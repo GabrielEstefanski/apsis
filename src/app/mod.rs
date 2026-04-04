@@ -1,5 +1,5 @@
 pub mod canvas;
-pub mod input;
+pub mod config;
 pub mod panel;
 pub mod templates;
 pub mod theme;
