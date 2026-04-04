@@ -39,13 +39,14 @@ pub fn draw_trails(
         for (j, (tx, ty)) in trail.iter().step_by(step).enumerate() {
             let t = j as f32 / sampled_len as f32;
             let p = Pos2::new(center.x + *tx as f32 * scale, center.y + *ty as f32 * scale);
+            let fade = t.powf(2.2);
 
             if let Some((prev_p, prev_t)) = prev {
                 if rect.contains(prev_p) || rect.contains(p) {
                     let mid_t = (prev_t + t) * 0.5;
-                    // Fade in over the first 15% of the trail, fully opaque after that.
-                    let alpha = ((mid_t / 0.15).min(1.0) * 160.0) as u8;
-                    let width = 0.4 + mid_t * 0.8;
+
+                    let alpha = (fade * 200.0) as u8;
+                    let width = 0.4 + fade * 0.8;
                     painter.line_segment(
                         [prev_p, p],
                         Stroke::new(
