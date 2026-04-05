@@ -1,6 +1,7 @@
 use std::f64::consts::PI;
 
 use crate::domain::body::Body;
+use crate::domain::materials::Material;
 use crate::physics::gravity::G;
 
 // ── Category ──────────────────────────────────────────────────────────────── //
@@ -171,10 +172,10 @@ pub fn template_bodies(key: &str) -> Vec<Body> {
                 (6.5, 0.0030),  // Earth-like
                 (10.0, 0.0003), // Mars-like
             ];
-            let mut v = vec![Body::new(0.0, 0.0, 0.0, 0.0, m_star)];
+            let mut v = vec![Body::new(0.0, 0.0, 0.0, 0.0, m_star, Material::Star)];
             for &(r, m) in planets {
                 let vc = (G * m_star / r).sqrt();
-                v.push(Body::new(r, 0.0, 0.0, vc, m));
+                v.push(Body::new(r, 0.0, 0.0, vc, m, Material::Rocky));
             }
             v
         }
@@ -188,10 +189,10 @@ pub fn template_bodies(key: &str) -> Vec<Body> {
                 (22.0, 0.03), // Uranus-like
                 (30.0, 0.03), // Neptune-like
             ];
-            let mut v = vec![Body::new(0.0, 0.0, 0.0, 0.0, m_star)];
+            let mut v = vec![Body::new(0.0, 0.0, 0.0, 0.0, m_star, Material::Star)];
             for &(r, m) in planets {
                 let vc = (G * m_star / r).sqrt();
-                v.push(Body::new(r, 0.0, 0.0, vc, m));
+                v.push(Body::new(r, 0.0, 0.0, vc, m, Material::Gas));
             }
             v
         }
@@ -203,8 +204,8 @@ pub fn template_bodies(key: &str) -> Vec<Body> {
             let r_moon = 0.5f64;
             let vc = (G * m_earth / r_moon).sqrt();
             vec![
-                Body::new(0.0, 0.0, 0.0, 0.0, m_earth),
-                Body::new(r_moon, 0.0, 0.0, vc, m_moon),
+                Body::new(0.0, 0.0, 0.0, 0.0, m_earth, Material::Rocky),
+                Body::new(r_moon, 0.0, 0.0, vc, m_moon, Material::Rocky),
             ]
         }
 
@@ -213,10 +214,10 @@ pub fn template_bodies(key: &str) -> Vec<Body> {
             let m_jup = 5.0f64;
             // (r, mass) — Io, Europa, Ganymede, Callisto
             let moons: &[(f64, f64)] = &[(1.0, 0.008), (1.6, 0.015), (2.6, 0.020), (4.0, 0.010)];
-            let mut v = vec![Body::new(0.0, 0.0, 0.0, 0.0, m_jup)];
+            let mut v = vec![Body::new(0.0, 0.0, 0.0, 0.0, m_jup, Material::Gas)];
             for &(r, m) in moons {
                 let vc = (G * m_jup / r).sqrt();
-                v.push(Body::new(r, 0.0, 0.0, vc, m));
+                v.push(Body::new(r, 0.0, 0.0, vc, m, Material::Rocky));
             }
             v
         }
@@ -227,8 +228,8 @@ pub fn template_bodies(key: &str) -> Vec<Body> {
             let r = 1.5f64;
             let vc = (G * m_star / r).sqrt();
             vec![
-                Body::new(0.0, 0.0, 0.0, 0.0, m_star),
-                Body::new(r, 0.0, 0.0, vc, 2.0),
+                Body::new(0.0, 0.0, 0.0, 0.0, m_star, Material::Star),
+                Body::new(r, 0.0, 0.0, vc, 2.0, Material::Gas),
             ]
         }
 
@@ -245,35 +246,49 @@ pub fn template_bodies(key: &str) -> Vec<Body> {
                 (1.65, 0.00128),
                 (2.20, 0.00033),
             ];
-            let mut v = vec![Body::new(0.0, 0.0, 0.0, 0.0, m_star)];
+            let mut v = vec![Body::new(0.0, 0.0, 0.0, 0.0, m_star, Material::Star)];
             for &(r, m) in planets {
                 let vc = (G * m_star / r).sqrt();
-                v.push(Body::new(r, 0.0, 0.0, vc, m));
+                v.push(Body::new(r, 0.0, 0.0, vc, m, Material::Rocky));
             }
             v
         }
 
         // ── Formations ───────────────────────────────────────────────────── //
         "binary" => vec![
-            Body::new(-1.0, 0.0, 0.0, -0.5, 1.0),
-            Body::new(1.0, 0.0, 0.0, 0.5, 1.0),
+            Body::new(-1.0, 0.0, 0.0, -0.5, 1.0, Material::Star),
+            Body::new(1.0, 0.0, 0.0, 0.5, 1.0, Material::Star),
         ],
 
         "figure8" => vec![
-            Body::new(0.97000436, -0.24308753, 0.46620369, 0.43236573, 1.0),
-            Body::new(0.0, 0.0, -0.93240737, -0.86473146, 1.0),
-            Body::new(-0.97000436, 0.24308753, 0.46620369, 0.43236573, 1.0),
+            Body::new(
+                0.97000436,
+                -0.24308753,
+                0.46620369,
+                0.43236573,
+                1.0,
+                Material::Rocky,
+            ),
+            Body::new(0.0, 0.0, -0.93240737, -0.86473146, 1.0, Material::Rocky),
+            Body::new(
+                -0.97000436,
+                0.24308753,
+                0.46620369,
+                0.43236573,
+                1.0,
+                Material::Rocky,
+            ),
         ],
 
         "pythagorean" => vec![
-            Body::new(-1.5, 0.0, 0.0, 0.0, 3.0),
-            Body::new(1.5, 0.0, 0.0, 0.0, 4.0),
-            Body::new(0.0, 2.0, 0.0, 0.0, 5.0),
+            Body::new(-1.5, 0.0, 0.0, 0.0, 3.0, Material::Rocky),
+            Body::new(1.5, 0.0, 0.0, 0.0, 4.0, Material::Rocky),
+            Body::new(0.0, 2.0, 0.0, 0.0, 5.0, Material::Rocky),
         ],
 
         "belt" => {
             let m_star = 100.0f64;
-            let mut v = vec![Body::new(0.0, 0.0, 0.0, 0.0, m_star)];
+            let mut v = vec![Body::new(0.0, 0.0, 0.0, 0.0, m_star, Material::Star)];
             let n = 120usize;
             let r = 12.0f64;
             let v_orb = (G * m_star / r).sqrt();
@@ -285,6 +300,7 @@ pub fn template_bodies(key: &str) -> Vec<Body> {
                     -v_orb * a.sin(),
                     v_orb * a.cos(),
                     0.001,
+                    Material::Rocky,
                 ));
             }
             v
@@ -299,7 +315,9 @@ pub fn template_bodies(key: &str) -> Vec<Body> {
                     (22.0f64, -0.7f64)
                 };
                 let m_core = 60.0f64;
-                v.push(Body::new(cx, 0.0, vxg, 0.0, m_core));
+
+                v.push(Body::new(cx, 0.0, vxg, 0.0, m_core, Material::Star));
+
                 let nr = 24usize;
                 let r = 5.0f64;
                 let vo = (G * m_core / r).sqrt();
@@ -311,6 +329,7 @@ pub fn template_bodies(key: &str) -> Vec<Body> {
                         vxg - vo * a.sin(),
                         vo * a.cos(),
                         0.1,
+                        Material::Star,
                     ));
                 }
             }
@@ -324,14 +343,15 @@ pub fn template_bodies(key: &str) -> Vec<Body> {
             let a = -PI / 3.0; // -60°
 
             vec![
-                Body::new(0.0, 0.0, 0.0, 0.0, m_star),
-                Body::new(r, 0.0, 0.0, v_p, 0.5),
+                Body::new(0.0, 0.0, 0.0, 0.0, m_star, Material::Star),
+                Body::new(r, 0.0, 0.0, v_p, 0.5, Material::Rocky),
                 Body::new(
                     r * a.cos(),
                     r * a.sin(),
                     -v_p * a.sin(),
                     v_p * a.cos(),
                     0.01,
+                    Material::Rocky,
                 ),
             ]
         }
@@ -348,9 +368,16 @@ pub fn template_bodies(key: &str) -> Vec<Body> {
             let v = omega * x;
 
             vec![
-                Body::new(0.0, 0.0, 0.0, 0.0, m_star),
-                Body::new(r, 0.0, 0.0, (G * m_star / r).sqrt(), m_planet),
-                Body::new(x, 0.0, 0.0, v, 0.01),
+                Body::new(0.0, 0.0, 0.0, 0.0, m_star, Material::Star),
+                Body::new(
+                    r,
+                    0.0,
+                    0.0,
+                    (G * m_star / r).sqrt(),
+                    m_planet,
+                    Material::Rocky,
+                ),
+                Body::new(x, 0.0, 0.0, v, 0.01, Material::Rocky),
             ]
         }
 
@@ -366,9 +393,16 @@ pub fn template_bodies(key: &str) -> Vec<Body> {
             let v = omega * x;
 
             vec![
-                Body::new(0.0, 0.0, 0.0, 0.0, m_star),
-                Body::new(r, 0.0, 0.0, (G * m_star / r).sqrt(), m_planet),
-                Body::new(x, 0.0, 0.0, v, 0.01),
+                Body::new(0.0, 0.0, 0.0, 0.0, m_star, Material::Star),
+                Body::new(
+                    r,
+                    0.0,
+                    0.0,
+                    (G * m_star / r).sqrt(),
+                    m_planet,
+                    Material::Rocky,
+                ),
+                Body::new(x, 0.0, 0.0, v, 0.01, Material::Rocky),
             ]
         }
 
@@ -384,9 +418,16 @@ pub fn template_bodies(key: &str) -> Vec<Body> {
             let v = omega * x.abs();
 
             vec![
-                Body::new(0.0, 0.0, 0.0, 0.0, m_star),
-                Body::new(r, 0.0, 0.0, (G * m_star / r).sqrt(), m_planet),
-                Body::new(x, 0.0, 0.0, -v, 0.01),
+                Body::new(0.0, 0.0, 0.0, 0.0, m_star, Material::Star),
+                Body::new(
+                    r,
+                    0.0,
+                    0.0,
+                    (G * m_star / r).sqrt(),
+                    m_planet,
+                    Material::Rocky,
+                ),
+                Body::new(x, 0.0, 0.0, -v, 0.01, Material::Rocky),
             ]
         }
 
@@ -397,14 +438,15 @@ pub fn template_bodies(key: &str) -> Vec<Body> {
             let v_p = (G * m_star / r).sqrt();
             let a = PI / 3.0; // 60° ahead
             vec![
-                Body::new(0.0, 0.0, 0.0, 0.0, m_star),
-                Body::new(r, 0.0, 0.0, v_p, 0.5),
+                Body::new(0.0, 0.0, 0.0, 0.0, m_star, Material::Star),
+                Body::new(r, 0.0, 0.0, v_p, 0.5, Material::Rocky),
                 Body::new(
                     r * a.cos(),
                     r * a.sin(),
                     -v_p * a.sin(),
                     v_p * a.cos(),
                     0.01,
+                    Material::Rocky,
                 ),
             ]
         }
@@ -419,9 +461,9 @@ pub fn template_bodies(key: &str) -> Vec<Body> {
             // Outer companion orbiting total mass 2m at r_out
             let v_o = (G * 2.0 * m / r_out).sqrt();
             vec![
-                Body::new(-r_in, 0.0, 0.0, -v_b, m),
-                Body::new(r_in, 0.0, 0.0, v_b, m),
-                Body::new(0.0, r_out, v_o, 0.0, 0.5),
+                Body::new(-r_in, 0.0, 0.0, -v_b, m, Material::Star),
+                Body::new(r_in, 0.0, 0.0, v_b, m, Material::Star),
+                Body::new(0.0, r_out, v_o, 0.0, 0.5, Material::Rocky),
             ]
         }
 
@@ -429,34 +471,83 @@ pub fn template_bodies(key: &str) -> Vec<Body> {
 
         // Head-on merge: two equal planets on direct collision path
         "merge_head_on" => vec![
-            Body::new(-5.0, 0.0, 0.3, 0.0, 2.0),
-            Body::new(5.0, 0.0, -0.3, 0.0, 2.0),
+            Body::new(-5.0, 0.0, 0.3, 0.0, 2.0, Material::Rocky),
+            Body::new(5.0, 0.0, -0.3, 0.0, 2.0, Material::Rocky),
         ],
 
         // Giant impact: large planet + smaller oblique impactor (Moon-forming analog)
         "giant_impact" => vec![
-            Body::new(-3.0, 0.4, 0.7, 0.0, 3.0),
-            Body::new(3.0, 0.0, -0.7, 0.06, 0.5),
+            Body::new(-3.0, 0.4, 0.7, 0.0, 3.0, Material::Rocky),
+            Body::new(3.0, 0.0, -0.7, 0.06, 0.5, Material::Rocky),
         ],
 
         // Flyby scatter: fast hyperbolic pass — gravitational slingshot / scattering
         "scatter_flyby" => vec![
-            Body::new(-12.0, 2.5, 2.8, 0.0, 2.0),
-            Body::new(0.0, 0.0, 0.0, 0.0, 2.0),
+            Body::new(-12.0, 2.5, 2.8, 0.0, 2.0, Material::Rocky),
+            Body::new(0.0, 0.0, 0.0, 0.0, 2.0, Material::Rocky),
         ],
 
         // Shattering: very high-velocity collision → strong fragmentation
         "shattering" => vec![
-            Body::new(-6.0, 0.0, 3.5, 0.0, 2.0),
-            Body::new(6.0, 0.0, -3.5, 0.0, 2.0),
+            Body::new(-6.0, 0.0, 3.5, 0.0, 2.0, Material::Rocky),
+            Body::new(6.0, 0.0, -3.5, 0.0, 2.0, Material::Rocky),
         ],
 
         // Chain reaction: four bodies — first triggers a cascade
         "chain_reaction" => vec![
-            Body::new(-12.0, 0.0, 2.5, 0.0, 1.5),
-            Body::new(-3.0, 0.0, 0.0, 0.0, 1.5),
-            Body::new(3.5, 0.0, 0.0, 0.0, 1.5),
-            Body::new(12.0, 0.0, -1.8, 0.0, 1.5),
+            Body::new(-12.0, 0.0, 2.5, 0.0, 1.5, Material::Rocky),
+            Body::new(-3.0, 0.0, 0.0, 0.0, 1.5, Material::Rocky),
+            Body::new(3.5, 0.0, 0.0, 0.0, 1.5, Material::Rocky),
+            Body::new(12.0, 0.0, -1.8, 0.0, 1.5, Material::Rocky),
+        ],
+
+        "gas_giant_impact" => vec![
+            Body::new(-6.0, 0.0, 1.2, 0.0, 4.0, Material::Gas),
+            Body::new(6.0, 0.0, -1.2, 0.1, 1.0, Material::Rocky),
+        ],
+
+        // Grazing impact — alta rotação, pouco dano
+        "grazing_collision" => vec![
+            Body::new(-5.0, 1.5, 1.0, 0.0, 2.0, Material::Rocky),
+            Body::new(5.0, -1.5, -1.0, 0.0, 2.0, Material::Rocky),
+        ],
+
+        // Capture attempt — pode virar órbita ou escapar
+        "capture_attempt" => vec![
+            Body::new(-10.0, 1.0, 1.8, 0.0, 1.0, Material::Rocky),
+            Body::new(0.0, 0.0, 0.0, 0.0, 3.0, Material::Rocky),
+        ],
+
+        // Binary collision — duas estrelas colidindo
+        "binary_star_collision" => vec![
+            Body::new(-8.0, 0.0, 1.0, 0.0, 6.0, Material::Star),
+            Body::new(8.0, 0.0, -1.0, 0.0, 6.0, Material::Star),
+        ],
+
+        // Dense vs gas — contraste forte
+        "dense_vs_gas" => vec![
+            Body::new(-6.0, 0.0, 1.5, 0.0, 2.5, Material::Rocky),
+            Body::new(6.0, 0.0, -1.5, 0.0, 2.5, Material::Gas),
+        ],
+
+        // Multi-body chaotic collision
+        "chaotic_cluster" => vec![
+            Body::new(-6.0, -2.0, 1.2, 0.6, 1.0, Material::Rocky),
+            Body::new(6.0, 2.0, -1.2, -0.6, 1.0, Material::Rocky),
+            Body::new(-4.0, 3.0, 0.8, -0.4, 1.0, Material::Icy),
+            Body::new(4.0, -3.0, -0.8, 0.4, 1.0, Material::Icy),
+        ],
+
+        // Impact + orbit transition
+        "impact_then_orbit" => vec![
+            Body::new(-8.0, 0.5, 1.4, 0.0, 2.0, Material::Rocky),
+            Body::new(0.0, 0.0, 0.0, 0.0, 3.5, Material::Rocky),
+        ],
+
+        // Ring formation attempt (proto-disk)
+        "ring_formation" => vec![
+            Body::new(-5.0, 0.0, 2.2, 0.0, 1.5, Material::Rocky),
+            Body::new(5.0, 0.0, -2.2, 0.0, 3.0, Material::Rocky),
         ],
 
         _ => vec![],
@@ -482,6 +573,7 @@ pub fn spawn_ring(
                 -orbit_vel * a.sin(),
                 orbit_vel * a.cos(),
                 mass,
+                Material::Rocky,
             )
         })
         .collect()
@@ -506,6 +598,7 @@ pub fn spawn_cluster(
                 vel_disp * va.cos(),
                 vel_disp * va.sin(),
                 mass,
+                Material::Star,
             )
         })
         .collect()

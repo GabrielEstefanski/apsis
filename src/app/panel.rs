@@ -3,7 +3,7 @@ use crate::app::templates::{
     spawn_cluster, spawn_ring, template_bodies, TemplateCategory, TEMPLATE_CATALOG,
 };
 use crate::app::theme::{
-    ACCENT, ACCENT_DIM, BORDER, DANGER, SUCCESS, TEXT_DIM, TEXT_PRI, TEXT_SEC, body_color, field,
+    ACCENT, ACCENT_DIM, BORDER, DANGER, SUCCESS, TEXT_DIM, TEXT_PRI, TEXT_SEC, field,
     fix4, metric, primary_btn, sci, secondary_btn, section, template_btn,
 };
 use crate::app::ui::{BodyForm, PanelTab, SelectionForm, SimulationApp, SpawnTab};
@@ -86,6 +86,14 @@ impl SimulationApp {
                     ui.checkbox(
                         &mut self.show_vectors,
                         RichText::new("vel").size(11.0).color(TEXT_SEC),
+                    );
+                    ui.checkbox(
+                        &mut self.show_force_vectors,
+                        RichText::new("force").size(11.0).color(TEXT_SEC),
+                    );
+                    ui.checkbox(
+                        &mut self.show_impact_normals,
+                        RichText::new("nrm").size(11.0).color(TEXT_SEC),
                     );
 
                     ui.separator();
@@ -186,13 +194,19 @@ impl SimulationApp {
 
     fn panel_metrics_compact(&self, ui: &mut egui::Ui) {
         let m = self.system.metrics();
-        let de_color = if m.rel_energy_error.abs() < 1e-8 {
-            SUCCESS
-        } else if m.rel_energy_error.abs() < 1e-5 {
-            ACCENT
-        } else {
-            DANGER
+
+        let drift_color = |v: f64| {
+            if v.abs() < 1e-8 {
+                SUCCESS
+            } else if v.abs() < 1e-5 {
+                ACCENT
+            } else {
+                DANGER
+            }
         };
+
+        let de_color = drift_color(m.rel_energy_error);
+        let dlz_color = drift_color(m.rel_angular_momentum_error);
 
         egui::Grid::new("metrics_compact")
             .num_columns(4)
@@ -221,12 +235,12 @@ impl SimulationApp {
                         .size(10.0)
                         .color(TEXT_PRI),
                 );
-                ui.label(RichText::new("dt").size(10.0).color(TEXT_SEC));
+                ui.label(RichText::new("dLz/L₀").size(10.0).color(TEXT_SEC));
                 ui.label(
-                    RichText::new(format!("{:.2e}", m.dt))
+                    RichText::new(sci(m.rel_angular_momentum_error))
                         .monospace()
                         .size(10.0)
-                        .color(TEXT_SEC),
+                        .color(dlz_color),
                 );
                 ui.end_row();
 
@@ -237,6 +251,15 @@ impl SimulationApp {
                         .size(10.0)
                         .color(TEXT_DIM),
                 );
+                ui.label(RichText::new("dt").size(10.0).color(TEXT_SEC));
+                ui.label(
+                    RichText::new(format!("{:.2e}", m.dt))
+                        .monospace()
+                        .size(10.0)
+                        .color(TEXT_SEC),
+                );
+                ui.end_row();
+
                 ui.label(RichText::new("U").size(10.0).color(TEXT_SEC));
                 ui.label(
                     RichText::new(fix4(m.potential))
@@ -244,8 +267,37 @@ impl SimulationApp {
                         .size(10.0)
                         .color(TEXT_DIM),
                 );
+                // Peak drift: max of dE and dLz, shows worst-ever violation
+                let max_drift = m.max_rel_energy_error.max(m.max_rel_angular_momentum_error);
+                let peak_col = drift_color(max_drift);
+                ui.label(RichText::new("peak").size(10.0).color(TEXT_DIM));
+                ui.label(
+                    RichText::new(sci(max_drift))
+                        .monospace()
+                        .size(10.0)
+                        .color(peak_col),
+                );
                 ui.end_row();
             });
+
+        // Drift alert banner: shown when either conserved quantity drifts > 1e-5
+        let energy_bad = m.rel_energy_error.abs() >= 1e-5;
+        let lz_bad = m.rel_angular_momentum_error.abs() >= 1e-5;
+        if energy_bad || lz_bad {
+            ui.add_space(2.0);
+            let mut parts = Vec::new();
+            if energy_bad {
+                parts.push(format!("dE {}", sci(m.rel_energy_error)));
+            }
+            if lz_bad {
+                parts.push(format!("dLz {}", sci(m.rel_angular_momentum_error)));
+            }
+            ui.label(
+                RichText::new(format!("⚠ drift: {}", parts.join("  ")))
+                    .size(9.5)
+                    .color(DANGER),
+            );
+        }
 
         if m.fragments_spawned_this_step > 0
             || m.hit_and_runs_this_step > 0
@@ -763,7 +815,8 @@ impl SimulationApp {
                 let body = self.system.bodies()[idx];
 
                 ui.horizontal(|ui| {
-                    let col = body_color(idx, body.mass);
+                    let [cr, cg, cb] = body.color;
+                    let col = egui::Color32::from_rgb(cr, cg, cb);
                     let (dot_rect, _) =
                         ui.allocate_exact_size(egui::vec2(12.0, 12.0), egui::Sense::hover());
                     ui.painter().circle_filled(dot_rect.center(), 5.0, col);
@@ -789,33 +842,33 @@ impl SimulationApp {
                 // ── Color picker ─────────────────────────────────────── //
                 section(ui, "COLOR");
 
-                let mut color_rgb: [f32; 3] = match body.color {
-                    Some([r, g, b]) => [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0],
-                    None => {
-                        let c = body_color(idx, body.mass);
-                        [c.r() as f32 / 255.0, c.g() as f32 / 255.0, c.b() as f32 / 255.0]
-                    }
-                };
+                let [r, g, b_] = body.color;
+                let mut color_rgb: [f32; 3] = [
+                    r as f32 / 255.0,
+                    g as f32 / 255.0,
+                    b_ as f32 / 255.0,
+                ];
                 let color_changed = ui.color_edit_button_rgb(&mut color_rgb).changed();
+                let is_custom = body.color != body.material.props().base_color;
                 ui.label(
-                    RichText::new(if body.color.is_some() { "custom" } else { "auto (palette)" })
+                    RichText::new(if is_custom { "custom" } else { "auto (material)" })
                         .size(9.5)
                         .color(TEXT_DIM),
                 );
-                let reset_color = body.color.is_some() && secondary_btn(ui, "Reset color");
+                let reset_color = is_custom && secondary_btn(ui, "Reset color");
 
                 if color_changed {
                     let mut b = self.system.bodies()[idx];
-                    b.color = Some([
+                    b.color = [
                         (color_rgb[0] * 255.0) as u8,
                         (color_rgb[1] * 255.0) as u8,
                         (color_rgb[2] * 255.0) as u8,
-                    ]);
+                    ];
                     self.system.update_body(idx, b);
                 }
                 if reset_color {
                     let mut b = self.system.bodies()[idx];
-                    b.color = None;
+                    b.color = b.material.props().base_color;
                     self.system.update_body(idx, b);
                 }
 
@@ -878,6 +931,7 @@ impl SimulationApp {
                             f.vx.parse().ok()?,
                             f.vy.parse().ok()?,
                             mass,
+                            crate::domain::materials::Material::Rocky,
                         );
                         b.radius = radius;
                         b.density = density;
