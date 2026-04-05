@@ -2,6 +2,7 @@
 
 use crate::core::fragmentation::{self, ImpactResult};
 use crate::domain::body::{Body, default_moment_inertia, sphere_radius_from_volume, sphere_volume};
+use crate::domain::materials::pair_restitution;
 use std::collections::VecDeque;
 
 /// CoR <= this value selects **astrophysics mode**:
@@ -24,6 +25,21 @@ pub struct CollisionOutcome {
     pub hit_and_runs: usize,
     /// Total ejecta mass below the fragment tracking threshold.
     pub total_dust_mass: f64,
+    /// Visual feedback events; consumed and cleared by the renderer each frame.
+    pub impact_events: Vec<ImpactEvent>,
+}
+
+/// Snapshot of a collision event for visual feedback.
+#[derive(Debug, Clone, Copy)]
+pub struct ImpactEvent {
+    /// Centre-of-mass of the two bodies at the moment of contact (world coords).
+    pub x: f64,
+    pub y: f64,
+    /// Outward normal from bj toward bi (unit vector).
+    pub nx: f64,
+    pub ny: f64,
+    /// Relative speed |vi − vj| at contact.
+    pub v_rel: f64,
 }
 
 /// Result of the normalized sub-step contact solver.
@@ -184,6 +200,27 @@ pub fn resolve_contact(
         return outcome;
     }
 
+    // Snapshot impact geometry *before* bodies are modified or removed.
+    let impact_event = {
+        let bi = &bodies[i];
+        let bj = &bodies[j];
+        let m_total = bi.mass + bj.mass;
+        let x = (bi.mass * bi.x + bj.mass * bj.x) / m_total;
+        let y = (bi.mass * bi.y + bj.mass * bj.y) / m_total;
+        let dx = bi.x - bj.x;
+        let dy = bi.y - bj.y;
+        let d = (dx * dx + dy * dy).sqrt().max(1e-30);
+        let dvx = bi.vx - bj.vx;
+        let dvy = bi.vy - bj.vy;
+        ImpactEvent {
+            x,
+            y,
+            nx: dx / d,
+            ny: dy / d,
+            v_rel: (dvx * dvx + dvy * dvy).sqrt(),
+        }
+    };
+
     match collision_response(&bodies[i], &bodies[j], cor, g_eff) {
         CollisionResponse::Bounce((vxi, vyi, vxj, vyj)) => {
             bodies[i].vx = vxi;
@@ -191,6 +228,7 @@ pub fn resolve_contact(
             bodies[j].vx = vxj;
             bodies[j].vy = vyj;
             outcome.bounces = 1;
+            outcome.impact_events.push(impact_event);
         }
         CollisionResponse::Merge => {
             let merged = merge_pair(bodies[i], bodies[j]);
@@ -198,6 +236,7 @@ pub fn resolve_contact(
             trails.swap_remove(j);
             bodies[i] = merged;
             outcome.merges = 1;
+            outcome.impact_events.push(impact_event);
         }
         CollisionResponse::HitAndRun {
             bi_new,
@@ -208,13 +247,14 @@ pub fn resolve_contact(
             bodies[j] = bj_new;
             outcome.hit_and_runs = 1;
             outcome.total_dust_mass += dust_mass;
+            outcome.impact_events.push(impact_event);
         }
         CollisionResponse::Fragments {
             bodies: frags,
             dust_mass,
         } => {
             let n = frags.len();
-            // Remove j first (higher index), then i, so i stays valid.
+
             bodies.swap_remove(j);
             trails.swap_remove(j);
             bodies.swap_remove(i);
@@ -225,6 +265,7 @@ pub fn resolve_contact(
             }
             outcome.fragments_spawned = n;
             outcome.total_dust_mass += dust_mass;
+            outcome.impact_events.push(impact_event);
         }
         CollisionResponse::None => {
             // Pass-through: unbound fly-by in astrophysics mode, or already
@@ -339,20 +380,30 @@ pub fn merge_pair(bi: Body, bj: Body) -> Body {
     let v_i = bi.mass / bi.density.max(1e-30);
     let v_j = bj.mass / bj.density.max(1e-30);
     let total_volume = v_i + v_j;
+
     let density = m / total_volume;
-    let radius_unclipped = sphere_radius_from_volume(total_volume);
+
+    let physical_radius = sphere_radius_from_volume(total_volume);
 
     // Softening scales with the same volume so ε ≈ 2r is maintained
-    let softening = (sphere_volume(bi.softening).max(0.0) + sphere_volume(bj.softening).max(0.0))
+    let softening = (sphere_volume(bi.softening).max(0.0)
+        + sphere_volume(bj.softening).max(0.0))
         .cbrt()   // cbrt of summed volumes ≠ (V_i+V_j)^(1/3) — kept for ε continuity
         * 2.0_f64.cbrt(); // factor to keep ε > r on average
-    let softening = softening.max(radius_unclipped * 2.0);
+    let softening = softening.max(physical_radius * 2.0);
 
     // Enforce Plummer-flatcore invariant: r ≤ ε/2
-    let radius = radius_unclipped.min(softening * 0.5);
-    let moment_inertia = default_moment_inertia(m, radius);
+    let radius = physical_radius.min(softening * 0.5);
+    let moment_inertia = default_moment_inertia(m, physical_radius);
 
     // ── Angular momentum ──────────────────────────────────────────────────── //
+    //
+    // L_orbital = μ · (r_j − r_i) × (v_j − v_i)
+    //           = μ · d · v_t   (v_t = n × Δv, CCW positive)
+    //
+    // This equals Σ mᵢ (rᵢ − r_com) × vᵢ for the two-body system, so it IS
+    // the orbital angular momentum relative to the COM.  No absolute positions
+    // are used: (r_j − r_i) is a pure relative vector.
     let mu = (bi.mass * bj.mass) * inv_m;
     let r_ij_x = bj.x - bi.x;
     let r_ij_y = bj.y - bi.y;
@@ -363,6 +414,13 @@ pub fn merge_pair(bi: Body, bj: Body) -> Body {
     let l_spin = bi.moment_inertia * bi.omega_z + bj.moment_inertia * bj.omega_z;
     let omega_z = (l_int + l_spin) / moment_inertia.max(1e-30);
 
+    // Clamp: surface equatorial speed (ω · R) must not exceed the relative
+    // impact speed.  Frontal impact (v_t = 0) → l_int = 0 → ω ≈ 0.
+    // Oblique impact (v_t large) → l_int large → ω large, but still bounded.
+    let v_rel_mag = (v_rel_x * v_rel_x + v_rel_y * v_rel_y).sqrt();
+    let omega_max = v_rel_mag / physical_radius.max(1e-30);
+    let omega_z = omega_z.clamp(-omega_max, omega_max);
+
     Body {
         x,
         y,
@@ -371,10 +429,17 @@ pub fn merge_pair(bi: Body, bj: Body) -> Body {
         mass: m,
         softening,
         radius,
+        physical_radius,
         density,
         omega_z,
         moment_inertia,
-        // Larger body's color dominates the merge
+
+        // Dominant body (heavier) determines material and base colour.
+        material: if bi.mass >= bj.mass {
+            bi.material
+        } else {
+            bj.material
+        },
         color: if bi.mass >= bj.mass {
             bi.color
         } else {
@@ -408,14 +473,13 @@ fn collision_response(bi: &Body, bj: &Body, cor: f64, g_eff: f64) -> CollisionRe
 
     let dvx = bi.vx - bj.vx;
     let dvy = bi.vy - bj.vy;
-    // Normal component of relative velocity (negative = approaching)
+
     let v_n = dvx * nx + dvy * ny;
     if v_n >= 0.0 {
-        return CollisionResponse::None; // Already separating
+        return CollisionResponse::None;
     }
 
     let v_rel_sq = dvx * dvx + dvy * dvy;
-    // Specific orbital energy of the pair
     let e_orb = 0.5 * v_rel_sq - g_eff * (bi.mass + bj.mass) / d.max(1e-30);
 
     let is_bound = e_orb < 0.0;
@@ -473,9 +537,13 @@ fn collision_response(bi: &Body, bj: &Body, cor: f64, g_eff: f64) -> CollisionRe
         }
     }
 
-    // Arcade mode: impulse bounce
+    // Arcade mode: impulse bounce.
+    // Use the larger of the global CoR slider and the pair's material-derived
+    // restitution so the slider always acts as a lower-bound override while
+    // material physics still kicks in when the slider is at minimum.
+    let effective_cor = cor.max(pair_restitution(bi.material, bj.material));
     let mu = bi.mass * bj.mass / (bi.mass + bj.mass);
-    let j_mag = -(1.0 + cor) * mu * v_n;
+    let j_mag = -(1.0 + effective_cor) * mu * v_n;
 
     CollisionResponse::Bounce((
         bi.vx + j_mag * nx / bi.mass,
@@ -605,13 +673,27 @@ mod tests {
     use crate::domain::body::density_from_mass_radius;
 
     fn body(x: f64, y: f64, vx: f64, vy: f64, mass: f64) -> Body {
-        Body::new(x, y, vx, vy, mass)
+        Body::new(
+            x,
+            y,
+            vx,
+            vy,
+            mass,
+            crate::domain::materials::Material::Rocky,
+        )
     }
 
     /// Create a body at position `(x, y)` with the given mass and a
     /// consistent `density` derived from the supplied radius.
     fn body_with_radius(x: f64, y: f64, vx: f64, vy: f64, mass: f64, r: f64) -> Body {
-        let mut b = Body::new(x, y, vx, vy, mass);
+        let mut b = Body::new(
+            x,
+            y,
+            vx,
+            vy,
+            mass,
+            crate::domain::materials::Material::Rocky,
+        );
         b.radius = r;
         b.density = density_from_mass_radius(mass, r);
         b

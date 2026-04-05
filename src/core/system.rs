@@ -3,9 +3,10 @@
 use crate::core::adaptive::{AccelerationStats, DtController, ThetaController};
 use crate::core::calibration;
 use crate::core::collision;
+use crate::core::collision::ImpactEvent;
 use crate::core::diagnostics::{DiagnosticsComputer, SimulationDiagnostics};
 use crate::core::metrics::Metrics;
-use crate::domain::body::{Body, density_from_mass_radius};
+use crate::domain::body::Body;
 use crate::physics::energy::{
     angular_momentum_z, center_of_mass_state, kinetic_energy, total_energy,
 };
@@ -28,6 +29,11 @@ pub struct System {
     initial_energy_scale: Option<f64>,
     rel_energy_error: f64,
     max_rel_energy_error: f64,
+
+    initial_angular_momentum: Option<f64>,
+    initial_angular_momentum_scale: Option<f64>,
+    rel_angular_momentum_error: f64,
+    max_rel_angular_momentum_error: f64,
 
     engine: BarnesHutEngine,
     scratch_acc: Vec<(f64, f64)>,
@@ -63,6 +69,9 @@ pub struct System {
     /// Scales all force evaluations and the orbital-energy bound test in the
     /// collision resolver.
     g_factor: f64,
+
+    /// Collision events accumulated since the last call to `take_impact_events`.
+    last_impact_events: Vec<ImpactEvent>,
 }
 
 impl System {
@@ -92,6 +101,10 @@ impl System {
             initial_energy_scale: None,
             rel_energy_error: 0.0,
             max_rel_energy_error: 0.0,
+            initial_angular_momentum: None,
+            initial_angular_momentum_scale: None,
+            rel_angular_momentum_error: 0.0,
+            max_rel_angular_momentum_error: 0.0,
             engine: BarnesHutEngine::new(max_depth),
             scratch_acc: Vec::new(),
             theta_controller,
@@ -113,6 +126,7 @@ impl System {
             total_dust_mass: 0.0,
             cor: 0.0,
             g_factor: 1.0,
+            last_impact_events: Vec::new(),
         }
     }
 }
@@ -150,6 +164,8 @@ impl System {
         self.fragments_spawned_this_step = collision_outcome.fragments_spawned;
         self.hit_and_runs_this_step = collision_outcome.hit_and_runs;
         self.total_dust_mass += collision_outcome.total_dust_mass;
+        self.last_impact_events
+            .extend(collision_outcome.impact_events);
 
         let raw_pe2 =
             evaluate_accelerations(&self.bodies, theta, &mut self.engine, &mut self.scratch_acc);
@@ -223,6 +239,7 @@ impl System {
             outcome.fragments_spawned += event_outcome.fragments_spawned;
             outcome.hit_and_runs += event_outcome.hit_and_runs;
             outcome.total_dust_mass += event_outcome.total_dust_mass;
+            outcome.impact_events.extend(event_outcome.impact_events);
 
             if event_outcome.merges == 0
                 && event_outcome.bounces == 0
@@ -278,6 +295,10 @@ impl System {
         self.initial_energy_scale = None;
         self.rel_energy_error = 0.0;
         self.max_rel_energy_error = 0.0;
+        self.initial_angular_momentum = None;
+        self.initial_angular_momentum_scale = None;
+        self.rel_angular_momentum_error = 0.0;
+        self.max_rel_angular_momentum_error = 0.0;
     }
 
     fn update_energy_tracking(&mut self) {
@@ -302,6 +323,40 @@ impl System {
 
         if self.rel_energy_error.abs() > self.max_rel_energy_error {
             self.max_rel_energy_error = self.rel_energy_error.abs();
+        }
+
+        // Angular momentum drift
+        let lz = angular_momentum_z(&self.bodies);
+        let lz_baseline = match self.initial_angular_momentum {
+            Some(v) => v,
+            None => {
+                // Scale: use |Lz| if non-trivial, otherwise fall back to a
+                // kinematic estimate Σ mᵢ |rᵢ||vᵢ| so near-zero-Lz systems
+                // still get a meaningful relative error.
+                let kinematic_scale: f64 = self
+                    .bodies
+                    .iter()
+                    .map(|b| {
+                        let r = (b.x * b.x + b.y * b.y).sqrt();
+                        let v = (b.vx * b.vx + b.vy * b.vy).sqrt();
+                        b.mass * r * v
+                    })
+                    .sum::<f64>()
+                    .max(1e-12);
+                let scale = lz.abs().max(kinematic_scale * 1e-3).max(1e-12);
+                self.initial_angular_momentum = Some(lz);
+                self.initial_angular_momentum_scale = Some(scale);
+                lz
+            }
+        };
+
+        let lz_denom = self
+            .initial_angular_momentum_scale
+            .unwrap_or_else(|| lz_baseline.abs().max(1e-12));
+        self.rel_angular_momentum_error = (lz - lz_baseline) / lz_denom;
+
+        if self.rel_angular_momentum_error.abs() > self.max_rel_angular_momentum_error {
+            self.max_rel_angular_momentum_error = self.rel_angular_momentum_error.abs();
         }
     }
 
@@ -374,11 +429,12 @@ impl System {
         if l > 0.0 && !self.bodies.is_empty() {
             let m_mean = self.total_mass / self.bodies.len() as f64;
             body.softening = calibration::SOFTENING_ETA * (body.mass / m_mean).cbrt() * l;
+
             let r = calibration::RADIUS_ETA * (body.mass / m_mean).cbrt() * l;
+
             body.radius = r.min(body.softening * 0.5);
-            body.density = density_from_mass_radius(body.mass, body.radius);
             body.moment_inertia =
-                crate::domain::body::default_moment_inertia(body.mass, body.radius);
+                crate::domain::body::default_moment_inertia(body.mass, body.physical_radius);
         }
         self.total_mass += body.mass;
         self.bodies.push(body);
@@ -403,6 +459,10 @@ impl System {
         self.initial_energy_scale = None;
         self.rel_energy_error = 0.0;
         self.max_rel_energy_error = 0.0;
+        self.initial_angular_momentum = None;
+        self.initial_angular_momentum_scale = None;
+        self.rel_angular_momentum_error = 0.0;
+        self.max_rel_angular_momentum_error = 0.0;
         self.current_dt = 0.0;
         self.steps = 0;
         self.last_potential = 0.0;
@@ -489,6 +549,8 @@ impl System {
             potential,
             total_energy: total,
             angular_momentum_z: lz,
+            rel_angular_momentum_error: self.rel_angular_momentum_error,
+            max_rel_angular_momentum_error: self.max_rel_angular_momentum_error,
             com_x,
             com_y,
             com_vx,
@@ -512,5 +574,17 @@ impl System {
             hit_and_runs_this_step: self.hit_and_runs_this_step,
             total_dust_mass: self.total_dust_mass,
         }
+    }
+
+    /// Drain and return all collision events since the last call.
+    /// The internal buffer is cleared; events accumulate across `steps_per_frame` physics steps.
+    pub fn take_impact_events(&mut self) -> Vec<ImpactEvent> {
+        std::mem::take(&mut self.last_impact_events)
+    }
+
+    /// Accelerations computed during the last integration step.
+    /// Each entry corresponds to `bodies()[i]`.
+    pub fn last_accelerations(&self) -> &[(f64, f64)] {
+        &self.scratch_acc
     }
 }

@@ -109,14 +109,35 @@ mod tests {
     /// Two-body circular orbit initial conditions for G=1, m=1, orbital radius=1.
     fn circular_orbit_bodies() -> Vec<Body> {
         vec![
-            Body::new(-1.0, 0.0, 0.0, -0.5, 1.0),
-            Body::new(1.0, 0.0, 0.0, 0.5, 1.0),
+            Body::new(
+                -1.0,
+                0.0,
+                0.0,
+                -0.5,
+                1.0,
+                crate::domain::materials::Material::Rocky,
+            ),
+            Body::new(
+                1.0,
+                0.0,
+                0.0,
+                0.5,
+                1.0,
+                crate::domain::materials::Material::Rocky,
+            ),
         ]
     }
 
     #[test]
     fn single_body_moves_uniformly_under_zero_force() {
-        let mut bodies = vec![Body::new(1.0, 2.0, 3.0, -1.0, 1.0)];
+        let mut bodies = vec![Body::new(
+            1.0,
+            2.0,
+            3.0,
+            -1.0,
+            1.0,
+            crate::domain::materials::Material::Rocky,
+        )];
         let mut engine = make_engine();
         let mut acc = Vec::new();
         let dt = 0.1;

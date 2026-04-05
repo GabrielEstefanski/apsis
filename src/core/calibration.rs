@@ -91,11 +91,7 @@ pub fn zero_com_velocity(bodies: &mut [Body], total_mass: f64) -> bool {
 /// prevent floating-point drift from corrupting the angular-momentum
 /// measurement `L_z = Σ m·(x·vy − y·vx)`, which is computed relative to the
 /// origin.
-pub fn recenter_com(
-    bodies: &mut [Body],
-    trails: &mut [VecDeque<(f64, f64)>],
-    total_mass: f64,
-) {
+pub fn recenter_com(bodies: &mut [Body], trails: &mut [VecDeque<(f64, f64)>], total_mass: f64) {
     if total_mass <= 0.0 || bodies.is_empty() {
         return;
     }
@@ -155,7 +151,7 @@ pub fn calibrate_softening(bodies: &mut [Body], total_mass: f64) {
 /// entered before surfaces touch — preventing the "slingshot at contact"
 /// numerical artefact.
 ///
-/// Also updates `moment_inertia` to remain consistent with the calibrated radius.
+/// Updates `moment_inertia` using the physical radius to preserve physical consistency.
 pub fn calibrate_radii(bodies: &mut [Body], total_mass: f64) {
     let n = bodies.len();
     if n < 2 {
@@ -171,7 +167,6 @@ pub fn calibrate_radii(bodies: &mut [Body], total_mass: f64) {
     for b in bodies.iter_mut() {
         let r = RADIUS_ETA * (b.mass / m_mean).cbrt() * l_mean;
         b.radius = r.min(b.softening * 0.5);
-        b.density = density_from_mass_radius(b.mass, b.radius);
         b.moment_inertia = default_moment_inertia(b.mass, b.radius);
     }
 }
@@ -185,7 +180,14 @@ mod tests {
     use std::collections::VecDeque;
 
     fn body(x: f64, y: f64, vx: f64, vy: f64, mass: f64) -> Body {
-        Body::new(x, y, vx, vy, mass)
+        Body::new(
+            x,
+            y,
+            vx,
+            vy,
+            mass,
+            crate::domain::materials::Material::Rocky,
+        )
     }
 
     // ── zero_com_velocity ────────────────────────────────────────────────── //
@@ -194,7 +196,7 @@ mod tests {
     fn com_velocity_is_zero_after_correction() {
         let mut bodies = vec![
             body(-1.0, 0.0, 2.0, 1.0, 1.0),
-            body( 1.0, 0.0, 4.0, 3.0, 3.0),
+            body(1.0, 0.0, 4.0, 3.0, 3.0),
         ];
         let m: f64 = bodies.iter().map(|b| b.mass).sum();
         zero_com_velocity(&mut bodies, m);
@@ -207,22 +209,21 @@ mod tests {
 
     #[test]
     fn zero_com_velocity_preserves_relative_velocity() {
-        let mut bodies = vec![
-            body(0.0, 0.0, 1.0, 0.0, 1.0),
-            body(1.0, 0.0, 3.0, 0.0, 1.0),
-        ];
+        let mut bodies = vec![body(0.0, 0.0, 1.0, 0.0, 1.0), body(1.0, 0.0, 3.0, 0.0, 1.0)];
         let m = 2.0;
         let dv_before = bodies[1].vx - bodies[0].vx;
         zero_com_velocity(&mut bodies, m);
         let dv_after = bodies[1].vx - bodies[0].vx;
-        assert!((dv_after - dv_before).abs() < 1e-12,
-            "relative velocity must not change: only the bulk frame shifts");
+        assert!(
+            (dv_after - dv_before).abs() < 1e-12,
+            "relative velocity must not change: only the bulk frame shifts"
+        );
     }
 
     #[test]
     fn zero_com_velocity_returns_false_when_already_at_rest() {
         let mut bodies = vec![
-            body(0.0, 0.0,  1.0, 0.0, 1.0),
+            body(0.0, 0.0, 1.0, 0.0, 1.0),
             body(1.0, 0.0, -1.0, 0.0, 1.0),
         ];
         let m = 2.0;
@@ -234,10 +235,7 @@ mod tests {
 
     #[test]
     fn com_position_is_zero_after_recentering() {
-        let mut bodies = vec![
-            body(3.0, 1.0, 0.0, 0.0, 1.0),
-            body(7.0, 5.0, 0.0, 0.0, 1.0),
-        ];
+        let mut bodies = vec![body(3.0, 1.0, 0.0, 0.0, 1.0), body(7.0, 5.0, 0.0, 0.0, 1.0)];
         let m = 2.0;
         let mut trails: Vec<VecDeque<(f64, f64)>> = vec![VecDeque::new(), VecDeque::new()];
         recenter_com(&mut bodies, &mut trails, m);
@@ -259,8 +257,10 @@ mod tests {
         let dx_before = bodies[1].x - bodies[0].x;
         recenter_com(&mut bodies, &mut trails, m);
         let dx_after = bodies[1].x - bodies[0].x;
-        assert!((dx_after - dx_before).abs() < 1e-12,
-            "separation must not change: recentering is a rigid translation");
+        assert!(
+            (dx_after - dx_before).abs() < 1e-12,
+            "separation must not change: recentering is a rigid translation"
+        );
     }
 
     #[test]
@@ -278,18 +278,17 @@ mod tests {
 
         // Trail point for body 0 should have shifted by the same -x_cm
         let trail_dx = trails[1].front().unwrap().0 - trails[0].front().unwrap().0;
-        assert!((trail_dx - 10.0).abs() < 1e-12,
-            "trail relative positions must match body relative positions after shift");
+        assert!(
+            (trail_dx - 10.0).abs() < 1e-12,
+            "trail relative positions must match body relative positions after shift"
+        );
     }
 
     // ── system_length_scale ──────────────────────────────────────────────── //
 
     #[test]
     fn length_scale_equals_separation_for_two_bodies() {
-        let bodies = vec![
-            body(0.0, 0.0, 0.0, 0.0, 1.0),
-            body(6.0, 0.0, 0.0, 0.0, 1.0),
-        ];
+        let bodies = vec![body(0.0, 0.0, 0.0, 0.0, 1.0), body(6.0, 0.0, 0.0, 0.0, 1.0)];
         // extent = 6, N-1 = 1 → l = 6/sqrt(1) = 6
         let l = system_length_scale(&bodies);
         assert!((l - 6.0).abs() < 1e-12);
@@ -307,27 +306,28 @@ mod tests {
     fn heavier_body_gets_larger_softening() {
         let mut bodies = vec![
             body(0.0, 0.0, 0.0, 0.0, 1.0),
-            body(5.0, 0.0, 0.0, 0.0, 8.0),  // 8× heavier → ε scales as ∛8 = 2×
+            body(5.0, 0.0, 0.0, 0.0, 8.0), // 8× heavier → ε scales as ∛8 = 2×
         ];
         let m: f64 = bodies.iter().map(|b| b.mass).sum();
         calibrate_softening(&mut bodies, m);
-        assert!(bodies[1].softening > bodies[0].softening,
-            "softening must scale with mass: heavier body needs larger ε");
+        assert!(
+            bodies[1].softening > bodies[0].softening,
+            "softening must scale with mass: heavier body needs larger ε"
+        );
     }
 
     #[test]
     fn softening_scales_as_cube_root_of_mass_ratio() {
-        let mut bodies = vec![
-            body(0.0, 0.0, 0.0, 0.0, 1.0),
-            body(5.0, 0.0, 0.0, 0.0, 8.0),
-        ];
+        let mut bodies = vec![body(0.0, 0.0, 0.0, 0.0, 1.0), body(5.0, 0.0, 0.0, 0.0, 8.0)];
         let m: f64 = bodies.iter().map(|b| b.mass).sum();
         calibrate_softening(&mut bodies, m);
         // ε_i = η × (m_i / m_mean)^(1/3) × l  →  ε_1/ε_0 = (m_1/m_0)^(1/3)
         let ratio = bodies[1].softening / bodies[0].softening;
         let expected = (8.0_f64 / 1.0_f64).cbrt();
-        assert!((ratio - expected).abs() < 1e-10,
-            "softening ratio must equal (m_1/m_0)^(1/3)");
+        assert!(
+            (ratio - expected).abs() < 1e-10,
+            "softening ratio must equal (m_1/m_0)^(1/3)"
+        );
     }
 
     // ── calibrate_radii ──────────────────────────────────────────────────── //
@@ -335,32 +335,33 @@ mod tests {
     #[test]
     fn radius_never_exceeds_half_softening() {
         let mut bodies = vec![
-            body(0.0,  0.0, 0.0, 0.0, 0.001),
-            body(5.0,  0.0, 0.0, 0.0, 1.0),
+            body(0.0, 0.0, 0.0, 0.0, 0.001),
+            body(5.0, 0.0, 0.0, 0.0, 1.0),
             body(10.0, 0.0, 0.0, 0.0, 100.0),
         ];
         let m: f64 = bodies.iter().map(|b| b.mass).sum();
         calibrate_softening(&mut bodies, m);
         calibrate_radii(&mut bodies, m);
         for b in &bodies {
-            assert!(b.radius <= b.softening * 0.5 + 1e-15,
-                "radius must satisfy r ≤ ε/2 to stay in Plummer flat core at contact");
+            assert!(
+                b.radius <= b.softening * 0.5 + 1e-15,
+                "radius must satisfy r ≤ ε/2 to stay in Plummer flat core at contact"
+            );
         }
     }
 
     #[test]
     fn moment_of_inertia_consistent_with_radius_after_calibration() {
-        let mut bodies = vec![
-            body(0.0, 0.0, 0.0, 0.0, 2.0),
-            body(4.0, 0.0, 0.0, 0.0, 2.0),
-        ];
+        let mut bodies = vec![body(0.0, 0.0, 0.0, 0.0, 2.0), body(4.0, 0.0, 0.0, 0.0, 2.0)];
         let m = 4.0;
         calibrate_softening(&mut bodies, m);
         calibrate_radii(&mut bodies, m);
         for b in &bodies {
-            let expected_i = 0.4 * b.mass * b.radius * b.radius;
-            assert!((b.moment_inertia - expected_i).abs() < 1e-15,
-                "I_z must equal (2/5)·m·r² after radius calibration");
+            let expected_i = 0.4 * b.mass * b.physical_radius * b.physical_radius;
+            assert!(
+                (b.moment_inertia - expected_i).abs() < 1e-15,
+                "I_z must equal (2/5)·m·r² after radius calibration"
+            );
         }
     }
 }

@@ -86,21 +86,21 @@ mod tests {
     /// v = (3, 4) → v² = 25; KE = 0.5 × 2 × 25 = 25.
     #[test]
     fn kinetic_energy_single_body() {
-        let b = Body::new(0.0, 0.0, 3.0, 4.0, 2.0);
+        let b = Body::new(0.0, 0.0, 3.0, 4.0, 2.0, crate::domain::materials::Material::Rocky);
         assert!((kinetic_energy(&[b]) - 25.0).abs() < 1e-12);
     }
 
     /// KE = 0 when all bodies are at rest (vx = vy = 0).
     #[test]
     fn kinetic_energy_at_rest_is_zero() {
-        let b = Body::new(1.0, 2.0, 0.0, 0.0, 5.0);
+        let b = Body::new(1.0, 2.0, 0.0, 0.0, 5.0, crate::domain::materials::Material::Rocky);
         assert_eq!(kinetic_energy(&[b]), 0.0);
     }
 
     /// KE ≥ 0 always (velocity components appear only as squares).
     #[test]
     fn kinetic_energy_is_nonnegative() {
-        let b = Body::new(0.0, 0.0, -3.0, 4.0, 1.0);
+        let b = Body::new(0.0, 0.0, -3.0, 4.0, 1.0, crate::domain::materials::Material::Rocky);
         assert!(kinetic_energy(&[b]) >= 0.0);
     }
 
@@ -108,8 +108,8 @@ mod tests {
     #[test]
     fn kinetic_energy_is_additive() {
         // KE₁ = ½·1·1² = 0.5;  KE₂ = ½·2·2² = 4.0
-        let b1 = Body::new(0.0, 0.0, 1.0, 0.0, 1.0);
-        let b2 = Body::new(0.0, 0.0, 0.0, 2.0, 2.0);
+        let b1 = Body::new(0.0, 0.0, 1.0, 0.0, 1.0, crate::domain::materials::Material::Rocky);
+        let b2 = Body::new(0.0, 0.0, 0.0, 2.0, 2.0, crate::domain::materials::Material::Rocky);
         assert!((kinetic_energy(&[b1, b2]) - 4.5).abs() < 1e-12);
     }
 
@@ -120,7 +120,7 @@ mod tests {
     #[test]
     fn angular_momentum_z_circular_orbit() {
         let (r, v, m) = (3.0, 2.0, 4.0);
-        let b = Body::new(r, 0.0, 0.0, v, m);
+        let b = Body::new(r, 0.0, 0.0, v, m, crate::domain::materials::Material::Rocky);
         assert!((angular_momentum_z(&[b]) - m * r * v).abs() < 1e-12);
     }
 
@@ -128,7 +128,7 @@ mod tests {
     /// Body at (1, 0) with velocity in +y: CCW orbit.
     #[test]
     fn angular_momentum_z_positive_for_ccw() {
-        let b = Body::new(1.0, 0.0, 0.0, 1.0, 1.0);
+        let b = Body::new(1.0, 0.0, 0.0, 1.0, 1.0, crate::domain::materials::Material::Rocky);
         assert!(angular_momentum_z(&[b]) > 0.0);
     }
 
@@ -136,7 +136,7 @@ mod tests {
     /// Body at (1, 0) with velocity in −y: CW orbit.
     #[test]
     fn angular_momentum_z_negative_for_cw() {
-        let b = Body::new(1.0, 0.0, 0.0, -1.0, 1.0);
+        let b = Body::new(1.0, 0.0, 0.0, -1.0, 1.0, crate::domain::materials::Material::Rocky);
         assert!(angular_momentum_z(&[b]) < 0.0);
     }
 
@@ -147,8 +147,8 @@ mod tests {
     /// Total = 3.
     #[test]
     fn angular_momentum_z_is_additive() {
-        let b1 = Body::new(1.0, 0.0, 0.0, 1.0, 1.0);
-        let b2 = Body::new(0.0, 2.0, -1.0, 0.0, 1.0);
+        let b1 = Body::new(1.0, 0.0, 0.0, 1.0, 1.0, crate::domain::materials::Material::Rocky);
+        let b2 = Body::new(0.0, 2.0, -1.0, 0.0, 1.0, crate::domain::materials::Material::Rocky);
         assert!((angular_momentum_z(&[b1, b2]) - 3.0).abs() < 1e-12);
     }
 
@@ -166,8 +166,8 @@ mod tests {
     /// r_com = midpoint for two equal-mass bodies.
     #[test]
     fn com_position_is_midpoint_for_equal_masses() {
-        let b1 = Body::new(0.0, 0.0, 0.0, 0.0, 1.0);
-        let b2 = Body::new(4.0, 2.0, 0.0, 0.0, 1.0);
+        let b1 = Body::new(0.0, 0.0, 0.0, 0.0, 1.0, crate::domain::materials::Material::Rocky);
+        let b2 = Body::new(4.0, 2.0, 0.0, 0.0, 1.0, crate::domain::materials::Material::Rocky);
         let (cx, cy, _, _) = center_of_mass_state(&[b1, b2]);
         assert!((cx - 2.0).abs() < 1e-12);
         assert!((cy - 1.0).abs() < 1e-12);
@@ -177,8 +177,8 @@ mod tests {
     /// m₁=1 v₁=(4,0), m₂=3 v₂=(0,0) → v_com = (1, 0).
     #[test]
     fn com_velocity_is_mass_weighted_mean() {
-        let b1 = Body::new(0.0, 0.0, 4.0, 0.0, 1.0);
-        let b2 = Body::new(0.0, 0.0, 0.0, 0.0, 3.0);
+        let b1 = Body::new(0.0, 0.0, 4.0, 0.0, 1.0, crate::domain::materials::Material::Rocky);
+        let b2 = Body::new(0.0, 0.0, 0.0, 0.0, 3.0, crate::domain::materials::Material::Rocky);
         let (_, _, vx, vy) = center_of_mass_state(&[b1, b2]);
         assert!((vx - 1.0).abs() < 1e-12);
         assert!(vy.abs() < 1e-12);

@@ -22,6 +22,7 @@ use crate::domain::body::{
     Body, default_moment_inertia, default_softening, radius_from_density_mass,
     sphere_radius_from_volume,
 };
+use crate::domain::materials::{Material, pair_disruption_scale};
 
 // ── Constants ────────────────────────────────────────────────────────────── //
 
@@ -33,10 +34,60 @@ const MIN_FRAGMENT_MASS: f64 = 1e-4;
 // Strength term (material regime approximation)
 const STRENGTH_K: f64 = 0.05;
 
-// ── Helpers ──────────────────────────────────────────────────────────────── //
+// ── Impact geometry ───────────────────────────────────────────────────────── //
 
-fn make_body(x: f64, y: f64, vx: f64, vy: f64, mass: f64, density: f64) -> Body {
-    let r = radius_from_density_mass(density, mass);
+/// Normal / tangential decomposition at the contact surface.
+///
+/// Convention:
+/// - `n` points **from bj toward bi** (along the line of centres).
+/// - `v_n = (vi − vj) · n`  → negative when the bodies are approaching.
+/// - `v_t = n × (vi − vj)`  → z-component, CCW-positive.
+/// - Orbital angular momentum relative to COM = `μ · d · v_t`
+///   (verified by expanding `Σ mᵢ (rᵢ − r_com) × vᵢ` for a two-body system).
+struct ImpactGeometry {
+    nx: f64,
+    ny: f64,
+    /// Normal component of v_i − v_j. Negative = approaching.
+    v_n: f64,
+    /// Tangential component (CCW positive).
+    v_t: f64,
+    /// Centre-to-centre separation (≈ R_i + R_j at contact).
+    d: f64,
+}
+
+fn impact_geometry(bi: &Body, bj: &Body) -> ImpactGeometry {
+    let dx = bi.x - bj.x;
+    let dy = bi.y - bj.y;
+    let d = (dx * dx + dy * dy).sqrt().max(1e-30);
+    let nx = dx / d;
+    let ny = dy / d;
+    let dvx = bi.vx - bj.vx;
+    let dvy = bi.vy - bj.vy;
+    let v_n = dvx * nx + dvy * ny;
+    // n × Δv  (z-component in 2-D, CCW positive)
+    let v_t = nx * dvy - ny * dvx;
+    ImpactGeometry {
+        nx,
+        ny,
+        v_n,
+        v_t,
+        d,
+    }
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────── //
+
+fn make_body(
+    x: f64,
+    y: f64,
+    vx: f64,
+    vy: f64,
+    mass: f64,
+    density: f64,
+    material: Material,
+) -> Body {
+    let physical_radius = radius_from_density_mass(density, mass);
+
     Body {
         x,
         y,
@@ -44,11 +95,13 @@ fn make_body(x: f64, y: f64, vx: f64, vy: f64, mass: f64, density: f64) -> Body 
         vy,
         mass,
         density,
-        radius: r,
-        softening: default_softening(mass).max(r * 2.0),
+        radius: physical_radius,
+        physical_radius,
+        softening: default_softening(mass).max(physical_radius * 2.0),
         omega_z: 0.0,
-        moment_inertia: default_moment_inertia(mass, r),
-        color: None,
+        moment_inertia: default_moment_inertia(mass, physical_radius),
+        material,
+        color: material.props().base_color,
     }
 }
 
@@ -74,28 +127,34 @@ pub enum ImpactResult {
 // ── Core physics ─────────────────────────────────────────────────────────── //
 
 pub fn specific_impact_energy(bi: &Body, bj: &Body) -> f64 {
+    let geom = impact_geometry(bi, bj);
     let m_total = bi.mass + bj.mass;
-    let dvx = bi.vx - bj.vx;
-    let dvy = bi.vy - bj.vy;
-    let v_rel_sq = dvx * dvx + dvy * dvy;
     let mu = bi.mass * bj.mass / m_total;
-    0.5 * mu * v_rel_sq / m_total
+    // Only the **normal** component compresses the target material.
+    // The tangential component transfers angular momentum (spin) rather
+    // than disrupting the bodies, so a grazing blow has Q ≈ 0.
+    // Head-on: v_t = 0, v_n = |v_rel|  → same as before.
+    // Oblique:  v_n ≪ |v_rel|           → Q much smaller, fewer disruptions.
+    0.5 * mu * geom.v_n * geom.v_n / m_total
 }
 
-/// Improved Q* with strength + gravity
+/// Improved Q* with strength + gravity, scaled by the pair's material hardness.
+///
+/// The Leinhardt-Stewart base value is multiplied by `pair_disruption_scale`,
+/// the geometric mean of both bodies' `disruption_scale` factors.  This means:
+/// - Two rocky bodies   → Q* × 1.0  (baseline)
+/// - Comet on comet     → Q* × 0.15 (very easy to shatter)
+/// - Star on star       → Q* × 5.0  (hard to disrupt)
+/// - Rocky hits a star  → Q* × 2.24 (geometric mean of 1.0 and 5.0)
 pub fn disruption_threshold(bi: &Body, bj: &Body, g_eff: f64) -> f64 {
     let m_total = bi.mass + bj.mass;
 
-    let v_i = bi.mass / bi.density.max(1e-30);
-    let v_j = bj.mass / bj.density.max(1e-30);
-    let r_eff = sphere_radius_from_volume(v_i + v_j).max(1e-30);
+    let r_eff = (bi.physical_radius + bj.physical_radius) * 0.5;
 
     let gravity = (3.0 / 5.0) * g_eff * m_total / r_eff;
-
-    // Simple strength scaling (dominates for small bodies)
     let strength = STRENGTH_K * r_eff.powf(-0.3);
 
-    gravity + strength
+    (gravity + strength) * pair_disruption_scale(bi.material, bj.material)
 }
 
 pub fn evaluate_impact(bi: &Body, bj: &Body, g_eff: f64) -> ImpactResult {
@@ -123,6 +182,7 @@ fn hit_and_run(bi: &Body, bj: &Body, q_ratio: f64) -> ImpactResult {
     let v_com_x = (bi.mass * bi.vx + bj.mass * bj.vx) * inv_m;
     let v_com_y = (bi.mass * bi.vy + bj.mass * bj.vy) * inv_m;
 
+    // proj = lighter body (skims past); targ = heavier body (mostly undisturbed).
     let (proj_is_i, proj, targ) = if bi.mass <= bj.mass {
         (true, bi, bj)
     } else {
@@ -136,16 +196,72 @@ fn hit_and_run(bi: &Body, bj: &Body, q_ratio: f64) -> ImpactResult {
     let vx_proj_new = proj.vx * (1.0 - dust_frac) + v_com_x * dust_frac;
     let vy_proj_new = proj.vy * (1.0 - dust_frac) + v_com_y * dust_frac;
 
-    let proj_new = make_body(
+    let mut proj_new = make_body(
         proj.x,
         proj.y,
         vx_proj_new,
         vy_proj_new,
         proj_mass_new,
         proj.density,
+        proj.material,
     );
 
-    let targ_new = *targ;
+    let mut targ_new = *targ;
+
+    // ── Angular momentum conservation ──────────────────────────────────────── //
+    //
+    // Total L = L_orbital + L_spin_i + L_spin_j  (relative to system COM).
+    //
+    // After the skim, the projectile's velocity changes; the target's does not.
+    // This shift in orbital L must be compensated by spin acquired by both bodies.
+    //
+    // Spin is distributed in proportion to each body's radius, which equals the
+    // lever-arm that the contact force has to exert torque about each body's own
+    // centre (analogous to the contact-point moment arm for each disc).
+    {
+        let geom = impact_geometry(bi, bj);
+        let mu_r = proj.mass * targ.mass / m_total;
+
+        // Orbital L before.  n is always defined relative to bi/bj positions.
+        let l_total = mu_r * geom.d * geom.v_t
+            + bi.moment_inertia * bi.omega_z
+            + bj.moment_inertia * bj.omega_z;
+
+        // Rebuild the tangential velocity after the projectile was deflected.
+        // v_rel = vi_after − vj_after (same sign convention as geom.v_t).
+        let (dvx_after, dvy_after) = if proj_is_i {
+            (vx_proj_new - bj.vx, vy_proj_new - bj.vy)
+        } else {
+            (bi.vx - vx_proj_new, bi.vy - vy_proj_new)
+        };
+        let v_t_after = geom.nx * dvy_after - geom.ny * dvx_after;
+        let l_orbital_after = mu_r * geom.d * v_t_after;
+
+        // Residual angular momentum that must become spin.
+        let delta_l = l_total - l_orbital_after;
+
+        // Distribute proportional to radius (lever-arm fraction at contact).
+        let r_sum = proj_new.physical_radius + targ_new.physical_radius;
+
+        let frac_proj = proj_new.physical_radius / r_sum;
+        let frac_targ = 1.0 - frac_proj;
+
+        // Clamp: surface speed from rotation ≤ relative impact speed.
+        // Frontal (v_t ≈ 0): delta_l ≈ 0 → Δω ≈ 0.
+        // Oblique (v_t large): delta_l large → Δω large.
+        let v_rel_mag = geom.v_n.hypot(geom.v_t).max(1e-30);
+
+        let omega_max_proj = v_rel_mag / proj_new.physical_radius.max(1e-30);
+        let omega_max_targ = v_rel_mag / targ_new.physical_radius.max(1e-30);
+
+        proj_new.omega_z = (proj.omega_z
+            + delta_l * frac_proj / proj_new.moment_inertia.max(1e-30))
+        .clamp(-omega_max_proj, omega_max_proj);
+
+        targ_new.omega_z = (targ.omega_z
+            + delta_l * frac_targ / targ_new.moment_inertia.max(1e-30))
+        .clamp(-omega_max_targ, omega_max_targ);
+    }
 
     let (bi_new, bj_new) = if proj_is_i {
         (proj_new, targ_new)
@@ -172,12 +288,19 @@ fn debris(bi: &Body, bj: &Body, g_eff: f64, q_ratio: f64) -> ImpactResult {
     let v_com_x = (bi.mass * bi.vx + bj.mass * bj.vx) * inv_m;
     let v_com_y = (bi.mass * bi.vy + bj.mass * bj.vy) * inv_m;
 
-    let v_i = bi.mass / bi.density.max(1e-30);
-    let v_j = bj.mass / bj.density.max(1e-30);
-    let r_eff = sphere_radius_from_volume(v_i + v_j).max(1e-30);
-
+    let r_eff = (bi.physical_radius + bj.physical_radius) * 0.5;
     let v_esc = (2.0 * g_eff * m_total / r_eff).sqrt();
-    let frag_density = m_total / (v_i + v_j);
+
+    let total_volume = (4.0 / 3.0) * PI * (bi.physical_radius.powi(3) + bj.physical_radius.powi(3));
+
+    let frag_density = m_total / total_volume;
+
+    // Fragments inherit the material of the dominant (heavier) body.
+    let dominant_material = if bi.mass >= bj.mass {
+        bi.material
+    } else {
+        bj.material
+    };
 
     let t = (q_ratio / 2.0).clamp(0.0, 1.0);
     let m_lr = m_total * (1.0 - t.powf(1.3));
@@ -190,7 +313,6 @@ fn debris(bi: &Body, bj: &Body, g_eff: f64, q_ratio: f64) -> ImpactResult {
     let base_angle = dvy.atan2(dvx);
 
     let mut n_ejecta = (q_ratio * 6.0).clamp(2.0, 12.0) as usize;
-
     n_ejecta = n_ejecta.min(((m_ej / MIN_FRAGMENT_MASS).floor() as usize).max(1));
 
     let ejecta_fracs = power_law_fracs(n_ejecta);
@@ -198,7 +320,10 @@ fn debris(bi: &Body, bj: &Body, g_eff: f64, q_ratio: f64) -> ImpactResult {
     let mut fragments = Vec::with_capacity(n_ejecta + 1);
     let mut dust_mass = 0.0;
 
-    if m_lr >= MIN_FRAGMENT_MASS {
+    // Track whether the largest remnant (LR) was added as fragments[0].
+    let has_remnant = m_lr >= MIN_FRAGMENT_MASS;
+
+    if has_remnant {
         fragments.push(make_body(
             x_com,
             y_com,
@@ -206,6 +331,7 @@ fn debris(bi: &Body, bj: &Body, g_eff: f64, q_ratio: f64) -> ImpactResult {
             v_com_y,
             m_lr,
             frag_density,
+            dominant_material,
         ));
     } else {
         dust_mass += m_lr;
@@ -227,9 +353,18 @@ fn debris(bi: &Body, bj: &Body, g_eff: f64, q_ratio: f64) -> ImpactResult {
         let vx = v_com_x + kick_speed * angle.cos();
         let vy = v_com_y + kick_speed * angle.sin();
 
-        fragments.push(make_body(x_com, y_com, vx, vy, m_k, frag_density));
+        fragments.push(make_body(
+            x_com,
+            y_com,
+            vx,
+            vy,
+            m_k,
+            frag_density,
+            dominant_material,
+        ));
     }
 
+    // ── Linear momentum correction ─────────────────────────────────────────── //
     let m_tracked: f64 = fragments.iter().map(|f| f.mass).sum();
 
     if m_tracked > 1e-30 {
@@ -246,6 +381,28 @@ fn debris(bi: &Body, bj: &Body, g_eff: f64, q_ratio: f64) -> ImpactResult {
             f.vx -= corr_x;
             f.vy -= corr_y;
         }
+    }
+
+    // ── Spin assignment for the largest remnant ────────────────────────────── //
+    //
+    // All fragments are placed at the system COM, so their orbital angular
+    // momentum relative to the COM is zero.  The total pre-impact angular
+    // momentum (orbital + existing spin of both bodies) therefore goes entirely
+    // into the spin of the largest remnant.
+    //
+    // Frontal impact (v_t ≈ 0): L ≈ 0 → ω_lr ≈ 0.
+    // Oblique impact (v_t large): L large → ω_lr large.
+    if has_remnant {
+        let geom = impact_geometry(bi, bj);
+        let mu_r = bi.mass * bj.mass / m_total;
+        let l_total = mu_r * geom.d * geom.v_t
+            + bi.moment_inertia * bi.omega_z
+            + bj.moment_inertia * bj.omega_z;
+
+        let v_rel_mag = geom.v_n.hypot(geom.v_t).max(1e-30);
+        let lr = &mut fragments[0];
+        let omega_max = v_rel_mag / lr.physical_radius.max(1e-30);
+        lr.omega_z = (l_total / lr.moment_inertia.max(1e-30)).clamp(-omega_max, omega_max);
     }
 
     ImpactResult::Debris {
@@ -272,9 +429,10 @@ fn power_law_fracs(n: usize) -> Vec<f64> {
 mod tests {
     use super::*;
     use crate::domain::body::density_from_mass_radius;
+    use crate::domain::materials::Material;
 
     fn body_at(x: f64, y: f64, vx: f64, vy: f64, mass: f64, radius: f64) -> Body {
-        let mut b = Body::new(x, y, vx, vy, mass);
+        let mut b = Body::new(x, y, vx, vy, mass, Material::Rocky);
         b.radius = radius;
         b.density = density_from_mass_radius(mass, radius);
         b

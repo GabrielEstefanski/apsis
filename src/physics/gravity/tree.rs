@@ -327,8 +327,8 @@ mod tests {
     #[test]
     fn root_com_equals_mass_weighted_average() {
         let bodies = vec![
-            Body::new(0.0, 0.0, 0.0, 0.0, 1.0),
-            Body::new(4.0, 0.0, 0.0, 0.0, 3.0),
+            Body::new(0.0, 0.0, 0.0, 0.0, 1.0, crate::domain::materials::Material::Rocky),
+            Body::new(4.0, 0.0, 0.0, 0.0, 3.0, crate::domain::materials::Material::Rocky),
         ];
         // COM_x = (1·0 + 3·4) / 4 = 3.0
         let mut tree = make_tree();
@@ -344,7 +344,7 @@ mod tests {
     #[test]
     fn root_body_count_equals_n() {
         let bodies: Vec<Body> = (0..10)
-            .map(|i| Body::new(i as f64, 0.0, 0.0, 0.0, 1.0))
+            .map(|i| Body::new(i as f64, 0.0, 0.0, 0.0, 1.0, crate::domain::materials::Material::Rocky))
             .collect();
         let mut tree = make_tree();
         tree.build(&bodies);
@@ -354,7 +354,7 @@ mod tests {
     /// A single body produces a root that is already a leaf (no subdivision).
     #[test]
     fn single_body_root_is_leaf_with_no_children() {
-        let bodies = vec![Body::new(1.0, 2.0, 0.0, 0.0, 5.0)];
+        let bodies = vec![Body::new(1.0, 2.0, 0.0, 0.0, 5.0, crate::domain::materials::Material::Rocky)];
         let mut tree = make_tree();
         tree.build(&bodies);
 

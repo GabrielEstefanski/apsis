@@ -27,6 +27,13 @@ pub struct Metrics {
     /// Total orbital angular momentum about the (re-centred) origin.
     pub angular_momentum_z: f64,
 
+    /// Relative angular momentum drift since the first step:
+    ///   δLz = (Lz_now − Lz_baseline) / |Lz_scale|
+    pub rel_angular_momentum_error: f64,
+
+    /// Largest |δLz| ever recorded in this run.
+    pub max_rel_angular_momentum_error: f64,
+
     pub com_x: f64,
     pub com_y: f64,
     pub com_vx: f64,
