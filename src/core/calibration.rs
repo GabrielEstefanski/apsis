@@ -8,7 +8,7 @@
 //! Separating calibration from simulation orchestration keeps every function
 //! single-purpose, trivially testable, and reusable across different integrators.
 
-use crate::domain::body::{Body, default_moment_inertia, density_from_mass_radius};
+use crate::domain::body::Body;
 use std::collections::VecDeque;
 
 // ── Tuning constants ────────────────────────────────────────────────────────── //
@@ -34,17 +34,18 @@ pub const RADIUS_ETA: f64 = 0.002;
 ///
 /// Returns `0.0` when `bodies` has fewer than two elements.
 pub fn system_length_scale(bodies: &[Body]) -> f64 {
-    let n = bodies.len();
+    let collisional: Vec<&Body> = bodies.iter().filter(|b| !b.is_diffuse_cloud()).collect();
+    let n = collisional.len();
     if n < 2 {
         return 0.0;
     }
 
-    let mut min_x = bodies[0].x;
-    let mut max_x = bodies[0].x;
-    let mut min_y = bodies[0].y;
-    let mut max_y = bodies[0].y;
+    let mut min_x = collisional[0].x;
+    let mut max_x = collisional[0].x;
+    let mut min_y = collisional[0].y;
+    let mut max_y = collisional[0].y;
 
-    for b in &bodies[1..] {
+    for b in &collisional[1..] {
         min_x = min_x.min(b.x);
         max_x = max_x.max(b.x);
         min_y = min_y.min(b.y);
@@ -127,7 +128,7 @@ pub fn recenter_com(bodies: &mut [Body], trails: &mut [VecDeque<(f64, f64)>], to
 ///
 /// No-ops when fewer than two bodies are present (single-body default is kept).
 pub fn calibrate_softening(bodies: &mut [Body], total_mass: f64) {
-    let n = bodies.len();
+    let n = bodies.iter().filter(|b| !b.is_diffuse_cloud()).count();
     if n < 2 {
         return;
     }
@@ -137,13 +138,21 @@ pub fn calibrate_softening(bodies: &mut [Body], total_mass: f64) {
         return;
     }
 
-    let m_mean = total_mass / n as f64;
+    let active_mass: f64 = bodies
+        .iter()
+        .filter(|b| !b.is_diffuse_cloud())
+        .map(|b| b.mass)
+        .sum();
+    let m_mean = active_mass.max(total_mass.min(active_mass)) / n as f64;
     for b in bodies.iter_mut() {
+        if b.is_diffuse_cloud() {
+            continue;
+        }
         b.softening = SOFTENING_ETA * (b.mass / m_mean).cbrt() * l_mean;
     }
 }
 
-/// Set each body's physical collision radius from the current system scale.
+/// Set each body's numerical contact radius from the current system scale.
 ///
 /// Formula: `r_i = RADIUS_ETA × (m_i / m_mean)^(1/3) × l_mean`
 ///
@@ -151,9 +160,10 @@ pub fn calibrate_softening(bodies: &mut [Body], total_mass: f64) {
 /// entered before surfaces touch — preventing the "slingshot at contact"
 /// numerical artefact.
 ///
-/// Updates `moment_inertia` using the physical radius to preserve physical consistency.
+/// This function must **not** alter the body's physical geometry
+/// (`physical_radius`, `density`, `moment_inertia`).
 pub fn calibrate_radii(bodies: &mut [Body], total_mass: f64) {
-    let n = bodies.len();
+    let n = bodies.iter().filter(|b| !b.is_diffuse_cloud()).count();
     if n < 2 {
         return;
     }
@@ -163,11 +173,19 @@ pub fn calibrate_radii(bodies: &mut [Body], total_mass: f64) {
         return;
     }
 
-    let m_mean = total_mass / n as f64;
+    let active_mass: f64 = bodies
+        .iter()
+        .filter(|b| !b.is_diffuse_cloud())
+        .map(|b| b.mass)
+        .sum();
+    let m_mean = active_mass.max(total_mass.min(active_mass)) / n as f64;
     for b in bodies.iter_mut() {
+        if b.is_diffuse_cloud() {
+            b.radius = 0.0;
+            continue;
+        }
         let r = RADIUS_ETA * (b.mass / m_mean).cbrt() * l_mean;
         b.radius = r.min(b.softening * 0.5);
-        b.moment_inertia = default_moment_inertia(b.mass, b.radius);
     }
 }
 

@@ -61,6 +61,7 @@ pub struct Metrics {
     // ── Diagnostics ───────────────────────────────────────────────────────── //
     pub max_acc: f64,
     pub jerk: f64,
+    pub max_vel: f64,
 
     // ── Collision bookkeeping ─────────────────────────────────────────────── //
     /// Number of pairwise merges that occurred during the last integration step.

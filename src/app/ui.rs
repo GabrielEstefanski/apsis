@@ -1,7 +1,7 @@
 use crate::app::config::PhysicsConfig;
 use crate::app::theme::apply_visuals;
 use crate::core::system::System;
-use crate::domain::body::{Body, default_moment_inertia, radius_from_density_mass};
+use crate::domain::body::{Body, default_moment_inertia};
 use eframe::egui;
 
 #[derive(PartialEq, Clone, Copy)]
@@ -16,6 +16,23 @@ pub enum PanelTab {
     Add,
     Templates,
     Config,
+}
+
+#[derive(PartialEq, Clone, Copy)]
+pub enum SemanticScaleMode {
+    Physical,
+    Comparative,
+    Illustrative,
+}
+
+impl SemanticScaleMode {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Physical => "physical",
+            Self::Comparative => "compare",
+            Self::Illustrative => "illustrate",
+        }
+    }
 }
 
 pub struct BodyForm {
@@ -68,7 +85,6 @@ impl BodyForm {
     pub fn try_build(&self) -> Option<Body> {
         let mass: f64 = self.mass.parse().ok().filter(|&v| v > 0.0)?;
         let density: f64 = self.density.parse().ok().filter(|&v| v > 0.0)?;
-        let radius = radius_from_density_mass(density, mass);
         let mut b = Body::new(
             self.x.parse().ok()?,
             self.y.parse().ok()?,
@@ -78,9 +94,10 @@ impl BodyForm {
             crate::domain::materials::Material::Rocky,
         );
         b.density = density;
-        b.radius = radius;
-        b.softening = b.softening.max(radius * 2.0);
-        b.moment_inertia = default_moment_inertia(mass, radius);
+        b.sync_physical_properties();
+        b.radius = b.physical_radius;
+        b.softening = b.softening.max(b.physical_radius * 2.0);
+        b.moment_inertia = default_moment_inertia(mass, b.physical_radius);
         Some(b)
     }
 }
@@ -103,6 +120,8 @@ pub struct SimulationApp {
     pub(super) proposed_dt: f64,
     pub(super) paused: bool,
     pub(super) scale: f32,
+    pub(super) body_size_boost: f32,
+    pub(super) semantic_scale_mode: SemanticScaleMode,
     pub(super) offset: egui::Vec2,
     pub(super) form: BodyForm,
     pub(super) form_error: Option<String>,
@@ -145,6 +164,8 @@ impl SimulationApp {
             proposed_dt: 1e-3,
             paused: true,
             scale: 10.0,
+            body_size_boost: 64.0,
+            semantic_scale_mode: SemanticScaleMode::Comparative,
             offset: egui::Vec2::ZERO,
             form: BodyForm::default(),
             form_error: None,

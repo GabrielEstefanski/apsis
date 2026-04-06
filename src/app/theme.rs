@@ -12,27 +12,6 @@ pub const TEXT_DIM: Color32 = Color32::from_rgb(42, 42, 55);
 pub const DANGER: Color32 = Color32::from_rgb(190, 70, 70);
 pub const SUCCESS: Color32 = Color32::from_rgb(75, 170, 110);
 
-const BODY_PALETTE: &[Color32] = &[
-    Color32::from_rgb(185, 205, 225),
-    Color32::from_rgb(225, 190, 135),
-    Color32::from_rgb(140, 195, 165),
-    Color32::from_rgb(200, 150, 150),
-    Color32::from_rgb(170, 160, 210),
-    Color32::from_rgb(210, 200, 140),
-    Color32::from_rgb(210, 160, 125),
-    Color32::from_rgb(145, 195, 205),
-];
-
-pub fn body_color(index: usize, mass: f64) -> Color32 {
-    let base = BODY_PALETTE[index % BODY_PALETTE.len()];
-    let t = (mass.log10().clamp(0.0, 3.0) / 3.0) as f32;
-    Color32::from_rgb(
-        (base.r() as f32 * (0.75 + 0.25 * t)) as u8,
-        (base.g() as f32 * (0.75 + 0.25 * t)) as u8,
-        (base.b() as f32 * (0.75 + 0.25 * t)) as u8,
-    )
-}
-
 pub fn body_radius(mass: f64) -> f32 {
     (mass.powf(0.33) as f32 * 2.8).clamp(2.5, 20.0)
 }
@@ -160,29 +139,4 @@ pub fn template_btn(ui: &mut egui::Ui, label: &str) -> bool {
             .min_size(egui::vec2(ui.available_width(), 20.0)),
     )
     .clicked()
-}
-
-/// Map `speed` to a perceptual thermal colormap (cool dim-blue → teal → gold → near-white).
-///
-/// Used for velocity-coded body colours: low speed = cold, high speed = hot.
-/// `v_max` is the normalisation reference (typically the fastest body this frame).
-pub fn velocity_color(speed: f64, v_max: f64) -> Color32 {
-    let t = (speed / v_max.max(1e-30)).clamp(0.0, 1.0) as f32;
-    // Four anchor colours in (R, G, B):
-    const ANCHORS: [(f32, f32, f32); 4] = [
-        (20.0, 40.0, 160.0),   // t = 0.00  cold blue
-        (30.0, 190.0, 140.0),  // t = 0.33  teal
-        (220.0, 165.0,  20.0), // t = 0.67  gold
-        (255.0, 240.0, 200.0), // t = 1.00  near-white hot
-    ];
-    let seg = (t * 3.0).clamp(0.0, 2.999_f32);
-    let i = seg as usize;
-    let frac = seg - i as f32;
-    let (r0, g0, b0) = ANCHORS[i];
-    let (r1, g1, b1) = ANCHORS[i + 1];
-    Color32::from_rgb(
-        (r0 + (r1 - r0) * frac) as u8,
-        (g0 + (g1 - g0) * frac) as u8,
-        (b0 + (b1 - b0) * frac) as u8,
-    )
 }

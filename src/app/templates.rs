@@ -1,10 +1,20 @@
 use std::f64::consts::PI;
 
-use crate::domain::body::Body;
+use crate::domain::body::{Body, density_from_mass_radius};
 use crate::domain::materials::Material;
 use crate::physics::gravity::G;
 
-// ── Category ──────────────────────────────────────────────────────────────── //
+const SOLAR_KG: f64 = 1.988_47e30;
+const EARTH_KG: f64 = 5.972_2e24;
+const JUPITER_KG: f64 = 1.898_13e27;
+const AU_KM: f64 = 149_597_870.7;
+const SOLAR_RADIUS_KM: f64 = 695_700.0;
+const EARTH_RADIUS_KM: f64 = 6_371.0;
+const JUPITER_RADIUS_KM: f64 = 69_911.0;
+
+// With G = 1, choosing mass units as 4*pi^2 solar masses makes circular
+// orbital speeds in AU come out naturally in AU / year.
+const KEPLER_MASS_SCALE: f64 = 4.0 * PI * PI;
 
 #[derive(PartialEq, Clone, Copy)]
 pub enum TemplateCategory {
@@ -16,11 +26,12 @@ pub enum TemplateCategory {
 impl TemplateCategory {
     pub fn label(self) -> &'static str {
         match self {
-            Self::Bodies => "CELESTIAL BODIES",
-            Self::Formations => "FORMATIONS",
-            Self::Collisions => "COLLISIONS",
+            Self::Bodies => "REAL SYSTEMS",
+            Self::Formations => "REAL CONFIGURATIONS",
+            Self::Collisions => "IMPACT ANALOGS",
         }
     }
+
     pub fn grid_id(self) -> &'static str {
         match self {
             Self::Bodies => "tpl_bodies",
@@ -30,17 +41,13 @@ impl TemplateCategory {
     }
 }
 
-// ── Catalog ───────────────────────────────────────────────────────────────── //
-
 pub struct TemplateEntry {
     pub key: &'static str,
     pub label: &'static str,
     pub category: TemplateCategory,
 }
 
-/// Add one entry here + one `match` arm in `template_bodies` to register a new scenario.
 pub const TEMPLATE_CATALOG: &[TemplateEntry] = &[
-    // Celestial bodies
     TemplateEntry {
         key: "inner_solar",
         label: "Inner Solar",
@@ -48,7 +55,7 @@ pub const TEMPLATE_CATALOG: &[TemplateEntry] = &[
     },
     TemplateEntry {
         key: "outer_solar",
-        label: "Outer Solar",
+        label: "Giant Planets",
         category: TemplateCategory::Bodies,
     },
     TemplateEntry {
@@ -58,12 +65,12 @@ pub const TEMPLATE_CATALOG: &[TemplateEntry] = &[
     },
     TemplateEntry {
         key: "jupiter_system",
-        label: "Jupiter Moons",
+        label: "Galilean Moons",
         category: TemplateCategory::Bodies,
     },
     TemplateEntry {
         key: "hot_jupiter",
-        label: "Hot Jupiter",
+        label: "51 Pegasi b",
         category: TemplateCategory::Bodies,
     },
     TemplateEntry {
@@ -71,490 +78,720 @@ pub const TEMPLATE_CATALOG: &[TemplateEntry] = &[
         label: "TRAPPIST-1",
         category: TemplateCategory::Bodies,
     },
-    // Formations
     TemplateEntry {
         key: "binary",
-        label: "Binary Star",
-        category: TemplateCategory::Formations,
-    },
-    TemplateEntry {
-        key: "figure8",
-        label: "Figure-8",
-        category: TemplateCategory::Formations,
-    },
-    TemplateEntry {
-        key: "pythagorean",
-        label: "Pythagorean",
+        label: "Pluto-Charon",
         category: TemplateCategory::Formations,
     },
     TemplateEntry {
         key: "belt",
-        label: "Asteroid Belt",
-        category: TemplateCategory::Formations,
-    },
-    TemplateEntry {
-        key: "galaxies",
-        label: "Galaxies",
+        label: "Main Belt",
         category: TemplateCategory::Formations,
     },
     TemplateEntry {
         key: "lagrange_l1",
-        label: "Lagrange L1",
+        label: "Sun-Earth L1",
         category: TemplateCategory::Formations,
     },
     TemplateEntry {
         key: "lagrange_l2",
-        label: "Lagrange L2",
-        category: TemplateCategory::Formations,
-    },
-    TemplateEntry {
-        key: "lagrange_l3",
-        label: "Lagrange L3",
+        label: "Sun-Earth L2",
         category: TemplateCategory::Formations,
     },
     TemplateEntry {
         key: "lagrange_l4",
-        label: "Lagrange L4",
+        label: "Jupiter Trojan L4",
         category: TemplateCategory::Formations,
     },
     TemplateEntry {
         key: "lagrange_l5",
-        label: "Lagrange L5",
+        label: "Jupiter Trojan L5",
         category: TemplateCategory::Formations,
     },
     TemplateEntry {
         key: "hierarchical",
-        label: "Hierarchical",
+        label: "Kepler-16 AB-b",
         category: TemplateCategory::Formations,
     },
-    // Collisions
     TemplateEntry {
         key: "merge_head_on",
-        label: "Head-on Merge",
+        label: "Arrokoth Analog",
         category: TemplateCategory::Collisions,
     },
     TemplateEntry {
         key: "giant_impact",
-        label: "Giant Impact",
+        label: "Earth-Theia",
         category: TemplateCategory::Collisions,
     },
     TemplateEntry {
         key: "scatter_flyby",
-        label: "Flyby Scatter",
+        label: "Earth-Apophis",
         category: TemplateCategory::Collisions,
     },
     TemplateEntry {
         key: "shattering",
-        label: "Shattering",
+        label: "Vesta Family",
         category: TemplateCategory::Collisions,
     },
     TemplateEntry {
         key: "chain_reaction",
-        label: "Chain React.",
+        label: "SL9 @ Jupiter",
         category: TemplateCategory::Collisions,
     },
 ];
 
-// ── Initial conditions ────────────────────────────────────────────────────── //
+#[inline]
+fn deg(value: f64) -> f64 {
+    value.to_radians()
+}
 
-/// Returns the initial body list for a given catalog key.
-/// Circular orbit speed (G=1): v = sqrt(M_central / r).
+#[inline]
+fn solar_mass(mass_solar: f64) -> f64 {
+    KEPLER_MASS_SCALE * mass_solar
+}
+
+#[inline]
+fn kg(mass_kg: f64) -> f64 {
+    solar_mass(mass_kg / SOLAR_KG)
+}
+
+#[inline]
+fn au_from_km(distance_km: f64) -> f64 {
+    distance_km / AU_KM
+}
+
+#[inline]
+fn au_per_year_from_km_s(speed_km_s: f64) -> f64 {
+    speed_km_s * 86_400.0 * 365.25 / AU_KM
+}
+
+fn body_real(
+    x: f64,
+    y: f64,
+    vx: f64,
+    vy: f64,
+    mass_kg: f64,
+    radius_km: f64,
+    material: Material,
+) -> Body {
+    let mut b = Body::new(x, y, vx, vy, kg(mass_kg), material);
+    let radius_au = au_from_km(radius_km);
+    b.density = density_from_mass_radius(b.mass, radius_au);
+    b.sync_physical_properties();
+    b.radius = b.physical_radius;
+    b.softening = b.softening.max(b.physical_radius * 2.0);
+    b
+}
+
+fn circular_orbit_real(
+    primary: Body,
+    orbital_radius: f64,
+    phase: f64,
+    mass_kg: f64,
+    radius_km: f64,
+    material: Material,
+) -> Body {
+    let mass = kg(mass_kg);
+    let omega = (G * (primary.mass + mass) / orbital_radius.powi(3)).sqrt();
+    let (c, s) = (phase.cos(), phase.sin());
+    body_real(
+        primary.x + orbital_radius * c,
+        primary.y + orbital_radius * s,
+        primary.vx - orbital_radius * omega * s,
+        primary.vy + orbital_radius * omega * c,
+        mass_kg,
+        radius_km,
+        material,
+    )
+}
+
+fn barycentric_binary_real(
+    separation: f64,
+    phase: f64,
+    mass_a_kg: f64,
+    radius_a_km: f64,
+    material_a: Material,
+    mass_b_kg: f64,
+    radius_b_km: f64,
+    material_b: Material,
+) -> [Body; 2] {
+    let mass_a = kg(mass_a_kg);
+    let mass_b = kg(mass_b_kg);
+    let total = mass_a + mass_b;
+    let omega = (G * total / separation.powi(3)).sqrt();
+    let ra = separation * mass_b / total;
+    let rb = separation * mass_a / total;
+    let (c, s) = (phase.cos(), phase.sin());
+
+    let a = body_real(
+        -ra * c,
+        -ra * s,
+        ra * omega * s,
+        -ra * omega * c,
+        mass_a_kg,
+        radius_a_km,
+        material_a,
+    );
+    let b = body_real(
+        rb * c,
+        rb * s,
+        -rb * omega * s,
+        rb * omega * c,
+        mass_b_kg,
+        radius_b_km,
+        material_b,
+    );
+
+    [a, b]
+}
+
 pub fn template_bodies(key: &str) -> Vec<Body> {
     match key {
-        // ── Celestial bodies ─────────────────────────────────────────────── //
-
-        // Inner solar system: Sun + Mercury, Venus, Earth, Mars
         "inner_solar" => {
-            let m_star = 100.0f64;
-            let planets: &[(f64, f64)] = &[
-                (2.5, 0.0002),  // Mercury-like
-                (4.5, 0.0025),  // Venus-like
-                (6.5, 0.0030),  // Earth-like
-                (10.0, 0.0003), // Mars-like
-            ];
-            let mut v = vec![Body::new(0.0, 0.0, 0.0, 0.0, m_star, Material::Star)];
-            for &(r, m) in planets {
-                let vc = (G * m_star / r).sqrt();
-                v.push(Body::new(r, 0.0, 0.0, vc, m, Material::Rocky));
-            }
-            v
-        }
-
-        // Outer solar system: Sun + Jupiter, Saturn, Uranus, Neptune
-        "outer_solar" => {
-            let m_star = 100.0f64;
-            let planets: &[(f64, f64)] = &[
-                (10.0, 0.30), // Jupiter-like
-                (16.0, 0.10), // Saturn-like
-                (22.0, 0.03), // Uranus-like
-                (30.0, 0.03), // Neptune-like
-            ];
-            let mut v = vec![Body::new(0.0, 0.0, 0.0, 0.0, m_star, Material::Star)];
-            for &(r, m) in planets {
-                let vc = (G * m_star / r).sqrt();
-                v.push(Body::new(r, 0.0, 0.0, vc, m, Material::Gas));
-            }
-            v
-        }
-
-        // Earth-Moon system
-        "earth_moon" => {
-            let m_earth = 1.0f64;
-            let m_moon = 0.012f64;
-            let r_moon = 0.5f64;
-            let vc = (G * m_earth / r_moon).sqrt();
+            let sun = body_real(
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                SOLAR_KG,
+                SOLAR_RADIUS_KM,
+                Material::Star,
+            );
             vec![
-                Body::new(0.0, 0.0, 0.0, 0.0, m_earth, Material::Rocky),
-                Body::new(r_moon, 0.0, 0.0, vc, m_moon, Material::Rocky),
-            ]
-        }
-
-        // Jupiter + four Galilean moons
-        "jupiter_system" => {
-            let m_jup = 5.0f64;
-            // (r, mass) — Io, Europa, Ganymede, Callisto
-            let moons: &[(f64, f64)] = &[(1.0, 0.008), (1.6, 0.015), (2.6, 0.020), (4.0, 0.010)];
-            let mut v = vec![Body::new(0.0, 0.0, 0.0, 0.0, m_jup, Material::Gas)];
-            for &(r, m) in moons {
-                let vc = (G * m_jup / r).sqrt();
-                v.push(Body::new(r, 0.0, 0.0, vc, m, Material::Rocky));
-            }
-            v
-        }
-
-        // Hot Jupiter: close-in gas giant on tight orbit
-        "hot_jupiter" => {
-            let m_star = 50.0f64;
-            let r = 1.5f64;
-            let vc = (G * m_star / r).sqrt();
-            vec![
-                Body::new(0.0, 0.0, 0.0, 0.0, m_star, Material::Star),
-                Body::new(r, 0.0, 0.0, vc, 2.0, Material::Gas),
-            ]
-        }
-
-        // TRAPPIST-1 simplified: compact M-dwarf + 7 small planets
-        "trappist1" => {
-            let m_star = 8.0f64;
-            // (r, mass) — planets b through h
-            let planets: &[(f64, f64)] = &[
-                (0.40, 0.00055),
-                (0.60, 0.00070),
-                (0.80, 0.00045),
-                (1.00, 0.00062),
-                (1.30, 0.00068),
-                (1.65, 0.00128),
-                (2.20, 0.00033),
-            ];
-            let mut v = vec![Body::new(0.0, 0.0, 0.0, 0.0, m_star, Material::Star)];
-            for &(r, m) in planets {
-                let vc = (G * m_star / r).sqrt();
-                v.push(Body::new(r, 0.0, 0.0, vc, m, Material::Rocky));
-            }
-            v
-        }
-
-        // ── Formations ───────────────────────────────────────────────────── //
-        "binary" => vec![
-            Body::new(-1.0, 0.0, 0.0, -0.5, 1.0, Material::Star),
-            Body::new(1.0, 0.0, 0.0, 0.5, 1.0, Material::Star),
-        ],
-
-        "figure8" => vec![
-            Body::new(
-                0.97000436,
-                -0.24308753,
-                0.46620369,
-                0.43236573,
-                1.0,
-                Material::Rocky,
-            ),
-            Body::new(0.0, 0.0, -0.93240737, -0.86473146, 1.0, Material::Rocky),
-            Body::new(
-                -0.97000436,
-                0.24308753,
-                0.46620369,
-                0.43236573,
-                1.0,
-                Material::Rocky,
-            ),
-        ],
-
-        "pythagorean" => vec![
-            Body::new(-1.5, 0.0, 0.0, 0.0, 3.0, Material::Rocky),
-            Body::new(1.5, 0.0, 0.0, 0.0, 4.0, Material::Rocky),
-            Body::new(0.0, 2.0, 0.0, 0.0, 5.0, Material::Rocky),
-        ],
-
-        "belt" => {
-            let m_star = 100.0f64;
-            let mut v = vec![Body::new(0.0, 0.0, 0.0, 0.0, m_star, Material::Star)];
-            let n = 120usize;
-            let r = 12.0f64;
-            let v_orb = (G * m_star / r).sqrt();
-            for i in 0..n {
-                let a = 2.0 * PI * i as f64 / n as f64;
-                v.push(Body::new(
-                    r * a.cos(),
-                    r * a.sin(),
-                    -v_orb * a.sin(),
-                    v_orb * a.cos(),
-                    0.001,
-                    Material::Rocky,
-                ));
-            }
-            v
-        }
-
-        "galaxies" => {
-            let mut v = Vec::new();
-            for g in 0..2i32 {
-                let (cx, vxg) = if g == 0 {
-                    (-22.0f64, 0.7f64)
-                } else {
-                    (22.0f64, -0.7f64)
-                };
-                let m_core = 60.0f64;
-
-                v.push(Body::new(cx, 0.0, vxg, 0.0, m_core, Material::Star));
-
-                let nr = 24usize;
-                let r = 5.0f64;
-                let vo = (G * m_core / r).sqrt();
-                for i in 0..nr {
-                    let a = 2.0 * PI * i as f64 / nr as f64;
-                    v.push(Body::new(
-                        cx + r * a.cos(),
-                        r * a.sin(),
-                        vxg - vo * a.sin(),
-                        vo * a.cos(),
-                        0.1,
-                        Material::Star,
-                    ));
-                }
-            }
-            v
-        }
-
-        "lagrange_l5" => {
-            let m_star = 100.0f64;
-            let r = 8.0f64;
-            let v_p = (G * m_star / r).sqrt();
-            let a = -PI / 3.0; // -60°
-
-            vec![
-                Body::new(0.0, 0.0, 0.0, 0.0, m_star, Material::Star),
-                Body::new(r, 0.0, 0.0, v_p, 0.5, Material::Rocky),
-                Body::new(
-                    r * a.cos(),
-                    r * a.sin(),
-                    -v_p * a.sin(),
-                    v_p * a.cos(),
-                    0.01,
+                sun,
+                circular_orbit_real(
+                    sun,
+                    0.387_098,
+                    deg(252.251),
+                    3.301_1e23,
+                    2_439.7,
                     Material::Rocky,
                 ),
+                circular_orbit_real(
+                    sun,
+                    0.723_332,
+                    deg(181.979),
+                    4.867_5e24,
+                    6_051.8,
+                    Material::Rocky,
+                ),
+                circular_orbit_real(
+                    sun,
+                    1.0,
+                    deg(100.464),
+                    EARTH_KG,
+                    EARTH_RADIUS_KM,
+                    Material::Rocky,
+                ),
+                circular_orbit_real(
+                    sun,
+                    1.523_679,
+                    deg(355.453),
+                    6.417_1e23,
+                    3_389.5,
+                    Material::Rocky,
+                ),
+            ]
+        }
+
+        "outer_solar" => {
+            let sun = body_real(
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                SOLAR_KG,
+                SOLAR_RADIUS_KM,
+                Material::Star,
+            );
+            vec![
+                sun,
+                circular_orbit_real(
+                    sun,
+                    5.2044,
+                    deg(34.404),
+                    JUPITER_KG,
+                    JUPITER_RADIUS_KM,
+                    Material::Gas,
+                ),
+                circular_orbit_real(
+                    sun,
+                    9.5826,
+                    deg(49.944),
+                    5.683_4e26,
+                    58_232.0,
+                    Material::Gas,
+                ),
+                circular_orbit_real(
+                    sun,
+                    19.2184,
+                    deg(313.232),
+                    8.681_3e25,
+                    25_362.0,
+                    Material::IceGiant,
+                ),
+                circular_orbit_real(
+                    sun,
+                    30.11,
+                    deg(304.880),
+                    1.024_13e26,
+                    24_622.0,
+                    Material::IceGiant,
+                ),
+            ]
+        }
+
+        "earth_moon" => barycentric_binary_real(
+            au_from_km(384_400.0),
+            deg(135.0),
+            EARTH_KG,
+            EARTH_RADIUS_KM,
+            Material::Rocky,
+            7.346e22,
+            1_737.4,
+            Material::Rocky,
+        )
+        .into(),
+
+        "jupiter_system" => {
+            let jupiter = body_real(
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                JUPITER_KG,
+                JUPITER_RADIUS_KM,
+                Material::Gas,
+            );
+            vec![
+                jupiter,
+                circular_orbit_real(
+                    jupiter,
+                    au_from_km(421_700.0),
+                    deg(20.0),
+                    8.931_9e22,
+                    1_821.6,
+                    Material::Rocky,
+                ),
+                circular_orbit_real(
+                    jupiter,
+                    au_from_km(671_100.0),
+                    deg(135.0),
+                    4.799_8e22,
+                    1_560.8,
+                    Material::Icy,
+                ),
+                circular_orbit_real(
+                    jupiter,
+                    au_from_km(1_070_400.0),
+                    deg(235.0),
+                    1.481_9e23,
+                    2_634.1,
+                    Material::Icy,
+                ),
+                circular_orbit_real(
+                    jupiter,
+                    au_from_km(1_882_700.0),
+                    deg(320.0),
+                    1.075_9e23,
+                    2_410.3,
+                    Material::Icy,
+                ),
+            ]
+        }
+
+        "hot_jupiter" => {
+            let star = body_real(
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                1.11 * SOLAR_KG,
+                1.237 * SOLAR_RADIUS_KM,
+                Material::Star,
+            );
+            vec![
+                star,
+                circular_orbit_real(
+                    star,
+                    0.0520,
+                    deg(40.0),
+                    0.46 * JUPITER_KG,
+                    1.9 * JUPITER_RADIUS_KM,
+                    Material::Gas,
+                ),
+            ]
+        }
+
+        "trappist1" => {
+            let star = body_real(
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0898 * SOLAR_KG,
+                0.121 * SOLAR_RADIUS_KM,
+                Material::BrownDwarf,
+            );
+            vec![
+                star,
+                circular_orbit_real(
+                    star,
+                    0.01154,
+                    deg(15.0),
+                    1.374 * EARTH_KG,
+                    1.116 * EARTH_RADIUS_KM,
+                    Material::Rocky,
+                ),
+                circular_orbit_real(
+                    star,
+                    0.01580,
+                    deg(120.0),
+                    1.308 * EARTH_KG,
+                    1.097 * EARTH_RADIUS_KM,
+                    Material::Rocky,
+                ),
+                circular_orbit_real(
+                    star,
+                    0.02227,
+                    deg(215.0),
+                    0.388 * EARTH_KG,
+                    0.788 * EARTH_RADIUS_KM,
+                    Material::Rocky,
+                ),
+                circular_orbit_real(
+                    star,
+                    0.02928,
+                    deg(300.0),
+                    0.692 * EARTH_KG,
+                    0.920 * EARTH_RADIUS_KM,
+                    Material::Rocky,
+                ),
+                circular_orbit_real(
+                    star,
+                    0.03853,
+                    deg(65.0),
+                    1.039 * EARTH_KG,
+                    1.045 * EARTH_RADIUS_KM,
+                    Material::Icy,
+                ),
+                circular_orbit_real(
+                    star,
+                    0.04688,
+                    deg(170.0),
+                    1.321 * EARTH_KG,
+                    1.129 * EARTH_RADIUS_KM,
+                    Material::Icy,
+                ),
+                circular_orbit_real(
+                    star,
+                    0.06193,
+                    deg(260.0),
+                    0.326 * EARTH_KG,
+                    0.773 * EARTH_RADIUS_KM,
+                    Material::Icy,
+                ),
+            ]
+        }
+
+        "binary" => barycentric_binary_real(
+            au_from_km(19_573.0),
+            deg(20.0),
+            1.303e22,
+            1_188.3,
+            Material::Icy,
+            1.586e21,
+            606.0,
+            Material::Icy,
+        )
+        .into(),
+
+        "belt" => {
+            let sun = body_real(
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                SOLAR_KG,
+                SOLAR_RADIUS_KM,
+                Material::Star,
+            );
+            vec![
+                sun,
+                circular_orbit_real(
+                    sun,
+                    2.3615,
+                    deg(45.0),
+                    2.590_76e20,
+                    262.7,
+                    Material::Asteroid,
+                ),
+                circular_orbit_real(
+                    sun,
+                    2.7675,
+                    deg(150.0),
+                    9.383_5e20,
+                    473.0,
+                    Material::Asteroid,
+                ),
+                circular_orbit_real(sun, 2.773, deg(255.0), 2.14e20, 256.0, Material::Asteroid),
+                circular_orbit_real(sun, 3.1415, deg(330.0), 8.67e19, 217.0, Material::Asteroid),
             ]
         }
 
         "lagrange_l1" => {
-            let m_star = 100.0f64;
-            let m_planet = 0.5f64;
-            let r = 8.0f64;
-
-            let mu = m_planet / (m_star + m_planet);
-            let omega = (G * (m_star + m_planet) / r.powi(3)).sqrt();
-
-            let x = r * (1.0 - (mu / 3.0).cbrt());
-            let v = omega * x;
-
-            vec![
-                Body::new(0.0, 0.0, 0.0, 0.0, m_star, Material::Star),
-                Body::new(
-                    r,
-                    0.0,
-                    0.0,
-                    (G * m_star / r).sqrt(),
-                    m_planet,
-                    Material::Rocky,
-                ),
-                Body::new(x, 0.0, 0.0, v, 0.01, Material::Rocky),
-            ]
+            let sun = body_real(
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                SOLAR_KG,
+                SOLAR_RADIUS_KM,
+                Material::Star,
+            );
+            let earth = circular_orbit_real(
+                sun,
+                1.0,
+                deg(0.0),
+                EARTH_KG,
+                EARTH_RADIUS_KM,
+                Material::Rocky,
+            );
+            let l1 = circular_orbit_real(
+                sun,
+                1.0 - au_from_km(1_500_000.0),
+                deg(0.0),
+                1_850.0,
+                0.005,
+                Material::Asteroid,
+            );
+            vec![sun, earth, l1]
         }
 
         "lagrange_l2" => {
-            let m_star = 100.0f64;
-            let m_planet = 0.5f64;
-            let r = 8.0f64;
-
-            let mu = m_planet / (m_star + m_planet);
-            let omega = (G * (m_star + m_planet) / r.powi(3)).sqrt();
-
-            let x = r * (1.0 + (mu / 3.0).cbrt());
-            let v = omega * x;
-
-            vec![
-                Body::new(0.0, 0.0, 0.0, 0.0, m_star, Material::Star),
-                Body::new(
-                    r,
-                    0.0,
-                    0.0,
-                    (G * m_star / r).sqrt(),
-                    m_planet,
-                    Material::Rocky,
-                ),
-                Body::new(x, 0.0, 0.0, v, 0.01, Material::Rocky),
-            ]
+            let sun = body_real(
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                SOLAR_KG,
+                SOLAR_RADIUS_KM,
+                Material::Star,
+            );
+            let earth = circular_orbit_real(
+                sun,
+                1.0,
+                deg(0.0),
+                EARTH_KG,
+                EARTH_RADIUS_KM,
+                Material::Rocky,
+            );
+            let l2 = circular_orbit_real(
+                sun,
+                1.0 + au_from_km(1_500_000.0),
+                deg(0.0),
+                6_200.0,
+                0.010,
+                Material::Asteroid,
+            );
+            vec![sun, earth, l2]
         }
 
-        "lagrange_l3" => {
-            let m_star = 100.0f64;
-            let m_planet = 0.5f64;
-            let r = 8.0f64;
-
-            let mu = m_planet / (m_star + m_planet);
-            let omega = (G * (m_star + m_planet) / r.powi(3)).sqrt();
-
-            let x = -r * (1.0 + 5.0 * mu / 12.0);
-            let v = omega * x.abs();
-
-            vec![
-                Body::new(0.0, 0.0, 0.0, 0.0, m_star, Material::Star),
-                Body::new(
-                    r,
-                    0.0,
-                    0.0,
-                    (G * m_star / r).sqrt(),
-                    m_planet,
-                    Material::Rocky,
-                ),
-                Body::new(x, 0.0, 0.0, -v, 0.01, Material::Rocky),
-            ]
-        }
-
-        // Lagrange L4 Trojan: star + planet + trojan asteroid at 60° ahead
         "lagrange_l4" => {
-            let m_star = 100.0f64;
-            let r = 8.0f64;
-            let v_p = (G * m_star / r).sqrt();
-            let a = PI / 3.0; // 60° ahead
-            vec![
-                Body::new(0.0, 0.0, 0.0, 0.0, m_star, Material::Star),
-                Body::new(r, 0.0, 0.0, v_p, 0.5, Material::Rocky),
-                Body::new(
-                    r * a.cos(),
-                    r * a.sin(),
-                    -v_p * a.sin(),
-                    v_p * a.cos(),
-                    0.01,
-                    Material::Rocky,
-                ),
-            ]
+            let sun = body_real(
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                SOLAR_KG,
+                SOLAR_RADIUS_KM,
+                Material::Star,
+            );
+            let jupiter = circular_orbit_real(
+                sun,
+                5.2044,
+                deg(0.0),
+                JUPITER_KG,
+                JUPITER_RADIUS_KM,
+                Material::Gas,
+            );
+            let trojan =
+                circular_orbit_real(sun, 5.2044, deg(60.0), 7.9e18, 57.0, Material::Asteroid);
+            vec![sun, jupiter, trojan]
         }
 
-        // Hierarchical triple: tight inner binary + distant outer companion
+        "lagrange_l5" => {
+            let sun = body_real(
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                SOLAR_KG,
+                SOLAR_RADIUS_KM,
+                Material::Star,
+            );
+            let jupiter = circular_orbit_real(
+                sun,
+                5.2044,
+                deg(0.0),
+                JUPITER_KG,
+                JUPITER_RADIUS_KM,
+                Material::Gas,
+            );
+            let trojan =
+                circular_orbit_real(sun, 5.2044, deg(-60.0), 1.3e18, 32.0, Material::Asteroid);
+            vec![sun, jupiter, trojan]
+        }
+
         "hierarchical" => {
-            let m = 1.0f64;
-            let r_in = 1.5f64;
-            let r_out = 10.0f64;
-            // Binary: two masses m at ±r_in; v = sqrt(G*m / (4*r_in))
-            let v_b = (G * m / (4.0 * r_in)).sqrt();
-            // Outer companion orbiting total mass 2m at r_out
-            let v_o = (G * 2.0 * m / r_out).sqrt();
-            vec![
-                Body::new(-r_in, 0.0, 0.0, -v_b, m, Material::Star),
-                Body::new(r_in, 0.0, 0.0, v_b, m, Material::Star),
-                Body::new(0.0, r_out, v_o, 0.0, 0.5, Material::Rocky),
-            ]
+            let [star_a, star_b] = barycentric_binary_real(
+                0.224_31,
+                deg(10.0),
+                0.6897 * SOLAR_KG,
+                0.6489 * SOLAR_RADIUS_KM,
+                Material::Star,
+                0.202_55 * SOLAR_KG,
+                0.22623 * SOLAR_RADIUS_KM,
+                Material::Star,
+            );
+            let total_mass = star_a.mass + star_b.mass;
+            let omega = (G * total_mass / 0.7048_f64.powi(3)).sqrt();
+            let phase = deg(210.0);
+            let (c, s) = (phase.cos(), phase.sin());
+            let planet = body_real(
+                0.7048 * c,
+                0.7048 * s,
+                -0.7048 * omega * s,
+                0.7048 * omega * c,
+                0.333 * JUPITER_KG,
+                0.7538 * JUPITER_RADIUS_KM,
+                Material::Gas,
+            );
+            vec![star_a, star_b, planet]
         }
 
-        // ── Collisions ────────────────────────────────────────────────────── //
+        "merge_head_on" => {
+            let left = body_real(
+                -au_from_km(28_000.0),
+                0.0,
+                au_per_year_from_km_s(0.010),
+                0.0,
+                8.0e17,
+                10.0,
+                Material::Icy,
+            );
+            let right = body_real(
+                au_from_km(28_000.0),
+                0.0,
+                -au_per_year_from_km_s(0.010),
+                0.0,
+                6.0e17,
+                7.0,
+                Material::Icy,
+            );
+            vec![left, right]
+        }
 
-        // Head-on merge: two equal planets on direct collision path
-        "merge_head_on" => vec![
-            Body::new(-5.0, 0.0, 0.3, 0.0, 2.0, Material::Rocky),
-            Body::new(5.0, 0.0, -0.3, 0.0, 2.0, Material::Rocky),
-        ],
+        "giant_impact" => {
+            let earth = body_real(
+                -au_from_km(22_000.0),
+                au_from_km(3_000.0),
+                au_per_year_from_km_s(4.5),
+                0.0,
+                EARTH_KG,
+                EARTH_RADIUS_KM,
+                Material::Rocky,
+            );
+            let theia = body_real(
+                au_from_km(28_000.0),
+                0.0,
+                -au_per_year_from_km_s(4.9),
+                au_per_year_from_km_s(0.7),
+                0.107 * EARTH_KG,
+                0.53 * EARTH_RADIUS_KM,
+                Material::Rocky,
+            );
+            vec![earth, theia]
+        }
 
-        // Giant impact: large planet + smaller oblique impactor (Moon-forming analog)
-        "giant_impact" => vec![
-            Body::new(-3.0, 0.4, 0.7, 0.0, 3.0, Material::Rocky),
-            Body::new(3.0, 0.0, -0.7, 0.06, 0.5, Material::Rocky),
-        ],
+        "scatter_flyby" => {
+            let earth = body_real(
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                EARTH_KG,
+                EARTH_RADIUS_KM,
+                Material::Rocky,
+            );
+            let apophis = body_real(
+                -au_from_km(90_000.0),
+                au_from_km(38_000.0),
+                au_per_year_from_km_s(7.4),
+                -au_per_year_from_km_s(1.2),
+                6.1e10,
+                0.17,
+                Material::Asteroid,
+            );
+            vec![earth, apophis]
+        }
 
-        // Flyby scatter: fast hyperbolic pass — gravitational slingshot / scattering
-        "scatter_flyby" => vec![
-            Body::new(-12.0, 2.5, 2.8, 0.0, 2.0, Material::Rocky),
-            Body::new(0.0, 0.0, 0.0, 0.0, 2.0, Material::Rocky),
-        ],
+        "shattering" => {
+            let vesta = body_real(
+                -au_from_km(4_500.0),
+                0.0,
+                au_per_year_from_km_s(2.6),
+                0.0,
+                2.590_76e20,
+                262.7,
+                Material::Asteroid,
+            );
+            let impactor = body_real(
+                au_from_km(6_500.0),
+                au_from_km(500.0),
+                -au_per_year_from_km_s(5.1),
+                -au_per_year_from_km_s(0.3),
+                3.0e18,
+                35.0,
+                Material::Asteroid,
+            );
+            vec![vesta, impactor]
+        }
 
-        // Shattering: very high-velocity collision → strong fragmentation
-        "shattering" => vec![
-            Body::new(-6.0, 0.0, 3.5, 0.0, 2.0, Material::Rocky),
-            Body::new(6.0, 0.0, -3.5, 0.0, 2.0, Material::Rocky),
-        ],
-
-        // Chain reaction: four bodies — first triggers a cascade
-        "chain_reaction" => vec![
-            Body::new(-12.0, 0.0, 2.5, 0.0, 1.5, Material::Rocky),
-            Body::new(-3.0, 0.0, 0.0, 0.0, 1.5, Material::Rocky),
-            Body::new(3.5, 0.0, 0.0, 0.0, 1.5, Material::Rocky),
-            Body::new(12.0, 0.0, -1.8, 0.0, 1.5, Material::Rocky),
-        ],
-
-        "gas_giant_impact" => vec![
-            Body::new(-6.0, 0.0, 1.2, 0.0, 4.0, Material::Gas),
-            Body::new(6.0, 0.0, -1.2, 0.1, 1.0, Material::Rocky),
-        ],
-
-        // Grazing impact — alta rotação, pouco dano
-        "grazing_collision" => vec![
-            Body::new(-5.0, 1.5, 1.0, 0.0, 2.0, Material::Rocky),
-            Body::new(5.0, -1.5, -1.0, 0.0, 2.0, Material::Rocky),
-        ],
-
-        // Capture attempt — pode virar órbita ou escapar
-        "capture_attempt" => vec![
-            Body::new(-10.0, 1.0, 1.8, 0.0, 1.0, Material::Rocky),
-            Body::new(0.0, 0.0, 0.0, 0.0, 3.0, Material::Rocky),
-        ],
-
-        // Binary collision — duas estrelas colidindo
-        "binary_star_collision" => vec![
-            Body::new(-8.0, 0.0, 1.0, 0.0, 6.0, Material::Star),
-            Body::new(8.0, 0.0, -1.0, 0.0, 6.0, Material::Star),
-        ],
-
-        // Dense vs gas — contraste forte
-        "dense_vs_gas" => vec![
-            Body::new(-6.0, 0.0, 1.5, 0.0, 2.5, Material::Rocky),
-            Body::new(6.0, 0.0, -1.5, 0.0, 2.5, Material::Gas),
-        ],
-
-        // Multi-body chaotic collision
-        "chaotic_cluster" => vec![
-            Body::new(-6.0, -2.0, 1.2, 0.6, 1.0, Material::Rocky),
-            Body::new(6.0, 2.0, -1.2, -0.6, 1.0, Material::Rocky),
-            Body::new(-4.0, 3.0, 0.8, -0.4, 1.0, Material::Icy),
-            Body::new(4.0, -3.0, -0.8, 0.4, 1.0, Material::Icy),
-        ],
-
-        // Impact + orbit transition
-        "impact_then_orbit" => vec![
-            Body::new(-8.0, 0.5, 1.4, 0.0, 2.0, Material::Rocky),
-            Body::new(0.0, 0.0, 0.0, 0.0, 3.5, Material::Rocky),
-        ],
-
-        // Ring formation attempt (proto-disk)
-        "ring_formation" => vec![
-            Body::new(-5.0, 0.0, 2.2, 0.0, 1.5, Material::Rocky),
-            Body::new(5.0, 0.0, -2.2, 0.0, 3.0, Material::Rocky),
-        ],
+        "chain_reaction" => {
+            let jupiter = body_real(
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                JUPITER_KG,
+                JUPITER_RADIUS_KM,
+                Material::Gas,
+            );
+            let fragments = [
+                (-180_000.0, 74_000.0, 20.8, -5.2, 2.5e13),
+                (-150_000.0, 61_000.0, 20.7, -5.0, 2.0e13),
+                (-120_000.0, 48_000.0, 20.6, -4.8, 1.7e13),
+                (-90_000.0, 35_000.0, 20.5, -4.6, 1.4e13),
+            ];
+            let mut bodies = vec![jupiter];
+            for (x_km, y_km, vx_km_s, vy_km_s, mass_kg) in fragments {
+                bodies.push(body_real(
+                    au_from_km(x_km),
+                    au_from_km(y_km),
+                    au_per_year_from_km_s(vx_km_s),
+                    au_per_year_from_km_s(vy_km_s),
+                    mass_kg,
+                    1.0,
+                    Material::Comet,
+                ));
+            }
+            bodies
+        }
 
         _ => vec![],
     }
 }
-
-// ── Procedural spawners ───────────────────────────────────────────────────── //
 
 pub fn spawn_ring(
     cx: f64,
@@ -573,7 +810,7 @@ pub fn spawn_ring(
                 -orbit_vel * a.sin(),
                 orbit_vel * a.cos(),
                 mass,
-                Material::Rocky,
+                Material::Asteroid,
             )
         })
         .collect()
@@ -598,8 +835,57 @@ pub fn spawn_cluster(
                 vel_disp * va.cos(),
                 vel_disp * va.sin(),
                 mass,
-                Material::Star,
+                Material::Asteroid,
             )
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{TEMPLATE_CATALOG, template_bodies};
+
+    #[test]
+    fn every_catalog_entry_resolves_to_bodies() {
+        for entry in TEMPLATE_CATALOG {
+            assert!(
+                !template_bodies(entry.key).is_empty(),
+                "template {} returned no bodies",
+                entry.key
+            );
+        }
+    }
+
+    #[test]
+    fn non_collision_templates_do_not_start_overlapping() {
+        for key in [
+            "inner_solar",
+            "outer_solar",
+            "earth_moon",
+            "jupiter_system",
+            "hot_jupiter",
+            "trappist1",
+            "binary",
+            "belt",
+            "lagrange_l1",
+            "lagrange_l2",
+            "lagrange_l4",
+            "lagrange_l5",
+            "hierarchical",
+        ] {
+            let bodies = template_bodies(key);
+            for i in 0..bodies.len() {
+                for j in (i + 1)..bodies.len() {
+                    let dx = bodies[i].x - bodies[j].x;
+                    let dy = bodies[i].y - bodies[j].y;
+                    let distance = (dx * dx + dy * dy).sqrt();
+                    let min_distance = bodies[i].physical_radius + bodies[j].physical_radius;
+                    assert!(
+                        distance > min_distance,
+                        "template {key} starts with overlap between {i} and {j}"
+                    );
+                }
+            }
+        }
+    }
 }

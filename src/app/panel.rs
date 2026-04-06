@@ -1,12 +1,14 @@
 use crate::app::config::PhysicsConfig;
 use crate::app::templates::{
-    spawn_cluster, spawn_ring, template_bodies, TemplateCategory, TEMPLATE_CATALOG,
+    TEMPLATE_CATALOG, TemplateCategory, spawn_cluster, spawn_ring, template_bodies,
 };
 use crate::app::theme::{
-    ACCENT, ACCENT_DIM, BORDER, DANGER, SUCCESS, TEXT_DIM, TEXT_PRI, TEXT_SEC, field,
-    fix4, metric, primary_btn, sci, secondary_btn, section, template_btn,
+    ACCENT, ACCENT_DIM, BORDER, DANGER, SUCCESS, TEXT_DIM, TEXT_PRI, TEXT_SEC, field, fix4, metric,
+    primary_btn, sci, secondary_btn, section, template_btn,
 };
-use crate::app::ui::{BodyForm, PanelTab, SelectionForm, SimulationApp, SpawnTab};
+use crate::app::ui::{
+    BodyForm, PanelTab, SelectionForm, SemanticScaleMode, SimulationApp, SpawnTab,
+};
 use crate::domain::body::{Body, radius_from_density_mass};
 use crate::physics::gravity::G;
 use eframe::egui::{self, Color32, RichText, Stroke};
@@ -68,9 +70,39 @@ impl SimulationApp {
                     ui.add(
                         egui::DragValue::new(&mut self.scale)
                             .speed(0.5)
+                            .clamp_range(1.0..=5000.0f32)
+                            .max_decimals(1),
+                    );
+
+                    ui.label(RichText::new("size").size(10.0).color(TEXT_SEC));
+                    ui.add(
+                        egui::DragValue::new(&mut self.body_size_boost)
+                            .speed(0.5)
                             .clamp_range(1.0..=500.0f32)
                             .max_decimals(1),
                     );
+
+                    ui.label(RichText::new("camera").size(10.0).color(TEXT_SEC));
+                    egui::ComboBox::from_id_source("semantic_scale_mode")
+                        .selected_text(self.semantic_scale_mode.label())
+                        .width(86.0)
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(
+                                &mut self.semantic_scale_mode,
+                                SemanticScaleMode::Physical,
+                                SemanticScaleMode::Physical.label(),
+                            );
+                            ui.selectable_value(
+                                &mut self.semantic_scale_mode,
+                                SemanticScaleMode::Comparative,
+                                SemanticScaleMode::Comparative.label(),
+                            );
+                            ui.selectable_value(
+                                &mut self.semantic_scale_mode,
+                                SemanticScaleMode::Illustrative,
+                                SemanticScaleMode::Illustrative.label(),
+                            );
+                        });
 
                     ui.separator();
 
@@ -109,12 +141,10 @@ impl SimulationApp {
                         ui.separator();
                         if ui
                             .add(
-                                egui::Button::new(
-                                    RichText::new("Clear").size(10.0).color(DANGER),
-                                )
-                                .fill(Color32::TRANSPARENT)
-                                .stroke(Stroke::new(0.5, DANGER))
-                                .min_size(egui::vec2(46.0, 20.0)),
+                                egui::Button::new(RichText::new("Clear").size(10.0).color(DANGER))
+                                    .fill(Color32::TRANSPARENT)
+                                    .stroke(Stroke::new(0.5, DANGER))
+                                    .min_size(egui::vec2(46.0, 20.0)),
                             )
                             .clicked()
                         {
@@ -194,6 +224,12 @@ impl SimulationApp {
 
     fn panel_metrics_compact(&self, ui: &mut egui::Ui) {
         let m = self.system.metrics();
+        let dust_clouds = self
+            .system
+            .bodies()
+            .iter()
+            .filter(|b| b.is_diffuse_cloud())
+            .count();
 
         let drift_color = |v: f64| {
             if v.abs() < 1e-8 {
@@ -301,6 +337,7 @@ impl SimulationApp {
 
         if m.fragments_spawned_this_step > 0
             || m.hit_and_runs_this_step > 0
+            || dust_clouds > 0
             || m.total_dust_mass > 0.0
         {
             ui.add_space(2.0);
@@ -319,9 +356,16 @@ impl SimulationApp {
                             .color(ACCENT),
                     );
                 }
+                if dust_clouds > 0 {
+                    ui.label(
+                        RichText::new(format!("clouds {}", dust_clouds))
+                            .size(9.5)
+                            .color(TEXT_SEC),
+                    );
+                }
                 if m.total_dust_mass > 0.0 {
                     ui.label(
-                        RichText::new(format!("dust {:.3e}", m.total_dust_mass))
+                        RichText::new(format!("untracked dust {:.3e}", m.total_dust_mass))
                             .size(9.5)
                             .color(TEXT_DIM),
                     );
@@ -339,9 +383,18 @@ impl SimulationApp {
 
         // Header row: label + current multiplier
         ui.horizontal(|ui| {
-            ui.label(RichText::new("TIME SPEED").size(9.5).color(TEXT_DIM).strong());
+            ui.label(
+                RichText::new("TIME SPEED")
+                    .size(9.5)
+                    .color(TEXT_DIM)
+                    .strong(),
+            );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let col = if self.steps_per_frame > 1 { ACCENT } else { TEXT_DIM };
+                let col = if self.steps_per_frame > 1 {
+                    ACCENT
+                } else {
+                    TEXT_DIM
+                };
                 ui.label(
                     RichText::new(format!("×{}", self.steps_per_frame))
                         .monospace()
@@ -373,7 +426,11 @@ impl SimulationApp {
             for (tab, label) in TABS {
                 let active = self.panel_tab == *tab;
                 let col = if active { TEXT_PRI } else { TEXT_SEC };
-                let fill = if active { ACCENT_DIM } else { Color32::TRANSPARENT };
+                let fill = if active {
+                    ACCENT_DIM
+                } else {
+                    Color32::TRANSPARENT
+                };
                 if ui
                     .add(
                         egui::Button::new(RichText::new(*label).size(10.5).color(col))
@@ -398,7 +455,11 @@ impl SimulationApp {
             let sub_btn = |ui: &mut egui::Ui, tab: SpawnTab, label: &str| -> bool {
                 let active = cur == tab;
                 let col = if active { TEXT_PRI } else { TEXT_SEC };
-                let fill = if active { ACCENT_DIM } else { Color32::TRANSPARENT };
+                let fill = if active {
+                    ACCENT_DIM
+                } else {
+                    Color32::TRANSPARENT
+                };
                 ui.add(
                     egui::Button::new(RichText::new(label).size(10.0).color(col))
                         .fill(fill)
@@ -677,7 +738,10 @@ impl SimulationApp {
         ];
 
         for &cat in CATEGORIES {
-            let entries: Vec<_> = TEMPLATE_CATALOG.iter().filter(|e| e.category == cat).collect();
+            let entries: Vec<_> = TEMPLATE_CATALOG
+                .iter()
+                .filter(|e| e.category == cat)
+                .collect();
             if entries.is_empty() {
                 continue;
             }
@@ -693,7 +757,8 @@ impl SimulationApp {
                             let bodies = template_bodies(entry.key);
                             self.system.load_bodies(bodies);
                             self.paused = true;
-                            self.offset = egui::Vec2::ZERO;
+
+                            self.fit_to_view();
                         }
                         if i % 2 == 1 {
                             ui.end_row();
@@ -787,7 +852,42 @@ impl SimulationApp {
         }
     }
 
-    // ── INSPECTOR (right panel) ────────────────────────────────────────────── //
+    fn fit_to_view(&mut self) {
+        let bodies = self.system.bodies();
+
+        if bodies.is_empty() {
+            return;
+        }
+
+        // ── 1. Bounding box ─────────────────────────────── //
+        let mut min_x = f64::INFINITY;
+        let mut max_x = f64::NEG_INFINITY;
+        let mut min_y = f64::INFINITY;
+        let mut max_y = f64::NEG_INFINITY;
+
+        for b in bodies {
+            min_x = min_x.min(b.x);
+            max_x = max_x.max(b.x);
+            min_y = min_y.min(b.y);
+            max_y = max_y.max(b.y);
+        }
+
+        let width = (max_x - min_x) as f32;
+        let height = (max_y - min_y) as f32;
+
+        let size = width.max(height).max(1e-9);
+
+        let padding = 1.2; // 20% de margem
+        let size_with_padding = size * padding;
+        let target_screen_size = 400.0;
+
+        self.scale = target_screen_size / size_with_padding;
+
+        let center_x = (min_x + max_x) as f32 * 0.5;
+        let center_y = (min_y + max_y) as f32 * 0.5;
+
+        self.offset = egui::vec2(-center_x * self.scale, -center_y * self.scale);
+    }
 
     pub(super) fn draw_inspector(&mut self, ctx: &egui::Context) {
         let idx = match self.selected_body {
@@ -836,24 +936,32 @@ impl SimulationApp {
                 metric(ui, "vx", &format!("{:.5}", body.vx), TEXT_DIM);
                 metric(ui, "vy", &format!("{:.5}", body.vy), TEXT_DIM);
                 metric(ui, "mass", &format!("{:.5}", body.mass), TEXT_DIM);
-                metric(ui, "radius", &format!("{:.5}", body.radius), TEXT_DIM);
+                metric(
+                    ui,
+                    "r_phys",
+                    &format!("{:.5}", body.physical_radius),
+                    TEXT_DIM,
+                );
+                metric(ui, "r_coll", &format!("{:.5}", body.radius), TEXT_DIM);
+                metric(ui, "soft", &format!("{:.5}", body.softening), TEXT_DIM);
                 metric(ui, "density", &format!("{:.4e}", body.density), TEXT_DIM);
 
                 // ── Color picker ─────────────────────────────────────── //
                 section(ui, "COLOR");
 
                 let [r, g, b_] = body.color;
-                let mut color_rgb: [f32; 3] = [
-                    r as f32 / 255.0,
-                    g as f32 / 255.0,
-                    b_ as f32 / 255.0,
-                ];
+                let mut color_rgb: [f32; 3] =
+                    [r as f32 / 255.0, g as f32 / 255.0, b_ as f32 / 255.0];
                 let color_changed = ui.color_edit_button_rgb(&mut color_rgb).changed();
                 let is_custom = body.color != body.material.props().base_color;
                 ui.label(
-                    RichText::new(if is_custom { "custom" } else { "auto (material)" })
-                        .size(9.5)
-                        .color(TEXT_DIM),
+                    RichText::new(if is_custom {
+                        "custom"
+                    } else {
+                        "auto (material)"
+                    })
+                    .size(9.5)
+                    .color(TEXT_DIM),
                 );
                 let reset_color = is_custom && secondary_btn(ui, "Reset color");
 
@@ -897,7 +1005,7 @@ impl SimulationApp {
                     };
                     ui.add_space(2.0);
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new("r →").size(10.0).color(TEXT_DIM));
+                        ui.label(RichText::new("r_phys →").size(10.0).color(TEXT_DIM));
                         ui.label(
                             RichText::new(&radius_preview)
                                 .monospace()
@@ -924,7 +1032,6 @@ impl SimulationApp {
                         let f = self.selection_form.as_ref().unwrap();
                         let mass = f.mass.parse::<f64>().ok().filter(|&v| v > 0.0)?;
                         let density = f.density.parse::<f64>().ok().filter(|&v| v > 0.0)?;
-                        let radius = radius_from_density_mass(density, mass);
                         let mut b = Body::new(
                             f.x.parse().ok()?,
                             f.y.parse().ok()?,
@@ -933,11 +1040,12 @@ impl SimulationApp {
                             mass,
                             crate::domain::materials::Material::Rocky,
                         );
-                        b.radius = radius;
                         b.density = density;
-                        b.softening = b.softening.max(radius * 2.0);
+                        b.sync_physical_properties();
+                        b.radius = b.physical_radius;
+                        b.softening = b.softening.max(b.physical_radius * 2.0);
                         b.moment_inertia =
-                            crate::domain::body::default_moment_inertia(mass, radius);
+                            crate::domain::body::default_moment_inertia(mass, b.physical_radius);
                         Some(b)
                     })();
                     match parsed {
