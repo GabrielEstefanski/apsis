@@ -60,10 +60,12 @@ enum CollisionResponse {
     HitAndRun {
         bi_new: Body,
         bj_new: Body,
+        dust_cloud: Option<Body>,
         dust_mass: f64,
     },
     Fragments {
         bodies: Vec<Body>,
+        dust_cloud: Option<Body>,
         dust_mass: f64,
     },
     None,
@@ -241,19 +243,25 @@ pub fn resolve_contact(
         CollisionResponse::HitAndRun {
             bi_new,
             bj_new,
+            dust_cloud,
             dust_mass,
         } => {
             bodies[i] = bi_new;
             bodies[j] = bj_new;
+            if let Some(cloud) = dust_cloud {
+                bodies.push(cloud);
+                trails.push(VecDeque::new());
+            }
             outcome.hit_and_runs = 1;
             outcome.total_dust_mass += dust_mass;
             outcome.impact_events.push(impact_event);
         }
         CollisionResponse::Fragments {
             bodies: frags,
+            dust_cloud,
             dust_mass,
         } => {
-            let n = frags.len();
+            let n = frags.len() + usize::from(dust_cloud.is_some());
 
             bodies.swap_remove(j);
             trails.swap_remove(j);
@@ -261,6 +269,10 @@ pub fn resolve_contact(
             trails.swap_remove(i);
             for frag in frags {
                 bodies.push(frag);
+                trails.push(VecDeque::new());
+            }
+            if let Some(cloud) = dust_cloud {
+                bodies.push(cloud);
                 trails.push(VecDeque::new());
             }
             outcome.fragments_spawned = n;
@@ -461,6 +473,10 @@ pub fn merge_pair(bi: Body, bj: Body) -> Body {
 /// **Arcade mode** (`cor > MERGE_COR_THRESHOLD`):
 /// - Apply impulse `J = −(1 + CoR) μ v_n` for all approaching contacts.
 fn collision_response(bi: &Body, bj: &Body, cor: f64, g_eff: f64) -> CollisionResponse {
+    if bi.is_diffuse_cloud() || bj.is_diffuse_cloud() {
+        return CollisionResponse::None;
+    }
+
     let dx = bi.x - bj.x;
     let dy = bi.y - bj.y;
     let d = (dx * dx + dy * dy).sqrt();
@@ -491,11 +507,13 @@ fn collision_response(bi: &Body, bj: &Body, cor: f64, g_eff: f64) -> CollisionRe
             match impact {
                 ImpactResult::Debris {
                     fragments,
+                    dust_cloud,
                     dust_mass,
                     ..
                 } => {
                     return CollisionResponse::Fragments {
                         bodies: fragments,
+                        dust_cloud,
                         dust_mass,
                     };
                 }
@@ -513,23 +531,27 @@ fn collision_response(bi: &Body, bj: &Body, cor: f64, g_eff: f64) -> CollisionRe
                 ImpactResult::HitAndRun {
                     bi_new,
                     bj_new,
+                    dust_cloud,
                     dust_mass,
                     ..
                 } => {
                     return CollisionResponse::HitAndRun {
                         bi_new,
                         bj_new,
+                        dust_cloud,
                         dust_mass,
                     };
                 }
 
                 ImpactResult::Debris {
                     fragments,
+                    dust_cloud,
                     dust_mass,
                     ..
                 } => {
                     return CollisionResponse::Fragments {
                         bodies: fragments,
+                        dust_cloud,
                         dust_mass,
                     };
                 }
@@ -696,6 +718,7 @@ mod tests {
         );
         b.radius = r;
         b.density = density_from_mass_radius(mass, r);
+        b.sync_physical_properties();
         b
     }
 
@@ -1019,7 +1042,6 @@ mod tests {
     /// V' = V_i + V_j: merged volume equals the sum of constituent volumes.
     #[test]
     fn merge_conserves_volume() {
-        use crate::domain::body::sphere_volume;
         let a = body_with_radius(-0.1, 0.0, 0.0, 0.0, 2.0, 0.3);
         let b = body_with_radius(0.1, 0.0, 0.0, 0.0, 3.0, 0.5);
         let v_before = a.mass / a.density + b.mass / b.density;

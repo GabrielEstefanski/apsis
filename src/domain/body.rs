@@ -92,6 +92,21 @@ impl Body {
             color: material.props().base_color,
         }
     }
+
+    /// Recompute physical-only quantities from the current mass and density.
+    ///
+    /// This must be used whenever mass or density changes. It intentionally
+    /// does **not** touch the calibrated contact radius, which belongs to the
+    /// numerical collision model rather than the body's physical geometry.
+    pub fn sync_physical_properties(&mut self) {
+        self.physical_radius = radius_from_density_mass(self.density, self.mass);
+        self.moment_inertia = default_moment_inertia(self.mass, self.physical_radius);
+    }
+
+    #[inline]
+    pub fn is_diffuse_cloud(&self) -> bool {
+        self.material.is_diffuse()
+    }
 }
 
 /// Default softening before system-scale calibration.

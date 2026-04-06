@@ -132,6 +132,12 @@ impl System {
 }
 
 impl System {
+    fn refresh_collision_geometry(&mut self) {
+        self.total_mass = self.bodies.iter().map(|b| b.mass).sum();
+        calibration::calibrate_softening(&mut self.bodies, self.total_mass);
+        calibration::calibrate_radii(&mut self.bodies, self.total_mass);
+    }
+
     pub fn step_adaptive(&mut self, proposed_dt: f64) -> f64 {
         self.last_proposed_dt = proposed_dt;
         let stats = AccelerationStats::new(self.last_diag.max_acc, self.last_diag.jerk);
@@ -187,7 +193,10 @@ impl System {
             }
         }
 
-        if collision_outcome.merges > 0 || collision_outcome.fragments_spawned > 0 {
+        if collision_outcome.merges > 0
+            || collision_outcome.fragments_spawned > 0
+            || collision_outcome.hit_and_runs > 0
+        {
             self.reset_energy_baseline();
         }
         self.update_energy_tracking();
@@ -253,6 +262,13 @@ impl System {
                 drift(&mut self.bodies, epsilon);
                 remaining -= epsilon;
                 continue;
+            }
+
+            if event_outcome.merges > 0
+                || event_outcome.fragments_spawned > 0
+                || event_outcome.hit_and_runs > 0
+            {
+                self.refresh_collision_geometry();
             }
 
             let raw_pe_mid = evaluate_accelerations(
@@ -425,20 +441,12 @@ impl System {
 
 impl System {
     pub fn add_body(&mut self, mut body: Body) {
-        let l = calibration::system_length_scale(&self.bodies);
-        if l > 0.0 && !self.bodies.is_empty() {
-            let m_mean = self.total_mass / self.bodies.len() as f64;
-            body.softening = calibration::SOFTENING_ETA * (body.mass / m_mean).cbrt() * l;
-
-            let r = calibration::RADIUS_ETA * (body.mass / m_mean).cbrt() * l;
-
-            body.radius = r.min(body.softening * 0.5);
-            body.moment_inertia =
-                crate::domain::body::default_moment_inertia(body.mass, body.physical_radius);
-        }
-        self.total_mass += body.mass;
+        body.sync_physical_properties();
+        body.softening = body.softening.max(body.physical_radius * 2.0);
+        body.radius = body.radius.min(body.softening * 0.5);
         self.bodies.push(body);
         self.trails.push(VecDeque::with_capacity(self.trail_cap));
+        self.refresh_collision_geometry();
         self.initial_energy = None;
         self.initial_energy_scale = None;
     }
@@ -474,15 +482,14 @@ impl System {
 
         self.zero_com_velocity();
         self.recenter_com();
-        self.calibrate_softening();
-        self.calibrate_radii();
+        self.refresh_collision_geometry();
     }
 
     pub fn remove_body(&mut self, index: usize) {
         if index < self.bodies.len() {
-            self.total_mass -= self.bodies[index].mass;
             self.bodies.swap_remove(index);
             self.trails.swap_remove(index);
+            self.refresh_collision_geometry();
             self.initial_energy = None;
             self.initial_energy_scale = None;
             self.rel_energy_error = 0.0;
@@ -493,8 +500,12 @@ impl System {
     pub fn update_body(&mut self, index: usize, body: Body) {
         if let Some(slot) = self.bodies.get_mut(index) {
             let mass_changed = (slot.mass - body.mass).abs() > 1e-15;
-            self.total_mass = (self.total_mass - slot.mass + body.mass).max(0.0);
-            *slot = body;
+            let mut updated = body;
+            updated.sync_physical_properties();
+            updated.softening = updated.softening.max(updated.physical_radius * 2.0);
+            updated.radius = updated.radius.min(updated.softening * 0.5);
+            *slot = updated;
+            self.refresh_collision_geometry();
             if mass_changed {
                 self.initial_energy = None;
                 self.initial_energy_scale = None;
@@ -536,6 +547,10 @@ impl System {
         self.g_factor
     }
 
+    pub fn engine(&self) -> &BarnesHutEngine {
+        &self.engine
+    }
+
     pub fn metrics(&self) -> Metrics {
         let kinetic = self.last_kinetic;
         let potential = self.last_potential;
@@ -567,6 +582,7 @@ impl System {
             dt_controller_state: self.dt_controller.last_dt(),
             max_acc: self.last_diag.max_acc,
             jerk: self.last_diag.jerk,
+            max_vel: self.last_diag.max_vel,
             merges_this_step: self.merges_this_step,
             bounces_this_step: self.bounces_this_step,
             near_miss_count: self.near_miss_count,

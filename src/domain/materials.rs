@@ -18,7 +18,6 @@ use std::f64::consts::PI;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Material {
     // ── Planetary bodies ─────────────────────────────────────────────────── //
-
     /// Silicate / metallic body (terrestrial planets, metallic asteroids).
     Rocky,
 
@@ -32,15 +31,16 @@ pub enum Material {
     IceGiant,
 
     // ── Small solar-system bodies ────────────────────────────────────────── //
-
     /// Rubble-pile or monolithic rock (C/S/M-type asteroids).
     Asteroid,
 
     /// Dirty snowball: high porosity, very volatile (comet nuclei).
     Comet,
 
-    // ── Stellar objects ───────────────────────────────────────────────────── //
+    /// Diffuse ejecta cloud that aggregates unresolved impact dust.
+    DustCloud,
 
+    // ── Stellar objects ───────────────────────────────────────────────────── //
     /// Main-sequence star (F/G/K spectral types — Sun-like).
     Star,
 
@@ -107,15 +107,14 @@ impl Material {
     pub fn props(self) -> MaterialProps {
         match self {
             // ── Planetary bodies ─────────────────────────────────────────── //
-
             Material::Rocky => MaterialProps {
                 base_density: 5500.0,
                 compressibility: 0.15,
                 density_min: 3000.0,
                 density_max: 13_000.0,
-                base_color: [139, 90, 43],   // silicate brown
+                base_color: [139, 90, 43],
                 restitution: 0.30,
-                disruption_scale: 1.0,       // baseline
+                disruption_scale: 1.0,
             },
 
             Material::Icy => MaterialProps {
@@ -123,9 +122,9 @@ impl Material {
                 compressibility: 0.08,
                 density_min: 800.0,
                 density_max: 3000.0,
-                base_color: [180, 220, 240],  // pale ice-blue
+                base_color: [180, 220, 240],
                 restitution: 0.10,
-                disruption_scale: 0.50,       // softer than rock
+                disruption_scale: 0.50,
             },
 
             Material::Gas => MaterialProps {
@@ -133,9 +132,9 @@ impl Material {
                 compressibility: 0.35,
                 density_min: 200.0,
                 density_max: 5000.0,
-                base_color: [210, 140, 60],   // Jupiter orange-tan
+                base_color: [210, 140, 60],
                 restitution: 0.05,
-                disruption_scale: 0.20,       // gas disperses easily
+                disruption_scale: 0.20,
             },
 
             Material::IceGiant => MaterialProps {
@@ -143,20 +142,19 @@ impl Material {
                 compressibility: 0.12,
                 density_min: 900.0,
                 density_max: 2500.0,
-                base_color: [64, 164, 223],   // Neptune blue-cyan
+                base_color: [64, 164, 223],
                 restitution: 0.04,
                 disruption_scale: 0.35,
             },
 
             // ── Small solar-system bodies ────────────────────────────────── //
-
             Material::Asteroid => MaterialProps {
                 base_density: 2200.0,
                 compressibility: 0.05,
                 density_min: 1200.0,
                 density_max: 4000.0,
-                base_color: [80, 75, 68],     // dark carbonaceous chondrite
-                restitution: 0.40,            // rubble-pile: somewhat elastic
+                base_color: [80, 75, 68],
+                restitution: 0.40,
                 disruption_scale: 0.60,
             },
 
@@ -165,21 +163,30 @@ impl Material {
                 compressibility: 0.03,
                 density_min: 300.0,
                 density_max: 900.0,
-                base_color: [160, 190, 215],  // dirty-ice grey-blue
+                base_color: [160, 190, 215],
                 restitution: 0.05,
-                disruption_scale: 0.15,       // dirty snowball, very fragile
+                disruption_scale: 0.15,
+            },
+
+            Material::DustCloud => MaterialProps {
+                base_density: 120.0,
+                compressibility: 0.0,
+                density_min: 20.0,
+                density_max: 400.0,
+                base_color: [194, 176, 148],
+                restitution: 0.0,
+                disruption_scale: 0.05,
             },
 
             // ── Stellar objects ───────────────────────────────────────────── //
-
             Material::Star => MaterialProps {
                 base_density: 1400.0,
                 compressibility: 0.60,
                 density_min: 500.0,
                 density_max: 1.0e5,
-                base_color: [255, 220, 100],  // G-type yellow-white
+                base_color: [255, 220, 100],
                 restitution: 0.00,
-                disruption_scale: 5.0,        // gravitationally bound, hard to disrupt
+                disruption_scale: 5.0,
             },
 
             Material::BrownDwarf => MaterialProps {
@@ -187,7 +194,7 @@ impl Material {
                 compressibility: 0.50,
                 density_min: 20_000.0,
                 density_max: 1.0e5,
-                base_color: [160, 60, 20],    // L/T-dwarf dark red-orange
+                base_color: [160, 60, 20],
                 restitution: 0.02,
                 disruption_scale: 3.0,
             },
@@ -197,9 +204,9 @@ impl Material {
                 compressibility: 0.80,
                 density_min: 1.0e6,
                 density_max: 1.0e9,
-                base_color: [200, 220, 255],  // blue-white degenerate
+                base_color: [200, 220, 255],
                 restitution: 0.00,
-                disruption_scale: 50.0,       // essentially indestructible
+                disruption_scale: 50.0,
             },
         }
     }
@@ -207,16 +214,22 @@ impl Material {
     /// Short human-readable name for UI display.
     pub fn display_name(self) -> &'static str {
         match self {
-            Material::Rocky     => "Rocky",
-            Material::Icy       => "Icy",
-            Material::Gas       => "Gas Giant",
-            Material::IceGiant  => "Ice Giant",
-            Material::Asteroid  => "Asteroid",
-            Material::Comet     => "Comet",
-            Material::Star      => "Star",
+            Material::Rocky => "Rocky",
+            Material::Icy => "Icy",
+            Material::Gas => "Gas Giant",
+            Material::IceGiant => "Ice Giant",
+            Material::Asteroid => "Asteroid",
+            Material::Comet => "Comet",
+            Material::DustCloud => "Dust Cloud",
+            Material::Star => "Star",
             Material::BrownDwarf => "Brown Dwarf",
             Material::WhiteDwarf => "White Dwarf",
         }
+    }
+
+    #[inline]
+    pub fn is_diffuse(self) -> bool {
+        matches!(self, Material::DustCloud)
     }
 }
 

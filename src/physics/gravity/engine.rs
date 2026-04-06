@@ -154,6 +154,98 @@ impl BarnesHutEngine {
             0.0
         }
     }
+
+    fn node_density(&self, node: &Node, x: f64, y: f64, theta: f64) -> f64 {
+        let dx = node.com_x - x;
+        let dy = node.com_y - y;
+        let dist2 = dx * dx + dy * dy + 1e-6;
+
+        let size = node.size();
+
+        if size * size / dist2 < theta * theta || node.is_leaf() {
+            let dist = dist2.sqrt();
+            return node.mass / dist;
+        }
+
+        let mut sum = 0.0;
+
+        for &c in &node.children {
+            if c != NO_CHILD {
+                let child = &self.tree.nodes()[c as usize];
+                sum += self.node_density(child, x, y, theta);
+            }
+        }
+
+        sum
+    }
+
+    pub fn estimate_local_density(&self, x: f64, y: f64, theta: f64) -> f64 {
+        if self.tree.nodes().is_empty() {
+            return 0.0;
+        }
+
+        let root = &self.tree.nodes()[0];
+        self.node_density(root, x, y, theta)
+    }
+
+    pub fn query_neighbors(&self, x: f64, y: f64, radius: f64, out: &mut Vec<usize>) {
+        out.clear();
+
+        let nodes = self.tree.nodes();
+        if nodes.is_empty() {
+            return;
+        }
+
+        self.query_node(nodes, 0, x, y, radius * radius, out);
+
+        out.sort_unstable();
+        out.dedup();
+    }
+
+    fn query_node(
+        &self,
+        nodes: &[Node],
+        node_idx: u32,
+        x: f64,
+        y: f64,
+        radius2: f64,
+        out: &mut Vec<usize>,
+    ) {
+        let node = &nodes[node_idx as usize];
+
+        if node.mass <= 0.0 {
+            return;
+        }
+
+        if !self.node_intersects(node, x, y, radius2) {
+            return;
+        }
+
+        if node.is_leaf() {
+            for k in 0..node.body_len as usize {
+                out.push(node.bodies[k] as usize);
+            }
+            return;
+        }
+
+        for &c in &node.children {
+            if c != NO_CHILD {
+                self.query_node(nodes, c, x, y, radius2, out);
+            }
+        }
+    }
+
+    fn node_intersects(&self, node: &Node, x: f64, y: f64, radius2: f64) -> bool {
+        let half = node.half;
+
+        let dx = (x - node.cx).abs() - half;
+        let dy = (y - node.cy).abs() - half;
+
+        let dx = dx.max(0.0);
+        let dy = dy.max(0.0);
+
+        dx * dx + dy * dy <= radius2
+    }
 }
 
 // ── Private evaluation strategies ─────────────────────────────────────────── //
@@ -292,8 +384,22 @@ mod tests {
     #[test]
     fn total_force_on_system_is_zero() {
         let bodies = vec![
-            Body::new(0.0, 0.0, 0.0, 0.0, 1.0, crate::domain::materials::Material::Rocky),
-            Body::new(3.0, 0.0, 0.0, 0.0, 2.0, crate::domain::materials::Material::Rocky),
+            Body::new(
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                1.0,
+                crate::domain::materials::Material::Rocky,
+            ),
+            Body::new(
+                3.0,
+                0.0,
+                0.0,
+                0.0,
+                2.0,
+                crate::domain::materials::Material::Rocky,
+            ),
         ];
         let (acc, _) = eval(&bodies);
 
@@ -310,8 +416,22 @@ mod tests {
     #[test]
     fn force_direction_is_attractive() {
         let bodies = vec![
-            Body::new(0.0, 0.0, 0.0, 0.0, 1.0, crate::domain::materials::Material::Rocky),
-            Body::new(4.0, 0.0, 0.0, 0.0, 1.0, crate::domain::materials::Material::Rocky),
+            Body::new(
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                1.0,
+                crate::domain::materials::Material::Rocky,
+            ),
+            Body::new(
+                4.0,
+                0.0,
+                0.0,
+                0.0,
+                1.0,
+                crate::domain::materials::Material::Rocky,
+            ),
         ];
         let (acc, _) = eval(&bodies);
         assert!(acc[0].0 > 0.0, "b0 should accelerate toward b1 (+x)");
@@ -325,9 +445,30 @@ mod tests {
     #[test]
     fn symmetric_configuration_has_zero_net_x_force_on_center() {
         let bodies = vec![
-            Body::new(-5.0, 0.0, 0.0, 0.0, 1.0, crate::domain::materials::Material::Rocky),
-            Body::new(0.0, 0.0, 0.0, 0.0, 1.0, crate::domain::materials::Material::Rocky), // center
-            Body::new(5.0, 0.0, 0.0, 0.0, 1.0, crate::domain::materials::Material::Rocky),
+            Body::new(
+                -5.0,
+                0.0,
+                0.0,
+                0.0,
+                1.0,
+                crate::domain::materials::Material::Rocky,
+            ),
+            Body::new(
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                1.0,
+                crate::domain::materials::Material::Rocky,
+            ), // center
+            Body::new(
+                5.0,
+                0.0,
+                0.0,
+                0.0,
+                1.0,
+                crate::domain::materials::Material::Rocky,
+            ),
         ];
         let (acc, _) = eval(&bodies);
         assert!(acc[1].0.abs() < 1e-12, "net Fx on center = {}", acc[1].0);
@@ -339,8 +480,22 @@ mod tests {
     #[test]
     fn gravitational_potential_is_negative() {
         let bodies = vec![
-            Body::new(0.0, 0.0, 0.0, 0.0, 1.0, crate::domain::materials::Material::Rocky),
-            Body::new(2.0, 0.0, 0.0, 0.0, 1.0, crate::domain::materials::Material::Rocky),
+            Body::new(
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                1.0,
+                crate::domain::materials::Material::Rocky,
+            ),
+            Body::new(
+                2.0,
+                0.0,
+                0.0,
+                0.0,
+                1.0,
+                crate::domain::materials::Material::Rocky,
+            ),
         ];
         let (_, potential) = eval(&bodies);
         assert!(potential < 0.0, "PE = {potential}");
