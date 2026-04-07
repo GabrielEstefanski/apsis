@@ -263,10 +263,11 @@ pub fn resolve_contact(
         } => {
             let n = frags.len() + usize::from(dust_cloud.is_some());
 
-            bodies.swap_remove(j);
-            trails.swap_remove(j);
-            bodies.swap_remove(i);
-            trails.swap_remove(i);
+            let (lo, hi) = if i < j { (i, j) } else { (j, i) };
+            bodies.swap_remove(hi);
+            trails.swap_remove(hi);
+            bodies.swap_remove(lo);
+            trails.swap_remove(lo);
             for frag in frags {
                 bodies.push(frag);
                 trails.push(VecDeque::new());
@@ -397,11 +398,9 @@ pub fn merge_pair(bi: Body, bj: Body) -> Body {
 
     let physical_radius = sphere_radius_from_volume(total_volume);
 
-    // Softening scales with the same volume so ε ≈ 2r is maintained
-    let softening = (sphere_volume(bi.softening).max(0.0)
-        + sphere_volume(bj.softening).max(0.0))
-        .cbrt()   // cbrt of summed volumes ≠ (V_i+V_j)^(1/3) — kept for ε continuity
-        * 2.0_f64.cbrt(); // factor to keep ε > r on average
+    let v_soft_i = sphere_volume(bi.softening).max(0.0);
+    let v_soft_j = sphere_volume(bj.softening).max(0.0);
+    let softening = sphere_radius_from_volume(v_soft_i + v_soft_j) * 2.0;
     let softening = softening.max(physical_radius * 2.0);
 
     // Enforce Plummer-flatcore invariant: r ≤ ε/2

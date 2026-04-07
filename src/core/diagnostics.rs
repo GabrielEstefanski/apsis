@@ -14,7 +14,9 @@ pub struct DiagnosticsComputer {
 
 impl DiagnosticsComputer {
     pub fn new() -> Self {
-        Self { last_acc: Vec::new() }
+        Self {
+            last_acc: Vec::new(),
+        }
     }
 
     pub fn compute(

@@ -34,7 +34,15 @@ fn impact_geometry(bi: &Body, bj: &Body) -> ImpactGeometry {
     ImpactGeometry { v_n, v_t, d }
 }
 
-fn make_body(x: f64, y: f64, vx: f64, vy: f64, mass: f64, density: f64, material: Material) -> Body {
+fn make_body(
+    x: f64,
+    y: f64,
+    vx: f64,
+    vy: f64,
+    mass: f64,
+    density: f64,
+    material: Material,
+) -> Body {
     let physical_radius = radius_from_density_mass(density, mass);
     Body {
         x,
@@ -133,7 +141,11 @@ fn hit_and_run(bi: &Body, bj: &Body, q_ratio: f64) -> ImpactResult {
     let v_com_x = (bi.mass * bi.vx + bj.mass * bj.vx) * inv_m;
     let v_com_y = (bi.mass * bi.vy + bj.mass * bj.vy) * inv_m;
 
-    let (proj, targ) = if bi.mass <= bj.mass { (bi, bj) } else { (bj, bi) };
+    let (proj, targ) = if bi.mass <= bj.mass {
+        (bi, bj)
+    } else {
+        (bj, bi)
+    };
 
     let dust_frac = (0.30 * q_ratio).clamp(0.0, 0.50);
     let dust_mass = dust_frac * proj.mass;
@@ -192,10 +204,12 @@ fn hit_and_run(bi: &Body, bj: &Body, q_ratio: f64) -> ImpactResult {
     let v_rel_mag = geom.v_n.hypot(geom.v_t).max(1e-30);
     let omega_max_proj = v_rel_mag / proj_new.physical_radius.max(1e-30);
     let omega_max_targ = v_rel_mag / targ_new.physical_radius.max(1e-30);
-    proj_new.omega_z = (proj.omega_z + l_total_before * frac_proj / proj_new.moment_inertia.max(1e-30))
-        .clamp(-omega_max_proj, omega_max_proj);
-    targ_new.omega_z = (targ.omega_z + l_total_before * frac_targ / targ_new.moment_inertia.max(1e-30))
-        .clamp(-omega_max_targ, omega_max_targ);
+    proj_new.omega_z = (proj.omega_z
+        + l_total_before * frac_proj / proj_new.moment_inertia.max(1e-30))
+    .clamp(-omega_max_proj, omega_max_proj);
+    targ_new.omega_z = (targ.omega_z
+        + l_total_before * frac_targ / targ_new.moment_inertia.max(1e-30))
+    .clamp(-omega_max_targ, omega_max_targ);
 
     let mut l_after_solid = 0.0;
     for body in [&proj_new, &targ_new] {
@@ -223,7 +237,7 @@ fn hit_and_run(bi: &Body, bj: &Body, q_ratio: f64) -> ImpactResult {
         bi_new,
         bj_new,
         dust_cloud,
-        dust_mass: 0.0,
+        dust_mass,
         q_ratio,
     }
 }
@@ -255,7 +269,10 @@ fn debris(bi: &Body, bj: &Body, g_eff: f64, q_ratio: f64) -> ImpactResult {
     let kick_speed = (v_esc * q_ratio.sqrt()).clamp(0.2 * v_esc, 3.0 * v_esc);
     let dvx = bi.vx - bj.vx;
     let dvy = bi.vy - bj.vy;
-    let base_angle = dvy.atan2(dvx);
+    let geom = impact_geometry(bi, bj);
+    let dx = bi.x - bj.x;
+    let dy = bi.y - bj.y;
+    let base_angle = dy.atan2(dx);
 
     let mut n_ejecta = (q_ratio * 6.0).clamp(2.0, 12.0) as usize;
     n_ejecta = n_ejecta.min(((m_ej / MIN_FRAGMENT_MASS).floor() as usize).max(1));
@@ -264,6 +281,8 @@ fn debris(bi: &Body, bj: &Body, g_eff: f64, q_ratio: f64) -> ImpactResult {
     let mut fragments = Vec::with_capacity(n_ejecta + 1);
     let mut unresolved_dust_mass = 0.0;
     let has_remnant = m_lr >= MIN_FRAGMENT_MASS;
+
+    let offset_r = bi.physical_radius + bj.physical_radius;
 
     if has_remnant {
         fragments.push(make_body(
@@ -285,16 +304,16 @@ fn debris(bi: &Body, bj: &Body, g_eff: f64, q_ratio: f64) -> ImpactResult {
             unresolved_dust_mass += m_k;
             continue;
         }
-
-        let spread = 0.4;
         let angle =
-            base_angle + 2.0 * PI * (k as f64) / (n_ejecta as f64) + rand::random::<f64>() * spread
-                - spread / 2.0;
+            base_angle + 2.0 * PI * (k as f64) / (n_ejecta as f64) + rand::random::<f64>() * 0.4
+                - 0.2;
         let vx = v_com_x + kick_speed * angle.cos();
         let vy = v_com_y + kick_speed * angle.sin();
+        let frag_x = x_com + offset_r * angle.cos();
+        let frag_y = y_com + offset_r * angle.sin();
         fragments.push(make_body(
-            x_com,
-            y_com,
+            frag_x,
+            frag_y,
             vx,
             vy,
             m_k,
@@ -305,17 +324,43 @@ fn debris(bi: &Body, bj: &Body, g_eff: f64, q_ratio: f64) -> ImpactResult {
 
     let m_tracked: f64 = fragments.iter().map(|f| f.mass).sum();
     if m_tracked > 1e-30 {
-        let px: f64 = fragments.iter().map(|f| f.mass * f.vx).sum();
-        let py: f64 = fragments.iter().map(|f| f.mass * f.vy).sum();
-        let expected_px = m_tracked * v_com_x;
-        let expected_py = m_tracked * v_com_y;
-        let corr_x = (px - expected_px) / m_tracked;
-        let corr_y = (py - expected_py) / m_tracked;
+        let p_total_x = bi.mass * bi.vx + bj.mass * bj.vx;
+        let p_total_y = bi.mass * bi.vy + bj.mass * bj.vy;
+        let p_frags_x: f64 = fragments.iter().map(|f| f.mass * f.vx).sum();
+        let p_frags_y: f64 = fragments.iter().map(|f| f.mass * f.vy).sum();
+        let corr_x = (p_frags_x - p_total_x) / m_tracked;
+        let corr_y = (p_frags_y - p_total_y) / m_tracked;
         for f in &mut fragments {
             f.vx -= corr_x;
             f.vy -= corr_y;
         }
     }
+
+    let dust_cloud = if m_tracked > 1e-30 && unresolved_dust_mass > 1e-30 {
+        let p_total_x = bi.mass * bi.vx + bj.mass * bj.vx;
+        let p_total_y = bi.mass * bi.vy + bj.mass * bj.vy;
+        let p_frags_x: f64 = fragments.iter().map(|f| f.mass * f.vx).sum();
+        let p_frags_y: f64 = fragments.iter().map(|f| f.mass * f.vy).sum();
+        let dust_vx = (p_total_x - p_frags_x) / unresolved_dust_mass;
+        let dust_vy = (p_total_y - p_frags_y) / unresolved_dust_mass;
+        make_dust_cloud(
+            x_com,
+            y_com,
+            dust_vx,
+            dust_vy,
+            unresolved_dust_mass,
+            frag_density,
+        )
+    } else {
+        make_dust_cloud(
+            x_com,
+            y_com,
+            v_com_x,
+            v_com_y,
+            unresolved_dust_mass,
+            frag_density,
+        )
+    };
 
     if has_remnant {
         let geom = impact_geometry(bi, bj);
@@ -330,19 +375,10 @@ fn debris(bi: &Body, bj: &Body, g_eff: f64, q_ratio: f64) -> ImpactResult {
         lr.omega_z = (l_total / lr.moment_inertia.max(1e-30)).clamp(-omega_max, omega_max);
     }
 
-    let dust_cloud = make_dust_cloud(
-        x_com,
-        y_com,
-        v_com_x,
-        v_com_y,
-        unresolved_dust_mass,
-        frag_density,
-    );
-
     ImpactResult::Debris {
         fragments,
         dust_cloud,
-        dust_mass: 0.0,
+        dust_mass: unresolved_dust_mass,
         q_ratio,
     }
 }

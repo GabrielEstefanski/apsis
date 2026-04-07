@@ -134,20 +134,34 @@ impl System {
 impl System {
     fn refresh_collision_geometry(&mut self) {
         self.total_mass = self.bodies.iter().map(|b| b.mass).sum();
-        calibration::calibrate_softening(&mut self.bodies, self.total_mass);
-        calibration::calibrate_radii(&mut self.bodies, self.total_mass);
+        calibration::calibrate_softening_and_radii(&mut self.bodies, self.total_mass);
     }
 
     pub fn step_adaptive(&mut self, proposed_dt: f64) -> f64 {
         self.last_proposed_dt = proposed_dt;
+
         let stats = AccelerationStats::new(self.last_diag.max_acc, self.last_diag.jerk);
+
+        let safe_proposed = if self.rel_energy_error.abs()
+            > self.dt_controller.config.target_rel_energy_error * 2.0
+        {
+            proposed_dt * 0.5
+        } else {
+            proposed_dt
+        };
+
         let dt = self
             .dt_controller
-            .update(proposed_dt, self.rel_energy_error, stats);
+            .update(safe_proposed, self.rel_energy_error, stats);
+
         self.step(dt);
+
+        if self.rel_energy_error.abs() > self.dt_controller.config.target_rel_energy_error * 10.0 {
+            self.last_proposed_dt = dt * 0.5;
+        }
+
         dt
     }
-
     pub fn step(&mut self, dt: f64) {
         self.last_proposed_dt = dt;
         self.current_dt = dt;
@@ -158,9 +172,19 @@ impl System {
 
         let theta = self.theta_controller.current();
 
-        let raw_pe =
-            evaluate_accelerations(&self.bodies, theta, &mut self.engine, &mut self.scratch_acc);
-        self.scale_acc_and_pe(raw_pe); // discard scaled PE here; we only need acc for kick
+        let dt_changed = self.current_dt > 0.0 && (dt / self.current_dt - 1.0).abs() > 0.5;
+        let acc_stale = self.steps == 0 || dt_changed;
+
+        if acc_stale {
+            let raw_pe = evaluate_accelerations(
+                &self.bodies,
+                theta,
+                &mut self.engine,
+                &mut self.scratch_acc,
+            );
+            self.last_potential = self.scale_acc_and_pe(raw_pe);
+        }
+
         half_kick(&mut self.bodies, &self.scratch_acc, 0.5 * dt);
 
         let collision_outcome = self.advance_with_ccd(dt, theta);
@@ -173,9 +197,20 @@ impl System {
         self.last_impact_events
             .extend(collision_outcome.impact_events);
 
-        let raw_pe2 =
-            evaluate_accelerations(&self.bodies, theta, &mut self.engine, &mut self.scratch_acc);
-        self.last_potential = self.scale_acc_and_pe(raw_pe2);
+        let needs_final_acc = collision_outcome.merges == 0
+            && collision_outcome.fragments_spawned == 0
+            && collision_outcome.hit_and_runs == 0;
+
+        if needs_final_acc {
+            let raw_pe = evaluate_accelerations(
+                &self.bodies,
+                theta,
+                &mut self.engine,
+                &mut self.scratch_acc,
+            );
+            self.last_potential = self.scale_acc_and_pe(raw_pe);
+        }
+
         half_kick(&mut self.bodies, &self.scratch_acc, 0.5 * dt);
 
         self.steps += 1;
@@ -250,11 +285,13 @@ impl System {
             outcome.total_dust_mass += event_outcome.total_dust_mass;
             outcome.impact_events.extend(event_outcome.impact_events);
 
-            if event_outcome.merges == 0
-                && event_outcome.bounces == 0
-                && event_outcome.fragments_spawned == 0
-                && event_outcome.hit_and_runs == 0
-            {
+            let topology_changed = event_outcome.merges > 0
+                || event_outcome.fragments_spawned > 0
+                || event_outcome.hit_and_runs > 0;
+
+            let physics_changed = topology_changed || event_outcome.bounces > 0;
+
+            if !physics_changed {
                 let epsilon = remaining.min(1e-8);
                 if epsilon <= 0.0 {
                     break;
@@ -264,11 +301,10 @@ impl System {
                 continue;
             }
 
-            if event_outcome.merges > 0
-                || event_outcome.fragments_spawned > 0
-                || event_outcome.hit_and_runs > 0
-            {
+            if topology_changed {
                 self.refresh_collision_geometry();
+                self.scratch_acc.resize(self.bodies.len(), (0.0, 0.0));
+                self.update_separated_errors();
             }
 
             let raw_pe_mid = evaluate_accelerations(
@@ -428,14 +464,6 @@ impl System {
 
     pub fn recenter_com(&mut self) {
         calibration::recenter_com(&mut self.bodies, &mut self.trails, self.total_mass);
-    }
-
-    pub fn calibrate_softening(&mut self) {
-        calibration::calibrate_softening(&mut self.bodies, self.total_mass);
-    }
-
-    pub fn calibrate_radii(&mut self) {
-        calibration::calibrate_radii(&mut self.bodies, self.total_mass);
     }
 }
 

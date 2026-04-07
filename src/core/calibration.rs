@@ -189,6 +189,36 @@ pub fn calibrate_radii(bodies: &mut [Body], total_mass: f64) {
     }
 }
 
+pub fn calibrate_softening_and_radii(bodies: &mut [Body], total_mass: f64) {
+    let n = bodies.iter().filter(|b| !b.is_diffuse_cloud()).count();
+    if n < 2 {
+        return;
+    }
+
+    let l_mean = system_length_scale(bodies);
+    if l_mean <= 0.0 {
+        return;
+    }
+
+    let active_mass: f64 = bodies
+        .iter()
+        .filter(|b| !b.is_diffuse_cloud())
+        .map(|b| b.mass)
+        .sum();
+    let m_mean = active_mass / n as f64;
+
+    for b in bodies.iter_mut() {
+        if b.is_diffuse_cloud() {
+            b.radius = 0.0;
+            continue;
+        }
+        let scale = (b.mass / m_mean).cbrt() * l_mean;
+        b.softening = SOFTENING_ETA * scale;
+        let r = RADIUS_ETA * scale;
+        b.radius = r.min(b.softening * 0.5);
+    }
+}
+
 // ── Unit tests ──────────────────────────────────────────────────────────────── //
 
 #[cfg(test)]
