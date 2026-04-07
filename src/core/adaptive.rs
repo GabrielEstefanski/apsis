@@ -78,39 +78,39 @@ impl ThetaController {
 
     pub fn update(&mut self, e_theta: f64, dt: f64) -> f64 {
         let current_theta = self.theta;
-    
+
         let e_norm = e_theta / self.target_error;
-    
-        let alpha = (dt / (self.tuning.ema_time_constant + dt)).clamp(0.05, 0.4);
-    
+
+        let alpha = (1.0 / (self.tuning.ema_time_constant + 1.0)).clamp(0.05, 0.4);
+
         self.error_ema = alpha * e_norm + (1.0 - alpha) * self.error_ema;
         let e = self.error_ema;
-    
+
         let factor = if e > 1.0 {
             1.0 / (1.0 + self.tuning.tighten_gain * (e - 1.0))
         } else {
             1.0 + self.tuning.relax_gain * (1.0 - e)
         };
-    
+
         let desired = (current_theta * factor).clamp(self.min_theta, self.max_theta);
-    
+
         let responsiveness = (e - 1.0).abs().clamp(0.0, 1.0);
         let response = self.tuning.response_gain * (0.3 + 0.7 * responsiveness);
-    
+
         let blended = current_theta + response * (desired - current_theta);
-    
+
         let step_scale = (e - 1.0).abs().clamp(0.1, 2.0);
-    
+
         let max_step = current_theta.abs().max(self.min_theta)
             * (self.tuning.min_step_fraction
                 + (self.tuning.max_step_fraction - self.tuning.min_step_fraction) * step_scale);
-    
+
         let delta = (blended - current_theta).clamp(-max_step, max_step);
-    
+
         let next = (current_theta + delta).clamp(self.min_theta, self.max_theta);
-    
+
         self.theta = next;
-    
+
         next
     }
 
@@ -168,7 +168,7 @@ impl DtController {
             clamp(proposed_dt)
         };
 
-        let mut dt = prev;
+        let mut dt = clamp(proposed_dt).min(prev);
 
         let ratio = (rel_energy_error.abs() / cfg.target_rel_energy_error).max(1e-12);
 
@@ -189,11 +189,8 @@ impl DtController {
         };
 
         let candidate = dt.min(accel_dt);
-
-        let f = cfg.dt_slew_fraction;
-        let lo = prev * (1.0 - f);
-        let hi = prev * (1.0 + f);
-
+        let lo = prev * cfg.shrink_limit;
+        let hi = prev * cfg.grow_limit;
         let smoothed = candidate.clamp(lo.max(cfg.min_dt), hi.min(cfg.max_dt));
 
         let out = clamp(smoothed);
