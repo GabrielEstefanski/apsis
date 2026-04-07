@@ -43,8 +43,6 @@ pub fn draw_trails(
 
             if let Some((prev_p, prev_t)) = prev {
                 if rect.contains(prev_p) || rect.contains(p) {
-                    let mid_t = (prev_t + t) * 0.5;
-
                     let alpha = (fade * 200.0) as u8;
                     let width = 0.4 + fade * 0.8;
                     painter.line_segment(

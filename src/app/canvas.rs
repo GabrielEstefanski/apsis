@@ -6,7 +6,8 @@ use crate::domain::body::{
     Body, default_moment_inertia, default_softening, radius_from_density_mass,
 };
 use crate::domain::materials::Material;
-use eframe::egui::{self, Align2, Color32, FontId, Pos2, Stroke};
+use crate::templates::instantiate_at;
+use eframe::egui::{self, Align2, Color32, FontId, Pos2, Rect, Stroke, Vec2};
 
 fn dim(c: Color32, f: f32) -> Color32 {
     Color32::from_rgba_premultiplied(
@@ -35,7 +36,9 @@ impl SimulationApp {
 
                 let response = ui.allocate_rect(rect, egui::Sense::click_and_drag());
 
-                if self.place_mode {
+                if self.template_drag.is_some() {
+                    self.handle_template_drag(ctx, rect, center);
+                } else if self.place_mode {
                     if response.drag_started() {
                         self.place_drag_start = ctx.input(|i| i.pointer.press_origin());
                     }
@@ -86,6 +89,34 @@ impl SimulationApp {
                                     self.selection_form = None;
                                 }
                             }
+                        }
+                    }
+                    // Drag selected body to reposition
+                    if let Some(sel_idx) = self.selected_body {
+                        if response.drag_started() {
+                            self.dragging_body = Some(sel_idx);
+                            let cursor_pos = ctx.input(|i| i.pointer.hover_pos()).unwrap_or(Pos2::ZERO);
+                            let wx = (cursor_pos.x - center.x) as f64 / self.scale as f64;
+                            let wy = (cursor_pos.y - center.y) as f64 / self.scale as f64;
+                            self.drag_start_world = Some((wx, wy));
+                        }
+                        if response.dragged() && self.dragging_body.is_some() {
+                            if let Some(start) = self.drag_start_world {
+                                let cur = ctx.input(|i| i.pointer.hover_pos()).unwrap_or(Pos2::ZERO);
+                                let cur_wx = (cur.x - center.x) as f64 / self.scale as f64;
+                                let cur_wy = (cur.y - center.y) as f64 / self.scale as f64;
+                                let dx = cur_wx - start.0;
+                                let dy = cur_wy - start.1;
+                                let mut body = self.system.bodies()[sel_idx];
+                                body.x += dx;
+                                body.y += dy;
+                                self.system.update_body(sel_idx, body);
+                                self.drag_start_world = Some((cur_wx, cur_wy));
+                            }
+                        }
+                        if response.drag_stopped() {
+                            self.dragging_body = None;
+                            self.drag_start_world = None;
                         }
                     }
                 }
@@ -383,6 +414,82 @@ impl SimulationApp {
                     );
                 }
             });
+    }
+
+    /// Called every frame while `template_drag` is Some.
+    /// Renders a ghost preview at the cursor and commits the drop on mouse release.
+    fn handle_template_drag(&mut self, ctx: &egui::Context, rect: Rect, center: Pos2) {
+        ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
+
+        let hover = ctx.input(|i| i.pointer.hover_pos());
+
+        // Ghost: draw template bodies semi-transparently under the cursor
+        if let Some(cursor) = hover {
+            if rect.contains(cursor) {
+                let build_fn = self.template_drag.unwrap();
+                let template = build_fn();
+
+                let total_mass: f64 = template.bodies.iter().map(|t| t.mass).sum();
+                let (com_x, com_y) = template.bodies.iter().fold((0.0, 0.0), |(ax, ay), t| {
+                    let [px, py] = t.position.unwrap_or([0.0, 0.0]);
+                    (ax + t.mass * px / total_mass, ay + t.mass * py / total_mass)
+                });
+
+                let painter = ctx.layer_painter(egui::LayerId::new(
+                    egui::Order::Tooltip,
+                    egui::Id::new("template_ghost"),
+                ));
+
+                for body in &template.bodies {
+                    let [bx, by] = body.position.unwrap_or([0.0, 0.0]);
+                    let rel_x = (bx - com_x) * self.scale as f64;
+                    let rel_y = (by - com_y) * self.scale as f64;
+                    let screen = Pos2::new(
+                        cursor.x + rel_x as f32,
+                        cursor.y + rel_y as f32,
+                    );
+                    let r = (body.radius * self.scale as f64).max(4.0) as f32;
+                    let [cr, cg, cb] = body.material.props().base_color;
+                    painter.circle_filled(
+                        screen,
+                        r,
+                        Color32::from_rgba_premultiplied(cr, cg, cb, 90),
+                    );
+                    painter.circle_stroke(
+                        screen,
+                        r,
+                        Stroke::new(1.0, Color32::from_rgba_premultiplied(cr, cg, cb, 180)),
+                    );
+                }
+
+                // Drop hint label
+                painter.text(
+                    cursor + Vec2::new(12.0, 12.0),
+                    Align2::LEFT_TOP,
+                    "release to place",
+                    FontId::proportional(9.0),
+                    Color32::from_rgba_premultiplied(200, 200, 210, 140),
+                );
+            }
+        }
+
+        // Drop: commit on mouse release
+        if ctx.input(|i| i.pointer.primary_released()) {
+            let build_fn = self.template_drag.take().unwrap();
+            if let Some(cursor) = hover {
+                if rect.contains(cursor) {
+                    let wx = (cursor.x - center.x) as f64 / self.scale as f64;
+                    let wy = (cursor.y - center.y) as f64 / self.scale as f64;
+                    let template = build_fn();
+                    for b in instantiate_at(&template, wx, wy) {
+                        self.system.add_body(b);
+                    }
+                }
+                // Released outside canvas → cancel (template_drag is already None)
+            } else {
+                // Pointer left the window → cancel
+            }
+        }
     }
 
     fn find_body_at(&self, cursor: Pos2, center: Pos2) -> Option<usize> {

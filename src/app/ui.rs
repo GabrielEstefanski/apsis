@@ -2,6 +2,7 @@ use crate::app::config::PhysicsConfig;
 use crate::app::theme::apply_visuals;
 use crate::core::system::System;
 use crate::domain::body::{Body, default_moment_inertia};
+use crate::templates::Template;
 use eframe::egui;
 
 #[derive(PartialEq, Clone, Copy)]
@@ -144,6 +145,8 @@ pub struct SimulationApp {
     pub(super) spawn_cluster_mass: f64,
     pub(super) spawn_cluster_vel_disp: f64,
     pub(super) selected_body: Option<usize>,
+    pub(super) dragging_body: Option<usize>,
+    pub(super) drag_start_world: Option<(f64, f64)>,
     pub(super) selection_form: Option<SelectionForm>,
 
     pub(super) physics_cfg: PhysicsConfig,
@@ -151,6 +154,10 @@ pub struct SimulationApp {
 
     pub(super) show_force_vectors: bool,
     pub(super) show_impact_normals: bool,
+    /// Non-None while the user is dragging a template card from the library panel.
+    /// Cleared on mouse release; the canvas reads this to render a ghost and
+    /// spawn the bodies on drop.
+    pub(super) template_drag: Option<fn() -> Template>,
     /// Per-body accumulated rotation angle (radians), for the spoke indicator.
     pub(super) body_angles: Vec<f64>,
     /// Active visual impact effects.
@@ -188,6 +195,8 @@ impl SimulationApp {
             spawn_cluster_mass: 1.0,
             spawn_cluster_vel_disp: 0.5,
             selected_body: None,
+            dragging_body: None,
+            drag_start_world: None,
             selection_form: None,
             physics_cfg: PhysicsConfig::default(),
             panel_tab: PanelTab::Add,
@@ -195,6 +204,7 @@ impl SimulationApp {
             show_impact_normals: false,
             body_angles: Vec::new(),
             impact_effects: Vec::new(),
+            template_drag: None,
         }
     }
 }
@@ -256,8 +266,7 @@ impl eframe::App for SimulationApp {
                 self.body_angles.resize(bodies.len(), 0.0);
             }
             if !self.paused {
-                let phys_dt = self.system.metrics().dt
-                    * self.steps_per_frame as f64;
+                let phys_dt = self.system.metrics().dt * self.steps_per_frame as f64;
                 for (i, b) in bodies.iter().enumerate() {
                     self.body_angles[i] += b.omega_z * phys_dt;
                 }

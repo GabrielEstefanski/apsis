@@ -16,11 +16,8 @@ pub fn compute_render_radius(physical_radius: f64, params: RenderParams) -> f32 
         SemanticScaleMode::Comparative => physical_px.max(params.min_px),
 
         SemanticScaleMode::Illustrative => {
-            let x = physical_px.max(0.0);
-
-            let log = (x + 1.0).ln();
-            let gamma = 0.6;
-            let scaled = log.powf(gamma) * 10.0;
+            let k = 0.15;
+            let scaled = (1.0 - (-k * physical_px).exp()) * 20.0;
 
             scaled.max(params.min_px).max(2.5)
         }

@@ -2,6 +2,7 @@ mod app;
 mod core;
 mod domain;
 mod physics;
+mod templates;
 
 use app::ui::SimulationApp;
 use core::adaptive::{DtAdaptationConfig, DtController, ThetaController};
