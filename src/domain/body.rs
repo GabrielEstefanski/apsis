@@ -20,16 +20,6 @@ pub struct Body {
     /// Calibrated by `System::calibrate_softening`.
     pub softening: f64,
 
-    /// Collision radius used for contact detection.
-    ///
-    /// A pair collides when their separation falls below r_i + r_j.
-    /// This value is **numerically calibrated** by `System::calibrate_radii`
-    /// to ensure meaningful collision frequency and simulation stability.
-    ///
-    /// Invariant: radius ≤ softening (ensures bodies are already in the
-    /// softened regime when contact occurs).
-    pub radius: f64,
-
     /// True physical radius derived from mass and density.
     ///
     /// This represents the actual size of the body and is used for:
@@ -71,9 +61,6 @@ impl Body {
         // True physical radius
         let physical_radius = radius_from_density_mass(density, mass);
 
-        // Initial collision radius (before calibration)
-        let radius = physical_radius;
-
         let softening = default_softening(mass);
 
         Self {
@@ -83,7 +70,6 @@ impl Body {
             vy,
             mass,
             softening,
-            radius,
             physical_radius,
             density,
             omega_z: 0.0,

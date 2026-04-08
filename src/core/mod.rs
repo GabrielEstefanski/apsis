@@ -11,10 +11,7 @@
 //! | [`adaptive`]    | [`DtController`], [`ThetaController`] |
 //! | [`diagnostics`] | Per-step acceleration and jerk statistics |
 
-pub mod adaptive;
 pub mod calibration;
-pub mod collision;
 pub mod diagnostics;
-pub mod fragmentation;
 pub mod metrics;
 pub mod system;

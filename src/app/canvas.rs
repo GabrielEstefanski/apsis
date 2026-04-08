@@ -1,11 +1,8 @@
 use crate::app::render_params::{RenderParams, compute_render_radius};
 use crate::app::theme::{ACCENT, BG, TEXT_DIM, body_radius, fmt_world, nice_grid_world};
-use crate::app::trails::draw_trails;
 use crate::app::ui::{SelectionForm, SemanticScaleMode, SimulationApp};
-use crate::domain::body::{
-    Body, default_moment_inertia, default_softening, radius_from_density_mass,
-};
-use crate::domain::materials::Material;
+use crate::domain::body::Body;
+use crate::render::{RenderBackend, WgpuBackend};
 use crate::templates::instantiate_at;
 use eframe::egui::{self, Align2, Color32, FontId, Pos2, Rect, Stroke, Vec2};
 
@@ -22,14 +19,10 @@ fn alpha(c: Color32, a: u8) -> Color32 {
     Color32::from_rgba_premultiplied(c.r(), c.g(), c.b(), a)
 }
 
-fn cloud_visual_radius(base_r: f32) -> f32 {
-    (base_r * 1.9).clamp(10.0, 60.0)
-}
-
 impl SimulationApp {
     pub(super) fn draw_canvas(&mut self, ctx: &egui::Context) {
         egui::CentralPanel::default()
-            .frame(egui::Frame::none().fill(BG))
+            .frame(egui::Frame::NONE.fill(BG))
             .show(ctx, |ui| {
                 let rect = ui.max_rect();
                 let center = rect.center() + self.offset;
@@ -60,12 +53,7 @@ impl SimulationApp {
                             );
 
                             b.density = self.place_density;
-                            let physical_radius = radius_from_density_mass(b.density, b.mass);
-                            b.physical_radius = physical_radius;
-                            b.radius = physical_radius;
-                            b.softening = default_softening(b.mass).max(physical_radius * 2.0);
-
-                            b.moment_inertia = default_moment_inertia(b.mass, physical_radius);
+                            b.sync_physical_properties();
                             self.system.add_body(b);
                         }
                     }
@@ -95,14 +83,16 @@ impl SimulationApp {
                     if let Some(sel_idx) = self.selected_body {
                         if response.drag_started() {
                             self.dragging_body = Some(sel_idx);
-                            let cursor_pos = ctx.input(|i| i.pointer.hover_pos()).unwrap_or(Pos2::ZERO);
+                            let cursor_pos =
+                                ctx.input(|i| i.pointer.hover_pos()).unwrap_or(Pos2::ZERO);
                             let wx = (cursor_pos.x - center.x) as f64 / self.scale as f64;
                             let wy = (cursor_pos.y - center.y) as f64 / self.scale as f64;
                             self.drag_start_world = Some((wx, wy));
                         }
                         if response.dragged() && self.dragging_body.is_some() {
                             if let Some(start) = self.drag_start_world {
-                                let cur = ctx.input(|i| i.pointer.hover_pos()).unwrap_or(Pos2::ZERO);
+                                let cur =
+                                    ctx.input(|i| i.pointer.hover_pos()).unwrap_or(Pos2::ZERO);
                                 let cur_wx = (cur.x - center.x) as f64 / self.scale as f64;
                                 let cur_wy = (cur.y - center.y) as f64 / self.scale as f64;
                                 let dx = cur_wx - start.0;
@@ -121,12 +111,17 @@ impl SimulationApp {
                     }
                 }
 
-                let scroll = ctx.input(|i| i.raw_scroll_delta.y);
-                if scroll != 0.0 {
-                    self.scale = (self.scale * (1.0 + scroll * 0.001)).clamp(0.5, 5000.0);
+                let scroll = ctx.input(|i| i.smooth_scroll_delta.y);
+
+                if scroll.abs() > 0.0 {
+                    let zoom_factor = (1.0 + scroll * 0.001).clamp(0.9, 1.1);
+                    self.scale = (self.scale * zoom_factor).clamp(0.5, 5000.0);
                 }
 
                 let painter = ui.painter();
+                let mut backend = WgpuBackend::new(ui, rect);
+
+                backend.begin();
 
                 // ── Grid ─────────────────────────────────────────────────── //
                 if self.show_grid {
@@ -190,24 +185,7 @@ impl SimulationApp {
 
                 // ── Trails ───────────────────────────────────────────────── //
                 if self.show_trails {
-                    let colors: Vec<Color32> = self
-                        .system
-                        .bodies()
-                        .iter()
-                        .enumerate()
-                        .map(|(_i, b)| {
-                            let [r, g, b_] = b.color;
-                            Color32::from_rgb(r, g, b_)
-                        })
-                        .collect();
-                    draw_trails(
-                        painter,
-                        self.system.trails(),
-                        &colors,
-                        center,
-                        self.scale,
-                        rect,
-                    );
+                    self.draw_trails_backend(&mut backend, center, rect);
                 }
 
                 let bodies = self.system.bodies();
@@ -235,72 +213,37 @@ impl SimulationApp {
                     let b = &bodies[i];
 
                     let [cr, cg, cb] = b.color;
-                    let col = Color32::from_rgb(cr, cg, cb);
 
                     let render_r = compute_render_radius(b.physical_radius, render_params);
 
                     let px = center.x + b.x as f32 * self.scale;
                     let py = center.y + b.y as f32 * self.scale;
 
-                    let pos = Pos2::new(px, py);
-
-                    // ── DRAW BODY ─────────────────────────────────────────────────── //
-                    if b.material == Material::DustCloud {
-                        if render_r < 1.5 {
-                            continue;
-                        }
-
-                        let cloud_r = cloud_visual_radius(render_r);
-
-                        let alpha = if cloud_r < 6.0 { 40 } else { 25 };
-
-                        painter.circle_filled(
-                            pos,
-                            cloud_r,
-                            Color32::from_rgba_premultiplied(col.r(), col.g(), col.b(), alpha),
-                        );
-                    } else {
-                        painter.circle_filled(pos, render_r, col);
-
-                        let outline = (render_r * 0.15).clamp(0.8, 2.5);
-
-                        painter.circle_stroke(pos, render_r, Stroke::new(outline, Color32::BLACK));
-
-                        painter.circle_stroke(
-                            pos,
-                            render_r + 2.0,
-                            Stroke::new(1.0, alpha(col, 60)),
-                        );
+                    if px < rect.left() - 50.0
+                        || px > rect.right() + 50.0
+                        || py < rect.top() - 50.0
+                        || py > rect.bottom() + 50.0
+                    {
+                        continue;
                     }
 
-                    // ── ROTATION SPOKE ───────────────────────────────────────────── //
-                    if !b.is_diffuse_cloud() && render_r > 3.5 && b.omega_z.abs() > 1e-6 {
-                        let angle = self.body_angles.get(i).copied().unwrap_or(0.0) as f32;
-                        let spoke =
-                            Pos2::new(px + angle.cos() * render_r, py + angle.sin() * render_r);
+                    backend.draw_circle([px, py], render_r, [cr, cg, cb]);
 
-                        painter.line_segment([pos, spoke], Stroke::new(1.5, dim(col, 0.55)));
-                        painter.circle_filled(spoke, 1.5, dim(col, 0.8));
-                    }
+                    //painter.circle_stroke(pos, render_r, Stroke::new(outline, Color32::BLACK));
+
+                    //painter.circle_stroke(pos, render_r + 2.0, Stroke::new(1.0, alpha(col, 60)));
 
                     // ── VELOCITY COLOR HINT (subtle) ─────────────────────────────── //
                     let speed = (b.vx * b.vx + b.vy * b.vy).sqrt();
                     if speed > 0.0 && render_r > 4.0 {
                         let t = (speed * 0.15).clamp(0.0, 1.0);
-                        let glow =
-                            Color32::from_rgba_premultiplied(255, 120, 40, (t * 120.0) as u8);
+                        let alpha = (t * 120.0) as u8;
 
-                        painter.circle_stroke(pos, render_r + 1.5, Stroke::new(1.0, glow));
-                    }
-
-                    // ── MASS LABEL ──────────────────────────────────────────────── //
-                    if !b.is_diffuse_cloud() && render_r > 6.0 {
-                        painter.text(
-                            Pos2::new(px, py + render_r + 8.0),
-                            Align2::CENTER_CENTER,
-                            format!("{:.1}", b.mass),
-                            FontId::proportional(9.0),
-                            Color32::from_rgba_premultiplied(col.r(), col.g(), col.b(), 120),
+                        backend.draw_circle_stroke(
+                            [px, py],
+                            render_r + 1.5,
+                            1.0,
+                            [255, 120, 40, alpha],
                         );
                     }
                 }
@@ -315,70 +258,12 @@ impl SimulationApp {
 
                         let mut r = compute_render_radius(b.physical_radius, render_params);
 
-                        if b.is_diffuse_cloud() {
-                            r = cloud_visual_radius(r);
-                        }
-
                         let r = r.max(6.0);
 
                         painter.circle_stroke(Pos2::new(px, py), r + 4.0, Stroke::new(1.0, ACCENT));
                     } else {
                         self.selected_body = None;
                         self.selection_form = None;
-                    }
-                }
-
-                // ── Impact visual effects ─────────────────────────────────── //
-                for effect in &self.impact_effects {
-                    let sx = center.x + effect.world_x as f32 * self.scale;
-                    let sy = center.y + effect.world_y as f32 * self.scale;
-                    let t = effect.age;
-                    let fade = (1.0 - t).max(0.0);
-                    let alpha = (fade.powf(0.5) * 255.0) as u8;
-
-                    let ring_r = t * 28.0;
-                    if ring_r > 0.5 {
-                        painter.circle_stroke(
-                            Pos2::new(sx, sy),
-                            ring_r,
-                            Stroke::new(
-                                (1.8 * fade).max(0.3),
-                                Color32::from_rgba_premultiplied(255, 210, 80, alpha),
-                            ),
-                        );
-                    }
-
-                    if t < 0.3 {
-                        let i_fade = (0.3 - t) / 0.3;
-                        painter.circle_filled(
-                            Pos2::new(sx, sy),
-                            9.0 * i_fade,
-                            Color32::from_rgba_premultiplied(255, 240, 180, (i_fade * 220.0) as u8),
-                        );
-                    }
-
-                    if self.show_impact_normals {
-                        let len = 32.0 * fade;
-                        let na = Pos2::new(sx + effect.nx * len, sy + effect.ny * len);
-                        let nb = Pos2::new(sx - effect.nx * len, sy - effect.ny * len);
-                        painter.line_segment(
-                            [na, nb],
-                            Stroke::new(
-                                1.0,
-                                Color32::from_rgba_premultiplied(100, 200, 255, alpha),
-                            ),
-                        );
-                    }
-
-                    for p in &effect.particles {
-                        let px_p = center.x + p[0] as f32 * self.scale;
-                        let py_p = center.y + p[1] as f32 * self.scale;
-                        let p_alpha = (fade.powf(1.5) * 220.0) as u8;
-                        painter.circle_filled(
-                            Pos2::new(px_p, py_p),
-                            1.5,
-                            Color32::from_rgba_premultiplied(255, 175, 55, p_alpha),
-                        );
                     }
                 }
 
@@ -413,7 +298,66 @@ impl SimulationApp {
                         TEXT_DIM,
                     );
                 }
+
+                backend.end();
             });
+    }
+
+    fn draw_trails_backend(
+        &self,
+        backend: &mut dyn RenderBackend,
+        center: Pos2,
+        rect: Rect,
+    ) {
+        const MAX_TOTAL_SEGMENTS: usize = 60_000;
+        let trails = self.system.trails();
+        let n = trails.len();
+        if n == 0 {
+            return;
+        }
+
+        let segs_per_body = (MAX_TOTAL_SEGMENTS / n).clamp(20, 2000);
+
+        for (i, trail) in trails.iter().enumerate() {
+            let len = trail.len();
+            if len < 2 {
+                continue;
+            }
+
+            let base = self
+                .system
+                .bodies()
+                .get(i)
+                .map(|b| b.color)
+                .unwrap_or([255, 255, 255]);
+
+            let step = (len / segs_per_body).max(1);
+            let sampled_len = (len / step).max(1);
+            let mut prev: Option<Pos2> = None;
+
+            for (j, (tx, ty)) in trail.iter().step_by(step).enumerate() {
+                let t = j as f32 / sampled_len as f32;
+                let p = Pos2::new(
+                    center.x + *tx as f32 * self.scale,
+                    center.y + *ty as f32 * self.scale,
+                );
+                let fade = t.powf(2.2);
+
+                if let Some(prev_p) = prev {
+                    if rect.contains(prev_p) || rect.contains(p) {
+                        let alpha = (fade * 200.0) as u8;
+                        let width = 0.4 + fade * 0.8;
+                        backend.draw_line_segment(
+                            [prev_p.x, prev_p.y],
+                            [p.x, p.y],
+                            width,
+                            [base[0], base[1], base[2], alpha],
+                        );
+                    }
+                }
+                prev = Some(p);
+            }
+        }
     }
 
     /// Called every frame while `template_drag` is Some.
@@ -426,7 +370,7 @@ impl SimulationApp {
         // Ghost: draw template bodies semi-transparently under the cursor
         if let Some(cursor) = hover {
             if rect.contains(cursor) {
-                let build_fn = self.template_drag.unwrap();
+                let build_fn = self.template_drag.as_ref().unwrap();
                 let template = build_fn();
 
                 let total_mass: f64 = template.bodies.iter().map(|t| t.mass).sum();
@@ -444,17 +388,16 @@ impl SimulationApp {
                     let [bx, by] = body.position.unwrap_or([0.0, 0.0]);
                     let rel_x = (bx - com_x) * self.scale as f64;
                     let rel_y = (by - com_y) * self.scale as f64;
-                    let screen = Pos2::new(
-                        cursor.x + rel_x as f32,
-                        cursor.y + rel_y as f32,
-                    );
+                    let screen = Pos2::new(cursor.x + rel_x as f32, cursor.y + rel_y as f32);
                     let r = (body.radius * self.scale as f64).max(4.0) as f32;
                     let [cr, cg, cb] = body.material.props().base_color;
+
                     painter.circle_filled(
                         screen,
                         r,
                         Color32::from_rgba_premultiplied(cr, cg, cb, 90),
                     );
+
                     painter.circle_stroke(
                         screen,
                         r,
@@ -512,10 +455,6 @@ impl SimulationApp {
             let py = center.y + b.y as f32 * self.scale;
 
             let mut r = compute_render_radius(b.physical_radius, render_params);
-
-            if b.is_diffuse_cloud() {
-                r = cloud_visual_radius(r);
-            }
 
             let r = r.max(6.0);
 

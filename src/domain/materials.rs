@@ -86,20 +86,6 @@ pub struct MaterialProps {
 
     /// Representative display colour [R, G, B].
     pub base_color: [u8; 3],
-
-    /// Coefficient of restitution for arcade-mode collisions (0 – 1).
-    ///
-    /// In astrophysics mode this value is unused for impulse calculation
-    /// (bound pairs merge; unbound pairs pass through), but it is exposed
-    /// here for UI display and potential future partial-merge models.
-    pub restitution: f64,
-
-    /// Scaling factor on the disruption threshold Q*_D.
-    ///
-    /// `Q*_effective = disruption_scale_i * disruption_scale_j * Q*_base`
-    /// where Q*_base is the gravity + strength term from Leinhardt & Stewart.
-    /// Values > 1 make the body harder to fragment; < 1 make it easier.
-    pub disruption_scale: f64,
 }
 
 impl Material {
@@ -113,8 +99,6 @@ impl Material {
                 density_min: 3000.0,
                 density_max: 13_000.0,
                 base_color: [139, 90, 43],
-                restitution: 0.30,
-                disruption_scale: 1.0,
             },
 
             Material::Icy => MaterialProps {
@@ -123,8 +107,6 @@ impl Material {
                 density_min: 800.0,
                 density_max: 3000.0,
                 base_color: [180, 220, 240],
-                restitution: 0.10,
-                disruption_scale: 0.50,
             },
 
             Material::Gas => MaterialProps {
@@ -133,8 +115,6 @@ impl Material {
                 density_min: 200.0,
                 density_max: 5000.0,
                 base_color: [210, 140, 60],
-                restitution: 0.05,
-                disruption_scale: 0.20,
             },
 
             Material::IceGiant => MaterialProps {
@@ -143,8 +123,6 @@ impl Material {
                 density_min: 900.0,
                 density_max: 2500.0,
                 base_color: [64, 164, 223],
-                restitution: 0.04,
-                disruption_scale: 0.35,
             },
 
             // ── Small solar-system bodies ────────────────────────────────── //
@@ -154,8 +132,6 @@ impl Material {
                 density_min: 1200.0,
                 density_max: 4000.0,
                 base_color: [80, 75, 68],
-                restitution: 0.40,
-                disruption_scale: 0.60,
             },
 
             Material::Comet => MaterialProps {
@@ -164,8 +140,6 @@ impl Material {
                 density_min: 300.0,
                 density_max: 900.0,
                 base_color: [160, 190, 215],
-                restitution: 0.05,
-                disruption_scale: 0.15,
             },
 
             Material::DustCloud => MaterialProps {
@@ -174,8 +148,6 @@ impl Material {
                 density_min: 20.0,
                 density_max: 400.0,
                 base_color: [194, 176, 148],
-                restitution: 0.0,
-                disruption_scale: 0.05,
             },
 
             // ── Stellar objects ───────────────────────────────────────────── //
@@ -185,8 +157,6 @@ impl Material {
                 density_min: 500.0,
                 density_max: 1.0e5,
                 base_color: [255, 220, 100],
-                restitution: 0.00,
-                disruption_scale: 5.0,
             },
 
             Material::BrownDwarf => MaterialProps {
@@ -195,8 +165,6 @@ impl Material {
                 density_min: 20_000.0,
                 density_max: 1.0e5,
                 base_color: [160, 60, 20],
-                restitution: 0.02,
-                disruption_scale: 3.0,
             },
 
             Material::WhiteDwarf => MaterialProps {
@@ -205,8 +173,6 @@ impl Material {
                 density_min: 1.0e6,
                 density_max: 1.0e9,
                 base_color: [200, 220, 255],
-                restitution: 0.00,
-                disruption_scale: 50.0,
             },
         }
     }
@@ -262,31 +228,4 @@ pub fn density(material: Material, mass: f64) -> f64 {
 #[inline]
 pub fn radius_from_mass_density(mass: f64, density: f64) -> f64 {
     ((3.0 * mass) / (4.0 * PI * density.max(1e-30))).cbrt()
-}
-
-/// Effective disruption-threshold scale for a colliding pair.
-///
-/// The geometric mean of both bodies' scales so that neither body dominates
-/// alone — a hard body hitting a soft one is harder to disrupt than two soft
-/// bodies but easier than two hard bodies.
-#[inline]
-pub fn pair_disruption_scale(a: Material, b: Material) -> f64 {
-    (a.props().disruption_scale * b.props().disruption_scale).sqrt()
-}
-
-/// Effective coefficient of restitution for a colliding pair in arcade mode.
-///
-/// Uses the harmonic mean so that one very inelastic body (e.g. Gas) brings
-/// the effective CoR down toward its value, matching physical intuition.
-#[inline]
-pub fn pair_restitution(a: Material, b: Material) -> f64 {
-    let ea = a.props().restitution;
-    let eb = b.props().restitution;
-    // Harmonic mean: 2·ea·eb / (ea + eb), with a fallback for both == 0.
-    let sum = ea + eb;
-    if sum < 1e-12 {
-        0.0
-    } else {
-        2.0 * ea * eb / sum
-    }
 }

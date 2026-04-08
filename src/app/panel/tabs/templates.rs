@@ -36,18 +36,16 @@ impl SimulationApp {
                 .show(ui, |ui| {
                     for (i, entry) in entries.iter().enumerate() {
                         let response = ui.add(
-                            egui::Button::new(
-                                RichText::new(entry.name).size(10.0).color(TEXT_PRI),
-                            )
-                            .fill(ACCENT_DIM)
-                            .stroke(Stroke::new(0.5, BORDER))
-                            .min_size(egui::vec2(88.0, 22.0))
-                            .sense(egui::Sense::click_and_drag()),
+                            egui::Button::new(RichText::new(entry.name).size(10.0).color(TEXT_PRI))
+                                .fill(ACCENT_DIM)
+                                .stroke(Stroke::new(0.5, BORDER))
+                                .min_size(egui::vec2(88.0, 22.0))
+                                .sense(egui::Sense::click_and_drag()),
                         );
 
                         // Drag → initiate cross-widget drag to canvas
                         if response.drag_started() {
-                            self.template_drag = Some(entry.build);
+                            self.template_drag = Some(Box::new(entry.build));
                         }
 
                         // Click (no drag) → spawn at viewport center (world origin of

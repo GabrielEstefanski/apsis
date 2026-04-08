@@ -41,7 +41,6 @@ pub fn instantiate_at(template: &Template, cx: f64, cy: f64) -> Vec<Body> {
                 t.material,
             );
             b.physical_radius = t.radius;
-            b.radius = t.radius;
             b
         })
         .collect()

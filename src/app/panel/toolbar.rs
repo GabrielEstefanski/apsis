@@ -34,17 +34,16 @@ impl SimulationApp {
 
             ui.separator();
 
-            // Simulation parameters
-            let dt_speed = self.proposed_dt * 0.05;
+            let mut dt = self.system.dt();
+            let speed = dt * 0.05;
 
-            ui.label(RichText::new("dt").size(10.0).color(TEXT_SEC));
             ui.add(
-                egui::DragValue::new(&mut self.proposed_dt)
-                    .speed(dt_speed)
-                    .clamp_range(1e-5..=0.5)
-                    .min_decimals(3)
-                    .max_decimals(5),
+                egui::DragValue::new(&mut dt)
+                    .speed(speed)
+                    .clamp_range(1e-5..=0.5),
             );
+
+            self.system.set_dt(dt);
 
             ui.label(RichText::new("zoom").size(10.0).color(TEXT_SEC));
             ui.add(
@@ -103,14 +102,9 @@ impl SimulationApp {
                 &mut self.show_force_vectors,
                 RichText::new("force").size(11.0).color(TEXT_SEC),
             );
-            ui.checkbox(
-                &mut self.show_impact_normals,
-                RichText::new("nrm").size(11.0).color(TEXT_SEC),
-            );
 
             ui.separator();
 
-            // Right-aligned system buttons
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let n = self.system.bodies().len();
                 ui.label(
@@ -131,32 +125,17 @@ impl SimulationApp {
                     self.system.load_bodies(vec![]);
                     self.paused = true;
                 }
+
                 if ui
                     .add(
-                        egui::Button::new(
-                            RichText::new("Reset E₀").size(10.0).color(TEXT_SEC),
-                        )
-                        .fill(Color32::TRANSPARENT)
-                        .stroke(Stroke::new(0.5, BORDER))
-                        .min_size(egui::vec2(60.0, 20.0)),
-                    )
-                    .clicked()
-                {
-                    self.system.reset_energy_baseline();
-                }
-                if ui
-                    .add(
-                        egui::Button::new(
-                            RichText::new("Zero COM").size(10.0).color(TEXT_SEC),
-                        )
-                        .fill(Color32::TRANSPARENT)
-                        .stroke(Stroke::new(0.5, BORDER))
-                        .min_size(egui::vec2(60.0, 20.0)),
+                        egui::Button::new(RichText::new("Zero COM").size(10.0).color(TEXT_SEC))
+                            .fill(Color32::TRANSPARENT)
+                            .stroke(Stroke::new(0.5, BORDER))
+                            .min_size(egui::vec2(60.0, 20.0)),
                     )
                     .clicked()
                 {
                     self.system.zero_com_velocity();
-                    self.system.reset_energy_baseline();
                 }
             });
         });

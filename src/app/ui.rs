@@ -1,9 +1,8 @@
 use crate::app::config::PhysicsConfig;
 use crate::app::theme::apply_visuals;
 use crate::core::system::System;
-use crate::domain::body::{Body, default_moment_inertia};
+use crate::domain::body::Body;
 use crate::templates::Template;
-use eframe::egui;
 
 #[derive(PartialEq, Clone, Copy)]
 pub enum SpawnTab {
@@ -94,31 +93,16 @@ impl BodyForm {
             mass,
             crate::domain::materials::Material::Rocky,
         );
+
         b.density = density;
         b.sync_physical_properties();
-        b.radius = b.physical_radius;
-        b.softening = b.softening.max(b.physical_radius * 2.0);
-        b.moment_inertia = default_moment_inertia(mass, b.physical_radius);
+
         Some(b)
     }
 }
 
-/// Short-lived visual effect spawned at a collision site.
-pub struct ImpactEffect {
-    pub world_x: f64,
-    pub world_y: f64,
-    /// Impact normal direction (bj → bi).
-    pub nx: f32,
-    pub ny: f32,
-    /// Age in [0, 1]: 0 = just created, 1 = expired.  Lifetime ≈ 0.2 s.
-    pub age: f32,
-    /// Burst particles: [world_x, world_y, world_vx, world_vy].
-    pub particles: Vec<[f64; 4]>,
-}
-
 pub struct SimulationApp {
     pub(super) system: System,
-    pub(super) proposed_dt: f64,
     pub(super) paused: bool,
     pub(super) scale: f32,
     pub(super) body_size_boost: f32,
@@ -130,7 +114,6 @@ pub struct SimulationApp {
     pub(super) show_grid: bool,
     pub(super) show_vectors: bool,
     pub(super) steps_per_frame: u32,
-    pub(super) collision_cor: f64,
     pub(super) place_mode: bool,
     pub(super) place_drag_start: Option<egui::Pos2>,
     pub(super) place_mass: f64,
@@ -153,22 +136,18 @@ pub struct SimulationApp {
     pub(super) panel_tab: PanelTab,
 
     pub(super) show_force_vectors: bool,
-    pub(super) show_impact_normals: bool,
     /// Non-None while the user is dragging a template card from the library panel.
     /// Cleared on mouse release; the canvas reads this to render a ghost and
     /// spawn the bodies on drop.
-    pub(super) template_drag: Option<fn() -> Template>,
+    pub(super) template_drag: Option<Box<dyn Fn() -> Template>>,
     /// Per-body accumulated rotation angle (radians), for the spoke indicator.
     pub(super) body_angles: Vec<f64>,
-    /// Active visual impact effects.
-    pub(super) impact_effects: Vec<ImpactEffect>,
 }
 
 impl SimulationApp {
     pub fn new(system: System) -> Self {
         Self {
             system,
-            proposed_dt: 1e-3,
             paused: true,
             scale: 10.0,
             body_size_boost: 64.0,
@@ -180,7 +159,6 @@ impl SimulationApp {
             show_grid: true,
             show_vectors: false,
             steps_per_frame: 1,
-            collision_cor: 0.0,
             place_mode: false,
             place_drag_start: None,
             place_mass: 1.0,
@@ -201,61 +179,18 @@ impl SimulationApp {
             physics_cfg: PhysicsConfig::default(),
             panel_tab: PanelTab::Add,
             show_force_vectors: false,
-            show_impact_normals: false,
             body_angles: Vec::new(),
-            impact_effects: Vec::new(),
             template_drag: None,
         }
     }
-}
 
-impl eframe::App for SimulationApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn draw_frame(&mut self, ctx: &egui::Context) {
         apply_visuals(ctx);
-
-        // ── Advance visual effects (real-wall-clock time) ─────────────────── //
-        let dt_real = ctx.input(|i| i.unstable_dt);
-
-        // Spawn burst effects from the previous physics step's collision events.
-        for event in self.system.take_impact_events() {
-            let kick = (event.v_rel * 0.04).clamp(0.005, 1.5);
-            const N: usize = 10;
-            let mut particles = Vec::with_capacity(N);
-            for k in 0..N {
-                let angle = std::f64::consts::TAU * k as f64 / N as f64;
-                // Deterministic speed variation: avoids rand dependency in UI layer.
-                let r_factor = 0.55 + 0.45 * ((k * 7 + 3) % N) as f64 / N as f64;
-                particles.push([
-                    event.x,
-                    event.y,
-                    angle.cos() * kick * r_factor,
-                    angle.sin() * kick * r_factor,
-                ]);
-            }
-            self.impact_effects.push(ImpactEffect {
-                world_x: event.x,
-                world_y: event.y,
-                nx: event.nx as f32,
-                ny: event.ny as f32,
-                age: 0.0,
-                particles,
-            });
-        }
-
-        // Advance and expire effects.
-        for effect in &mut self.impact_effects {
-            effect.age = (effect.age + dt_real / 0.2).min(1.0);
-            for p in &mut effect.particles {
-                p[0] += p[2] * dt_real as f64;
-                p[1] += p[3] * dt_real as f64;
-            }
-        }
-        self.impact_effects.retain(|e| e.age < 1.0);
 
         // ── Physics step ──────────────────────────────────────────────────── //
         if !self.paused {
             for _ in 0..self.steps_per_frame {
-                self.system.step_adaptive(self.proposed_dt);
+                self.system.step();
             }
         }
 
@@ -266,7 +201,7 @@ impl eframe::App for SimulationApp {
                 self.body_angles.resize(bodies.len(), 0.0);
             }
             if !self.paused {
-                let phys_dt = self.system.metrics().dt * self.steps_per_frame as f64;
+                let phys_dt = self.system.dt() * self.steps_per_frame as f64;
                 for (i, b) in bodies.iter().enumerate() {
                     self.body_angles[i] += b.omega_z * phys_dt;
                 }
@@ -279,6 +214,16 @@ impl eframe::App for SimulationApp {
         self.draw_inspector(ctx);
         self.draw_canvas(ctx);
 
-        ctx.request_repaint();
+        if !self.paused {
+            ctx.request_repaint();
+        }
+    }
+}
+
+impl eframe::App for SimulationApp {
+    fn save(&mut self, _storage: &mut dyn eframe::Storage) {}
+
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        self.draw_frame(ui.ctx());
     }
 }
