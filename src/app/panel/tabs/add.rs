@@ -1,7 +1,8 @@
 use crate::app::theme::{ACCENT_DIM, BORDER, DANGER, SUCCESS, TEXT_DIM, TEXT_SEC};
 use crate::app::theme::{field, primary_btn};
 use crate::app::ui::{BodyForm, SimulationApp, SpawnTab};
-use crate::domain::body::radius_from_density_mass;
+use crate::domain::body::{Body, radius_from_density_mass};
+use crate::domain::materials::Material;
 use crate::physics::gravity::G;
 use eframe::egui::{self, Color32, RichText, Stroke};
 
@@ -208,7 +209,39 @@ impl SimulationApp {
             .size(9.0)
             .color(TEXT_DIM),
         );
-        // TODO: spawn ring button (needs spawn_ring helper)
+        ui.add_space(6.0);
+
+        if primary_btn(ui, "+ Add ring") {
+            let n = self.spawn_ring_count as usize;
+            if n > 0 && self.spawn_ring_radius > 0.0 {
+                let total_m = self.system.total_mass();
+                let center = self.system.metrics();
+
+                let v = if total_m > 0.0 {
+                    (G * total_m / self.spawn_ring_radius).sqrt() * self.spawn_ring_vel_scale
+                } else {
+                    0.0
+                };
+
+                for i in 0..n {
+                    let angle = (i as f64 / n as f64) * std::f64::consts::TAU;
+
+                    let x = center.com_x + self.spawn_ring_radius * angle.cos();
+                    let y = center.com_y + self.spawn_ring_radius * angle.sin();
+
+                    // tangential velocity
+                    let vx = -v * angle.sin();
+                    let vy = v * angle.cos();
+
+                    let mut b = Body::new(x, y, vx, vy, self.spawn_ring_mass, Material::Rocky);
+
+                    b.density = self.place_density;
+                    b.sync_physical_properties();
+
+                    self.system.add_body(b);
+                }
+            }
+        }
     }
 
     fn panel_add_cluster(&mut self, ui: &mut egui::Ui) {
@@ -253,6 +286,31 @@ impl SimulationApp {
             });
         });
 
-        // TODO: spawn cluster button (needs spawn_cluster helper)
+        ui.add_space(6.0);
+
+        if primary_btn(ui, "+ Add cluster") {
+            let n = self.spawn_cluster_count as usize;
+            if n > 0 {
+                let center = self.system.metrics();
+
+                for _ in 0..n {
+                    let r = self.spawn_cluster_radius * rand::random::<f64>().sqrt();
+                    let theta = rand::random::<f64>() * std::f64::consts::TAU;
+
+                    let x = center.com_x + r * theta.cos();
+                    let y = center.com_y + r * theta.sin();
+
+                    let vx = (rand::random::<f64>() - 0.5) * self.spawn_cluster_vel_disp;
+                    let vy = (rand::random::<f64>() - 0.5) * self.spawn_cluster_vel_disp;
+
+                    let mut b = Body::new(x, y, vx, vy, self.spawn_cluster_mass, Material::Rocky);
+
+                    b.density = self.place_density;
+                    b.sync_physical_properties();
+
+                    self.system.add_body(b);
+                }
+            }
+        }
     }
 }

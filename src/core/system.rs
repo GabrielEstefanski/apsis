@@ -1,9 +1,27 @@
-//! Simulation orchestrator.
+//! Simulation orchestrator for an N-body gravitational system.
+//!
+//! This module defines the [`System`] type, responsible for advancing
+//! the state of a set of massive bodies interacting via gravity.
+//!
+//! ## Design goals
+//!
+//! - Preserve physical consistency with a symplectic integrator (Velocity Verlet)
+//! - Maintain deterministic and reproducible evolution
+//! - Provide diagnostics for energy and angular momentum conservation
+//! - Support Barnes–Hut acceleration for scalable simulations
+//!
+//! ## Important assumptions
+//!
+//! - Time step (`dt`) is constant (required for symplectic behavior)
+//! - The force field is evaluated consistently at well-defined points
+//! - No discrete events (e.g., collisions) are applied within integration steps
+//!
+//! ## Notes
+//!
+//! This system is intended for scientific and numerical experiments in
+//! gravitational dynamics, not for general-purpose physics engines.
 
-use crate::core::adaptive::{AccelerationStats, DtController, ThetaController};
 use crate::core::calibration;
-use crate::core::collision;
-use crate::core::collision::ImpactEvent;
 use crate::core::diagnostics::{DiagnosticsComputer, SimulationDiagnostics};
 use crate::core::metrics::Metrics;
 use crate::domain::body::Body;
@@ -14,79 +32,89 @@ use crate::physics::gravity::BarnesHutEngine;
 use crate::physics::integrator::{drift, evaluate_accelerations, half_kick};
 use std::collections::VecDeque;
 
-/// The central simulation state.
+/// Central simulation state for an N-body gravitational system.
 pub struct System {
+    /// Bodies participating in the simulation.
     bodies: Vec<Body>,
+
+    /// Trajectory history for visualization/debugging.
     trails: Vec<VecDeque<(f64, f64)>>,
     trail_cap: usize,
     trail_every: usize,
 
+    /// Total mass of the system (used for COM recentering).
     total_mass: f64,
+
+    /// Last computed energies.
     last_kinetic: f64,
     last_potential: f64,
 
+    /// Initial total energy (used as reference).
     initial_energy: Option<f64>,
-    initial_energy_scale: Option<f64>,
+
+    /// Relative energy error (diagnostic only).
     rel_energy_error: f64,
-    max_rel_energy_error: f64,
 
-    initial_angular_momentum: Option<f64>,
-    initial_angular_momentum_scale: Option<f64>,
-    rel_angular_momentum_error: f64,
-    max_rel_angular_momentum_error: f64,
-
+    /// Barnes–Hut engine for approximate force computation.
     engine: BarnesHutEngine,
+
+    /// Scratch buffer for accelerations.
     scratch_acc: Vec<(f64, f64)>,
 
-    theta_controller: ThetaController,
-    dt_controller: DtController,
+    /// Barnes–Hut opening angle parameter (θ).
+    theta: f64,
 
+    /// Diagnostics subsystem.
     diagnostics: DiagnosticsComputer,
     last_diag: SimulationDiagnostics,
-    probe_interval: u64,
 
+    /// Step counter.
     steps: u64,
+
+    /// Fixed time step.
     current_dt: f64,
-    last_proposed_dt: f64,
 
-    theta_fixed_rel_error: f64,
-    dt_fixed_rel_error: f64,
-    last_theta_error_norm: f64,
-
-    merges_this_step: usize,
-    bounces_this_step: usize,
-    near_miss_count: usize,
-    fragments_spawned_this_step: usize,
-    hit_and_runs_this_step: usize,
-    /// Cumulative ejecta dust mass (too small to individually track).
-    total_dust_mass: f64,
-
-    /// Coefficient of restitution: 0.0 = perfectly inelastic (merge if bound),
-    /// 1.0 = perfectly elastic.
-    cor: f64,
-
-    /// Gravitational strength multiplier.  1.0 = default (G₀ = 1).
-    /// Scales all force evaluations and the orbital-energy bound test in the
-    /// collision resolver.
+    /// Gravitational scaling factor (G multiplier).
     g_factor: f64,
 
-    /// Collision events accumulated since the last call to `take_impact_events`.
-    last_impact_events: Vec<ImpactEvent>,
+    /// Initial angular momentum (z-component) used as reference.
+    initial_angular_momentum: Option<f64>,
+
+    /// Relative angular momentum error (diagnostic only).
+    rel_angular_momentum_error: f64,
+
+    /// Absolute angular momentum error (always meaningful).
+    abs_angular_momentum_error: f64,
 }
 
 impl System {
+    /// Creates a new simulation system.
+    ///
+    /// # Parameters
+    ///
+    /// - `bodies`: Initial set of bodies
+    /// - `theta`: Barnes–Hut opening angle (controls accuracy vs performance)
+    /// - `dt`: Fixed time step
+    /// - `max_depth`: Maximum tree depth for Barnes–Hut
+    /// - `trail_cap`: Maximum stored points per trajectory
+    /// - `trail_every`: Sampling interval for trails
+    ///
+    /// # Notes
+    ///
+    /// - Smaller `theta` increases accuracy (approaches O(N²))
+    /// - Smaller `dt` improves stability and energy conservation
     pub fn new(
+        bodies: Vec<Body>,
+        theta: f64,
+        dt: f64,
+        max_depth: usize,
         trail_cap: usize,
         trail_every: usize,
-        max_depth: usize,
-        theta_controller: ThetaController,
-        dt_controller: DtController,
-        probe_interval: u64,
-        bodies: Vec<Body>,
     ) -> Self {
         let trails = (0..bodies.len())
             .map(|_| VecDeque::with_capacity(trail_cap))
             .collect();
+
         let total_mass = bodies.iter().map(|b| b.mass).sum();
 
         Self {
@@ -98,122 +126,44 @@ impl System {
             last_kinetic: 0.0,
             last_potential: 0.0,
             initial_energy: None,
-            initial_energy_scale: None,
             rel_energy_error: 0.0,
-            max_rel_energy_error: 0.0,
-            initial_angular_momentum: None,
-            initial_angular_momentum_scale: None,
-            rel_angular_momentum_error: 0.0,
-            max_rel_angular_momentum_error: 0.0,
             engine: BarnesHutEngine::new(max_depth),
             scratch_acc: Vec::new(),
-            theta_controller,
-            dt_controller,
+            theta,
             diagnostics: DiagnosticsComputer::new(),
             last_diag: SimulationDiagnostics::default(),
-            probe_interval,
             steps: 0,
-            current_dt: 0.0,
-            last_proposed_dt: 0.0,
-            theta_fixed_rel_error: 0.0,
-            dt_fixed_rel_error: 0.0,
-            last_theta_error_norm: 0.0,
-            merges_this_step: 0,
-            bounces_this_step: 0,
-            near_miss_count: 0,
-            fragments_spawned_this_step: 0,
-            hit_and_runs_this_step: 0,
-            total_dust_mass: 0.0,
-            cor: 0.0,
+            current_dt: dt,
             g_factor: 1.0,
-            last_impact_events: Vec::new(),
+            initial_angular_momentum: None,
+            rel_angular_momentum_error: 0.0,
+            abs_angular_momentum_error: 0.0,
         }
     }
 }
 
 impl System {
-    fn refresh_collision_geometry(&mut self) {
-        self.total_mass = self.bodies.iter().map(|b| b.mass).sum();
-        calibration::calibrate_softening_and_radii(&mut self.bodies, self.total_mass);
-    }
+    pub fn step(&mut self) {
+        let dt = self.current_dt;
+        let theta = self.theta;
 
-    pub fn step_adaptive(&mut self, proposed_dt: f64) -> f64 {
-        self.last_proposed_dt = proposed_dt;
+        let raw_pe =
+            evaluate_accelerations(&self.bodies, theta, &mut self.engine, &mut self.scratch_acc);
 
-        let stats = AccelerationStats::new(self.last_diag.max_acc, self.last_diag.jerk);
-
-        let safe_proposed = if self.rel_energy_error.abs()
-            > self.dt_controller.config.target_rel_energy_error * 2.0
-        {
-            proposed_dt * 0.5
-        } else {
-            proposed_dt
-        };
-
-        let dt = self
-            .dt_controller
-            .update(safe_proposed, self.rel_energy_error, stats);
-
-        self.step(dt);
-
-        if self.rel_energy_error.abs() > self.dt_controller.config.target_rel_energy_error * 10.0 {
-            self.last_proposed_dt = dt * 0.5;
-        }
-
-        dt
-    }
-    pub fn step(&mut self, dt: f64) {
-        self.last_proposed_dt = dt;
-        self.current_dt = dt;
-
-        if self.scratch_acc.len() != self.bodies.len() {
-            self.scratch_acc.resize(self.bodies.len(), (0.0, 0.0));
-        }
-
-        let theta = self.theta_controller.current();
-
-        let dt_changed = self.current_dt > 0.0 && (dt / self.current_dt - 1.0).abs() > 0.5;
-        let acc_stale = self.steps == 0 || dt_changed;
-
-        if acc_stale {
-            let raw_pe = evaluate_accelerations(
-                &self.bodies,
-                theta,
-                &mut self.engine,
-                &mut self.scratch_acc,
-            );
-            self.last_potential = self.scale_acc_and_pe(raw_pe);
-        }
+        self.last_potential = self.scale_acc_and_pe(raw_pe);
 
         half_kick(&mut self.bodies, &self.scratch_acc, 0.5 * dt);
 
-        let collision_outcome = self.advance_with_ccd(dt, theta);
-        self.merges_this_step = collision_outcome.merges;
-        self.bounces_this_step = collision_outcome.bounces;
-        self.near_miss_count = collision_outcome.near_misses;
-        self.fragments_spawned_this_step = collision_outcome.fragments_spawned;
-        self.hit_and_runs_this_step = collision_outcome.hit_and_runs;
-        self.total_dust_mass += collision_outcome.total_dust_mass;
-        self.last_impact_events
-            .extend(collision_outcome.impact_events);
+        drift(&mut self.bodies, dt);
 
-        let needs_final_acc = collision_outcome.merges == 0
-            && collision_outcome.fragments_spawned == 0
-            && collision_outcome.hit_and_runs == 0;
-
-        if needs_final_acc {
-            let raw_pe = evaluate_accelerations(
-                &self.bodies,
-                theta,
-                &mut self.engine,
-                &mut self.scratch_acc,
-            );
-            self.last_potential = self.scale_acc_and_pe(raw_pe);
-        }
+        let raw_pe_after =
+            evaluate_accelerations(&self.bodies, theta, &mut self.engine, &mut self.scratch_acc);
+        self.last_potential = self.scale_acc_and_pe(raw_pe_after);
 
         half_kick(&mut self.bodies, &self.scratch_acc, 0.5 * dt);
 
         self.steps += 1;
+
         self.last_diag = self
             .diagnostics
             .compute(&self.scratch_acc, &self.bodies, dt);
@@ -228,99 +178,12 @@ impl System {
             }
         }
 
-        if collision_outcome.merges > 0
-            || collision_outcome.fragments_spawned > 0
-            || collision_outcome.hit_and_runs > 0
-        {
-            self.reset_energy_baseline();
-        }
         self.update_energy_tracking();
-
-        if self.steps % self.probe_interval == 0 {
-            self.update_separated_errors();
-        }
-        self.theta_controller
-            .update(self.theta_fixed_rel_error, self.current_dt);
+        self.update_angular_momentum_tracking();
 
         if self.steps % 97 == 0 {
             calibration::recenter_com(&mut self.bodies, &mut self.trails, self.total_mass);
         }
-    }
-
-    fn advance_with_ccd(&mut self, dt: f64, theta: f64) -> collision::CollisionOutcome {
-        let mut outcome = collision::CollisionOutcome::default();
-        let mut remaining = dt.max(0.0);
-        let max_iterations = 32;
-        let mut iterations = 0;
-
-        while remaining > 1e-8 && iterations < max_iterations {
-            iterations += 1;
-
-            let Some(event) =
-                collision::find_earliest_contact(&self.bodies, &self.scratch_acc, remaining)
-            else {
-                drift(&mut self.bodies, remaining);
-                return outcome;
-            };
-
-            if event.time > 0.0 {
-                drift(&mut self.bodies, event.time);
-                remaining -= event.time;
-            }
-
-            let event_outcome = collision::resolve_contact(
-                &mut self.bodies,
-                &mut self.trails,
-                event.i,
-                event.j,
-                self.cor,
-                self.g_factor,
-            );
-
-            outcome.merges += event_outcome.merges;
-            outcome.bounces += event_outcome.bounces;
-            outcome.near_misses += event_outcome.near_misses;
-            outcome.fragments_spawned += event_outcome.fragments_spawned;
-            outcome.hit_and_runs += event_outcome.hit_and_runs;
-            outcome.total_dust_mass += event_outcome.total_dust_mass;
-            outcome.impact_events.extend(event_outcome.impact_events);
-
-            let topology_changed = event_outcome.merges > 0
-                || event_outcome.fragments_spawned > 0
-                || event_outcome.hit_and_runs > 0;
-
-            let physics_changed = topology_changed || event_outcome.bounces > 0;
-
-            if !physics_changed {
-                let epsilon = remaining.min(1e-8);
-                if epsilon <= 0.0 {
-                    break;
-                }
-                drift(&mut self.bodies, epsilon);
-                remaining -= epsilon;
-                continue;
-            }
-
-            if topology_changed {
-                self.refresh_collision_geometry();
-                self.scratch_acc.resize(self.bodies.len(), (0.0, 0.0));
-                self.update_separated_errors();
-            }
-
-            let raw_pe_mid = evaluate_accelerations(
-                &self.bodies,
-                theta,
-                &mut self.engine,
-                &mut self.scratch_acc,
-            );
-            self.last_potential = self.scale_acc_and_pe(raw_pe_mid);
-        }
-
-        if remaining > 1e-8 {
-            drift(&mut self.bodies, remaining);
-        }
-
-        outcome
     }
 }
 
@@ -342,243 +205,281 @@ impl System {
 }
 
 impl System {
-    pub fn reset_energy_baseline(&mut self) {
-        self.initial_energy = None;
-        self.initial_energy_scale = None;
-        self.rel_energy_error = 0.0;
-        self.max_rel_energy_error = 0.0;
-        self.initial_angular_momentum = None;
-        self.initial_angular_momentum_scale = None;
-        self.rel_angular_momentum_error = 0.0;
-        self.max_rel_angular_momentum_error = 0.0;
-    }
-
+    /// Updates energy diagnostics for the current simulation state.
+    ///
+    /// # Computes
+    ///
+    /// - Kinetic energy
+    /// - Total mechanical energy
+    /// - Relative energy drift from the initial state
+    ///
+    /// # Notes
+    ///
+    /// - The baseline energy is initialized on first call
+    /// - In a correct symplectic simulation:
+    ///     - Energy should oscillate around the baseline
+    ///     - No long-term drift should be observed
     fn update_energy_tracking(&mut self) {
         let kinetic = kinetic_energy(&self.bodies);
         self.last_kinetic = kinetic;
+
         let total = total_energy(kinetic, self.last_potential);
 
+        // Initialize baseline once
         let baseline = match self.initial_energy {
             Some(v) => v,
             None => {
-                let scale = (kinetic.abs() + self.last_potential.abs()).max(1e-12);
                 self.initial_energy = Some(total);
-                self.initial_energy_scale = Some(scale);
                 total
             }
         };
 
-        let denom = self
-            .initial_energy_scale
-            .unwrap_or_else(|| baseline.abs().max(1e-12));
+        let denom = baseline.abs().max(1e-12);
         self.rel_energy_error = (total - baseline) / denom;
+    }
 
-        if self.rel_energy_error.abs() > self.max_rel_energy_error {
-            self.max_rel_energy_error = self.rel_energy_error.abs();
-        }
-
-        // Angular momentum drift
+    /// Updates angular momentum diagnostics.
+    ///
+    /// # Computes
+    ///
+    /// - Absolute angular momentum error
+    /// - Relative angular momentum error (when meaningful)
+    ///
+    /// # Notes
+    ///
+    /// - Relative error becomes unstable when angular momentum ≈ 0
+    /// - Absolute error is always reliable
+    fn update_angular_momentum_tracking(&mut self) {
         let lz = angular_momentum_z(&self.bodies);
-        let lz_baseline = match self.initial_angular_momentum {
+
+        let baseline = match self.initial_angular_momentum {
             Some(v) => v,
             None => {
-                // Scale: use |Lz| if non-trivial, otherwise fall back to a
-                // kinematic estimate Σ mᵢ |rᵢ||vᵢ| so near-zero-Lz systems
-                // still get a meaningful relative error.
-                let kinematic_scale: f64 = self
-                    .bodies
-                    .iter()
-                    .map(|b| {
-                        let r = (b.x * b.x + b.y * b.y).sqrt();
-                        let v = (b.vx * b.vx + b.vy * b.vy).sqrt();
-                        b.mass * r * v
-                    })
-                    .sum::<f64>()
-                    .max(1e-12);
-                let scale = lz.abs().max(kinematic_scale * 1e-3).max(1e-12);
                 self.initial_angular_momentum = Some(lz);
-                self.initial_angular_momentum_scale = Some(scale);
                 lz
             }
         };
 
-        let lz_denom = self
-            .initial_angular_momentum_scale
-            .unwrap_or_else(|| lz_baseline.abs().max(1e-12));
-        self.rel_angular_momentum_error = (lz - lz_baseline) / lz_denom;
+        // Absolute error (always valid)
+        self.abs_angular_momentum_error = (lz - baseline).abs();
 
-        if self.rel_angular_momentum_error.abs() > self.max_rel_angular_momentum_error {
-            self.max_rel_angular_momentum_error = self.rel_angular_momentum_error.abs();
-        }
+        // Relative error (only meaningful when baseline is not near zero)
+        let denom = baseline.abs().max(1e-12);
+        self.rel_angular_momentum_error = (lz - baseline) / denom;
     }
 
-    fn update_separated_errors(&mut self) {
-        let n = self.bodies.len();
-        if n == 0 {
-            return;
-        }
-
-        let base_energy = total_energy(self.last_kinetic, self.last_potential);
-        let denom = self
-            .initial_energy_scale
-            .unwrap_or_else(|| base_energy.abs().max(1e-9));
-        let theta = self.theta_controller.current();
-
-        let k = ((n as f64).sqrt().ceil() as usize).min(n);
-        let step_size = (n / k).max(1);
-        let mut idx = (self.steps as usize) % n;
-        let mut sum = 0.0_f64;
-
-        for _ in 0..k {
-            let e = self.engine.theta_error_proxy(idx, &self.bodies, theta);
-            sum += e * e;
-            idx = (idx + step_size) % n;
-        }
-
-        let raw = (sum / k as f64).sqrt();
-        let alpha = (self.current_dt / (0.1 + self.current_dt)).clamp(0.05, 0.3);
-        self.theta_fixed_rel_error = alpha * raw + (1.0 - alpha) * self.theta_fixed_rel_error;
-        self.last_theta_error_norm =
-            self.theta_fixed_rel_error / self.theta_controller.target_error;
-
-        let dt = self.last_proposed_dt.clamp(
-            self.dt_controller.config.min_dt,
-            self.dt_controller.config.max_dt,
-        );
-
-        let specific_energy_scale = denom / self.total_mass.max(1e-12);
-        let vel = self.last_diag.max_vel;
-        let acc = self.last_diag.max_acc;
-        let jerk = self.last_diag.jerk;
-        self.dt_fixed_rel_error =
-            (vel * acc * dt * dt + jerk * dt * dt * dt) / specific_energy_scale.max(1e-12);
-    }
-}
-
-impl System {
+    /// Resets the velocity of the system so that the center of mass is at rest.
+    ///
+    /// # Notes
+    ///
+    /// - This operation preserves relative motion
+    /// - It removes global drift from numerical accumulation
+    /// - Does not affect internal dynamics
     pub fn zero_com_velocity(&mut self) {
-        if calibration::zero_com_velocity(&mut self.bodies, self.total_mass) {
-            self.reset_energy_baseline();
-        }
+        calibration::zero_com_velocity(&mut self.bodies, self.total_mass);
     }
 
+    /// Recenters the system so that the center of mass is at the origin.
+    ///
+    /// # Notes
+    ///
+    /// - Affects only the reference frame
+    /// - Does not alter relative trajectories
+    /// - Useful to avoid numerical drift over long simulations
     pub fn recenter_com(&mut self) {
         calibration::recenter_com(&mut self.bodies, &mut self.trails, self.total_mass);
     }
 }
 
 impl System {
+    /// Adds a new body to the simulation.
+    ///
+    /// # Notes
+    ///
+    /// - Resets energy baseline since the system state changes
+    /// - Does NOT apply any collision-related adjustments
+    /// - Assumes the caller provides physically consistent values
     pub fn add_body(&mut self, mut body: Body) {
         body.sync_physical_properties();
-        body.softening = body.softening.max(body.physical_radius * 2.0);
-        body.radius = body.radius.min(body.softening * 0.5);
+
+        self.total_mass += body.mass;
+
         self.bodies.push(body);
         self.trails.push(VecDeque::with_capacity(self.trail_cap));
-        self.refresh_collision_geometry();
+
+        // Reset energy baseline due to topology change
         self.initial_energy = None;
-        self.initial_energy_scale = None;
     }
 
+    /// Replaces the entire set of bodies in the simulation.
+    ///
+    /// # Behavior
+    ///
+    /// - Clears all previous state
+    /// - Recomputes total mass
+    /// - Resets diagnostics and energy tracking
+    ///
+    /// # Notes
+    ///
+    /// - Center-of-mass is re-centered
+    /// - System starts from a clean deterministic state
     pub fn load_bodies(&mut self, bodies: Vec<Body>) {
         self.bodies.clear();
         self.trails.clear();
         self.scratch_acc.clear();
+
         self.total_mass = 0.0;
 
-        for b in bodies {
+        for mut b in bodies {
+            b.sync_physical_properties();
             self.total_mass += b.mass;
+
             self.bodies.push(b);
             self.trails.push(VecDeque::with_capacity(self.trail_cap));
         }
 
+        // Reset simulation state
         self.initial_energy = None;
-        self.initial_energy_scale = None;
         self.rel_energy_error = 0.0;
-        self.max_rel_energy_error = 0.0;
-        self.initial_angular_momentum = None;
-        self.initial_angular_momentum_scale = None;
-        self.rel_angular_momentum_error = 0.0;
-        self.max_rel_angular_momentum_error = 0.0;
-        self.current_dt = 0.0;
+
         self.steps = 0;
         self.last_potential = 0.0;
-        self.theta_fixed_rel_error = 0.0;
-        self.dt_fixed_rel_error = 0.0;
-        self.last_theta_error_norm = 0.0;
+        self.last_kinetic = 0.0;
+
         self.diagnostics = DiagnosticsComputer::new();
         self.last_diag = SimulationDiagnostics::default();
 
+        // Normalize reference frame
         self.zero_com_velocity();
         self.recenter_com();
-        self.refresh_collision_geometry();
     }
 
+    /// Removes a body from the system.
+    ///
+    /// # Notes
+    ///
+    /// - Uses `swap_remove` for O(1) removal
+    /// - Resets energy baseline due to system change
     pub fn remove_body(&mut self, index: usize) {
         if index < self.bodies.len() {
-            self.bodies.swap_remove(index);
+            let removed = self.bodies.swap_remove(index);
             self.trails.swap_remove(index);
-            self.refresh_collision_geometry();
+
+            self.total_mass -= removed.mass;
+
             self.initial_energy = None;
-            self.initial_energy_scale = None;
             self.rel_energy_error = 0.0;
-            self.max_rel_energy_error = 0.0;
         }
     }
 
-    pub fn update_body(&mut self, index: usize, body: Body) {
+    /// Updates a body in-place.
+    ///
+    /// # Behavior
+    ///
+    /// - Replaces the body at the given index
+    /// - Recomputes derived physical properties
+    ///
+    /// # Notes
+    ///
+    /// - If mass changes, energy baseline is reset
+    pub fn update_body(&mut self, index: usize, mut body: Body) {
         if let Some(slot) = self.bodies.get_mut(index) {
             let mass_changed = (slot.mass - body.mass).abs() > 1e-15;
-            let mut updated = body;
-            updated.sync_physical_properties();
-            updated.softening = updated.softening.max(updated.physical_radius * 2.0);
-            updated.radius = updated.radius.min(updated.softening * 0.5);
-            *slot = updated;
-            self.refresh_collision_geometry();
+
+            body.sync_physical_properties();
+
+            // Update total mass if needed
+            if mass_changed {
+                self.total_mass += body.mass - slot.mass;
+            }
+
+            *slot = body;
+
             if mass_changed {
                 self.initial_energy = None;
-                self.initial_energy_scale = None;
+                self.rel_energy_error = 0.0;
             }
         }
     }
 }
 
 impl System {
+    /// Returns an immutable slice of all bodies in the simulation.
     pub fn bodies(&self) -> &[Body] {
         &self.bodies
     }
 
+    pub fn dt(&self) -> f64 {
+        self.current_dt
+    }
+
+    /// Returns the trajectory (trail) of a specific body, if it exists.
+    ///
+    /// # Parameters
+    /// - `index`: Index of the body
+    ///
+    /// # Returns
+    /// - `Some(&trail)` if the body exists
+    /// - `None` otherwise
     pub fn trail(&self, index: usize) -> Option<&VecDeque<(f64, f64)>> {
         self.trails.get(index)
     }
 
+    /// Returns all stored trajectory trails.
+    ///
+    /// Each entry corresponds to one body.
     pub fn trails(&self) -> &[VecDeque<(f64, f64)>] {
         &self.trails
     }
 
+    /// Returns the total mass of the system.
+    ///
+    /// This is maintained incrementally for performance.
     pub fn total_mass(&self) -> f64 {
         self.total_mass
     }
 
-    pub fn set_theta(&mut self, theta: f64) {
-        self.theta_controller.set(theta);
-    }
-
-    pub fn set_cor(&mut self, cor: f64) {
-        self.cor = cor.clamp(0.0, 1.0);
-    }
-
+    /// Sets the gravitational scaling factor.
+    ///
+    /// # Notes
+    ///
+    /// - Effective gravitational constant becomes `G = g_factor`
+    /// - Must be non-negative
+    /// - Should remain constant during a simulation run
     pub fn set_g_factor(&mut self, g: f64) {
         self.g_factor = g.max(0.0);
     }
 
+    /// Returns the current gravitational scaling factor.
     pub fn g_factor(&self) -> f64 {
         self.g_factor
     }
 
+    pub fn set_dt(&mut self, dt: f64) {
+        self.current_dt = dt;
+    }
+
+    /// Returns a reference to the Barnes–Hut engine.
+    ///
+    /// Useful for inspection or advanced diagnostics.
     pub fn engine(&self) -> &BarnesHutEngine {
         &self.engine
     }
 
+    /// Returns diagnostic metrics for the current simulation state.
+    ///
+    /// # Includes
+    ///
+    /// - Kinetic, potential, and total energy
+    /// - Angular momentum (z-component)
+    /// - Center-of-mass position and velocity
+    /// - Relative energy error
+    /// - Integration diagnostics (max acceleration, velocity, jerk)
+    ///
+    /// # Notes
+    ///
+    /// - All values correspond to the last completed integration step
+    /// - No adaptive or heuristic metrics are included
     pub fn metrics(&self) -> Metrics {
         let kinetic = self.last_kinetic;
         let potential = self.last_potential;
@@ -588,46 +489,43 @@ impl System {
         let (com_x, com_y, com_vx, com_vy) = center_of_mass_state(&self.bodies);
 
         Metrics {
+            // ── Energetics ─────────────────────────────── //
             kinetic,
             potential,
             total_energy: total,
+            rel_energy_error: self.rel_energy_error,
+
+            // ── Angular momentum ───────────────────────── //
             angular_momentum_z: lz,
             rel_angular_momentum_error: self.rel_angular_momentum_error,
-            max_rel_angular_momentum_error: self.max_rel_angular_momentum_error,
+            abs_angular_momentum_error: self.abs_angular_momentum_error,
+
+            // ── Center of mass ─────────────────────────── //
             com_x,
             com_y,
             com_vx,
             com_vy,
+
+            // ── Simulation parameters ──────────────────── //
             g_factor: self.g_factor,
-            theta: self.theta_controller.current(),
+            theta: self.theta,
             dt: self.current_dt,
-            rel_energy_error: self.rel_energy_error,
-            max_rel_energy_error: self.max_rel_energy_error,
-            theta_fixed_rel_error: self.theta_fixed_rel_error,
-            dt_fixed_rel_error: self.dt_fixed_rel_error,
-            last_theta_error_norm: self.last_theta_error_norm,
-            theta_error_smoothed_norm: self.theta_controller.error(),
-            dt_controller_state: self.dt_controller.last_dt(),
+
+            // ── Diagnostics ────────────────────────────── //
             max_acc: self.last_diag.max_acc,
             jerk: self.last_diag.jerk,
             max_vel: self.last_diag.max_vel,
-            merges_this_step: self.merges_this_step,
-            bounces_this_step: self.bounces_this_step,
-            near_miss_count: self.near_miss_count,
-            fragments_spawned_this_step: self.fragments_spawned_this_step,
-            hit_and_runs_this_step: self.hit_and_runs_this_step,
-            total_dust_mass: self.total_dust_mass,
         }
     }
 
-    /// Drain and return all collision events since the last call.
-    /// The internal buffer is cleared; events accumulate across `steps_per_frame` physics steps.
-    pub fn take_impact_events(&mut self) -> Vec<ImpactEvent> {
-        std::mem::take(&mut self.last_impact_events)
-    }
-
-    /// Accelerations computed during the last integration step.
+    /// Returns accelerations computed during the last integration step.
+    ///
     /// Each entry corresponds to `bodies()[i]`.
+    ///
+    /// # Notes
+    ///
+    /// - Values are updated during the last force evaluation
+    /// - Useful for debugging or numerical analysis
     pub fn last_accelerations(&self) -> &[(f64, f64)] {
         &self.scratch_acc
     }

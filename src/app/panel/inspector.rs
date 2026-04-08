@@ -30,22 +30,29 @@ impl SimulationApp {
         metric(ui, "vx", &format!("{:.5}", body.vx), TEXT_DIM);
         metric(ui, "vy", &format!("{:.5}", body.vy), TEXT_DIM);
         metric(ui, "mass", &format!("{:.5}", body.mass), TEXT_DIM);
-        metric(ui, "r_phys", &format!("{:.5}", body.physical_radius), TEXT_DIM);
-        metric(ui, "r_coll", &format!("{:.5}", body.radius), TEXT_DIM);
+        metric(
+            ui,
+            "r_phys",
+            &format!("{:.5}", body.physical_radius),
+            TEXT_DIM,
+        );
         metric(ui, "soft", &format!("{:.5}", body.softening), TEXT_DIM);
         metric(ui, "density", &format!("{:.4e}", body.density), TEXT_DIM);
 
         section(ui, "COLOR");
 
         let [r, g, b_] = body.color;
-        let mut color_rgb: [f32; 3] =
-            [r as f32 / 255.0, g as f32 / 255.0, b_ as f32 / 255.0];
+        let mut color_rgb: [f32; 3] = [r as f32 / 255.0, g as f32 / 255.0, b_ as f32 / 255.0];
         let color_changed = ui.color_edit_button_rgb(&mut color_rgb).changed();
         let is_custom = body.color != body.material.props().base_color;
         ui.label(
-            RichText::new(if is_custom { "custom" } else { "auto (material)" })
-                .size(9.5)
-                .color(TEXT_DIM),
+            RichText::new(if is_custom {
+                "custom"
+            } else {
+                "auto (material)"
+            })
+            .size(9.5)
+            .color(TEXT_DIM),
         );
         let reset_color = is_custom && secondary_btn(ui, "Reset color");
 
@@ -126,7 +133,6 @@ impl SimulationApp {
                 );
                 b.density = density;
                 b.sync_physical_properties();
-                b.radius = b.physical_radius;
                 b.softening = b.softening.max(b.physical_radius * 2.0);
                 b.moment_inertia = default_moment_inertia(mass, b.physical_radius);
                 Some(b)
@@ -137,8 +143,7 @@ impl SimulationApp {
                     self.selection_form.as_mut().unwrap().error = None;
                 }
                 None => {
-                    self.selection_form.as_mut().unwrap().error =
-                        Some("invalid values".into());
+                    self.selection_form.as_mut().unwrap().error = Some("invalid values".into());
                 }
             }
         }

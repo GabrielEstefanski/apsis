@@ -18,7 +18,7 @@ impl SimulationApp {
             .frame(
                 egui::Frame::none()
                     .fill(crate::app::theme::PANEL_BG)
-                    .inner_margin(egui::Margin::symmetric(12.0, 5.0)),
+                    .inner_margin(egui::Margin::symmetric(12, 5)),
             )
             .show(ctx, |ui| self.toolbar_content(ui));
     }
@@ -28,7 +28,7 @@ impl SimulationApp {
             .frame(
                 egui::Frame::none()
                     .fill(crate::app::theme::PANEL_BG)
-                    .inner_margin(egui::Margin::symmetric(12.0, 10.0)),
+                    .inner_margin(egui::Margin::symmetric(12, 10)),
             )
             .min_width(220.0)
             .max_width(220.0)
@@ -64,7 +64,7 @@ impl SimulationApp {
             .frame(
                 egui::Frame::none()
                     .fill(crate::app::theme::PANEL_BG)
-                    .inner_margin(egui::Margin::symmetric(14.0, 14.0)),
+                    .inner_margin(egui::Margin::symmetric(14, 14)),
             )
             .min_width(200.0)
             .max_width(200.0)
