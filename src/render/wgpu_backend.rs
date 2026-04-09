@@ -236,12 +236,7 @@ impl GpuResources {
     ///
     /// Lines are submitted before circles so that body discs render on top of
     /// trail segments when both occupy the same screen area.
-    fn draw<'rp>(
-        &'rp self,
-        pass: &mut wgpu::RenderPass<'rp>,
-        circle_count: u32,
-        line_count: u32,
-    ) {
+    fn draw<'rp>(&'rp self, pass: &mut wgpu::RenderPass<'rp>, circle_count: u32, line_count: u32) {
         if line_count > 0 {
             pass.set_pipeline(&self.line_pipeline);
             pass.set_bind_group(0, &self.bind_group, &[]);
