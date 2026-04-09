@@ -37,9 +37,6 @@ pub enum Material {
     /// Dirty snowball: high porosity, very volatile (comet nuclei).
     Comet,
 
-    /// Diffuse ejecta cloud that aggregates unresolved impact dust.
-    DustCloud,
-
     // ── Stellar objects ───────────────────────────────────────────────────── //
     /// Main-sequence star (F/G/K spectral types — Sun-like).
     Star,
@@ -142,14 +139,6 @@ impl Material {
                 base_color: [160, 190, 215],
             },
 
-            Material::DustCloud => MaterialProps {
-                base_density: 120.0,
-                compressibility: 0.0,
-                density_min: 20.0,
-                density_max: 400.0,
-                base_color: [194, 176, 148],
-            },
-
             // ── Stellar objects ───────────────────────────────────────────── //
             Material::Star => MaterialProps {
                 base_density: 1400.0,
@@ -186,16 +175,10 @@ impl Material {
             Material::IceGiant => "Ice Giant",
             Material::Asteroid => "Asteroid",
             Material::Comet => "Comet",
-            Material::DustCloud => "Dust Cloud",
             Material::Star => "Star",
             Material::BrownDwarf => "Brown Dwarf",
             Material::WhiteDwarf => "White Dwarf",
         }
-    }
-
-    #[inline]
-    pub fn is_diffuse(self) -> bool {
-        matches!(self, Material::DustCloud)
     }
 }
 

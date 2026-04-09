@@ -4,6 +4,7 @@ use eframe::egui;
 pub enum TemplateCategory {
     Bodies,
     Systems,
+    ThreeBodyProblems,
 }
 
 impl TemplateCategory {
@@ -11,6 +12,7 @@ impl TemplateCategory {
         match self {
             Self::Bodies => "BODIES",
             Self::Systems => "SYSTEMS",
+            Self::ThreeBodyProblems => "3-BODY PROBLEMS",
         }
     }
 

@@ -43,8 +43,6 @@ pub struct Body {
     pub omega_z: f64,
 
     /// Moment of inertia around z-axis: I_z = (2/5)·m·r² for a uniform sphere.
-    ///
-    /// NOTE: This is computed using the **physical radius**, not the collision radius.
     pub moment_inertia: f64,
 
     /// Astrophysical material class.
@@ -87,11 +85,6 @@ impl Body {
     pub fn sync_physical_properties(&mut self) {
         self.physical_radius = radius_from_density_mass(self.density, self.mass);
         self.moment_inertia = default_moment_inertia(self.mass, self.physical_radius);
-    }
-
-    #[inline]
-    pub fn is_diffuse_cloud(&self) -> bool {
-        self.material.is_diffuse()
     }
 }
 
