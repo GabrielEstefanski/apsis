@@ -68,6 +68,34 @@ pub fn recenter_com(bodies: &mut [Body], trails: &mut [VecDeque<(f64, f64)>], to
     }
 }
 
+/// Returns the centre-of-mass offset `(x_cm, y_cm)` that must be subtracted to
+/// place the COM at the origin, or `None` when the system is already centred
+/// (COM within 1 fm) or the input is degenerate.
+///
+/// This is a pure query — it does **not** modify bodies or trails.
+pub fn com_offset(bodies: &[Body], total_mass: f64) -> Option<(f64, f64)> {
+    if total_mass <= 0.0 || bodies.is_empty() {
+        return None;
+    }
+    let x_cm = bodies.iter().map(|b| b.mass * b.x).sum::<f64>() / total_mass;
+    let y_cm = bodies.iter().map(|b| b.mass * b.y).sum::<f64>() / total_mass;
+    if x_cm.hypot(y_cm) < 1e-14 {
+        return None;
+    }
+    Some((x_cm, y_cm))
+}
+
+/// Translates all bodies by `(-dx, -dy)`, i.e. removes the given COM offset.
+///
+/// This is the body-only half of a full recentering; the caller is responsible
+/// for translating any associated trail data by the same vector.
+pub fn apply_body_shift(bodies: &mut [Body], dx: f64, dy: f64) {
+    for b in bodies.iter_mut() {
+        b.x -= dx;
+        b.y -= dy;
+    }
+}
+
 // ── Unit tests ──────────────────────────────────────────────────────────────── //
 
 #[cfg(test)]
