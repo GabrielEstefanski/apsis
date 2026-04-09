@@ -2,7 +2,7 @@ use crate::app::render_params::{RenderParams, compute_render_radius};
 use crate::app::theme::{ACCENT, BG, TEXT_DIM, body_radius, fmt_world, nice_grid_world};
 use crate::app::ui::{SelectionForm, SemanticScaleMode, SimulationApp};
 use crate::domain::body::Body;
-use crate::render::{RenderBackend, WgpuBackend};
+use crate::render::{RenderBackend, TrailRenderer, WgpuBackend};
 use crate::templates::instantiate_at;
 use eframe::egui::{self, Align2, Color32, FontId, Pos2, Rect, Stroke, Vec2};
 
@@ -185,7 +185,13 @@ impl SimulationApp {
 
                 // ── Trails ───────────────────────────────────────────────── //
                 if self.show_trails {
-                    self.draw_trails_backend(&mut backend, center, rect);
+                    TrailRenderer::submit(
+                        ui,
+                        rect,
+                        self.system.trail_buf_mut(),
+                        [center.x, center.y],
+                        self.scale,
+                    );
                 }
 
                 let bodies = self.system.bodies();
@@ -301,63 +307,6 @@ impl SimulationApp {
 
                 backend.end();
             });
-    }
-
-    fn draw_trails_backend(
-        &self,
-        backend: &mut dyn RenderBackend,
-        center: Pos2,
-        rect: Rect,
-    ) {
-        const MAX_TOTAL_SEGMENTS: usize = 60_000;
-        let trails = self.system.trails();
-        let n = trails.len();
-        if n == 0 {
-            return;
-        }
-
-        let segs_per_body = (MAX_TOTAL_SEGMENTS / n).clamp(20, 2000);
-
-        for (i, trail) in trails.iter().enumerate() {
-            let len = trail.len();
-            if len < 2 {
-                continue;
-            }
-
-            let base = self
-                .system
-                .bodies()
-                .get(i)
-                .map(|b| b.color)
-                .unwrap_or([255, 255, 255]);
-
-            let step = (len / segs_per_body).max(1);
-            let sampled_len = (len / step).max(1);
-            let mut prev: Option<Pos2> = None;
-
-            for (j, (tx, ty)) in trail.iter().step_by(step).enumerate() {
-                let t = j as f32 / sampled_len as f32;
-                let p = Pos2::new(
-                    center.x + *tx as f32 * self.scale,
-                    center.y + *ty as f32 * self.scale,
-                );
-                let fade = t.powf(2.2);
-
-                if let Some(prev_p) = prev {
-                    if rect.contains(prev_p) || rect.contains(p) {
-                        let alpha = (fade * 200.0) as u8;
-                        let width = 0.4 + fade * 0.8;
-                        backend.draw_line_segment(
-                            [prev_p.x, prev_p.y],
-                            [p.x, p.y],
-                            width,
-                            [base[0], base[1], base[2], alpha],
-                        );
-                    }
-                }
-                prev = Some(p);
-            }
-        }
     }
 
     /// Called every frame while `template_drag` is Some.

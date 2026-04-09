@@ -13,15 +13,13 @@ fn main() {
     let theta = 0.6; // Barnes–Hut accuracy
     let dt = 1e-4; // Fixed time step
     let max_depth = 32; // Barnes–Hut tree depth
-    let trail_cap = 12000; // Max trail length
-    let trail_every = 4; // Sampling interval
+    let trail_every = 4; // Trail sampling interval (ring-buffer depth is adaptive)
 
     let system = System::new(
         vec![], // start empty (or plug templates later)
         theta,
         dt,
         max_depth,
-        trail_cap,
         trail_every,
     );
 
