@@ -9,29 +9,27 @@ use crate::app::ui::SimulationApp;
 use eframe::egui;
 
 impl SimulationApp {
-    // ── PUBLIC ENTRY POINTS ───────────────────────────────────────────────── //
-    // These methods are called from the main update loop.
-    // They own only the egui frame/shell; all content is delegated to sub-modules.
-
+    // ── TOOLBAR ────────────────────────────────────────────────────────────
     pub(super) fn draw_toolbar(&mut self, ctx: &egui::Context) {
-        egui::TopBottomPanel::top("toolbar")
+        egui::Panel::top("toolbar")
             .frame(
-                egui::Frame::none()
+                egui::Frame::NONE
                     .fill(crate::app::theme::PANEL_BG)
                     .inner_margin(egui::Margin::symmetric(12, 5)),
             )
             .show(ctx, |ui| self.toolbar_content(ui));
     }
 
+    // ── LEFT PANEL ─────────────────────────────────────────────────────────
     pub(super) fn draw_panel(&mut self, ctx: &egui::Context) {
-        egui::SidePanel::left("controls")
+        egui::Panel::left("controls")
             .frame(
-                egui::Frame::none()
+                egui::Frame::NONE
                     .fill(crate::app::theme::PANEL_BG)
                     .inner_margin(egui::Margin::symmetric(12, 10)),
             )
-            .min_width(220.0)
-            .max_width(220.0)
+            .min_size(220.0)
+            .max_size(220.0)
             .show(ctx, |ui| {
                 ui.set_width(196.0);
 
@@ -48,6 +46,7 @@ impl SimulationApp {
             });
     }
 
+    // ── RIGHT PANEL ────────────────────────────────────────────────────────
     pub(super) fn draw_inspector(&mut self, ctx: &egui::Context) {
         let idx = match self.selected_body {
             Some(i) => i,
@@ -60,22 +59,21 @@ impl SimulationApp {
             return;
         }
 
-        egui::SidePanel::right("inspector")
+        egui::Panel::right("inspector")
             .frame(
-                egui::Frame::none()
+                egui::Frame::NONE
                     .fill(crate::app::theme::PANEL_BG)
                     .inner_margin(egui::Margin::symmetric(14, 14)),
             )
-            .min_width(200.0)
-            .max_width(200.0)
+            .min_size(200.0)
+            .max_size(200.0)
             .show(ctx, |ui| {
                 ui.set_width(172.0);
                 self.inspector_content(ui, idx);
             });
     }
 
-    // Visible to sub-modules that need to reset the viewport after loading a
-    // template or any other operation that changes the body set.
+    // ── FIT VIEW ───────────────────────────────────────────────────────────
     pub(in crate::app::panel) fn fit_to_view(&mut self) {
         let bodies = self.system.bodies();
 
@@ -103,6 +101,7 @@ impl SimulationApp {
 
         let center_x = (min_x + max_x) as f32 * 0.5;
         let center_y = (min_y + max_y) as f32 * 0.5;
+
         self.offset = egui::vec2(-center_x * self.scale, -center_y * self.scale);
     }
 }

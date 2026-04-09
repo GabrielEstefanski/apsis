@@ -1,8 +1,8 @@
-pub mod egui_backend;
-pub mod render_backend;
-pub mod trail_backend;
+pub mod callback_trait;
+pub mod grid_renderer;
+pub mod trail_renderer;
 pub mod wgpu_backend;
 
-pub use render_backend::RenderBackend;
-pub use trail_backend::TrailRenderer;
+pub use callback_trait::CallbackFn;
+pub use trail_renderer::TrailRenderer;
 pub use wgpu_backend::WgpuBackend;

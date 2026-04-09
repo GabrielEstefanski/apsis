@@ -130,13 +130,3 @@ pub fn secondary_btn(ui: &mut egui::Ui, label: &str) -> bool {
     )
     .clicked()
 }
-
-pub fn template_btn(ui: &mut egui::Ui, label: &str) -> bool {
-    ui.add(
-        egui::Button::new(RichText::new(label).size(10.5).color(TEXT_SEC))
-            .fill(Color32::TRANSPARENT)
-            .stroke(Stroke::new(0.5, BORDER))
-            .min_size(egui::vec2(ui.available_width(), 20.0)),
-    )
-    .clicked()
-}
