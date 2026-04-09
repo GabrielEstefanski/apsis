@@ -1,4 +1,4 @@
-//! Plummer-softened gravitational kernel — pure physics, no simulation state.
+//! Plummer-softened gravitational kernel.
 //!
 //! ## Physical model
 //!
@@ -84,6 +84,21 @@ pub fn plummer_acc(dx: f64, dy: f64, mass_j: f64, eps2: f64) -> (f64, f64) {
 pub fn plummer_phi(dx: f64, dy: f64, mass_j: f64, eps2: f64) -> f64 {
     let d2 = dx * dx + dy * dy + eps2;
     -G * mass_j * d2.sqrt().recip()
+}
+
+/// Newtonian potential (no softening) at body i due to body j.
+/// `Φᵢⱼ = −G mⱼ / r` where `r = √(dx² + dy²)`.
+///
+/// Singular at r = 0, so use with care.
+///
+/// Provided for testing and comparison with the Plummer kernel.
+/// Not used in the main simulation to avoid accidental singularities.
+///
+/// Returns negative for positive mass; diverges to −∞ at r = 0.
+#[inline]
+pub fn newtonian_phi(dx: f64, dy: f64, mass_j: f64) -> f64 {
+    let r = (dx * dx + dy * dy).sqrt();
+    -G * mass_j / r
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────── //

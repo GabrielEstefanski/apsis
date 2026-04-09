@@ -64,4 +64,20 @@ pub const TEMPLATES: &[TemplateEntry] = &[
         category: TemplateCategory::Systems,
         build: jupiter_trojans,
     },
+    // ── Three-body problems ─────────────────────────────────────────────────── //
+    TemplateEntry {
+        name: "3-Body Chaotic Ejection",
+        category: TemplateCategory::ThreeBodyProblems,
+        build: three_body_chaotic_ejection,
+    },
+    TemplateEntry {
+        name: "3-Body Figure Eight",
+        category: TemplateCategory::ThreeBodyProblems,
+        build: three_body_figure_eight,
+    },
+    TemplateEntry {
+        name: "3-Body Lagrange Triangle",
+        category: TemplateCategory::ThreeBodyProblems,
+        build: three_body_lagrange_triangle,
+    },
 ];

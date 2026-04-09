@@ -14,7 +14,11 @@ impl SimulationApp {
         );
         ui.add_space(6.0);
 
-        for cat in [TemplateCategory::Bodies, TemplateCategory::Systems] {
+        for cat in [
+            TemplateCategory::Bodies,
+            TemplateCategory::Systems,
+            TemplateCategory::ThreeBodyProblems,
+        ] {
             let entries: Vec<_> = TEMPLATES.iter().filter(|e| e.category == cat).collect();
             if entries.is_empty() {
                 continue;
