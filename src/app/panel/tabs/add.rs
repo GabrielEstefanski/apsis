@@ -1,8 +1,8 @@
-use crate::app::theme::{ACCENT_DIM, BORDER, DANGER, SUCCESS, TEXT_DIM, TEXT_SEC};
+use crate::app::theme::{ACCENT_DIM, BORDER, DANGER, SUCCESS, TEXT_DIM, TEXT_PRI, TEXT_SEC};
 use crate::app::theme::{field, primary_btn};
 use crate::app::ui::{BodyForm, SimulationApp, SpawnTab};
 use crate::domain::body::{Body, radius_from_density_mass};
-use crate::domain::materials::Material;
+use crate::domain::materials::{Material, density};
 use crate::physics::gravity::G;
 use eframe::egui::{self, Color32, RichText, Stroke};
 
@@ -54,45 +54,95 @@ impl SimulationApp {
     }
 
     fn panel_add_single(&mut self, ui: &mut egui::Ui) {
+        // ── Material / type dropdown ─────────────────────────────────── //
         ui.horizontal(|ui| {
-            let (col, lbl) = if self.place_mode {
-                (SUCCESS, "● place on")
-            } else {
-                (TEXT_SEC, "○ place off")
-            };
-            let btn = egui::Button::new(RichText::new(lbl).size(10.5).color(col))
-                .fill(Color32::TRANSPARENT)
-                .stroke(Stroke::new(
-                    0.5,
-                    if self.place_mode { SUCCESS } else { BORDER },
-                ))
-                .min_size(egui::vec2(ui.available_width(), 20.0));
-            if ui.add(btn).clicked() {
-                self.place_mode = !self.place_mode;
-            }
+            ui.label(RichText::new("type").size(10.0).color(TEXT_SEC));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let prev = self.place_material;
+                egui::ComboBox::from_id_salt("place_material")
+                    .selected_text(
+                        RichText::new(self.place_material.display_name())
+                            .size(10.5)
+                            .color(TEXT_PRI),
+                    )
+                    .width(ui.available_width())
+                    .show_ui(ui, |ui| {
+                        for &mat in Material::ALL {
+                            let props = mat.props();
+                            let [r, g, b] = props.base_color;
+                            let dot_col = egui::Color32::from_rgb(r, g, b);
+                            ui.horizontal(|ui| {
+                                let (dot, _) = ui.allocate_exact_size(
+                                    egui::vec2(10.0, 10.0),
+                                    egui::Sense::hover(),
+                                );
+                                ui.painter().circle_filled(dot.center(), 4.0, dot_col);
+                                ui.selectable_value(
+                                    &mut self.place_material,
+                                    mat,
+                                    RichText::new(mat.display_name()).size(10.5),
+                                );
+                            });
+                        }
+                    });
+                // When material changes, update density preset
+                if self.place_material != prev {
+                    self.place_mass = self.place_material.default_mass();
+                    self.place_density = density(self.place_material, self.place_mass);
+                }
+            });
         });
 
         ui.add_space(4.0);
-        ui.horizontal(|ui| {
+
+        // ── Place-on-canvas toggle ───────────────────────────────────── //
+        let (col, lbl) = if self.place_mode {
+            (SUCCESS, "● place on canvas")
+        } else {
+            (TEXT_SEC, "○ click canvas to place")
+        };
+        let btn = egui::Button::new(RichText::new(lbl).size(10.0).color(col))
+            .fill(Color32::TRANSPARENT)
+            .stroke(Stroke::new(0.5, if self.place_mode { SUCCESS } else { BORDER }))
+            .min_size(egui::vec2(ui.available_width(), 20.0));
+        if ui.add(btn).clicked() {
+            self.place_mode = !self.place_mode;
+        }
+
+        ui.add_space(4.0);
+
+        // ── Mass / density ───────────────────────────────────────────── //
+        let mass_changed = ui.horizontal(|ui| {
             ui.label(RichText::new("mass").size(10.0).color(TEXT_SEC));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let speed = (self.place_mass * 0.05).max(1e-8);
                 ui.add(
                     egui::DragValue::new(&mut self.place_mass)
-                        .speed(0.1)
-                        .clamp_range(1e-6..=1e6),
-                );
-            });
-        });
+                        .speed(speed)
+                        .range(1e-10..=1e12_f64),
+                )
+                .changed()
+            })
+            .inner
+        }).inner;
+
+        // Auto-update density when mass changes (follows material model)
+        if mass_changed {
+            self.place_density = density(self.place_material, self.place_mass);
+        }
+
         ui.horizontal(|ui| {
             ui.label(RichText::new("density").size(10.0).color(TEXT_SEC));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let speed = (self.place_density * 0.02).max(1e-4);
                 ui.add(
                     egui::DragValue::new(&mut self.place_density)
-                        .speed(0.01)
-                        .clamp_range(1e-6..=1e6),
+                        .speed(speed)
+                        .range(1e-6..=1e12_f64),
                 );
             });
         });
+
         {
             let r = radius_from_density_mass(self.place_density, self.place_mass);
             ui.label(

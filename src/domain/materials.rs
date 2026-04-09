@@ -166,6 +166,34 @@ impl Material {
         }
     }
 
+    /// All selectable materials in display order.
+    pub const ALL: &'static [Material] = &[
+        Material::Star,
+        Material::BrownDwarf,
+        Material::Gas,
+        Material::IceGiant,
+        Material::Rocky,
+        Material::Icy,
+        Material::Asteroid,
+        Material::Comet,
+        Material::WhiteDwarf,
+    ];
+
+    /// Suggested default mass for this material type (simulation units).
+    pub fn default_mass(self) -> f64 {
+        match self {
+            Material::Star => 1_000_000.0,
+            Material::BrownDwarf => 13_000.0,
+            Material::Gas => 1_000.0,
+            Material::IceGiant => 80.0,
+            Material::Rocky => 1.0,
+            Material::Icy => 0.05,
+            Material::Asteroid => 1e-4,
+            Material::Comet => 1e-6,
+            Material::WhiteDwarf => 500_000.0,
+        }
+    }
+
     /// Short human-readable name for UI display.
     pub fn display_name(self) -> &'static str {
         match self {

@@ -1,3 +1,5 @@
+use wgpu::*;
+
 mod app;
 mod core;
 mod domain;
@@ -13,7 +15,9 @@ fn main() {
     let theta = 0.6; // Barnes–Hut accuracy
     let dt = 1e-4; // Fixed time step
     let max_depth = 32; // Barnes–Hut tree depth
-    let trail_every = 4; // Trail sampling interval (ring-buffer depth is adaptive)
+    // trail_every is kept for API compatibility but is no longer used in step();
+    // the trail is now recorded once per rendered frame via push_trail().
+    let trail_every = 1;
 
     let system = System::new(
         vec![], // start empty (or plug templates later)

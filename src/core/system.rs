@@ -26,6 +26,30 @@ use crate::core::diagnostics::{DiagnosticsComputer, SimulationDiagnostics};
 use crate::core::metrics::Metrics;
 use crate::core::trail_buffer::{TrailBuffer, adaptive_capacity};
 use crate::domain::body::Body;
+
+/// Number of bodies that actually need individual trail rendering.
+///
+/// Belt members and sub-threshold bodies are excluded because their trails are
+/// suppressed by the renderer anyway. Using this count for ring-buffer capacity
+/// allocation keeps GPU memory proportional to what's actually rendered, not
+/// to the total body count (which can be dominated by asteroid belts).
+fn trail_body_count(bodies: &[Body]) -> usize {
+    if bodies.is_empty() {
+        return 0;
+    }
+    let max_mass = bodies
+        .iter()
+        .map(|b| b.mass)
+        .fold(0.0_f64, f64::max);
+    if max_mass <= 0.0 {
+        return bodies.len();
+    }
+    bodies
+        .iter()
+        .filter(|b| b.mass / max_mass > 1e-6)
+        .count()
+        .max(1)
+}
 use crate::physics::energy::{
     angular_momentum_z, center_of_mass_state, kinetic_energy, total_energy,
 };
@@ -110,7 +134,9 @@ impl System {
         trail_every: usize,
     ) -> Self {
         let n = bodies.len();
-        let mut trail_buf = TrailBuffer::new(n);
+        let trail_n = trail_body_count(&bodies);
+        let cap = adaptive_capacity(trail_n.max(1));
+        let mut trail_buf = TrailBuffer::new_with_capacity(n, cap);
         trail_buf.update_colors(&bodies);
 
         let total_mass = bodies.iter().map(|b| b.mass).sum();
@@ -164,10 +190,6 @@ impl System {
         self.last_diag = self
             .diagnostics
             .compute(&self.scratch_acc, &self.bodies, dt);
-
-        if self.steps % self.trail_every as u64 == 0 {
-            self.trail_buf.push(&self.bodies);
-        }
 
         self.update_energy_tracking();
         self.update_angular_momentum_tracking();
@@ -267,7 +289,8 @@ impl System {
         self.bodies.push(body);
 
         let n = self.bodies.len();
-        self.trail_buf.reset(n, adaptive_capacity(n));
+        let cap = adaptive_capacity(trail_body_count(&self.bodies).max(1));
+        self.trail_buf.reset(n, cap);
         self.trail_buf.update_colors(&self.bodies);
 
         self.initial_energy = None;
@@ -289,7 +312,8 @@ impl System {
         }
 
         let n = self.bodies.len();
-        self.trail_buf.reset(n, adaptive_capacity(n));
+        let cap = adaptive_capacity(trail_body_count(&self.bodies).max(1));
+        self.trail_buf.reset(n, cap);
         self.trail_buf.update_colors(&self.bodies);
 
         self.initial_energy = None;
@@ -314,7 +338,8 @@ impl System {
             self.total_mass -= removed.mass;
 
             let n = self.bodies.len();
-            self.trail_buf.reset(n, adaptive_capacity(n));
+            let cap = adaptive_capacity(trail_body_count(&self.bodies).max(1));
+            self.trail_buf.reset(n, cap);
             self.trail_buf.update_colors(&self.bodies);
 
             self.initial_energy = None;
@@ -387,6 +412,23 @@ impl System {
 
     pub fn set_dt(&mut self, dt: f64) {
         self.current_dt = dt;
+    }
+
+    pub fn trail_every(&self) -> usize {
+        self.trail_every
+    }
+
+    pub fn set_trail_every(&mut self, n: usize) {
+        self.trail_every = n.max(1);
+    }
+
+    /// Records the current body positions into the trail ring buffer.
+    ///
+    /// Call this **once per rendered frame** (not per physics step) so the
+    /// trail density is proportional to the amount of simulated time per
+    /// frame rather than to a fixed physics-step count.
+    pub fn push_trail(&mut self) {
+        self.trail_buf.push(&self.bodies);
     }
 
     /// Returns a reference to the Barnes–Hut engine.

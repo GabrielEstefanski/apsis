@@ -62,7 +62,7 @@ pub fn adaptive_capacity(n_bodies: usize) -> usize {
 // ── TrailBuffer ───────────────────────────────────────────────────────────────
 
 /// Dirty-state for the position buffer.
-#[derive(Default)]
+#[derive(Default, Clone)]
 enum PositionsDirty {
     #[default]
     Clean,
@@ -74,6 +74,7 @@ enum PositionsDirty {
 }
 
 /// Column-major ring buffer of trail positions for all simulation bodies.
+#[derive(Clone)]
 ///
 /// Call [`push`](Self::push) after each physics step that should record a
 /// position sample.  Call the `take_*` drain methods once per frame to
@@ -110,6 +111,14 @@ impl TrailBuffer {
     /// by [`adaptive_capacity`].
     pub fn new(n_bodies: usize) -> Self {
         let capacity = adaptive_capacity(n_bodies);
+        Self::new_with_capacity(n_bodies, capacity)
+    }
+
+    /// Creates an empty buffer for `n_bodies` bodies with an explicit `capacity`.
+    ///
+    /// Use this when the optimal capacity cannot be derived from `n_bodies` alone
+    /// (e.g. when many bodies are belt members that do not render individual trails).
+    pub fn new_with_capacity(n_bodies: usize, capacity: usize) -> Self {
         let mut buf = Self {
             positions: Vec::new(),
             colors: Vec::new(),

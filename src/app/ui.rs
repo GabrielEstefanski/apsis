@@ -1,8 +1,12 @@
 use crate::app::config::PhysicsConfig;
-use crate::app::theme::apply_visuals;
+use crate::app::render_hints::{BodyRenderHints, compute_render_hints};
+use crate::app::theme::{BG, apply_visuals};
 use crate::core::system::System;
 use crate::domain::body::Body;
+use crate::domain::materials::Material;
+use crate::render::{TrailRenderer, WgpuBackend};
 use crate::templates::Template;
+use std::sync::{Arc, Mutex};
 
 #[derive(PartialEq, Clone, Copy)]
 pub enum SpawnTab {
@@ -111,6 +115,7 @@ pub struct SimulationApp {
     pub(super) form: BodyForm,
     pub(super) form_error: Option<String>,
     pub(super) show_trails: bool,
+    pub(super) show_orbit_ellipses: bool,
     pub(super) show_grid: bool,
     pub(super) show_vectors: bool,
     pub(super) steps_per_frame: u32,
@@ -131,17 +136,26 @@ pub struct SimulationApp {
     pub(super) dragging_body: Option<usize>,
     pub(super) drag_start_world: Option<(f64, f64)>,
     pub(super) selection_form: Option<SelectionForm>,
-
     pub(super) physics_cfg: PhysicsConfig,
     pub(super) panel_tab: PanelTab,
-
     pub(super) show_force_vectors: bool,
-    /// Non-None while the user is dragging a template card from the library panel.
-    /// Cleared on mouse release; the canvas reads this to render a ghost and
-    /// spawn the bodies on drop.
     pub(super) template_drag: Option<Box<dyn Fn() -> Template>>,
-    /// Per-body accumulated rotation angle (radians), for the spoke indicator.
     pub(super) body_angles: Vec<f64>,
+    pub(super) render_hints: Vec<BodyRenderHints>,
+    pub(super) show_belts: bool,
+
+    pub(super) place_material: Material,
+
+    pub(super) trail: Option<TrailRenderer>,
+
+    // Camera inertia
+    pub(super) zoom_vel: f32,
+    pub(super) pan_vel: egui::Vec2,
+
+    pub(super) backend: Arc<Mutex<WgpuBackend>>,
+    pub(super) device: Option<Arc<wgpu::Device>>,
+    pub(super) queue: Option<Arc<wgpu::Queue>>,
+    pub(super) format: Option<wgpu::TextureFormat>,
 }
 
 impl SimulationApp {
@@ -156,6 +170,7 @@ impl SimulationApp {
             form: BodyForm::default(),
             form_error: None,
             show_trails: true,
+            show_orbit_ellipses: false,
             show_grid: true,
             show_vectors: false,
             steps_per_frame: 1,
@@ -179,40 +194,48 @@ impl SimulationApp {
             physics_cfg: PhysicsConfig::default(),
             panel_tab: PanelTab::Add,
             show_force_vectors: false,
+            render_hints: Vec::new(),
             body_angles: Vec::new(),
             template_drag: None,
+            show_belts: false,
+            place_material: Material::Rocky,
+            trail: None,
+
+            zoom_vel: 0.0,
+            pan_vel: egui::Vec2::ZERO,
+
+            backend: Arc::new(Mutex::new(WgpuBackend::new())),
+            device: None,
+            queue: None,
+            format: None,
         }
     }
 
-    fn draw_frame(&mut self, ctx: &egui::Context) {
-        apply_visuals(ctx);
+    fn draw_frame(&mut self, ui: &mut egui::Ui) {
+        let ctx = ui.ctx().clone();
 
-        // ── Physics step ──────────────────────────────────────────────────── //
+        apply_visuals(&ctx);
+
         if !self.paused {
             for _ in 0..self.steps_per_frame {
                 self.system.step();
             }
+
+            self.system.push_trail();
+            self.render_hints = compute_render_hints(self.system.bodies());
         }
 
-        // ── Update rotation angles (must happen after step) ───────────────── //
-        {
-            let bodies = self.system.bodies();
-            if self.body_angles.len() != bodies.len() {
-                self.body_angles.resize(bodies.len(), 0.0);
-            }
-            if !self.paused {
-                let phys_dt = self.system.dt() * self.steps_per_frame as f64;
-                for (i, b) in bodies.iter().enumerate() {
-                    self.body_angles[i] += b.omega_z * phys_dt;
-                }
-            }
-        }
+        // 🔴 PAINÉIS NO CONTEXT (ANTES DE QUALQUER CENTRAL)
+        self.draw_toolbar(&ctx);
+        self.draw_panel(&ctx);
+        self.draw_inspector(&ctx);
 
-        // ── Render ────────────────────────────────────────────────────────── //
-        self.draw_toolbar(ctx);
-        self.draw_panel(ctx);
-        self.draw_inspector(ctx);
-        self.draw_canvas(ctx);
+        // 🔴 CENTRAL POR ÚLTIMO
+        egui::CentralPanel::default()
+            .frame(egui::Frame::NONE.fill(BG))
+            .show(&ctx, |ui| {
+                self.draw_canvas(ui);
+            });
 
         if !self.paused {
             ctx.request_repaint();
@@ -223,7 +246,13 @@ impl SimulationApp {
 impl eframe::App for SimulationApp {
     fn save(&mut self, _storage: &mut dyn eframe::Storage) {}
 
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        self.draw_frame(ui.ctx());
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        let render_state = frame.wgpu_render_state().unwrap();
+
+        self.device = Some(render_state.device.clone().into());
+        self.queue = Some(render_state.queue.clone().into());
+        self.format = Some(render_state.target_format);
+
+        self.draw_frame(ui);
     }
 }

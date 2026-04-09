@@ -111,18 +111,22 @@ impl SimulationApp {
             });
 
         // ── Drift alert ───────────────────────────── //
-        let energy_bad = m.rel_energy_error.abs() >= 1e-5;
-        let lz_bad = m.rel_angular_momentum_error.abs() >= 1e-5;
+        // Lz relative error is meaningless when initial angular momentum ≈ 0
+        // (symmetric configs like figure-8). Detect by huge relative error.
+        let lz_ref_trivial = m.rel_angular_momentum_error.abs() > 1e3
+            || m.angular_momentum_z.abs() < 1e-10;
+
+        let energy_bad = m.rel_energy_error.abs() >= 1e-5
+            && m.total_energy.abs() > 1e-15;
+        let lz_bad = !lz_ref_trivial && m.rel_angular_momentum_error.abs() >= 1e-5;
 
         if energy_bad || lz_bad {
             ui.add_space(2.0);
 
             let mut parts = Vec::new();
-
             if energy_bad {
                 parts.push(format!("dE {}", sci(m.rel_energy_error)));
             }
-
             if lz_bad {
                 parts.push(format!("dLz {}", sci(m.rel_angular_momentum_error)));
             }
