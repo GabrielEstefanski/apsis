@@ -33,14 +33,19 @@ use crate::domain::body::Body;
 /// suppressed by the renderer anyway. Using this count for ring-buffer capacity
 /// allocation keeps GPU memory proportional to what's actually rendered, not
 /// to the total body count (which can be dominated by asteroid belts).
+/// Generate an auto-name for a new body given existing names.
+/// Counts existing names that start with the material prefix and appends N+1.
+fn auto_name(material: crate::domain::materials::Material, existing: &[String]) -> String {
+    let prefix = material.display_name();
+    let count = existing.iter().filter(|n| n.starts_with(prefix)).count() + 1;
+    format!("{prefix} {count}")
+}
+
 fn trail_body_count(bodies: &[Body]) -> usize {
     if bodies.is_empty() {
         return 0;
     }
-    let max_mass = bodies
-        .iter()
-        .map(|b| b.mass)
-        .fold(0.0_f64, f64::max);
+    let max_mass = bodies.iter().map(|b| b.mass).fold(0.0_f64, f64::max);
     if max_mass <= 0.0 {
         return bodies.len();
     }
@@ -50,14 +55,12 @@ fn trail_body_count(bodies: &[Body]) -> usize {
         .count()
         .max(1)
 }
-use crate::physics::orbital::{self, OrbitalElements};
 use crate::physics::energy::{
     angular_momentum_z, center_of_mass_state, kinetic_energy, total_energy,
 };
 use crate::physics::gravity::BarnesHutEngine;
-use crate::physics::integrator::{
-    drift, evaluate_accelerations, kick, Integrator, Y4_C, Y4_D,
-};
+use crate::physics::integrator::{Integrator, Y4_C, Y4_D, drift, evaluate_accelerations, kick};
+use crate::physics::orbital::{self, OrbitalElements};
 
 /// Central simulation state for an N-body gravitational system.
 pub struct System {
@@ -126,6 +129,10 @@ pub struct System {
 
     /// Absolute angular momentum error (always meaningful).
     abs_angular_momentum_error: f64,
+
+    /// Human-readable label for each body, parallel to `bodies`.
+    /// Kept separate because `Body` is `Copy` and cannot own a `String`.
+    names: Vec<String>,
 }
 
 impl System {
@@ -158,6 +165,15 @@ impl System {
         trail_buf.update_colors(&bodies);
 
         let total_mass = bodies.iter().map(|b| b.mass).sum();
+        let names = bodies.iter().map(|b| auto_name(b.material, &[])).collect::<Vec<_>>();
+        // Re-generate with correct counters (so Star 1, Star 2 … instead of all "Star 1")
+        let names = {
+            let mut acc: Vec<String> = Vec::with_capacity(bodies.len());
+            for b in &bodies {
+                acc.push(auto_name(b.material, &acc));
+            }
+            acc
+        };
 
         Self {
             bodies,
@@ -183,6 +199,7 @@ impl System {
             initial_angular_momentum: None,
             rel_angular_momentum_error: 0.0,
             abs_angular_momentum_error: 0.0,
+            names,
         }
     }
 }
@@ -353,6 +370,7 @@ impl System {
             body.softening = default_softening(body.mass) * self.softening_scale;
         }
         self.total_mass += body.mass;
+        self.names.push(auto_name(body.material, &self.names));
         self.bodies.push(body);
 
         let n = self.bodies.len();
@@ -363,6 +381,46 @@ impl System {
         self.initial_energy = None;
     }
 
+    /// Add multiple bodies in a single batch.
+    ///
+    /// More efficient than calling [`add_body`] in a loop: the trail buffer is
+    /// reset only once and the energy baseline is invalidated once.
+    pub fn add_bodies(&mut self, new_bodies: Vec<Body>) {
+        use crate::domain::body::default_softening;
+        for mut body in new_bodies {
+            body.sync_physical_properties();
+            if (self.softening_scale - 1.0).abs() > 1e-15 {
+                body.softening = default_softening(body.mass) * self.softening_scale;
+            }
+            self.total_mass += body.mass;
+            self.names.push(auto_name(body.material, &self.names));
+            self.bodies.push(body);
+        }
+
+        let n = self.bodies.len();
+        let cap = adaptive_capacity(trail_body_count(&self.bodies).max(1));
+        self.trail_buf.reset(n, cap);
+        self.trail_buf.update_colors(&self.bodies);
+        self.initial_energy = None;
+    }
+
+    /// Read the display name for body `idx`.
+    pub fn name(&self, idx: usize) -> &str {
+        self.names.get(idx).map(|s| s.as_str()).unwrap_or("")
+    }
+
+    /// All body names (parallel to `bodies()`).
+    pub fn names(&self) -> &[String] {
+        &self.names
+    }
+
+    /// Rename body `idx`. Silently ignores out-of-range indices.
+    pub fn set_name(&mut self, idx: usize, name: String) {
+        if let Some(slot) = self.names.get_mut(idx) {
+            *slot = name;
+        }
+    }
+
     /// Replaces the entire set of bodies in the simulation.
     ///
     /// All previous state is cleared, the trail buffer is reset, and the
@@ -370,11 +428,13 @@ impl System {
     pub fn load_bodies(&mut self, bodies: Vec<Body>) {
         self.bodies.clear();
         self.scratch_acc.clear();
+        self.names.clear();
         self.total_mass = 0.0;
 
         for mut b in bodies {
             b.sync_physical_properties();
             self.total_mass += b.mass;
+            self.names.push(auto_name(b.material, &self.names));
             self.bodies.push(b);
         }
 
@@ -404,6 +464,9 @@ impl System {
         if index < self.bodies.len() {
             let removed = self.bodies.swap_remove(index);
             self.total_mass -= removed.mass;
+            if index < self.names.len() {
+                self.names.swap_remove(index);
+            }
 
             let n = self.bodies.len();
             let cap = adaptive_capacity(trail_body_count(&self.bodies).max(1));
@@ -612,5 +675,76 @@ impl System {
     /// Call [`update_orbital_elements`] first to get fresh values.
     pub fn orbital_elements(&self) -> &[Option<OrbitalElements>] {
         &self.orbital_cache
+    }
+
+    // ── Snapshot (save / load) ───────────────────────────────────────────────
+
+    /// Capture the minimal state required for deterministic reproduction.
+    pub fn to_snapshot(&self) -> crate::core::snapshot::SimSnapshot {
+        use crate::core::snapshot::{BodyRecord, SimSnapshot};
+        SimSnapshot {
+            save_id: 0, // caller sets this via new_id() or save_to_dir()
+            t: self.t,
+            steps: self.steps,
+            dt: self.current_dt,
+            theta: self.theta,
+            softening_scale: self.softening_scale,
+            g_factor: self.g_factor,
+            integrator: self.integrator,
+            trail_every: self.trail_every,
+            bodies: self.bodies.iter().map(BodyRecord::from_body).collect(),
+            names: self.names.clone(),
+        }
+    }
+
+    /// Replace the current simulation state with a saved snapshot.
+    ///
+    /// The trail buffer is cleared (it is cosmetic and cannot be restored).
+    /// Energy / angular-momentum references are reset so the first post-load
+    /// step establishes new baselines.
+    pub fn restore_from_snapshot(&mut self, snap: &crate::core::snapshot::SimSnapshot) {
+        let bodies: Vec<Body> = snap.bodies.iter().map(|r| r.into_body()).collect();
+        // Restore names: use saved names if present, else auto-generate
+        self.names = if snap.names.len() == bodies.len() {
+            snap.names.clone()
+        } else {
+            let mut acc: Vec<String> = Vec::with_capacity(bodies.len());
+            for b in &bodies { acc.push(auto_name(b.material, &acc)); }
+            acc
+        };
+        let n = bodies.len();
+
+        self.bodies = bodies;
+        self.total_mass = self.bodies.iter().map(|b| b.mass).sum();
+        self.scratch_acc.clear();
+
+        // Rebuild trail buffer (empty — cosmetic data is not saved)
+        let cap =
+            crate::core::trail_buffer::adaptive_capacity(trail_body_count(&self.bodies).max(1));
+        self.trail_buf.reset(n, cap);
+        self.trail_buf.update_colors(&self.bodies);
+
+        // Restore physics parameters
+        self.t = snap.t;
+        self.steps = snap.steps;
+        self.current_dt = snap.dt;
+        self.theta = snap.theta;
+        self.softening_scale = snap.softening_scale;
+        self.g_factor = snap.g_factor;
+        self.integrator = snap.integrator;
+        self.trail_every = snap.trail_every.max(1);
+
+        // Reset energy / angular-momentum baselines so next step establishes
+        // fresh references relative to the restored state.
+        self.initial_energy = None;
+        self.initial_angular_momentum = None;
+        self.rel_energy_error = 0.0;
+        self.rel_angular_momentum_error = 0.0;
+        self.abs_angular_momentum_error = 0.0;
+        self.last_kinetic = 0.0;
+        self.last_potential = 0.0;
+        self.diagnostics = crate::core::diagnostics::DiagnosticsComputer::new();
+        self.last_diag = crate::core::diagnostics::SimulationDiagnostics::default();
+        self.orbital_cache.clear();
     }
 }

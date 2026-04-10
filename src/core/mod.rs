@@ -14,6 +14,8 @@
 pub mod calibration;
 pub mod diagnostics;
 pub mod metrics;
+pub mod physics_thread;
 pub mod recorder;
+pub mod snapshot;
 pub mod system;
 pub mod trail_buffer;

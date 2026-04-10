@@ -1,7 +1,9 @@
 use crate::app::config::PhysicsConfig;
 use crate::app::render_hints::{BodyRenderHints, compute_render_hints};
 use crate::app::theme::{BG, apply_visuals};
+use crate::core::physics_thread::{PhysicsHandle, spawn as spawn_physics};
 use crate::core::recorder::SimRecorder;
+use crate::core::snapshot::{SaveEntry, SimSnapshot, list_saves};
 use crate::core::system::System;
 use crate::domain::body::Body;
 use crate::domain::materials::Material;
@@ -50,6 +52,7 @@ pub struct BodyForm {
 }
 
 pub struct SelectionForm {
+    pub name: String,
     pub x: String,
     pub y: String,
     pub vx: String,
@@ -60,8 +63,9 @@ pub struct SelectionForm {
 }
 
 impl SelectionForm {
-    pub fn from_body(b: &Body) -> Self {
+    pub fn from_body(b: &Body, name: &str) -> Self {
         Self {
+            name: name.to_owned(),
             x: format!("{:.6}", b.x),
             y: format!("{:.6}", b.y),
             vx: format!("{:.6}", b.vx),
@@ -107,7 +111,7 @@ impl BodyForm {
 }
 
 pub struct SimulationApp {
-    pub(super) system: System,
+    pub(super) system: PhysicsHandle,
     pub(super) paused: bool,
     pub(super) scale: f32,
     pub(super) body_size_boost: f32,
@@ -150,9 +154,18 @@ pub struct SimulationApp {
 
     pub(super) trail: Option<TrailRenderer>,
 
-    // Camera inertia
+    // Camera inertia + animation
     pub(super) zoom_vel: f32,
     pub(super) pan_vel: egui::Vec2,
+    /// Smooth-pan target offset; `None` when idle.
+    pub(super) camera_anim_target: Option<egui::Vec2>,
+    /// When `true`, `draw_frame` will call `fit_to_view` on the next frame
+    /// that has a non-empty body list. Used after template/snapshot loads
+    /// where bodies arrive asynchronously from the physics thread.
+    pub(super) pending_fit: bool,
+
+    // Canvas hover
+    pub(super) hovered_body: Option<usize>,
 
     pub(super) backend: Arc<Mutex<WgpuBackend>>,
     pub(super) device: Option<Arc<wgpu::Device>>,
@@ -168,6 +181,22 @@ pub struct SimulationApp {
     pub(super) record_base_path: String,
     /// Last error from starting a recording session, shown in the UI.
     pub(super) record_error: Option<String>,
+
+    // ── Save / Load ───────────────────────────────────────────────────────────
+    /// Directory where `.grav` save files are written.
+    pub(super) save_dir: String,
+    /// Real-time seconds between automatic saves (0 = disabled).
+    pub(super) autosave_interval_secs: f64,
+    /// Instant of the last successful auto- or manual save.
+    pub(super) last_save_instant: std::time::Instant,
+    /// `true` while the load-save browser modal is open.
+    pub(super) show_save_modal: bool,
+    /// Entries shown in the modal; refreshed when the modal opens.
+    pub(super) save_modal_entries: Vec<SaveEntry>,
+    /// Any error message to display in the modal.
+    pub(super) save_modal_error: Option<String>,
+    /// Snapshot staged for confirmation before loading (avoids accidental overwrites).
+    pub(super) pending_load: Option<SimSnapshot>,
 }
 
 impl SimulationApp {
@@ -178,8 +207,10 @@ impl SimulationApp {
         physics_cfg.softening_scale = system.softening_scale();
         physics_cfg.trail_every = system.trail_every();
 
+        let physics = spawn_physics(system, true /* start paused */);
+
         Self {
-            system,
+            system: physics,
             paused: true,
             scale: 10.0,
             body_size_boost: 64.0,
@@ -222,6 +253,9 @@ impl SimulationApp {
 
             zoom_vel: 0.0,
             pan_vel: egui::Vec2::ZERO,
+            camera_anim_target: None,
+            pending_fit: false,
+            hovered_body: None,
 
             backend: Arc::new(Mutex::new(WgpuBackend::new())),
             device: None,
@@ -232,6 +266,14 @@ impl SimulationApp {
             record_interval: 0.01,
             record_base_path: "./sim_export".into(),
             record_error: None,
+
+            save_dir: "./saves".into(),
+            autosave_interval_secs: 300.0,
+            last_save_instant: std::time::Instant::now(),
+            show_save_modal: false,
+            save_modal_entries: Vec::new(),
+            save_modal_error: None,
+            pending_load: None,
         }
     }
 
@@ -240,20 +282,25 @@ impl SimulationApp {
 
         apply_visuals(&ctx);
 
-        if !self.paused {
-            for _ in 0..self.steps_per_frame {
-                self.system.step();
-            }
+        // ── Sync latest physics state into local cache ────────────────────────
+        self.system.sync();
 
-            self.system.push_trail();
-            self.render_hints = compute_render_hints(self.system.bodies());
+        // ── Pending fit-to-view (after async template/snapshot load) ──────────
+        if self.pending_fit && !self.system.bodies().is_empty() && !self.system.is_loading() {
+            self.fit_to_view();
+            self.pending_fit = false;
         }
 
-        // Update orbital elements once per rendered frame regardless of pause state
-        // so the inspector always shows fresh values.
-        self.system.update_orbital_elements();
+        // Forward UI-controlled parameters to the physics thread every frame.
+        // These are cheap fire-and-forget sends; the thread drains them before
+        // each batch, so latency is at most one batch period (~100 µs).
+        self.system.set_paused(self.paused);
+        self.system.set_steps_per_frame(self.steps_per_frame);
 
-        // ── CSV recording ─────────────────────────────────────────────────────
+        // Recompute render hints from the freshly-synced body list.
+        self.render_hints = compute_render_hints(self.system.bodies());
+
+        // ── CSV recording (render-rate sampling) ──────────────────────────────
         if let Some(rec) = self.recorder.as_mut() {
             let t = self.system.t();
             if rec.should_record(t) {
@@ -267,9 +314,18 @@ impl SimulationApp {
             }
         }
 
+        // ── Auto-save ─────────────────────────────────────────────────────────
+        if self.autosave_interval_secs > 0.0
+            && !self.system.bodies().is_empty()
+            && self.last_save_instant.elapsed().as_secs_f64() >= self.autosave_interval_secs
+        {
+            let _ = self.do_save();
+        }
+
         self.draw_toolbar(&ctx);
         self.draw_panel(&ctx);
         self.draw_inspector(&ctx);
+        self.draw_save_modal(&ctx);
 
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE.fill(BG))
@@ -278,8 +334,35 @@ impl SimulationApp {
             });
 
         if !self.paused {
+            // Running: repaint every frame to keep the canvas live.
             ctx.request_repaint();
+        } else {
+            // Paused: still repaint at ~20 Hz so updates from the physics thread
+            // (body added, save loaded, etc.) appear without requiring user input.
+            ctx.request_repaint_after(std::time::Duration::from_millis(50));
         }
+    }
+
+    /// Perform a manual or auto-save. Returns the saved path on success.
+    pub(super) fn do_save(&mut self) -> Result<std::path::PathBuf, String> {
+        let mut snap = self.system.to_snapshot();
+        snap.save_id = SimSnapshot::new_id();
+        let dir = std::path::Path::new(&self.save_dir);
+        match snap.save_to_dir(dir) {
+            Ok(p) => {
+                self.last_save_instant = std::time::Instant::now();
+                Ok(p)
+            }
+            Err(e) => Err(e.to_string()),
+        }
+    }
+
+    /// Open the modal and refresh the file listing.
+    pub(super) fn open_save_modal(&mut self) {
+        self.save_modal_entries = list_saves(std::path::Path::new(&self.save_dir));
+        self.save_modal_error = None;
+        self.pending_load = None;
+        self.show_save_modal = true;
     }
 }
 

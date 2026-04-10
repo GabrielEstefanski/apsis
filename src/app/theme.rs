@@ -7,8 +7,8 @@ pub const BORDER: Color32 = Color32::from_rgb(28, 28, 36);
 pub const ACCENT: Color32 = Color32::from_rgb(200, 200, 210);
 pub const ACCENT_DIM: Color32 = Color32::from_rgb(36, 36, 48);
 pub const TEXT_PRI: Color32 = Color32::from_rgb(210, 210, 215);
-pub const TEXT_SEC: Color32 = Color32::from_rgb(85, 85, 100);
-pub const TEXT_DIM: Color32 = Color32::from_rgb(42, 42, 55);
+pub const TEXT_SEC: Color32 = Color32::from_rgb(110, 110, 130);
+pub const TEXT_DIM: Color32 = Color32::from_rgb(68, 68, 85);
 pub const DANGER: Color32 = Color32::from_rgb(190, 70, 70);
 pub const SUCCESS: Color32 = Color32::from_rgb(75, 170, 110);
 
@@ -72,9 +72,9 @@ pub fn apply_visuals(ctx: &egui::Context) {
 }
 
 pub fn section(ui: &mut egui::Ui, label: &str) {
-    ui.add_space(12.0);
+    ui.add_space(10.0);
     ui.horizontal(|ui| {
-        ui.label(RichText::new(label).size(9.5).color(TEXT_DIM).strong());
+        ui.label(RichText::new(label).size(10.0).color(TEXT_SEC).strong());
         ui.add_space(4.0);
         let rect = ui.available_rect_before_wrap();
         ui.painter().line_segment(
@@ -90,9 +90,14 @@ pub fn section(ui: &mut egui::Ui, label: &str) {
 
 pub fn metric(ui: &mut egui::Ui, label: &str, value: &str, color: Color32) {
     ui.horizontal(|ui| {
-        ui.label(RichText::new(label).size(11.0).color(TEXT_SEC));
+        ui.add(
+            egui::Label::new(RichText::new(label).size(11.0).color(TEXT_SEC)).truncate(),
+        );
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.label(RichText::new(value).monospace().size(11.0).color(color));
+            ui.add(
+                egui::Label::new(RichText::new(value).monospace().size(11.0).color(color))
+                    .truncate(),
+            );
         });
     });
 }

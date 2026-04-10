@@ -127,6 +127,35 @@ impl SimulationApp {
                 );
                 ui.separator();
 
+                // Save / Load
+                if ui
+                    .add(
+                        egui::Button::new(RichText::new("Saves").size(10.0).color(ACCENT))
+                            .fill(Color32::TRANSPARENT)
+                            .stroke(Stroke::new(0.5, ACCENT))
+                            .min_size(egui::vec2(48.0, 20.0)),
+                    )
+                    .on_hover_text("Browse and load saved states")
+                    .clicked()
+                {
+                    self.open_save_modal();
+                }
+
+                if ui
+                    .add(
+                        egui::Button::new(RichText::new("Save").size(10.0).color(SUCCESS))
+                            .fill(Color32::TRANSPARENT)
+                            .stroke(Stroke::new(0.5, SUCCESS))
+                            .min_size(egui::vec2(40.0, 20.0)),
+                    )
+                    .on_hover_text("Quick-save current state")
+                    .clicked()
+                {
+                    let _ = self.do_save();
+                }
+
+                ui.separator();
+
                 if ui
                     .add(
                         egui::Button::new(RichText::new("Clear").size(10.0).color(DANGER))

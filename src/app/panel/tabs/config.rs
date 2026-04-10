@@ -67,23 +67,7 @@ impl SimulationApp {
             self.system.set_theta(theta);
         }
 
-        // Accuracy hint
-        let hint = if theta < 0.2 {
-            ("≈ O(N²)", ACCENT)
-        } else if theta < 0.5 {
-            ("high accuracy", ACCENT)
-        } else if theta < 0.8 {
-            ("balanced", TEXT_SEC)
-        } else {
-            ("approximate", TEXT_DIM)
-        };
-        ui.label(
-            RichText::new(format!("  → {}", hint.0))
-                .size(9.0)
-                .color(hint.1),
-        );
-
-        ui.add_space(4.0);
+        ui.add_space(2.0);
 
         // ε — Plummer softening scale
         let eps_tip = "Global Plummer softening scale.\n\
@@ -111,12 +95,9 @@ impl SimulationApp {
         }
 
         ui.label(
-            RichText::new(format!(
-                "  ε_eff = 0.02 · m^(1/3) · {:.3}",
-                self.physics_cfg.softening_scale
-            ))
-            .size(9.0)
-            .color(TEXT_DIM),
+            RichText::new(format!("  ε_eff = 0.02·m^⅓·{:.3}", self.physics_cfg.softening_scale))
+                .size(9.0)
+                .color(TEXT_DIM),
         );
 
         // ── GRAVITY ─────────────────────────────────────────────────────────
@@ -143,11 +124,6 @@ impl SimulationApp {
             self.system.set_g_factor(g);
         }
 
-        ui.label(
-            RichText::new(format!("  G_eff = {:.6}", self.physics_cfg.g_factor))
-                .size(9.0)
-                .color(TEXT_DIM),
-        );
 
         // ── INTEGRATION ──────────────────────────────────────────────────────
         section(ui, "INTEGRATION");
@@ -176,21 +152,26 @@ impl SimulationApp {
                 });
         });
 
-        ui.label(
-            RichText::new(format!(
-                "  order {} · {} F-eval/step",
-                self.physics_cfg.integrator.order(),
-                self.physics_cfg.integrator.force_evals_per_step(),
-            ))
-            .size(9.0)
-            .color(TEXT_DIM),
-        );
-        ui.label(
-            RichText::new(format!("  {}", self.physics_cfg.integrator.description()))
-                .size(8.5)
-                .color(TEXT_DIM)
-                .italics(),
-        );
+        ui.horizontal(|ui| {
+            ui.label(
+                RichText::new(format!(
+                    "  O({}) · {}F/step",
+                    self.physics_cfg.integrator.order(),
+                    self.physics_cfg.integrator.force_evals_per_step(),
+                ))
+                .size(9.5)
+                .color(TEXT_DIM),
+            );
+            ui.add(
+                egui::Label::new(
+                    RichText::new(format!("— {}", self.physics_cfg.integrator.description()))
+                        .size(9.0)
+                        .color(TEXT_DIM)
+                        .italics(),
+                )
+                .truncate(),
+            );
+        });
 
         ui.add_space(4.0);
 
@@ -248,11 +229,6 @@ impl SimulationApp {
             self.system.set_trail_every(trail_every);
         }
 
-        ui.label(
-            RichText::new(format!("  record every {} frame(s)", trail_every))
-                .size(9.0)
-                .color(TEXT_DIM),
-        );
 
         // ── UNIT LABELS ──────────────────────────────────────────────────────
         section(ui, "UNIT LABELS");

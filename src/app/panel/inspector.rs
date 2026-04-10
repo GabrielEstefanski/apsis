@@ -25,20 +25,19 @@ impl SimulationApp {
 
         ui.add_space(10.0);
 
+        let ul = &self.physics_cfg.dist_label.clone();
+        let um = &self.physics_cfg.mass_label.clone();
+        let ut = &self.physics_cfg.time_label.clone();
+
         section(ui, "LIVE");
-        metric(ui, "x", &format!("{:.5}", body.x), TEXT_DIM);
-        metric(ui, "y", &format!("{:.5}", body.y), TEXT_DIM);
-        metric(ui, "vx", &format!("{:.5}", body.vx), TEXT_DIM);
-        metric(ui, "vy", &format!("{:.5}", body.vy), TEXT_DIM);
-        metric(ui, "mass", &format!("{:.5}", body.mass), TEXT_DIM);
-        metric(
-            ui,
-            "r_phys",
-            &format!("{:.5}", body.physical_radius),
-            TEXT_DIM,
-        );
-        metric(ui, "soft", &format!("{:.5}", body.softening), TEXT_DIM);
-        metric(ui, "density", &format!("{:.4e}", body.density), TEXT_DIM);
+        metric(ui, "x",       &format!("{:.5e} {ul}", body.x),            TEXT_DIM);
+        metric(ui, "y",       &format!("{:.5e} {ul}", body.y),            TEXT_DIM);
+        metric(ui, "vx",      &format!("{:.5e} {ul}/{ut}", body.vx),      TEXT_DIM);
+        metric(ui, "vy",      &format!("{:.5e} {ul}/{ut}", body.vy),      TEXT_DIM);
+        metric(ui, "mass",    &format!("{:.5e} {um}", body.mass),         TEXT_DIM);
+        metric(ui, "r",       &format!("{:.5e} {ul}", body.physical_radius), TEXT_DIM);
+        metric(ui, "soft ε",  &format!("{:.5e} {ul}", body.softening),    TEXT_DIM);
+        metric(ui, "ρ",       &format!("{:.4e} {um}/{ul}³", body.density),TEXT_DIM);
 
         // ── ORBITAL ELEMENTS ─────────────────────────────────────────── //
         section(ui, "ORBITAL");
@@ -157,11 +156,13 @@ impl SimulationApp {
         section(ui, "EDIT");
 
         if self.selection_form.is_none() {
-            self.selection_form = Some(SelectionForm::from_body(&body));
+            let name = self.system.name(idx).to_owned();
+            self.selection_form = Some(SelectionForm::from_body(&body, &name));
         }
 
         let (apply, delete, error) = {
             let form = self.selection_form.as_mut().unwrap();
+            field(ui, "name", &mut form.name);
             field(ui, "x", &mut form.x);
             field(ui, "y", &mut form.y);
             field(ui, "vx", &mut form.vx);
@@ -223,6 +224,10 @@ impl SimulationApp {
             match parsed {
                 Some(b) => {
                     self.system.update_body(idx, b);
+                    let name = self.selection_form.as_ref().unwrap().name.clone();
+                    if !name.is_empty() {
+                        self.system.set_name(idx, name);
+                    }
                     self.selection_form.as_mut().unwrap().error = None;
                 }
                 None => {
