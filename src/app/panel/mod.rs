@@ -1,5 +1,6 @@
 mod inspector;
 mod metrics;
+mod save_modal;
 mod tab_bar;
 mod tabs;
 mod time_speed;
@@ -28,11 +29,10 @@ impl SimulationApp {
                     .fill(crate::app::theme::PANEL_BG)
                     .inner_margin(egui::Margin::symmetric(12, 10)),
             )
-            .min_size(220.0)
-            .max_size(220.0)
+            .default_size(272.0)
+            .min_size(200.0)
+            .resizable(true)
             .show(ctx, |ui| {
-                ui.set_width(196.0);
-
                 self.panel_metrics_compact(ui);
                 self.panel_time_speed(ui);
                 self.panel_tab_bar(ui);
@@ -40,7 +40,7 @@ impl SimulationApp {
                 ui.add_space(4.0);
 
                 egui::ScrollArea::vertical().show(ui, |ui| {
-                    ui.set_width(196.0);
+                    ui.set_width(ui.available_width());
                     self.panel_tab_dispatch(ui);
                 });
             });
@@ -74,7 +74,7 @@ impl SimulationApp {
     }
 
     // ── FIT VIEW ───────────────────────────────────────────────────────────
-    pub(in crate::app::panel) fn fit_to_view(&mut self) {
+    pub(in crate::app) fn fit_to_view(&mut self) {
         let bodies = self.system.bodies();
 
         if bodies.is_empty() {

@@ -55,12 +55,12 @@ impl SimulationApp {
                         // Click (no drag) → spawn at viewport center (world origin of
                         // current offset, i.e. the screen centre in world space)
                         if response.clicked() {
-                            let cx = -(self.offset.x as f64) / self.scale as f64;
-                            let cy = -(self.offset.y as f64) / self.scale as f64;
                             let template = (entry.build)();
-                            for b in instantiate_at(&template, cx, cy) {
-                                self.system.add_body(b);
-                            }
+                            // Instantiate at world origin; fit_to_view will
+                            // re-center and re-scale the camera once loaded.
+                            let bodies = instantiate_at(&template, 0.0, 0.0);
+                            self.system.add_bodies(bodies);
+                            self.pending_fit = true;
                         }
 
                         if response.hovered() && self.template_drag.is_none() {

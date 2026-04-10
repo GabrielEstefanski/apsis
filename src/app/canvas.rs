@@ -1,32 +1,58 @@
 use crate::app::render_params::{RenderParams, compute_render_radius};
-use crate::app::theme::{BG, nice_grid_world};
 use crate::app::ui::{SelectionForm, SemanticScaleMode, SimulationApp};
-use crate::domain::body::Body;
 use crate::render::CallbackFn;
-use eframe::egui::{self, Pos2};
+use crate::templates::instantiate_at;
+use eframe::egui::{self, Color32, FontId, Pos2, Stroke};
 use eframe::egui_wgpu;
+
+// ── Tunables ──────────────────────────────────────────────────────────────────
+
+/// Minimum hit-test radius in pixels. Makes small/distant bodies easier to click.
+const MIN_HIT_PX: f32 = 10.0;
+
+/// Maximum distance in pixels from the body centre to place its name label.
+/// Prevents labels drifting far from large bodies at high zoom.
+const MAX_LABEL_OFFSET_PX: f32 = 48.0;
+
+/// Label font size.
+const LABEL_FONT_SIZE: f32 = 10.5;
+
+/// Selection ring: base gap outside the body disc.
+const RING_GAP: f32 = 5.0;
+
+/// Camera pan animation: fraction of remaining distance applied each frame.
+const CAM_LERP: f32 = 0.16;
 
 impl SimulationApp {
     pub(super) fn draw_canvas(&mut self, ui: &mut egui::Ui) {
-        // 🔴 REMOVIDO CentralPanel daqui
-
         let rect = ui.max_rect();
-
         let response = ui.allocate_rect(rect, egui::Sense::click_and_drag());
-
-        let center = rect.center() + self.offset;
-
         let ctx = ui.ctx();
 
-        let (scroll_y, hover_pos, dt) = ctx.input(|i| (
+        let (scroll_y, hover_pos, dt, time) = ctx.input(|i| (
             i.smooth_scroll_delta.y,
             i.pointer.hover_pos(),
             i.stable_dt.min(0.05_f32),
+            i.time as f32,
         ));
 
-        // ── Zoom com inércia ─────────────────────────────────────────────────
+        // ── Camera pan animation (spring toward target) ───────────────────────
+        if let Some(target) = self.camera_anim_target {
+            let delta = target - self.offset;
+            if delta.length_sq() < 0.1 {
+                self.offset = target;
+                self.camera_anim_target = None;
+            } else {
+                self.offset += delta * CAM_LERP;
+                ctx.request_repaint();
+            }
+        }
+
+        // centre is derived AFTER any animation update
+        let center = rect.center() + self.offset;
+
+        // ── Zoom with inertia ─────────────────────────────────────────────────
         if scroll_y.abs() > 0.0 {
-            // Acumula velocidade — clamp para evitar zoom explosivo em trackpads
             self.zoom_vel += scroll_y * 0.0004;
             self.zoom_vel = self.zoom_vel.clamp(-0.15, 0.15);
         }
@@ -35,13 +61,15 @@ impl SimulationApp {
             let old_scale = self.scale;
             self.scale = (self.scale * (1.0 + self.zoom_vel)).clamp(0.001, 50_000.0);
 
-            // Mantém o ponto do mundo sob o cursor fixo na tela
             if let Some(mouse) = hover_pos {
                 let ratio = self.scale / old_scale;
                 self.offset += (mouse - center) * (1.0 - ratio);
+                // keep animation target in sync with the scale-adjusted offset
+                if let Some(t) = self.camera_anim_target.as_mut() {
+                    *t *= ratio;
+                }
             }
 
-            // Fricção: decai ~20% por frame → suave em ~15 frames (0.25s)
             self.zoom_vel *= 0.80;
             if self.zoom_vel.abs() < 0.00005 {
                 self.zoom_vel = 0.0;
@@ -50,35 +78,27 @@ impl SimulationApp {
             }
         }
 
-        // ── Pan com inércia ──────────────────────────────────────────────────
+        // ── Pan with inertia ──────────────────────────────────────────────────
         if response.dragged() {
             let delta = response.drag_delta();
             self.offset += delta;
-            // Atualiza velocidade como média exponencial do delta instantâneo
+            // Cancel smooth-pan if the user takes manual control
+            self.camera_anim_target = None;
             let frame_vel = delta / dt.max(1.0 / 120.0);
             self.pan_vel = self.pan_vel * 0.4 + frame_vel * 0.6;
             ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
         } else {
             if self.pan_vel.length_sq() > 1.0 {
                 self.offset += self.pan_vel * dt;
-                // Fricção contínua: T½ ≈ 0.25s
                 self.pan_vel *= (-dt * 2.8_f32).exp();
                 if self.pan_vel.length_sq() < 1.0 {
                     self.pan_vel = egui::Vec2::ZERO;
                 }
                 ctx.request_repaint();
             }
-            if hover_pos.map_or(false, |p| rect.contains(p)) {
-                ctx.set_cursor_icon(egui::CursorIcon::Grab);
-            }
         }
 
-        let mut backend = self.backend.lock().unwrap();
-        backend.begin();
-        backend.show_grid = self.show_grid;
-
-        let bodies = self.system.bodies();
-
+        // ── Render params ─────────────────────────────────────────────────────
         let render_params = RenderParams {
             world_scale: self.scale,
             mode: self.semantic_scale_mode,
@@ -89,38 +109,75 @@ impl SimulationApp {
             },
         };
 
-        for b in bodies {
-            let [cr, cg, cb] = b.color;
+        // ── Hover detection (before click, drives cursor + ring) ──────────────
+        let center_after_pan = rect.center() + self.offset;
+        self.hovered_body = hover_pos
+            .filter(|p| rect.contains(*p))
+            .and_then(|p| self.find_body_at(p, center_after_pan, render_params));
 
-            let r = compute_render_radius(b.physical_radius, render_params);
-
-            let px = center.x + b.x as f32 * self.scale;
-            let py = center.y + b.y as f32 * self.scale;
-
-            backend.draw_circle([px, py], r, [cr, cg, cb]);
+        // Cursor: pointer over bodies, grab over empty space, grabbing while dragging
+        if response.dragged() {
+            ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
+        } else if self.hovered_body.is_some() {
+            ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
+        } else if hover_pos.map_or(false, |p| rect.contains(p)) {
+            ctx.set_cursor_icon(egui::CursorIcon::Grab);
         }
 
-        // Passa estado de câmera e trail buffer pro callback de GPU
-        backend.center = [center.x, center.y];
-        backend.scale = self.scale;
-        backend.trail_width = self.trail_width;
-        if self.show_trails {
-            backend.trail_buffer = Some(self.system.trail_buf().clone());
-        } else {
-            backend.trail_buffer = None;
+        // ── GPU body rendering ────────────────────────────────────────────────
+        {
+            let mut backend = self.backend.lock().unwrap();
+            backend.begin();
+            backend.show_grid = self.show_grid;
+
+            let bodies = self.system.bodies();
+            for b in bodies {
+                let [cr, cg, cb] = b.color;
+                let r = compute_render_radius(b.physical_radius, render_params);
+                let px = center_after_pan.x + b.x as f32 * self.scale;
+                let py = center_after_pan.y + b.y as f32 * self.scale;
+                backend.draw_circle([px, py], r, [cr, cg, cb]);
+            }
+
+            backend.center = [center_after_pan.x, center_after_pan.y];
+            backend.scale = self.scale;
+            backend.trail_width = self.trail_width;
+            backend.trail_buffer = if self.show_trails {
+                Some(self.system.clone_trail_buf())
+            } else {
+                None
+            };
         }
 
-        drop(backend);
-
-        // ── Click to select / deselect body ──────────────────────────────────
+        // ── Click: select + pan to center (+ zoom-in if body is tiny) ─────────
         if response.clicked() {
             if let Some(cursor) = ctx.input(|i| i.pointer.interact_pos()) {
-                let hit = self.find_body_at(cursor, center);
-                match hit {
+                match self.find_body_at(cursor, center_after_pan, render_params) {
                     Some(idx) => {
                         let body = self.system.bodies()[idx];
                         self.selected_body = Some(idx);
-                        self.selection_form = Some(SelectionForm::from_body(&body));
+                        let name = self.system.name(idx).to_owned();
+                        self.selection_form = Some(SelectionForm::from_body(&body, &name));
+
+                        // Stop inertia so the animation isn't fighting existing momentum
+                        self.pan_vel = egui::Vec2::ZERO;
+                        self.zoom_vel = 0.0;
+
+                        // Zoom in if body is too small to see clearly (< 6 px radius)
+                        let screen_r = compute_render_radius(body.physical_radius, render_params);
+                        if screen_r < 6.0 && body.physical_radius > 1e-30 {
+                            let desired_px = 24.0_f32;
+                            let new_scale = (desired_px / body.physical_radius as f32)
+                                .clamp(self.scale * 2.0, self.scale * 500.0)
+                                .min(50_000.0);
+                            self.scale = new_scale;
+                        }
+
+                        // Smooth-pan to centre the body
+                        self.camera_anim_target = Some(egui::vec2(
+                            -body.x as f32 * self.scale,
+                            -body.y as f32 * self.scale,
+                        ));
                     }
                     None => {
                         self.selected_body = None;
@@ -130,8 +187,45 @@ impl SimulationApp {
             }
         }
 
+        // ── Template drag-drop ────────────────────────────────────────────────
+        // Check if a drag from the template panel was released over this canvas.
+        if self.template_drag.is_some() {
+            let released = ctx.input(|i| i.pointer.any_released());
+            let drop_pos = ctx.input(|i| i.pointer.interact_pos());
+
+            if released {
+                if let (Some(build_fn), Some(screen_pos)) = (self.template_drag.take(), drop_pos) {
+                    if rect.contains(screen_pos) {
+                        // Convert screen pos → world pos
+                        let wx = (screen_pos.x - center_after_pan.x) as f64 / self.scale as f64;
+                        let wy = (screen_pos.y - center_after_pan.y) as f64 / self.scale as f64;
+                        let template = (build_fn)();
+                        let bodies = instantiate_at(&template, wx, wy);
+                        self.system.add_bodies(bodies);
+                        self.pending_fit = false; // dropped at explicit position — no auto-fit
+                    } else {
+                        // Released outside canvas — discard
+                        self.template_drag = None;
+                    }
+                } else {
+                    self.template_drag = None;
+                }
+            } else {
+                // Still dragging — show a ghost cursor
+                if hover_pos.map_or(false, |p| rect.contains(p)) {
+                    ctx.set_cursor_icon(egui::CursorIcon::Crosshair);
+                }
+            }
+        }
+
+        // Keep animating while a body is selected (pulsing ring needs repaints)
+        if self.selected_body.is_some() {
+            ctx.request_repaint();
+        }
+
+        // ── GPU paint callback ────────────────────────────────────────────────
         let device = self.device.as_ref().unwrap().clone();
-        let queue = self.queue.as_ref().unwrap().clone();
+        let queue  = self.queue.as_ref().unwrap().clone();
         let format = self.format.unwrap();
 
         ui.painter().add(egui_wgpu::Callback::new_paint_callback(
@@ -147,28 +241,190 @@ impl SimulationApp {
                 },
             },
         ));
+
+        // ── Overlay: rings + labels (on top of GPU layer) ─────────────────────
+        self.draw_overlay(ui, center_after_pan, time);
+
+        // ── Loading overlay ───────────────────────────────────────────────────
+        if self.system.is_loading() {
+            self.draw_loading_overlay(ui, rect, time);
+            ctx.request_repaint();
+        }
     }
 
-    fn find_body_at(&self, cursor: Pos2, center: Pos2) -> Option<usize> {
-        let bodies = self.system.bodies();
+    // ── Overlay ───────────────────────────────────────────────────────────────
 
+    fn draw_overlay(&self, ui: &egui::Ui, center: Pos2, time: f32) {
+        let bodies = self.system.bodies();
+        let names  = self.system.names();
+
+        if bodies.is_empty() { return; }
+
+        let max_mass = bodies.iter().map(|b| b.mass).fold(0.0_f64, f64::max);
+
+        // !! Use the SAME min_px as the GPU renderer so rings/labels are anchored
+        //    to the visible disc, not to the (possibly sub-pixel) physical radius.
         let render_params = RenderParams {
             world_scale: self.scale,
             mode: self.semantic_scale_mode,
             min_px: match self.semantic_scale_mode {
-                SemanticScaleMode::Physical => 0.0,
-                SemanticScaleMode::Comparative => 3.0,
+                SemanticScaleMode::Physical     => 0.0,
+                SemanticScaleMode::Comparative  => 3.0,
                 SemanticScaleMode::Illustrative => 5.0,
             },
         };
 
+        // Label visibility: show when body is large enough on screen OR important
+        // enough given current zoom. threshold ↑ at low zoom → fewer labels.
+        let importance_threshold =
+            (2.0_f64 / self.scale as f64).clamp(0.001, 1.0);
+
+        let painter = ui.painter();
+        let font    = FontId::proportional(LABEL_FONT_SIZE);
+
+        // Pulse for selection ring: ±1.5 px at ~3.5 Hz
+        let pulse = (time * 3.5).sin() * 1.5_f32;
+
+        for (i, (body, name)) in bodies.iter().zip(names.iter()).enumerate() {
+            // visual_r = how big the body actually appears on screen (matches GPU)
+            let visual_r = compute_render_radius(body.physical_radius, render_params);
+
+            let px = center.x + body.x as f32 * self.scale;
+            let py = center.y + body.y as f32 * self.scale;
+            let body_pos = egui::pos2(px, py);
+
+            let is_selected = self.selected_body == Some(i);
+            let is_hovered  = self.hovered_body  == Some(i) && !is_selected;
+
+            // ── Hover ring ───────────────────────────────────────────────
+            if is_hovered {
+                painter.circle_stroke(
+                    body_pos,
+                    visual_r + RING_GAP - 1.0,
+                    Stroke::new(1.0, Color32::from_rgba_premultiplied(160, 160, 200, 90)),
+                );
+            }
+
+            // ── Selection ring (pulsing) ─────────────────────────────────
+            if is_selected {
+                let r1 = visual_r + RING_GAP + pulse;
+                let r2 = r1 + 3.5;
+
+                // Outer dim halo
+                painter.circle_stroke(
+                    body_pos, r2,
+                    Stroke::new(0.8, Color32::from_rgba_premultiplied(130, 130, 200, 55)),
+                );
+                // Main ring
+                painter.circle_stroke(
+                    body_pos, r1,
+                    Stroke::new(1.5, Color32::from_rgba_premultiplied(200, 200, 255, 210)),
+                );
+                // Inner tick marks at compass points for clarity
+                for angle in [0.0_f32, 90.0, 180.0, 270.0] {
+                    let rad = angle.to_radians();
+                    let dir = egui::vec2(rad.cos(), rad.sin());
+                    let inner = body_pos + dir * (r1 - 2.5);
+                    let outer = body_pos + dir * (r1 + 2.5);
+                    painter.line_segment(
+                        [inner, outer],
+                        Stroke::new(1.5, Color32::from_rgba_premultiplied(200, 200, 255, 180)),
+                    );
+                }
+            }
+
+            // ── Name label ───────────────────────────────────────────────
+            let importance = if max_mass > 0.0 { body.mass / max_mass } else { 0.0 };
+            let show_label = visual_r >= 5.0
+                || importance >= importance_threshold
+                || is_selected;
+
+            if show_label {
+                // Cap offset so the label never drifts far from the body
+                let offset_y = (visual_r + 4.0).min(MAX_LABEL_OFFSET_PX);
+                let label_pos = egui::pos2(px, py + offset_y);
+
+                let color = if is_selected {
+                    Color32::from_rgb(220, 220, 255)
+                } else {
+                    Color32::from_rgba_premultiplied(175, 175, 195, 195)
+                };
+
+                // Shadow
+                painter.text(
+                    label_pos + egui::vec2(1.0, 1.0),
+                    egui::Align2::CENTER_TOP,
+                    name.as_str(),
+                    font.clone(),
+                    Color32::from_black_alpha(110),
+                );
+                painter.text(
+                    label_pos,
+                    egui::Align2::CENTER_TOP,
+                    name.as_str(),
+                    font.clone(),
+                    color,
+                );
+            }
+        }
+    }
+
+    // ── Loading overlay ───────────────────────────────────────────────────────
+
+    fn draw_loading_overlay(&self, ui: &egui::Ui, rect: egui::Rect, time: f32) {
+        let painter = ui.painter();
+
+        // Dim backdrop — subtle, doesn't obliterate the scene.
+        painter.rect_filled(
+            rect,
+            0.0,
+            Color32::from_black_alpha(120),
+        );
+
+        let cx = rect.center();
+
+        // ── Spinner: three arcs rotating at different phases ──────────────────
+        // Outer ring
+        draw_spinner_arc(painter, cx, 22.0, 2.5, time,  1.0, Color32::from_rgba_premultiplied(160, 160, 255, 220));
+        // Middle ring (counter-rotate, dimmer)
+        draw_spinner_arc(painter, cx, 14.0, 2.0, -time * 1.4, 0.75, Color32::from_rgba_premultiplied(120, 120, 200, 150));
+        // Inner dot
+        painter.circle_filled(cx, 3.5, Color32::from_rgba_premultiplied(180, 180, 255, 200));
+
+        // ── "LOADING" label ────────────────────────────────────────────────────
+        let label_pos = egui::pos2(cx.x, cx.y + 36.0);
+        // Shadow
+        painter.text(
+            label_pos + egui::vec2(1.0, 1.0),
+            egui::Align2::CENTER_TOP,
+            "LOADING",
+            eframe::egui::FontId::proportional(11.0),
+            Color32::from_black_alpha(120),
+        );
+        painter.text(
+            label_pos,
+            egui::Align2::CENTER_TOP,
+            "LOADING",
+            eframe::egui::FontId::proportional(11.0),
+            Color32::from_rgba_premultiplied(170, 170, 220, 210),
+        );
+    }
+
+    // ── Hit-test ──────────────────────────────────────────────────────────────
+
+    fn find_body_at(&self, cursor: Pos2, center: Pos2, render_params: RenderParams) -> Option<usize> {
+        let bodies = self.system.bodies();
+
+        // Iterate in reverse so top-rendered (last) body wins ties
         for i in (0..bodies.len()).rev() {
             let b = &bodies[i];
 
             let px = center.x + b.x as f32 * self.scale;
             let py = center.y + b.y as f32 * self.scale;
 
-            let r = compute_render_radius(b.physical_radius, render_params).max(6.0);
+            // Hit radius: visual size + generous minimum for easy clicking
+            let r = compute_render_radius(b.physical_radius, render_params)
+                .max(MIN_HIT_PX);
 
             let dx = cursor.x - px;
             let dy = cursor.y - py;
@@ -179,5 +435,44 @@ impl SimulationApp {
         }
 
         None
+    }
+}
+
+// ── Spinner helpers ───────────────────────────────────────────────────────────
+
+/// Draw a rotating arc at `center` with the given `radius` and line `width`.
+/// `time` drives rotation speed; `arc_frac` (0..1) is how much of the circle
+/// is filled (e.g. 0.75 = 270°). Alpha fades from full at the head to 0 at
+/// the tail for a "comet tail" effect.
+fn draw_spinner_arc(
+    painter: &egui::Painter,
+    center: Pos2,
+    radius: f32,
+    width: f32,
+    time: f32,
+    arc_frac: f32,
+    color: Color32,
+) {
+    let segments = 32usize;
+    let arc_radians = arc_frac * std::f32::consts::TAU;
+    let angle_step  = arc_radians / segments as f32;
+    let base_angle  = time * 2.2; // rotation speed
+
+    let [r, g, b, _] = color.to_array();
+
+    for i in 0..segments {
+        let t_frac = i as f32 / segments as f32; // 0 = tail, 1 = head
+        let alpha  = (t_frac * t_frac * 255.0) as u8;          // quadratic fade
+
+        let a0 = base_angle + i as f32 * angle_step;
+        let a1 = a0 + angle_step * 1.1; // slight overlap to avoid gaps
+
+        let p0 = center + egui::vec2(a0.cos(), a0.sin()) * radius;
+        let p1 = center + egui::vec2(a1.cos(), a1.sin()) * radius;
+
+        painter.line_segment(
+            [p0, p1],
+            Stroke::new(width, Color32::from_rgba_premultiplied(r, g, b, alpha)),
+        );
     }
 }
