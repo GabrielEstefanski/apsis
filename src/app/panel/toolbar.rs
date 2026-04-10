@@ -100,6 +100,16 @@ impl SimulationApp {
             // ── Display toggles ─────────────────────────────────────── //
             toggle(ui, &mut self.show_grid, "grid");
             toggle(ui, &mut self.show_trails, "trails");
+            if self.show_trails {
+                ui.add(
+                    egui::DragValue::new(&mut self.trail_width)
+                        .speed(0.1)
+                        .range(0.5_f32..=20.0)
+                        .max_decimals(1)
+                        .prefix("w:"),
+                )
+                .on_hover_text("Trail ribbon width in pixels");
+            }
             toggle(ui, &mut self.show_orbit_ellipses, "orbits");
             toggle(ui, &mut self.show_vectors, "vel");
             toggle(ui, &mut self.show_force_vectors, "force");

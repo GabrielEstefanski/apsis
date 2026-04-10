@@ -103,6 +103,7 @@ impl SimulationApp {
         // Passa estado de câmera e trail buffer pro callback de GPU
         backend.center = [center.x, center.y];
         backend.scale = self.scale;
+        backend.trail_width = self.trail_width;
         if self.show_trails {
             backend.trail_buffer = Some(self.system.trail_buf().clone());
         } else {

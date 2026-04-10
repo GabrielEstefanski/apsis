@@ -1,6 +1,7 @@
 use crate::app::config::PhysicsConfig;
 use crate::app::render_hints::{BodyRenderHints, compute_render_hints};
 use crate::app::theme::{BG, apply_visuals};
+use crate::core::recorder::SimRecorder;
 use crate::core::system::System;
 use crate::domain::body::Body;
 use crate::domain::materials::Material;
@@ -143,6 +144,7 @@ pub struct SimulationApp {
     pub(super) body_angles: Vec<f64>,
     pub(super) render_hints: Vec<BodyRenderHints>,
     pub(super) show_belts: bool,
+    pub(super) trail_width: f32,
 
     pub(super) place_material: Material,
 
@@ -156,10 +158,26 @@ pub struct SimulationApp {
     pub(super) device: Option<Arc<wgpu::Device>>,
     pub(super) queue: Option<Arc<wgpu::Queue>>,
     pub(super) format: Option<wgpu::TextureFormat>,
+
+    // ── CSV export ────────────────────────────────────────────────────────────
+    /// Active recorder, `None` when not recording.
+    pub(super) recorder: Option<SimRecorder>,
+    /// Simulated-time gap between successive CSV records.
+    pub(super) record_interval: f64,
+    /// Base path prefix (no extension); e.g. `"./run01"`.
+    pub(super) record_base_path: String,
+    /// Last error from starting a recording session, shown in the UI.
+    pub(super) record_error: Option<String>,
 }
 
 impl SimulationApp {
     pub fn new(system: System) -> Self {
+        let mut physics_cfg = PhysicsConfig::default();
+        physics_cfg.integrator = system.integrator();
+        physics_cfg.theta = system.theta();
+        physics_cfg.softening_scale = system.softening_scale();
+        physics_cfg.trail_every = system.trail_every();
+
         Self {
             system,
             paused: true,
@@ -191,13 +209,14 @@ impl SimulationApp {
             dragging_body: None,
             drag_start_world: None,
             selection_form: None,
-            physics_cfg: PhysicsConfig::default(),
+            physics_cfg,
             panel_tab: PanelTab::Add,
             show_force_vectors: false,
             render_hints: Vec::new(),
             body_angles: Vec::new(),
             template_drag: None,
             show_belts: false,
+            trail_width: 1.5,
             place_material: Material::Rocky,
             trail: None,
 
@@ -208,6 +227,11 @@ impl SimulationApp {
             device: None,
             queue: None,
             format: None,
+
+            recorder: None,
+            record_interval: 0.01,
+            record_base_path: "./sim_export".into(),
+            record_error: None,
         }
     }
 
@@ -225,12 +249,28 @@ impl SimulationApp {
             self.render_hints = compute_render_hints(self.system.bodies());
         }
 
-        // 🔴 PAINÉIS NO CONTEXT (ANTES DE QUALQUER CENTRAL)
+        // Update orbital elements once per rendered frame regardless of pause state
+        // so the inspector always shows fresh values.
+        self.system.update_orbital_elements();
+
+        // ── CSV recording ─────────────────────────────────────────────────────
+        if let Some(rec) = self.recorder.as_mut() {
+            let t = self.system.t();
+            if rec.should_record(t) {
+                let metrics = self.system.metrics();
+                let _ = rec.record(
+                    t,
+                    self.system.bodies(),
+                    &metrics,
+                    self.system.orbital_elements(),
+                );
+            }
+        }
+
         self.draw_toolbar(&ctx);
         self.draw_panel(&ctx);
         self.draw_inspector(&ctx);
 
-        // 🔴 CENTRAL POR ÚLTIMO
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE.fill(BG))
             .show(&ctx, |ui| {

@@ -14,5 +14,6 @@
 pub mod calibration;
 pub mod diagnostics;
 pub mod metrics;
+pub mod recorder;
 pub mod system;
 pub mod trail_buffer;

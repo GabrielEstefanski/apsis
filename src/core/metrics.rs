@@ -1,3 +1,5 @@
+use crate::physics::integrator::Integrator;
+
 /// Snapshot of the physical state of the simulation at a single instant.
 ///
 /// `Metrics` is a pure data-transfer object with no logic or side effects.
@@ -44,7 +46,17 @@ pub struct Metrics {
     pub com_vx: f64,
     pub com_vy: f64,
 
+    // ── Time ──────────────────────────────────────────────────────────────── //
+    /// Total simulated time elapsed.
+    pub t: f64,
+
+    /// Number of integration steps completed.
+    pub steps: u64,
+
     // ── Simulation parameters ─────────────────────────────────────────────── //
+    /// Active integration algorithm.
+    pub integrator: Integrator,
+
     /// Effective gravitational multiplier (G_eff = G₀ · g_factor).
     pub g_factor: f64,
 

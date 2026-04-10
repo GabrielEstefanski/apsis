@@ -2,8 +2,8 @@ use std::mem::size_of;
 
 use bytemuck::{Pod, Zeroable};
 
-use crate::render::grid_renderer::GridRenderer;
 use crate::render::TrailRenderer;
+use crate::render::grid_renderer::GridRenderer;
 
 const MIN_BUFFER_CAPACITY: u32 = 256;
 
@@ -116,6 +116,7 @@ impl GpuResources {
         if !circles.is_empty() {
             ensure_instance_capacity::<CircleInstance>(
                 device,
+                queue,
                 &mut self.circle_buf,
                 &mut self.circle_cap,
                 circles.len() as u32,
@@ -127,6 +128,7 @@ impl GpuResources {
         if !lines.is_empty() {
             ensure_instance_capacity::<LineInstance>(
                 device,
+                queue,
                 &mut self.line_buf,
                 &mut self.line_cap,
                 lines.len() as u32,
@@ -167,6 +169,7 @@ pub struct WgpuBackend {
     pub center: [f32; 2],
     pub scale: f32,
     pub show_grid: bool,
+    pub trail_width: f32,
 }
 
 impl WgpuBackend {
@@ -182,6 +185,7 @@ impl WgpuBackend {
             center: [0.0, 0.0],
             scale: 1.0,
             show_grid: true,
+            trail_width: 1.5,
         }
     }
 
@@ -275,7 +279,10 @@ impl WgpuBackend {
 
         let (circle_count, line_count) = {
             let gpu = self.gpu.as_mut().unwrap();
-            let screen_uniform = ScreenUniform { size: screen, _pad: [0.0; 2] };
+            let screen_uniform = ScreenUniform {
+                size: screen,
+                _pad: [0.0; 2],
+            };
             gpu.upload(device, queue, screen_uniform, &self.circles, &self.lines)
         };
 
@@ -283,7 +290,7 @@ impl WgpuBackend {
 
         // ── 2. Trails ────────────────────────────────────────
         if let (Some(trail), Some(buf)) = (self.trail.as_mut(), trail_buf) {
-            trail.upload(device, queue, buf, center, scale);
+            trail.upload(device, queue, buf, center, scale, self.trail_width);
             trail.draw(pass, &gpu.bind_group_screen);
         }
 
@@ -310,7 +317,9 @@ fn alloc_instance_buf<T: Pod>(
     let buf = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some(label),
         size: capacity as u64 * size_of::<T>() as u64,
-        usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        usage: wgpu::BufferUsages::VERTEX
+            | wgpu::BufferUsages::COPY_DST
+            | wgpu::BufferUsages::COPY_SRC,
         mapped_at_creation: false,
     });
     (buf, capacity)
@@ -318,6 +327,7 @@ fn alloc_instance_buf<T: Pod>(
 
 fn ensure_instance_capacity<T: Pod>(
     device: &wgpu::Device,
+    queue: &wgpu::Queue,
     buf: &mut wgpu::Buffer,
     cap: &mut u32,
     needed: u32,
@@ -328,8 +338,20 @@ fn ensure_instance_capacity<T: Pod>(
     }
 
     let new_cap = needed.next_power_of_two().max(MIN_BUFFER_CAPACITY);
-
     let (new_buf, new_cap) = alloc_instance_buf::<T>(device, new_cap, label);
+
+    // Copy existing GPU data into the new larger buffer so growth is seamless.
+    // Instance buffers are fully rewritten each frame via write_buffer, so this
+    // is mostly for correctness; the real win is avoiding the old buffer's
+    // data being stale during the brief window between resize and upload.
+    if *cap > 0 {
+        let copy_bytes = *cap as u64 * size_of::<T>() as u64;
+        let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("instance_buf_grow"),
+        });
+        enc.copy_buffer_to_buffer(buf, 0, &new_buf, 0, copy_bytes);
+        queue.submit([enc.finish()]);
+    }
 
     *buf = new_buf;
     *cap = new_cap;

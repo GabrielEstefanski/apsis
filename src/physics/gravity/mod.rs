@@ -16,4 +16,4 @@ mod kernel;
 mod tree;
 
 pub use engine::BarnesHutEngine;
-pub use kernel::G;
+pub use kernel::{G, pair_eps2};
