@@ -16,7 +16,8 @@ pub use three_body_figure_eight::three_body_figure_eight;
 pub use three_body_lagrange_triangle::three_body_lagrange_triangle;
 
 pub use systems::{
-    jupiter_trojan, simple_system, solar_system, sun_earth_lagrange, sun_earth_unstable_lagrange,
+    hierachical, jupiter_trojan, simple_system, solar_system, sun_earth_lagrange,
+    sun_earth_unstable_lagrange,
 };
 
 pub use threebodyproblems::{

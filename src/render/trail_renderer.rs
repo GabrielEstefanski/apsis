@@ -13,7 +13,7 @@ pub struct TrailState {
     pub cap: u32,
     pub center: [f32; 2],
     pub scale: f32,
-    pub _pad: f32,
+    pub trail_width: f32,
 }
 
 pub struct TrailRenderer {
@@ -171,6 +171,7 @@ impl TrailRenderer {
         trail: &TrailBuffer,
         center: [f32; 2],
         scale: f32,
+        trail_width: f32,
     ) {
         let n_bodies = trail.n_bodies();
         let cap = trail.capacity();
@@ -226,7 +227,7 @@ impl TrailRenderer {
             cap,
             center,
             scale,
-            _pad: 0.0,
+            trail_width,
         };
 
         queue.write_buffer(&self.state_buf, 0, bytemuck::bytes_of(&state));
@@ -266,7 +267,7 @@ struct TrailState {
     cap: u32,
     center: vec2<f32>,
     scale: f32,
-    _pad: f32,
+    trail_width: f32,
 };
 
 @group(1) @binding(0)
@@ -322,7 +323,7 @@ fn vs_trail(
     let tangent = dir / len;
     let normal = vec2<f32>(-tangent.y, tangent.x);
 
-    let half_width = 1.0;
+    let half_width = state.trail_width;
 
     var uv = array<vec2<f32>, 6>(
         vec2<f32>(0.0, -1.0),

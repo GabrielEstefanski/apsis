@@ -50,11 +50,14 @@ fn trail_body_count(bodies: &[Body]) -> usize {
         .count()
         .max(1)
 }
+use crate::physics::orbital::{self, OrbitalElements};
 use crate::physics::energy::{
     angular_momentum_z, center_of_mass_state, kinetic_energy, total_energy,
 };
 use crate::physics::gravity::BarnesHutEngine;
-use crate::physics::integrator::{drift, evaluate_accelerations, half_kick};
+use crate::physics::integrator::{
+    drift, evaluate_accelerations, kick, Integrator, Y4_C, Y4_D,
+};
 
 /// Central simulation state for an N-body gravitational system.
 pub struct System {
@@ -87,12 +90,27 @@ pub struct System {
     /// Barnes–Hut opening angle parameter (θ).
     theta: f64,
 
+    /// Active integration algorithm.
+    integrator: Integrator,
+
+    /// Cached osculating orbital elements — one slot per body.
+    /// Updated on demand via [`System::update_orbital_elements`], not every step.
+    orbital_cache: Vec<Option<OrbitalElements>>,
+
+    /// Global Plummer softening scale applied on top of the per-body
+    /// mass-proportional default: `ε = EPS_BASE · m^(1/3) · softening_scale`.
+    softening_scale: f64,
+
     /// Diagnostics subsystem.
     diagnostics: DiagnosticsComputer,
     last_diag: SimulationDiagnostics,
 
     /// Step counter.
     steps: u64,
+
+    /// Total simulated time elapsed (t = steps × dt, but tracked as f64
+    /// so it remains correct even if dt changes mid-run).
+    t: f64,
 
     /// Fixed time step.
     current_dt: f64,
@@ -153,9 +171,13 @@ impl System {
             engine: BarnesHutEngine::new(max_depth),
             scratch_acc: Vec::new(),
             theta,
+            integrator: Integrator::VelocityVerlet,
+            orbital_cache: Vec::new(),
+            softening_scale: 1.0,
             diagnostics: DiagnosticsComputer::new(),
             last_diag: SimulationDiagnostics::default(),
             steps: 0,
+            t: 0.0,
             current_dt: dt,
             g_factor: 1.0,
             initial_angular_momentum: None,
@@ -166,26 +188,16 @@ impl System {
 }
 
 impl System {
+    /// Advance the simulation by one time step using the configured integrator.
     pub fn step(&mut self) {
+        match self.integrator {
+            Integrator::VelocityVerlet => self.step_vv(),
+            Integrator::Yoshida4 => self.step_yoshida4(),
+        }
+
         let dt = self.current_dt;
-        let theta = self.theta;
-
-        let raw_pe =
-            evaluate_accelerations(&self.bodies, theta, &mut self.engine, &mut self.scratch_acc);
-
-        self.last_potential = self.scale_acc_and_pe(raw_pe);
-
-        half_kick(&mut self.bodies, &self.scratch_acc, 0.5 * dt);
-
-        drift(&mut self.bodies, dt);
-
-        let raw_pe_after =
-            evaluate_accelerations(&self.bodies, theta, &mut self.engine, &mut self.scratch_acc);
-        self.last_potential = self.scale_acc_and_pe(raw_pe_after);
-
-        half_kick(&mut self.bodies, &self.scratch_acc, 0.5 * dt);
-
         self.steps += 1;
+        self.t += dt;
 
         self.last_diag = self
             .diagnostics
@@ -202,6 +214,57 @@ impl System {
                 self.trail_buf.translate(-dx as f32, -dy as f32);
             }
         }
+    }
+
+    // ── Velocity Verlet (KDK leapfrog, 2nd-order) ────────────────────────────
+
+    fn step_vv(&mut self) {
+        let dt = self.current_dt;
+        let theta = self.theta;
+
+        // Force at x(t)
+        let raw_pe =
+            evaluate_accelerations(&self.bodies, theta, &mut self.engine, &mut self.scratch_acc);
+        self.last_potential = self.scale_acc_and_pe(raw_pe);
+
+        kick(&mut self.bodies, &self.scratch_acc, 0.5 * dt); // half-kick
+        drift(&mut self.bodies, dt);
+
+        // Force at x(t + dt)
+        let raw_pe =
+            evaluate_accelerations(&self.bodies, theta, &mut self.engine, &mut self.scratch_acc);
+        self.last_potential = self.scale_acc_and_pe(raw_pe);
+
+        kick(&mut self.bodies, &self.scratch_acc, 0.5 * dt); // half-kick
+    }
+
+    // ── Yoshida 4th-order (Forest–Ruth DKD, 4th-order) ───────────────────────
+    //
+    // Scheme: drift(c₀) → F → kick(d₀) → drift(c₁) → F → kick(d₁) → drift(c₂) → F → kick(d₂) → drift(c₃)
+    //
+    // d₁ = w₀ ≈ −1.70, so the middle sub-step is a *backward* kick — correct
+    // and essential for the 4th-order cancellation of error terms.
+
+    fn step_yoshida4(&mut self) {
+        let dt = self.current_dt;
+        let theta = self.theta;
+
+        for i in 0..3 {
+            drift(&mut self.bodies, Y4_C[i] * dt);
+
+            let raw_pe = evaluate_accelerations(
+                &self.bodies,
+                theta,
+                &mut self.engine,
+                &mut self.scratch_acc,
+            );
+            self.last_potential = self.scale_acc_and_pe(raw_pe);
+
+            kick(&mut self.bodies, &self.scratch_acc, Y4_D[i] * dt);
+        }
+
+        // Final drift to complete the DKD stencil
+        drift(&mut self.bodies, Y4_C[3] * dt);
     }
 }
 
@@ -284,7 +347,11 @@ impl System {
     /// history is lost.  Energy baseline is reset because the system
     /// topology has changed.
     pub fn add_body(&mut self, mut body: Body) {
+        use crate::domain::body::default_softening;
         body.sync_physical_properties();
+        if (self.softening_scale - 1.0).abs() > 1e-15 {
+            body.softening = default_softening(body.mass) * self.softening_scale;
+        }
         self.total_mass += body.mass;
         self.bodies.push(body);
 
@@ -319,6 +386,7 @@ impl System {
         self.initial_energy = None;
         self.rel_energy_error = 0.0;
         self.steps = 0;
+        self.t = 0.0;
         self.last_potential = 0.0;
         self.last_kinetic = 0.0;
         self.diagnostics = DiagnosticsComputer::new();
@@ -383,6 +451,16 @@ impl System {
         self.current_dt
     }
 
+    /// Total simulated time elapsed.
+    pub fn t(&self) -> f64 {
+        self.t
+    }
+
+    /// Number of integration steps completed.
+    pub fn steps(&self) -> u64 {
+        self.steps
+    }
+
     /// Returns a shared reference to the GPU-ready trail ring buffer.
     pub fn trail_buf(&self) -> &TrailBuffer {
         &self.trail_buf
@@ -412,6 +490,46 @@ impl System {
 
     pub fn set_dt(&mut self, dt: f64) {
         self.current_dt = dt;
+    }
+
+    /// Returns the active integrator.
+    pub fn integrator(&self) -> Integrator {
+        self.integrator
+    }
+
+    /// Switches the integration algorithm.  Takes effect on the next [`step`].
+    pub fn set_integrator(&mut self, i: Integrator) {
+        self.integrator = i;
+    }
+
+    /// Returns the current Barnes–Hut opening angle θ.
+    pub fn theta(&self) -> f64 {
+        self.theta
+    }
+
+    /// Sets the Barnes–Hut opening angle θ (clamped to [0.1, 1.5]).
+    ///
+    /// Smaller θ → more accurate (approaches O(N²) as θ → 0).
+    /// Larger θ → faster but less accurate.
+    pub fn set_theta(&mut self, theta: f64) {
+        self.theta = theta.clamp(0.05, 1.5);
+    }
+
+    /// Returns the current global softening scale factor.
+    pub fn softening_scale(&self) -> f64 {
+        self.softening_scale
+    }
+
+    /// Sets a global Plummer softening scale applied on top of the
+    /// per-body mass-proportional default (`ε = ε_default · scale`).
+    ///
+    /// Also rescales all existing body softenings immediately.
+    pub fn set_softening_scale(&mut self, scale: f64) {
+        use crate::domain::body::default_softening;
+        self.softening_scale = scale.max(0.0);
+        for b in &mut self.bodies {
+            b.softening = default_softening(b.mass) * self.softening_scale;
+        }
     }
 
     pub fn trail_every(&self) -> usize {
@@ -460,6 +578,10 @@ impl System {
             com_vx,
             com_vy,
 
+            t: self.t,
+            steps: self.steps,
+
+            integrator: self.integrator,
             g_factor: self.g_factor,
             theta: self.theta,
             dt: self.current_dt,
@@ -473,5 +595,22 @@ impl System {
     /// Returns accelerations computed during the last integration step.
     pub fn last_accelerations(&self) -> &[(f64, f64)] {
         &self.scratch_acc
+    }
+
+    // ── Orbital elements ─────────────────────────────────────────────────────
+
+    /// Recomputes osculating orbital elements for all bodies and caches the result.
+    ///
+    /// This is O(N²) and should be called **once per rendered frame**, not every
+    /// physics step. The result is available via [`orbital_elements`].
+    pub fn update_orbital_elements(&mut self) {
+        self.orbital_cache = orbital::compute_all(&self.bodies, self.g_factor);
+    }
+
+    /// Returns the cached osculating orbital elements (one slot per body).
+    ///
+    /// Call [`update_orbital_elements`] first to get fresh values.
+    pub fn orbital_elements(&self) -> &[Option<OrbitalElements>] {
+        &self.orbital_cache
     }
 }

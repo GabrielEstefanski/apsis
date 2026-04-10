@@ -1,4 +1,8 @@
-use crate::templates::{Template, category::TemplateCategory, presets::*};
+use crate::templates::{
+    Template,
+    category::TemplateCategory,
+    presets::{hierachical::simple_three_body, *},
+};
 
 pub struct TemplateEntry {
     pub name: &'static str,
@@ -63,6 +67,11 @@ pub const TEMPLATES: &[TemplateEntry] = &[
         name: "Jupiter Trojans",
         category: TemplateCategory::Systems,
         build: jupiter_trojans,
+    },
+    TemplateEntry {
+        name: "Hierarchical",
+        category: TemplateCategory::Systems,
+        build: simple_three_body,
     },
     // ── Three-body problems ─────────────────────────────────────────────────── //
     TemplateEntry {

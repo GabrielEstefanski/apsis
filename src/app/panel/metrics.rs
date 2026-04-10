@@ -75,6 +75,23 @@ impl SimulationApp {
                 );
                 ui.end_row();
 
+                // ── Simulated time ─────────────────── //
+                ui.label(RichText::new("t").size(10.0).color(TEXT_SEC));
+                ui.label(
+                    RichText::new(format!("{:.4e}", m.t))
+                        .monospace()
+                        .size(10.0)
+                        .color(TEXT_PRI),
+                );
+                ui.label(RichText::new("steps").size(10.0).color(TEXT_SEC));
+                ui.label(
+                    RichText::new(format!("{}", m.steps))
+                        .monospace()
+                        .size(10.0)
+                        .color(TEXT_DIM),
+                );
+                ui.end_row();
+
                 // ── Integration params ─────────────── //
                 ui.label(RichText::new("dt").size(10.0).color(TEXT_SEC));
                 ui.label(
@@ -89,6 +106,22 @@ impl SimulationApp {
                         .monospace()
                         .size(10.0)
                         .color(TEXT_SEC),
+                );
+                ui.end_row();
+
+                // ── Integrator ──────────────────────── //
+                ui.label(RichText::new("integr.").size(10.0).color(TEXT_SEC));
+                ui.label(
+                    RichText::new(format!("O({})", m.integrator.order()))
+                        .monospace()
+                        .size(10.0)
+                        .color(ACCENT),
+                );
+                ui.label(RichText::new("").size(10.0)); // spacer
+                ui.label(
+                    RichText::new(m.integrator.label())
+                        .size(9.0)
+                        .color(TEXT_DIM),
                 );
                 ui.end_row();
 

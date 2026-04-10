@@ -4,6 +4,7 @@
 //! scalars) and return a scalar. No simulation state is modified.
 
 use crate::domain::body::Body;
+use crate::physics::gravity::{G, pair_eps2};
 
 /// Total kinetic energy of the system.
 ///
@@ -57,6 +58,38 @@ pub fn center_of_mass_state(bodies: &[Body]) -> (f64, f64, f64, f64) {
     }
 
     (x / m, y / m, vx / m, vy / m)
+}
+
+/// Computes the gravitational potential energy contributed to each body.
+///
+/// For each body `i`, `pe[i]` receives half of the pairwise potential with
+/// every other body `j`:
+///
+/// ```text
+/// pe_i = ½ Σⱼ≠ᵢ  −G mᵢ mⱼ / √(rᵢⱼ² + ε²ᵢⱼ)
+/// ```
+///
+/// Summing `pe` over all `i` recovers the total potential energy exactly.
+/// This is the standard symmetric partition used in N-body diagnostics.
+///
+/// Complexity: O(N²). Intended for recording/export, **not** the inner step loop.
+pub fn per_body_potential_energy(bodies: &[Body], g_factor: f64) -> Vec<f64> {
+    let n = bodies.len();
+    let mut pe = vec![0.0_f64; n];
+
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let dx = bodies[j].x - bodies[i].x;
+            let dy = bodies[j].y - bodies[i].y;
+            let eps2 = pair_eps2(bodies[i].softening, bodies[j].softening);
+            let d2 = dx * dx + dy * dy + eps2;
+            let phi = -G * g_factor * bodies[i].mass * bodies[j].mass / d2.sqrt();
+            pe[i] += phi * 0.5;
+            pe[j] += phi * 0.5;
+        }
+    }
+
+    pe
 }
 
 #[cfg(test)]

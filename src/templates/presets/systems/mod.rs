@@ -1,3 +1,4 @@
+pub mod hierachical;
 pub mod jupiter_trojan;
 pub mod simple_system;
 pub mod solar_system;
