@@ -2,8 +2,13 @@ use crate::app::theme::{ACCENT, BORDER, DANGER, SUCCESS, TEXT_DIM, TEXT_PRI, TEX
 use crate::app::ui::{SemanticScaleMode, SimulationApp};
 use eframe::egui::{self, Color32, RichText, Stroke};
 
+// Frame-counter for the rec dot pulse (toolbar has no `time` param)
+// We borrow ctx.input time instead.
+
 impl SimulationApp {
     pub(super) fn toolbar_content(&mut self, ui: &mut egui::Ui) {
+        let time = ui.ctx().input(|i| i.time as f32);
+
         ui.horizontal(|ui| {
             ui.label(
                 RichText::new("GRAVITY SIM")
@@ -12,44 +17,21 @@ impl SimulationApp {
                     .strong(),
             );
 
+            // ── Simulation name (editable inline) ───────────────────────────── //
             ui.separator();
-
-            // ── Play / Pause ────────────────────────────────────────── //
-            let (lbl, col) = if self.paused {
-                ("▶  Run", SUCCESS)
+            let name_display = if self.sim_name.is_empty() {
+                "Unnamed".to_owned()
             } else {
-                ("⏸  Pause", ACCENT)
+                self.sim_name.clone()
             };
-            if ui
-                .add(
-                    egui::Button::new(RichText::new(lbl).size(11.0).color(col))
-                        .fill(Color32::TRANSPARENT)
-                        .stroke(Stroke::new(1.0, col))
-                        .min_size(egui::vec2(72.0, 22.0)),
-                )
-                .clicked()
-            {
-                self.paused = !self.paused;
-            }
-
-            ui.separator();
-
-            // ── Integration timestep ────────────────────────────────── //
-            ui.label(RichText::new("dt").size(10.0).color(TEXT_SEC));
-            let mut dt = self.system.dt();
-            let speed = (dt * 0.05).max(1e-7);
-            let r = ui.add(
-                egui::DragValue::new(&mut dt)
-                    .speed(speed)
-                    .range(1e-6..=1.0)
-                    .max_decimals(6),
+            let name_resp = ui.add(
+                egui::TextEdit::singleline(&mut self.sim_name)
+                    .desired_width(120.0)
+                    .hint_text(name_display)
+                    .font(egui::FontId::proportional(10.0)),
             );
-            if r.changed() {
-                self.system.set_dt(dt);
-            }
-            if r.hovered() {
-                egui::show_tooltip_text(ui.ctx(), ui.layer_id(), egui::Id::new("dt_tip"),
-                    "Integration timestep. Smaller = more accurate but slower.");
+            if name_resp.hovered() {
+                name_resp.on_hover_text("Simulation name — used in save files and recordings");
             }
 
             ui.separator();
@@ -119,82 +101,106 @@ impl SimulationApp {
 
             // ── Right-side actions ──────────────────────────────────── //
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                // Body count
                 let n = self.system.bodies().len();
-                ui.label(
-                    RichText::new(format!("{n} bodies"))
-                        .size(10.0)
-                        .color(TEXT_DIM),
-                );
+                ui.label(RichText::new(format!("{n} bodies")).size(10.0).color(TEXT_DIM));
                 ui.separator();
 
-                // Save / Load
-                if ui
-                    .add(
-                        egui::Button::new(RichText::new("Saves").size(10.0).color(ACCENT))
-                            .fill(Color32::TRANSPARENT)
-                            .stroke(Stroke::new(0.5, ACCENT))
-                            .min_size(egui::vec2(48.0, 20.0)),
-                    )
-                    .on_hover_text("Browse and load saved states")
-                    .clicked()
-                {
+                // ⚙ Settings
+                if ui.add(
+                    egui::Button::new(RichText::new("⚙").size(13.0).color(TEXT_DIM))
+                        .fill(Color32::TRANSPARENT)
+                        .stroke(Stroke::new(0.5, BORDER))
+                        .min_size(egui::vec2(24.0, 20.0)),
+                ).on_hover_text("Settings — unit labels, recording").clicked() {
+                    self.show_settings_modal = !self.show_settings_modal;
+                }
+
+                // ? Shortcuts
+                if ui.add(
+                    egui::Button::new(RichText::new("?").size(11.0).color(TEXT_DIM))
+                        .fill(Color32::TRANSPARENT)
+                        .stroke(Stroke::new(0.5, BORDER))
+                        .min_size(egui::vec2(22.0, 20.0)),
+                ).on_hover_text("Keyboard shortcuts (H)").clicked() {
+                    self.show_shortcuts_modal = !self.show_shortcuts_modal;
+                }
+
+                // ● Record dot
+                let is_rec = self.recorder.is_some();
+                let pulse_alpha = if is_rec {
+                    (((time * 2.5).sin() * 0.4 + 0.6) * 255.0) as u8
+                } else { 100 };
+                let rec_col = Color32::from_rgba_unmultiplied(
+                    DANGER.r(), DANGER.g(), DANGER.b(), pulse_alpha,
+                );
+                let rec_btn = ui.add(
+                    egui::Button::new(RichText::new("●").size(13.0).color(rec_col))
+                        .fill(if is_rec {
+                            Color32::from_rgba_unmultiplied(50, 10, 10, 80)
+                        } else { Color32::TRANSPARENT })
+                        .stroke(Stroke::new(0.5,
+                            if is_rec { DANGER.gamma_multiply(0.5) } else { BORDER }))
+                        .min_size(egui::vec2(24.0, 20.0)),
+                ).on_hover_text(if is_rec { "Recording — click to stop" } else { "Start recording (open Settings)" });
+                if rec_btn.clicked() {
+                    if is_rec {
+                        if let Some(mut rec) = self.recorder.take() { let _ = rec.flush(); }
+                    } else {
+                        self.show_settings_modal = true;
+                    }
+                }
+
+                ui.separator();
+
+                // Saves
+                if ui.add(
+                    egui::Button::new(RichText::new("Saves").size(10.0).color(ACCENT))
+                        .fill(Color32::TRANSPARENT)
+                        .stroke(Stroke::new(0.5, ACCENT))
+                        .min_size(egui::vec2(48.0, 20.0)),
+                ).on_hover_text("Browse and load saved states").clicked() {
                     self.open_save_modal();
                 }
 
-                if ui
-                    .add(
-                        egui::Button::new(RichText::new("Save").size(10.0).color(SUCCESS))
-                            .fill(Color32::TRANSPARENT)
-                            .stroke(Stroke::new(0.5, SUCCESS))
-                            .min_size(egui::vec2(40.0, 20.0)),
-                    )
-                    .on_hover_text("Quick-save current state")
-                    .clicked()
-                {
+                if ui.add(
+                    egui::Button::new(RichText::new("Save").size(10.0).color(SUCCESS))
+                        .fill(Color32::TRANSPARENT)
+                        .stroke(Stroke::new(0.5, SUCCESS))
+                        .min_size(egui::vec2(40.0, 20.0)),
+                ).on_hover_text("Quick-save current state").clicked() {
                     let _ = self.do_save();
                 }
 
                 ui.separator();
 
-                if ui
-                    .add(
-                        egui::Button::new(RichText::new("Clear").size(10.0).color(DANGER))
-                            .fill(Color32::TRANSPARENT)
-                            .stroke(Stroke::new(0.5, DANGER))
-                            .min_size(egui::vec2(46.0, 20.0)),
-                    )
-                    .clicked()
-                {
+                if ui.add(
+                    egui::Button::new(RichText::new("Clear").size(10.0).color(DANGER))
+                        .fill(Color32::TRANSPARENT)
+                        .stroke(Stroke::new(0.5, DANGER))
+                        .min_size(egui::vec2(46.0, 20.0)),
+                ).clicked() {
                     self.system.load_bodies(vec![]);
                     self.paused = true;
+                    self.reset_drift_peaks();
+                    self.sim_name = String::new();
                 }
 
-                if ui
-                    .add(
-                        egui::Button::new(
-                            RichText::new("Zero COM").size(10.0).color(TEXT_SEC),
-                        )
+                if ui.add(
+                    egui::Button::new(RichText::new("Zero COM").size(10.0).color(TEXT_SEC))
                         .fill(Color32::TRANSPARENT)
                         .stroke(Stroke::new(0.5, BORDER))
                         .min_size(egui::vec2(60.0, 20.0)),
-                    )
-                    .on_hover_text("Zero centre-of-mass velocity")
-                    .clicked()
-                {
+                ).on_hover_text("Zero centre-of-mass velocity").clicked() {
                     self.system.zero_com_velocity();
                 }
 
-                if ui
-                    .add(
-                        egui::Button::new(
-                            RichText::new("Fit view").size(10.0).color(TEXT_SEC),
-                        )
+                if ui.add(
+                    egui::Button::new(RichText::new("Fit view").size(10.0).color(TEXT_SEC))
                         .fill(Color32::TRANSPARENT)
                         .stroke(Stroke::new(0.5, BORDER))
                         .min_size(egui::vec2(52.0, 20.0)),
-                    )
-                    .clicked()
-                {
+                ).clicked() {
                     self.fit_to_view();
                 }
             });

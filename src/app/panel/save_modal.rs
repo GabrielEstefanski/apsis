@@ -112,8 +112,8 @@ impl SimulationApp {
                     ui.add_space(4.0);
                     ui.label(
                         RichText::new(format!(
-                            "Load save #{} — t={:.4e}, {} bodies?",
-                            snap.save_id,
+                            "Load \"{}\" — t={:.4e}, {} bodies?",
+                            if snap.sim_name.is_empty() { "Unnamed" } else { &snap.sim_name },
                             snap.t,
                             snap.bodies.len()
                         ))
@@ -136,12 +136,14 @@ impl SimulationApp {
                             self.physics_cfg.softening_scale = snap.softening_scale;
                             self.physics_cfg.g_factor       = snap.g_factor;
                             self.physics_cfg.trail_every    = snap.trail_every;
+                            self.sim_name = snap.sim_name.clone();
                             self.paused = true;
                             self.selected_body = None;
                             self.selection_form = None;
                             self.pending_load = None;
                             self.pending_fit = true;
                             self.show_save_modal = false;
+                            self.reset_drift_peaks();
                         }
                         if ui
                             .add(
@@ -180,17 +182,22 @@ impl SimulationApp {
                             let mut load_idx: Option<usize> = None;
 
                             for (i, entry) in self.save_modal_entries.iter().enumerate() {
-                                let secs = entry.save_id / 1000;
-                                let millis = entry.save_id % 1000;
-
                                 ui.horizontal(|ui| {
-                                    // ID / timestamp
-                                    ui.label(
-                                        RichText::new(format!("unix+{secs}.{millis:03}"))
-                                            .size(10.0)
-                                            .color(TEXT_PRI)
-                                            .monospace(),
-                                    );
+                                    // Name + date column
+                                    ui.vertical(|ui| {
+                                        ui.label(
+                                            RichText::new(entry.display_name())
+                                                .size(10.5)
+                                                .color(TEXT_PRI)
+                                                .strong(),
+                                        );
+                                        ui.label(
+                                            RichText::new(entry.display_date())
+                                                .size(9.0)
+                                                .color(TEXT_DIM)
+                                                .monospace(),
+                                        );
+                                    });
 
                                     // Stats
                                     ui.label(

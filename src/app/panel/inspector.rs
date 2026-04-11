@@ -1,6 +1,6 @@
 use crate::app::theme::{ACCENT, DANGER, SUCCESS, TEXT_DIM, TEXT_PRI, TEXT_SEC};
 use crate::app::theme::{field, metric, primary_btn, secondary_btn, section};
-use crate::app::ui::{SelectionForm, SimulationApp};
+use crate::app::ui::{SelectionForm, SimulationApp, UndoRecord};
 use crate::domain::body::{Body, default_moment_inertia, radius_from_density_mass};
 use crate::physics::orbital::OrbitType;
 use eframe::egui::{self, RichText};
@@ -139,17 +139,29 @@ impl SimulationApp {
         let reset_color = is_custom && secondary_btn(ui, "Reset color");
 
         if color_changed {
-            let mut b = self.system.bodies()[idx];
+            let old = self.system.bodies()[idx];
+            let mut b = old;
             b.color = [
                 (color_rgb[0] * 255.0) as u8,
                 (color_rgb[1] * 255.0) as u8,
                 (color_rgb[2] * 255.0) as u8,
             ];
+            self.push_undo(UndoRecord::EditedBody {
+                idx,
+                old_body: old,
+                old_name: self.system.name(idx).to_owned(),
+            });
             self.system.update_body(idx, b);
         }
         if reset_color {
-            let mut b = self.system.bodies()[idx];
+            let old = self.system.bodies()[idx];
+            let mut b = old;
             b.color = b.material.props().base_color;
+            self.push_undo(UndoRecord::EditedBody {
+                idx,
+                old_body: old,
+                old_name: self.system.name(idx).to_owned(),
+            });
             self.system.update_body(idx, b);
         }
 
@@ -223,6 +235,9 @@ impl SimulationApp {
             })();
             match parsed {
                 Some(b) => {
+                    let old_body = self.system.bodies()[idx];
+                    let old_name = self.system.name(idx).to_owned();
+                    self.push_undo(UndoRecord::EditedBody { idx, old_body, old_name });
                     self.system.update_body(idx, b);
                     let name = self.selection_form.as_ref().unwrap().name.clone();
                     if !name.is_empty() {
@@ -237,6 +252,9 @@ impl SimulationApp {
         }
 
         if delete {
+            let body = self.system.bodies()[idx];
+            let name = self.system.name(idx).to_owned();
+            self.push_undo(UndoRecord::RemovedBody { body, name });
             self.system.remove_body(idx);
             self.selected_body = None;
             self.selection_form = None;

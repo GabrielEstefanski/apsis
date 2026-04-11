@@ -205,6 +205,7 @@ impl PhysicsHandle {
             g_factor: 1.0,
             integrator: Integrator::VelocityVerlet,
             trail_every: 1,
+            sim_name: String::new(),
             bodies: vec![],
             names: vec![],
         })

@@ -1,5 +1,5 @@
 use crate::app::theme::{ACCENT_DIM, BORDER, TEXT_DIM, TEXT_PRI, TEXT_SEC};
-use crate::app::ui::SimulationApp;
+use crate::app::ui::{SimulationApp, UndoRecord};
 use crate::templates::{TEMPLATES, TemplateCategory, instantiate_at};
 use eframe::egui::{self, RichText, Stroke};
 
@@ -56,11 +56,15 @@ impl SimulationApp {
                         // current offset, i.e. the screen centre in world space)
                         if response.clicked() {
                             let template = (entry.build)();
-                            // Instantiate at world origin; fit_to_view will
-                            // re-center and re-scale the camera once loaded.
                             let bodies = instantiate_at(&template, 0.0, 0.0);
+                            self.push_undo(UndoRecord::AddedBodies(bodies.len()));
                             self.system.add_bodies(bodies);
                             self.pending_fit = true;
+                            self.reset_drift_peaks();
+                            // Seed the simulation name from the template (user can rename later)
+                            if self.sim_name.is_empty() {
+                                self.sim_name = entry.name.to_owned();
+                            }
                         }
 
                         if response.hovered() && self.template_drag.is_none() {

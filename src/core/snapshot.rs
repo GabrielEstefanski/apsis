@@ -5,27 +5,32 @@
 //! Each save is a single `.grav` file in a compact little-endian binary layout:
 //!
 //! ```text
-//! [4]  magic        = b"GRAV"
-//! [2]  schema_ver   = 1  (u16 LE)
-//! [8]  save_id      u64 LE  — unix-millis at save time (unique, sortable)
-//! [8]  t            f64 LE  — simulated time
-//! [8]  steps        u64 LE
-//! [8]  dt           f64 LE
-//! [8]  theta        f64 LE
-//! [8]  softening    f64 LE  — softening_scale
-//! [8]  g_factor     f64 LE
-//! [1]  integrator   u8      — 0=VV, 1=Yoshida4
-//! [4]  trail_every  u32 LE
-//! [4]  n_bodies     u32 LE
+//! [4]  magic         = b"GRAV"
+//! [2]  schema_ver    u16 LE   — 1, 2, or 3
+//! [8]  save_id       u64 LE   — unix-millis at save time (unique, sortable)
+//! [8]  t             f64 LE   — simulated time
+//! [8]  steps         u64 LE
+//! [8]  dt            f64 LE
+//! [8]  theta         f64 LE
+//! [8]  softening     f64 LE   — softening_scale
+//! [8]  g_factor      f64 LE
+//! [1]  integrator    u8       — 0=VV, 1=Yoshida4
+//! [4]  trail_every   u32 LE
+//! --- v3+ only ---
+//! [4]  sim_name_len  u32 LE
+//! [N]  sim_name      UTF-8 bytes
+//! ----------------
+//! [4]  n_bodies      u32 LE
 //! per body (84 bytes):
 //!   [8] x  [8] y  [8] vx  [8] vy
 //!   [8] mass  [8] density  [8] softening  [8] physical_radius
 //!   [8] omega_z  [8] moment_inertia
 //!   [1] material_id  [3] color_rgb
+//! v2+ names section: n_bodies × (u32 len + UTF-8 bytes)
 //! ```
 //!
 //! The save_id is used as the filename: `{save_id}.grav`.
-//! Listing saves just reads the header (first 63 bytes) of each file.
+//! Listing saves reads only the header fields of each file.
 
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
@@ -38,7 +43,7 @@ use crate::physics::integrator::Integrator;
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 pub const MAGIC: [u8; 4] = *b"GRAV";
-pub const SCHEMA_VERSION: u16 = 2;
+pub const SCHEMA_VERSION: u16 = 3;
 
 /// Byte offset where body data starts (after header).
 const HEADER_BYTES: usize = 4 + 2 + 8 + 8 + 8 + 8 + 8 + 8 + 8 + 1 + 4 + 4; // 71
@@ -69,6 +74,8 @@ pub struct SimSnapshot {
     pub integrator: Integrator,
     /// Trail sampling interval.
     pub trail_every: usize,
+    /// User-assigned simulation name (v3+). Empty string for older saves.
+    pub sim_name: String,
     /// Body states — the only things that evolve.
     pub bodies: Vec<BodyRecord>,
     /// Display names, parallel to `bodies`. May be empty for v1 saves (auto-generated on load).
@@ -134,14 +141,46 @@ pub struct SaveEntry {
     pub t: f64,
     pub steps: u64,
     pub n_bodies: u32,
+    /// Simulation name stored in v3+ files. Empty for older saves.
+    pub sim_name: String,
 }
 
 impl SaveEntry {
-    pub fn display_name(&self) -> String {
-        let secs = self.save_id / 1000;
-        // Format: unix+{secs} like the recorder timestamp
-        format!("unix+{secs}")
+    /// Human-readable name: the user's sim name or "Unnamed".
+    pub fn display_name(&self) -> &str {
+        if self.sim_name.is_empty() { "Unnamed" } else { &self.sim_name }
     }
+
+    /// Human-readable UTC date derived from save_id (unix millis).
+    pub fn display_date(&self) -> String {
+        unix_millis_to_display(self.save_id)
+    }
+}
+
+/// Convert unix milliseconds to a human-readable UTC date string.
+/// Uses the Gregorian calendar algorithm — no external crates required.
+fn unix_millis_to_display(millis: u64) -> String {
+    let total_secs = millis / 1000;
+    let time_of_day = total_secs % 86400;
+    let h = time_of_day / 3600;
+    let m = (time_of_day % 3600) / 60;
+
+    // Days since Unix epoch (1970-01-01)
+    let days = total_secs / 86400;
+
+    // Gregorian civil calendar: http://howardhinnant.github.io/date_algorithms.html
+    let z   = days as i64 + 719468;
+    let era = if z >= 0 { z } else { z - 146096 } / 146097;
+    let doe = (z - era * 146097) as u64;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y   = yoe as i64 + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp  = (5 * doy + 2) / 153;
+    let d   = doy - (153 * mp + 2) / 5 + 1;
+    let mo  = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y   = if mo <= 2 { y + 1 } else { y };
+
+    format!("{y:04}-{mo:02}-{d:02}  {h:02}:{m:02}")
 }
 
 // ── Serialisation helpers ─────────────────────────────────────────────────────
@@ -242,6 +281,10 @@ impl SimSnapshot {
         wf64(&mut w, self.g_factor)?;
         w.write_all(&[integrator_to_u8(self.integrator)])?;
         wu32(&mut w, self.trail_every as u32)?;
+        // v3: sim_name before n_bodies
+        let name_bytes = self.sim_name.as_bytes();
+        wu32(&mut w, name_bytes.len() as u32)?;
+        w.write_all(name_bytes)?;
         wu32(&mut w, self.bodies.len() as u32)?;
 
         // Bodies
@@ -282,12 +325,12 @@ impl SimSnapshot {
             return Err(io::Error::new(io::ErrorKind::InvalidData, "not a .grav file"));
         }
 
-        // Schema version — accept v1 (no names) and v2 (with names)
+        // Schema version — accept v1, v2, v3
         let ver = ru16(&mut r)?;
-        if ver != 1 && ver != SCHEMA_VERSION {
+        if ver < 1 || ver > SCHEMA_VERSION {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                format!("unsupported schema version {ver} (expected {SCHEMA_VERSION})"),
+                format!("unsupported schema version {ver} (expected ≤{SCHEMA_VERSION})"),
             ));
         }
 
@@ -302,6 +345,15 @@ impl SimSnapshot {
         r.read_exact(&mut integ_byte)?;
         let integrator  = u8_to_integrator(integ_byte[0]);
         let trail_every = ru32(&mut r)? as usize;
+        // v3: sim_name before n_bodies
+        let sim_name = if ver >= 3 {
+            let len = ru32(&mut r)? as usize;
+            let mut buf = vec![0u8; len];
+            r.read_exact(&mut buf)?;
+            String::from_utf8(buf).unwrap_or_default()
+        } else {
+            String::new()
+        };
         let n_bodies    = ru32(&mut r)?;
 
         let mut bodies = Vec::with_capacity(n_bodies as usize);
@@ -344,7 +396,7 @@ impl SimSnapshot {
 
         Ok(SimSnapshot {
             save_id, t, steps, dt, theta, softening_scale,
-            g_factor, integrator, trail_every, bodies, names,
+            g_factor, integrator, trail_every, sim_name, bodies, names,
         })
     }
 
@@ -358,13 +410,22 @@ impl SimSnapshot {
         if magic != MAGIC {
             return Err(io::Error::new(io::ErrorKind::InvalidData, "not a .grav file"));
         }
-        let _ver     = ru16(&mut r)?;
+        let ver      = ru16(&mut r)?;
         let save_id  = ru64(&mut r)?;
         let t        = rf64(&mut r)?;
         let steps    = ru64(&mut r)?;
         // skip dt, theta, softening, g_factor, integrator, trail_every
         let mut skip = [0u8; 8 + 8 + 8 + 8 + 1 + 4];
         r.read_exact(&mut skip)?;
+        // v3: sim_name before n_bodies
+        let sim_name = if ver >= 3 {
+            let len = ru32(&mut r)? as usize;
+            let mut buf = vec![0u8; len];
+            r.read_exact(&mut buf)?;
+            String::from_utf8(buf).unwrap_or_default()
+        } else {
+            String::new()
+        };
         let n_bodies = ru32(&mut r)?;
 
         Ok(SaveEntry {
@@ -373,6 +434,7 @@ impl SimSnapshot {
             t,
             steps,
             n_bodies,
+            sim_name,
         })
     }
 }

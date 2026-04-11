@@ -1,9 +1,10 @@
 mod inspector;
 mod metrics;
 mod save_modal;
+mod settings_modal;
+mod shortcuts_modal;
 mod tab_bar;
 mod tabs;
-mod time_speed;
 mod toolbar;
 
 use crate::app::ui::SimulationApp;
@@ -34,7 +35,6 @@ impl SimulationApp {
             .resizable(true)
             .show(ctx, |ui| {
                 self.panel_metrics_compact(ui);
-                self.panel_time_speed(ui);
                 self.panel_tab_bar(ui);
 
                 ui.add_space(4.0);
