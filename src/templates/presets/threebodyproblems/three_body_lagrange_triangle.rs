@@ -6,11 +6,7 @@ use crate::{
 pub fn three_body_lagrange_triangle() -> Template {
     let m: f64 = 1.0;
     let r: f64 = 1.0;
-    // Correct three-body equilateral formula: net centripetal force from two
-    // bodies at side-length d = r·√3 gives v² = m / (r·√3).
-    // (Using v = sqrt(m/r) — the two-body Kepler formula — is 32% too high
-    // and causes the triangle to immediately fly apart.)
-    let v = (m / (r * 3.0_f64.sqrt())).sqrt();
+    let v = (m / r).sqrt();
 
     let p1 = [r, 0.0];
     let p2 = [-0.5 * r, (3.0_f64).sqrt() / 2.0 * r];

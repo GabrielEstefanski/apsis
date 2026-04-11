@@ -692,6 +692,7 @@ impl System {
             g_factor: self.g_factor,
             integrator: self.integrator,
             trail_every: self.trail_every,
+            sim_name: String::new(), // set by the app layer before saving
             bodies: self.bodies.iter().map(BodyRecord::from_body).collect(),
             names: self.names.clone(),
         }

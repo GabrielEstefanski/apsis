@@ -5,7 +5,10 @@
       "Bash(cargo check:*)",
       "Bash(cargo test:*)",
       "Bash(cargo run:*)",
-      "Bash(python3 -c ':*)"
+      "Bash(python3 -c ':*)",
+      "Bash(cargo metadata:*)",
+      "Bash(python3 -c \"import json,sys; m=json.load\\(sys.stdin\\); [print\\(p['manifest_path']\\) for p in m['packages'] if p['name']=='egui']\")",
+      "Bash(python -c \"import json,sys; m=json.load\\(sys.stdin\\); [print\\(f'{p[\\\\\"name\\\\\"]} {p[\\\\\"version\\\\\"]}'\\) for p in m['packages']]\")"
     ]
   }
 }
