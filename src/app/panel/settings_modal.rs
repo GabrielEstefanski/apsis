@@ -151,7 +151,7 @@ impl SimulationApp {
                             .min_size(egui::vec2(ui.available_width(), 26.0)),
                     ).clicked() {
                         // Auto-generate a versioned path when still using the default.
-                        if self.record_base_path == "./sim_export" || self.record_base_path.is_empty() {
+                        if self.record_base_path == "./records/sim_export" || self.record_base_path.is_empty() {
                             let name_slug = if self.sim_name.is_empty() {
                                 "unnamed".to_owned()
                             } else {
@@ -165,7 +165,7 @@ impl SimulationApp {
                                 .duration_since(std::time::UNIX_EPOCH)
                                 .map(|d| d.as_secs())
                                 .unwrap_or(0);
-                            self.record_base_path = format!("./{name_slug}_{ts}");
+                            self.record_base_path = format!("./records/{name_slug}_{ts}");
                         }
                         let meta = RecordMetadata {
                             n_bodies:          self.system.bodies().len(),

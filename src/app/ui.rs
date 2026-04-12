@@ -319,7 +319,7 @@ impl SimulationApp {
 
             recorder: None,
             record_interval: 0.01,
-            record_base_path: "./sim_export".into(),
+            record_base_path: "./records/sim_export".into(),
             record_error: None,
 
             save_dir: "./saves".into(),
