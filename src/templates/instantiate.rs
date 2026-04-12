@@ -32,6 +32,7 @@ pub fn instantiate_at(template: &Template, cx: f64, cy: f64) -> Vec<Body> {
         .iter()
         .map(|t| {
             let [px, py] = t.position.unwrap_or([0.0, 0.0]);
+
             let mut b = Body::new(
                 px + dx,
                 py + dy,
@@ -40,7 +41,9 @@ pub fn instantiate_at(template: &Template, cx: f64, cy: f64) -> Vec<Body> {
                 t.mass,
                 t.material,
             );
-            b.physical_radius = t.radius;
+
+            b.omega_z = t.spin;
+
             b
         })
         .collect()

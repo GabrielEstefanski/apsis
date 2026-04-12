@@ -6,7 +6,7 @@
 //!
 //! ```text
 //! [4]  magic         = b"GRAV"
-//! [2]  schema_ver    u16 LE   — 1, 2, or 3
+//! [2]  schema_ver    u16 LE   — 1, 2, 3, or 4
 //! [8]  save_id       u64 LE   — unix-millis at save time (unique, sortable)
 //! [8]  t             f64 LE   — simulated time
 //! [8]  steps         u64 LE
@@ -19,6 +19,8 @@
 //! --- v3+ only ---
 //! [4]  sim_name_len  u32 LE
 //! [N]  sim_name      UTF-8 bytes
+//! --- v4+ only ---
+//! [8]  seed          u64 LE   — reproducibility seed
 //! ----------------
 //! [4]  n_bodies      u32 LE
 //! per body (84 bytes):
@@ -27,6 +29,14 @@
 //!   [8] omega_z  [8] moment_inertia
 //!   [1] material_id  [3] color_rgb
 //! v2+ names section: n_bodies × (u32 len + UTF-8 bytes)
+//! --- v4+ trail section ---
+//! [1]  trail_has     u8       — 0=no trail, 1=trail present
+//! if trail_has == 1:
+//!   [4]  n_bodies    u32 LE   — must match header n_bodies
+//!   [4]  capacity    u32 LE
+//!   [4]  head        u32 LE
+//!   [4]  len         u32 LE
+//!   [n_bodies * capacity * 8]  positions  — column-major [f32; 2] pairs
 //! ```
 //!
 //! The save_id is used as the filename: `{save_id}.grav`.
@@ -43,13 +53,8 @@ use crate::physics::integrator::Integrator;
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 pub const MAGIC: [u8; 4] = *b"GRAV";
-pub const SCHEMA_VERSION: u16 = 3;
+pub const SCHEMA_VERSION: u16 = 4;
 
-/// Byte offset where body data starts (after header).
-const HEADER_BYTES: usize = 4 + 2 + 8 + 8 + 8 + 8 + 8 + 8 + 8 + 1 + 4 + 4; // 71
-
-/// Bytes per body record.
-const BODY_BYTES: usize = 10 * 8 + 1 + 3; // 84
 
 // ── Snapshot ──────────────────────────────────────────────────────────────────
 
@@ -76,10 +81,14 @@ pub struct SimSnapshot {
     pub trail_every: usize,
     /// User-assigned simulation name (v3+). Empty string for older saves.
     pub sim_name: String,
+    /// Reproducibility seed (v4+). Zero for older saves.
+    pub seed: u64,
     /// Body states — the only things that evolve.
     pub bodies: Vec<BodyRecord>,
     /// Display names, parallel to `bodies`. May be empty for v1 saves (auto-generated on load).
     pub names: Vec<String>,
+    /// Saved trail data (v4+). `None` if not present or too large.
+    pub trail: Option<TrailSnapshot>,
 }
 
 /// Per-body fields stored in a snapshot.
@@ -119,8 +128,6 @@ impl BodyRecord {
 
     pub fn into_body(self) -> Body {
         let mut b = Body::new(self.x, self.y, self.vx, self.vy, self.mass, self.material);
-        // Override derived fields with exactly-stored values to preserve the
-        // simulation state rather than recomputing from the density model.
         b.density = self.density;
         b.softening = self.softening;
         b.physical_radius = self.physical_radius;
@@ -129,6 +136,19 @@ impl BodyRecord {
         b.color = self.color;
         b
     }
+}
+
+/// Saved state of a [`TrailBuffer`](crate::core::trail_buffer::TrailBuffer).
+///
+/// Stored column-major: `positions[col * n_bodies + body_idx]`.
+#[derive(Clone)]
+pub struct TrailSnapshot {
+    pub n_bodies: u32,
+    pub capacity: u32,
+    pub head: u32,
+    pub len: u32,
+    /// Flat position array, column-major. NaN entries represent unwritten slots.
+    pub positions: Vec<[f32; 2]>,
 }
 
 // ── Metadata for the browser ──────────────────────────────────────────────────
@@ -143,6 +163,8 @@ pub struct SaveEntry {
     pub n_bodies: u32,
     /// Simulation name stored in v3+ files. Empty for older saves.
     pub sim_name: String,
+    /// Reproducibility seed (v4+). Zero for older saves.
+    pub seed: u64,
 }
 
 impl SaveEntry {
@@ -158,17 +180,14 @@ impl SaveEntry {
 }
 
 /// Convert unix milliseconds to a human-readable UTC date string.
-/// Uses the Gregorian calendar algorithm — no external crates required.
 fn unix_millis_to_display(millis: u64) -> String {
     let total_secs = millis / 1000;
     let time_of_day = total_secs % 86400;
     let h = time_of_day / 3600;
     let m = (time_of_day % 3600) / 60;
 
-    // Days since Unix epoch (1970-01-01)
     let days = total_secs / 86400;
 
-    // Gregorian civil calendar: http://howardhinnant.github.io/date_algorithms.html
     let z   = days as i64 + 719468;
     let era = if z >= 0 { z } else { z - 146096 } / 146097;
     let doe = (z - era * 146097) as u64;
@@ -185,9 +204,11 @@ fn unix_millis_to_display(millis: u64) -> String {
 
 // ── Serialisation helpers ─────────────────────────────────────────────────────
 
+fn wu8 (w: &mut impl Write, v: u8 ) -> io::Result<()> { w.write_all(&[v]) }
 fn wu16(w: &mut impl Write, v: u16) -> io::Result<()> { w.write_all(&v.to_le_bytes()) }
 fn wu32(w: &mut impl Write, v: u32) -> io::Result<()> { w.write_all(&v.to_le_bytes()) }
 fn wu64(w: &mut impl Write, v: u64) -> io::Result<()> { w.write_all(&v.to_le_bytes()) }
+fn wf32(w: &mut impl Write, v: f32) -> io::Result<()> { w.write_all(&v.to_le_bytes()) }
 fn wf64(w: &mut impl Write, v: f64) -> io::Result<()> { w.write_all(&v.to_le_bytes()) }
 
 fn ru16(r: &mut impl Read) -> io::Result<u16> {
@@ -198,6 +219,9 @@ fn ru32(r: &mut impl Read) -> io::Result<u32> {
 }
 fn ru64(r: &mut impl Read) -> io::Result<u64> {
     let mut b = [0u8; 8]; r.read_exact(&mut b)?; Ok(u64::from_le_bytes(b))
+}
+fn rf32(r: &mut impl Read) -> io::Result<f32> {
+    let mut b = [0u8; 4]; r.read_exact(&mut b)?; Ok(f32::from_le_bytes(b))
 }
 fn rf64(r: &mut impl Read) -> io::Result<f64> {
     let mut b = [0u8; 8]; r.read_exact(&mut b)?; Ok(f64::from_le_bytes(b))
@@ -212,13 +236,13 @@ fn u8_to_integrator(v: u8) -> Integrator {
 
 fn material_to_u8(m: Material) -> u8 {
     match m {
-        Material::Rocky     => 0,
-        Material::Icy       => 1,
-        Material::Gas       => 2,
-        Material::IceGiant  => 3,
-        Material::Asteroid  => 4,
-        Material::Comet     => 5,
-        Material::Star      => 6,
+        Material::Rocky      => 0,
+        Material::Icy        => 1,
+        Material::Gas        => 2,
+        Material::IceGiant   => 3,
+        Material::Asteroid   => 4,
+        Material::Comet      => 5,
+        Material::Star       => 6,
         Material::BrownDwarf => 7,
         Material::WhiteDwarf => 8,
     }
@@ -252,6 +276,13 @@ impl SimSnapshot {
         unix_millis()
     }
 
+    /// Generate a new reproducibility seed (unix millis, same as new_id but
+    /// semantically distinct — the seed identifies the *initial* state, not
+    /// the save time).
+    pub fn new_seed() -> u64 {
+        unix_millis()
+    }
+
     /// Write this snapshot to `dir/{save_id}.grav`.
     /// Creates the directory if needed.
     pub fn save_to_dir(&mut self, dir: &Path) -> io::Result<PathBuf> {
@@ -269,7 +300,7 @@ impl SimSnapshot {
         use std::io::BufWriter;
         let mut w = BufWriter::new(std::fs::File::create(path)?);
 
-        // Header
+        // ── Header ────────────────────────────────────────────────────────────
         w.write_all(&MAGIC)?;
         wu16(&mut w, SCHEMA_VERSION)?;
         wu64(&mut w, self.save_id)?;
@@ -281,13 +312,15 @@ impl SimSnapshot {
         wf64(&mut w, self.g_factor)?;
         w.write_all(&[integrator_to_u8(self.integrator)])?;
         wu32(&mut w, self.trail_every as u32)?;
-        // v3: sim_name before n_bodies
+        // v3: sim_name
         let name_bytes = self.sim_name.as_bytes();
         wu32(&mut w, name_bytes.len() as u32)?;
         w.write_all(name_bytes)?;
-        wu32(&mut w, self.bodies.len() as u32)?;
+        // v4: seed
+        wu64(&mut w, self.seed)?;
 
-        // Bodies
+        // ── Bodies ────────────────────────────────────────────────────────────
+        wu32(&mut w, self.bodies.len() as u32)?;
         for b in &self.bodies {
             wf64(&mut w, b.x)?;
             wf64(&mut w, b.y)?;
@@ -303,11 +336,26 @@ impl SimSnapshot {
             w.write_all(&b.color)?;
         }
 
-        // Names section (v2+): each name as u32 length + UTF-8 bytes
+        // ── Names (v2+) ───────────────────────────────────────────────────────
         for name in &self.names {
             let bytes = name.as_bytes();
             wu32(&mut w, bytes.len() as u32)?;
             w.write_all(bytes)?;
+        }
+
+        // ── Trail (v4) ────────────────────────────────────────────────────────
+        if let Some(trail) = &self.trail {
+            wu8(&mut w, 1)?;
+            wu32(&mut w, trail.n_bodies)?;
+            wu32(&mut w, trail.capacity)?;
+            wu32(&mut w, trail.head)?;
+            wu32(&mut w, trail.len)?;
+            for pos in &trail.positions {
+                wf32(&mut w, pos[0])?;
+                wf32(&mut w, pos[1])?;
+            }
+        } else {
+            wu8(&mut w, 0)?;
         }
 
         w.flush()
@@ -325,7 +373,6 @@ impl SimSnapshot {
             return Err(io::Error::new(io::ErrorKind::InvalidData, "not a .grav file"));
         }
 
-        // Schema version — accept v1, v2, v3
         let ver = ru16(&mut r)?;
         if ver < 1 || ver > SCHEMA_VERSION {
             return Err(io::Error::new(
@@ -334,18 +381,18 @@ impl SimSnapshot {
             ));
         }
 
-        let save_id     = ru64(&mut r)?;
-        let t           = rf64(&mut r)?;
-        let steps       = ru64(&mut r)?;
-        let dt          = rf64(&mut r)?;
-        let theta       = rf64(&mut r)?;
+        let save_id         = ru64(&mut r)?;
+        let t               = rf64(&mut r)?;
+        let steps           = ru64(&mut r)?;
+        let dt              = rf64(&mut r)?;
+        let theta           = rf64(&mut r)?;
         let softening_scale = rf64(&mut r)?;
-        let g_factor    = rf64(&mut r)?;
-        let mut integ_byte = [0u8; 1];
+        let g_factor        = rf64(&mut r)?;
+        let mut integ_byte  = [0u8; 1];
         r.read_exact(&mut integ_byte)?;
-        let integrator  = u8_to_integrator(integ_byte[0]);
-        let trail_every = ru32(&mut r)? as usize;
-        // v3: sim_name before n_bodies
+        let integrator      = u8_to_integrator(integ_byte[0]);
+        let trail_every     = ru32(&mut r)? as usize;
+
         let sim_name = if ver >= 3 {
             let len = ru32(&mut r)? as usize;
             let mut buf = vec![0u8; len];
@@ -354,21 +401,24 @@ impl SimSnapshot {
         } else {
             String::new()
         };
-        let n_bodies    = ru32(&mut r)?;
+
+        let seed = if ver >= 4 { ru64(&mut r)? } else { 0 };
+
+        let n_bodies = ru32(&mut r)?;
 
         let mut bodies = Vec::with_capacity(n_bodies as usize);
         for _ in 0..n_bodies {
-            let x              = rf64(&mut r)?;
-            let y              = rf64(&mut r)?;
-            let vx             = rf64(&mut r)?;
-            let vy             = rf64(&mut r)?;
-            let mass           = rf64(&mut r)?;
-            let density        = rf64(&mut r)?;
-            let softening      = rf64(&mut r)?;
+            let x               = rf64(&mut r)?;
+            let y               = rf64(&mut r)?;
+            let vx              = rf64(&mut r)?;
+            let vy              = rf64(&mut r)?;
+            let mass            = rf64(&mut r)?;
+            let density         = rf64(&mut r)?;
+            let softening       = rf64(&mut r)?;
             let physical_radius = rf64(&mut r)?;
-            let omega_z        = rf64(&mut r)?;
-            let moment_inertia = rf64(&mut r)?;
-            let mut mat_byte = [0u8; 1];
+            let omega_z         = rf64(&mut r)?;
+            let moment_inertia  = rf64(&mut r)?;
+            let mut mat_byte    = [0u8; 1];
             r.read_exact(&mut mat_byte)?;
             let material = u8_to_material(mat_byte[0]);
             let mut color = [0u8; 3];
@@ -380,7 +430,7 @@ impl SimSnapshot {
             });
         }
 
-        // Names section (v2+): read n_bodies name entries
+        // Names (v2+)
         let names = if ver >= 2 {
             let mut ns = Vec::with_capacity(n_bodies as usize);
             for _ in 0..n_bodies {
@@ -391,12 +441,39 @@ impl SimSnapshot {
             }
             ns
         } else {
-            Vec::new() // caller will auto-generate names
+            Vec::new()
+        };
+
+        // Trail (v4+)
+        let trail = if ver >= 4 {
+            let has = {
+                let mut b = [0u8; 1];
+                r.read_exact(&mut b)?;
+                b[0] != 0
+            };
+            if has {
+                let tn  = ru32(&mut r)?;
+                let cap = ru32(&mut r)?;
+                let hd  = ru32(&mut r)?;
+                let ln  = ru32(&mut r)?;
+                let total = (tn as usize) * (cap as usize);
+                let mut positions = Vec::with_capacity(total);
+                for _ in 0..total {
+                    let x = rf32(&mut r)?;
+                    let y = rf32(&mut r)?;
+                    positions.push([x, y]);
+                }
+                Some(TrailSnapshot { n_bodies: tn, capacity: cap, head: hd, len: ln, positions })
+            } else {
+                None
+            }
+        } else {
+            None
         };
 
         Ok(SimSnapshot {
             save_id, t, steps, dt, theta, softening_scale,
-            g_factor, integrator, trail_every, sim_name, bodies, names,
+            g_factor, integrator, trail_every, sim_name, seed, bodies, names, trail,
         })
     }
 
@@ -410,14 +487,14 @@ impl SimSnapshot {
         if magic != MAGIC {
             return Err(io::Error::new(io::ErrorKind::InvalidData, "not a .grav file"));
         }
-        let ver      = ru16(&mut r)?;
-        let save_id  = ru64(&mut r)?;
-        let t        = rf64(&mut r)?;
-        let steps    = ru64(&mut r)?;
-        // skip dt, theta, softening, g_factor, integrator, trail_every
-        let mut skip = [0u8; 8 + 8 + 8 + 8 + 1 + 4];
+        let ver     = ru16(&mut r)?;
+        let save_id = ru64(&mut r)?;
+        let t       = rf64(&mut r)?;
+        let steps   = ru64(&mut r)?;
+        // skip: dt(8) + theta(8) + softening(8) + g_factor(8) + integrator(1) + trail_every(4) = 37
+        let mut skip = [0u8; 37];
         r.read_exact(&mut skip)?;
-        // v3: sim_name before n_bodies
+
         let sim_name = if ver >= 3 {
             let len = ru32(&mut r)? as usize;
             let mut buf = vec![0u8; len];
@@ -426,6 +503,13 @@ impl SimSnapshot {
         } else {
             String::new()
         };
+
+        let seed = if ver >= 4 {
+            ru64(&mut r)?
+        } else {
+            0
+        };
+
         let n_bodies = ru32(&mut r)?;
 
         Ok(SaveEntry {
@@ -435,6 +519,7 @@ impl SimSnapshot {
             steps,
             n_bodies,
             sim_name,
+            seed,
         })
     }
 }
@@ -451,7 +536,6 @@ pub fn list_saves(dir: &Path) -> Vec<SaveEntry> {
         .filter_map(|e| SimSnapshot::read_entry(&e.path()).ok())
         .collect();
 
-    // Newest first (largest save_id = latest unix millis)
     entries.sort_by(|a, b| b.save_id.cmp(&a.save_id));
     entries
 }

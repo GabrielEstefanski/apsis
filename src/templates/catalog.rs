@@ -34,11 +34,6 @@ pub const TEMPLATES: &[TemplateEntry] = &[
     },
     // ── Multi-body systems ─────────────────────────────────────────────────── //
     TemplateEntry {
-        name: "Simple",
-        category: TemplateCategory::Systems,
-        build: simple_system,
-    },
-    TemplateEntry {
         name: "Binary Stars",
         category: TemplateCategory::Systems,
         build: binary_star,

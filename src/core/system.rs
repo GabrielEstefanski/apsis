@@ -133,6 +133,12 @@ pub struct System {
     /// Human-readable label for each body, parallel to `bodies`.
     /// Kept separate because `Body` is `Copy` and cannot own a `String`.
     names: Vec<String>,
+
+    /// Minimum pairwise separation cached from the most recent step.
+    r_min: f64,
+
+    /// Maximum effective pairwise softening length cached from the most recent step.
+    softening_max: f64,
 }
 
 impl System {
@@ -175,6 +181,8 @@ impl System {
             acc
         };
 
+        let (r_min, softening_max) = Self::compute_closeness(&bodies);
+
         Self {
             bodies,
             trail_buf,
@@ -200,6 +208,8 @@ impl System {
             rel_angular_momentum_error: 0.0,
             abs_angular_momentum_error: 0.0,
             names,
+            r_min,
+            softening_max,
         }
     }
 }
@@ -231,6 +241,11 @@ impl System {
                 self.trail_buf.translate(-dx as f32, -dy as f32);
             }
         }
+
+        // Update softening diagnostics every step (O(N²) but bounded by threshold).
+        let (r_min, soft_max) = Self::compute_closeness(&self.bodies);
+        self.r_min = r_min;
+        self.softening_max = soft_max;
     }
 
     // ── Velocity Verlet (KDK leapfrog, 2nd-order) ────────────────────────────
@@ -286,6 +301,42 @@ impl System {
 }
 
 impl System {
+    /// Compute the minimum pairwise separation and maximum effective softening
+    /// length over all body pairs.
+    ///
+    /// Skipped (returns sentinels) when N < 2 or N > [`N_CLOSENESS_THRESHOLD`],
+    /// to keep overhead bounded for large asteroid-belt simulations.
+    fn compute_closeness(bodies: &[Body]) -> (f64, f64) {
+        const N_CLOSENESS_THRESHOLD: usize = 512;
+
+        if bodies.len() < 2 || bodies.len() > N_CLOSENESS_THRESHOLD {
+            return (f64::MAX, 0.0);
+        }
+
+        let mut r_min = f64::MAX;
+        let mut soft_max = 0.0_f64;
+
+        for i in 0..bodies.len() {
+            for j in (i + 1)..bodies.len() {
+                let dx = bodies[i].x - bodies[j].x;
+                let dy = bodies[i].y - bodies[j].y;
+                let r = (dx * dx + dy * dy).sqrt();
+                if r < r_min {
+                    r_min = r;
+                }
+                let eps2_ij = (bodies[i].softening * bodies[i].softening
+                    + bodies[j].softening * bodies[j].softening)
+                    * 0.5;
+                let eps_ij = eps2_ij.sqrt();
+                if eps_ij > soft_max {
+                    soft_max = eps_ij;
+                }
+            }
+        }
+
+        (r_min, soft_max)
+    }
+
     /// Multiply every acceleration in `scratch_acc` and the raw potential
     /// by `g_factor`, then return the scaled potential.
     ///
@@ -454,6 +505,10 @@ impl System {
 
         self.zero_com_velocity();
         self.recenter_com();
+
+        let (r_min, softening_max) = Self::compute_closeness(&self.bodies);
+        self.r_min = r_min;
+        self.softening_max = softening_max;
     }
 
     /// Removes a body from the simulation.
@@ -652,6 +707,9 @@ impl System {
             max_acc: self.last_diag.max_acc,
             jerk: self.last_diag.jerk,
             max_vel: self.last_diag.max_vel,
+
+            r_min: self.r_min,
+            softening_max: self.softening_max,
         }
     }
 
@@ -693,6 +751,8 @@ impl System {
             integrator: self.integrator,
             trail_every: self.trail_every,
             sim_name: String::new(), // set by the app layer before saving
+            seed: 0,                 // set by the app layer before saving
+            trail: None,             // set by the app layer before saving
             bodies: self.bodies.iter().map(BodyRecord::from_body).collect(),
             names: self.names.clone(),
         }
@@ -719,11 +779,19 @@ impl System {
         self.total_mass = self.bodies.iter().map(|b| b.mass).sum();
         self.scratch_acc.clear();
 
-        // Rebuild trail buffer (empty — cosmetic data is not saved)
+        // Rebuild trail buffer — restore saved trail if dimensions match,
+        // otherwise start empty.
         let cap =
             crate::core::trail_buffer::adaptive_capacity(trail_body_count(&self.bodies).max(1));
         self.trail_buf.reset(n, cap);
         self.trail_buf.update_colors(&self.bodies);
+        if let Some(trail_snap) = &snap.trail {
+            if trail_snap.n_bodies == n as u32
+                && trail_snap.positions.len() == (trail_snap.n_bodies * trail_snap.capacity) as usize
+            {
+                self.trail_buf.restore_from_snapshot(trail_snap);
+            }
+        }
 
         // Restore physics parameters
         self.t = snap.t;
@@ -747,5 +815,9 @@ impl System {
         self.diagnostics = crate::core::diagnostics::DiagnosticsComputer::new();
         self.last_diag = crate::core::diagnostics::SimulationDiagnostics::default();
         self.orbital_cache.clear();
+
+        let (r_min, softening_max) = Self::compute_closeness(&self.bodies);
+        self.r_min = r_min;
+        self.softening_max = softening_max;
     }
 }

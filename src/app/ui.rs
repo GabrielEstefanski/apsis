@@ -170,6 +170,10 @@ pub struct SimulationApp {
     pub(super) render_hints: Vec<BodyRenderHints>,
     pub(super) show_belts: bool,
     pub(super) trail_width: f32,
+    /// Minimum body-mass / dominant-mass ratio required to show a trail.
+    /// Bodies below this threshold have their trail alpha zeroed out.
+    /// Default 1e-6 suppresses asteroid-mass bodies automatically.
+    pub(super) trail_min_mass_ratio: f64,
 
     pub(super) place_material: Material,
 
@@ -242,6 +246,9 @@ pub struct SimulationApp {
     pub(super) show_name_prompt: bool,
     /// Editable buffer for the name prompt text field.
     pub(super) pending_name_input: String,
+    /// Reproducibility seed for the current simulation.
+    /// Generated fresh when a new simulation starts, preserved when loading a save.
+    pub(super) sim_seed: u64,
 }
 
 impl SimulationApp {
@@ -295,6 +302,7 @@ impl SimulationApp {
             template_drag: None,
             show_belts: false,
             trail_width: 1.5,
+            trail_min_mass_ratio: 1e-7,
             place_material: Material::Rocky,
             trail: None,
 
@@ -332,6 +340,7 @@ impl SimulationApp {
             sim_name: String::new(),
             show_name_prompt: false,
             pending_name_input: String::new(),
+            sim_seed: SimSnapshot::new_seed(),
         }
     }
 
@@ -455,6 +464,9 @@ impl SimulationApp {
         let mut snap = self.system.to_snapshot();
         snap.save_id = SimSnapshot::new_id();
         snap.sim_name = self.sim_name.clone();
+        snap.seed = self.sim_seed;
+        // Capture trail for visual continuity on reload.
+        snap.trail = Some(self.system.clone_trail_buf().to_snapshot());
         let dir = std::path::Path::new(&self.save_dir);
         match snap.save_to_dir(dir) {
             Ok(p) => {

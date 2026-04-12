@@ -8,7 +8,10 @@ pub struct CallbackFn {
     pub device: Arc<wgpu::Device>,
     pub queue: Arc<wgpu::Queue>,
     pub format: wgpu::TextureFormat,
+    /// Canvas dimensions in logical pixels: [width, height].
     pub screen: [f32; 2],
+    /// Canvas origin in logical pixels: [rect.min.x, rect.min.y].
+    pub viewport_min: [f32; 2],
 }
 
 impl CallbackTrait for CallbackFn {
@@ -19,25 +22,15 @@ impl CallbackTrait for CallbackFn {
         _resources: &CallbackResources,
     ) {
         let mut backend = self.backend.lock().unwrap();
-
-        let (trail_ptr, center, scale) = {
-            let trail_ptr = backend
-                .trail_buffer
-                .as_ref()
-                .map(|t| t as *const crate::core::trail_buffer::TrailBuffer);
-
-            (trail_ptr, backend.center, backend.scale)
-        };
-
-        let trail_buf = unsafe { trail_ptr.map(|p| &*p) };
-
+        let center = backend.center;
+        let scale = backend.scale;
         backend.render_frame(
             &self.device,
             &self.queue,
             pass,
             self.screen,
+            self.viewport_min,
             self.format,
-            trail_buf,
             center,
             scale,
         );

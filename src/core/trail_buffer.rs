@@ -32,6 +32,7 @@
 //! body count, keeping `n_bodies × capacity` (total GPU buffer size) roughly
 //! constant across the supported simulation scales.
 
+use crate::core::snapshot::TrailSnapshot;
 use crate::domain::body::Body;
 
 // ── Tuning ────────────────────────────────────────────────────────────────────
@@ -45,13 +46,18 @@ const INCREMENTAL_LIMIT: usize = 8;
 
 /// Recommended ring-buffer depth (time steps stored) for `n_bodies`.
 ///
-/// The heuristic keeps `n_bodies × capacity` ≈ 100 000–200 000 positions,
-/// which bounds peak GPU position-buffer size to roughly 1.6 MB regardless
-/// of body count.
+/// Larger values give finer temporal resolution (more samples per orbit arc)
+/// at the cost of GPU memory.  The physics thread caps pushes per batch at
+/// `capacity / 128`, so the *simulated-time window* visible in the trail is
+/// always `128 × steps_per_frame × dt` regardless of capacity — capacity
+/// only affects how many distinct position samples exist within that window.
+///
+/// Memory footprint: `n_bodies × capacity × 8 bytes`.
 pub fn adaptive_capacity(n_bodies: usize) -> usize {
     match n_bodies {
-        0..=50 => 4_096,
-        51..=200 => 2_048,
+        0..=5 => 16_384,   // ≤ 5 bodies  → ≤ 0.7 MB  — 2/3-body problems, binary stars
+        6..=50 => 8_192,   // ≤ 50 bodies → ≤ 3.3 MB  — small solar systems
+        51..=200 => 2_048, // ≤ 200       → ≤ 3.3 MB  — medium systems
         201..=1_000 => 512,
         1_001..=5_000 => 128,
         5_001..=20_000 => 48,
@@ -99,6 +105,11 @@ pub struct TrailBuffer {
     /// Number of tracked bodies (matrix width).
     n_bodies: u32,
 
+    /// Total number of samples ever pushed into this buffer instance.
+    /// Used by the renderer to detect how many new columns appeared since the
+    /// previous frame without cloning or diffing the full matrix on the CPU.
+    sample_count: u64,
+
     /// Pending position dirty state.
     pos_dirty: PositionsDirty,
 
@@ -126,6 +137,7 @@ impl TrailBuffer {
             len: 0,
             capacity: 0,
             n_bodies: 0,
+            sample_count: 0,
             pos_dirty: PositionsDirty::Clean,
             colors_dirty: false,
         };
@@ -142,6 +154,7 @@ impl TrailBuffer {
         self.capacity = capacity as u32;
         self.head = 0;
         self.len = 0;
+        self.sample_count = 0;
 
         let total = n_bodies * capacity;
         self.positions = vec![[f32::NAN; 2]; total];
@@ -187,6 +200,7 @@ impl TrailBuffer {
         };
 
         self.advance_head();
+        self.sample_count += 1;
     }
 
     /// Applies a rigid translation to **all** stored positions.
@@ -221,6 +235,30 @@ impl TrailBuffer {
             ];
         }
         self.colors_dirty = true;
+    }
+
+    /// Override the alpha channel for specific bodies.
+    ///
+    /// `show[i] = false` sets alpha to 0 so the trail shader's discard path
+    /// skips all segments for that body — effectively hiding its trail without
+    /// removing it from the ring buffer.
+    ///
+    /// Called by the render layer after cloning the buffer, so it never touches
+    /// the physics-thread's own copy.
+    pub fn apply_visibility(&mut self, show: &[bool]) {
+        let mut changed = false;
+        for (i, &visible) in show.iter().enumerate() {
+            if let Some(c) = self.colors.get_mut(i) {
+                let new_alpha: f32 = if visible { 1.0 } else { 0.0 };
+                if (c[3] - new_alpha).abs() > 1e-6 {
+                    c[3] = new_alpha;
+                    changed = true;
+                }
+            }
+        }
+        if changed {
+            self.colors_dirty = true;
+        }
     }
 
     // ── Dirty-state drain (call once per render frame) ────────────────────── //
@@ -285,6 +323,39 @@ impl TrailBuffer {
     /// Number of tracked bodies.
     pub fn n_bodies(&self) -> u32 {
         self.n_bodies
+    }
+
+    /// Total number of pushed samples recorded by this buffer.
+    pub fn sample_count(&self) -> u64 {
+        self.sample_count
+    }
+
+    // ── Snapshot persistence ──────────────────────────────────────────────── //
+
+    /// Capture the full trail state into a [`TrailSnapshot`].
+    pub fn to_snapshot(&self) -> TrailSnapshot {
+        TrailSnapshot {
+            n_bodies: self.n_bodies,
+            capacity: self.capacity,
+            head: self.head,
+            len: self.len,
+            positions: self.positions.clone(),
+        }
+    }
+
+    /// Restore trail state from a [`TrailSnapshot`].
+    ///
+    /// After this call the entire position matrix is flagged for a full GPU
+    /// upload so the renderer picks up the restored data on the next frame.
+    pub fn restore_from_snapshot(&mut self, snap: &TrailSnapshot) {
+        self.n_bodies = snap.n_bodies;
+        self.capacity = snap.capacity;
+        self.head = snap.head;
+        self.len = snap.len;
+        self.sample_count = snap.len as u64;
+        self.positions = snap.positions.clone();
+        self.pos_dirty = PositionsDirty::Full;
+        // colours stay dirty from the reset() that preceded this call
     }
 
     // ── Private ───────────────────────────────────────────────────────────── //

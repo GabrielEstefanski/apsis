@@ -131,12 +131,14 @@ impl SimulationApp {
                         {
                             self.system.restore_from_snapshot(&snap);
                             // Sync app UI state back from snapshot
-                            self.physics_cfg.integrator     = snap.integrator;
-                            self.physics_cfg.theta          = snap.theta;
+                            self.physics_cfg.integrator      = snap.integrator;
+                            self.physics_cfg.theta           = snap.theta;
                             self.physics_cfg.softening_scale = snap.softening_scale;
-                            self.physics_cfg.g_factor       = snap.g_factor;
-                            self.physics_cfg.trail_every    = snap.trail_every;
+                            self.physics_cfg.g_factor        = snap.g_factor;
+                            self.physics_cfg.trail_every     = snap.trail_every;
                             self.sim_name = snap.sim_name.clone();
+                            // Restore seed (0 = old save without seed → generate fresh)
+                            self.sim_seed = if snap.seed != 0 { snap.seed } else { crate::core::snapshot::SimSnapshot::new_seed() };
                             self.paused = true;
                             self.selected_body = None;
                             self.selection_form = None;
@@ -183,7 +185,7 @@ impl SimulationApp {
 
                             for (i, entry) in self.save_modal_entries.iter().enumerate() {
                                 ui.horizontal(|ui| {
-                                    // Name + date column
+                                    // Name + date + seed column
                                     ui.vertical(|ui| {
                                         ui.label(
                                             RichText::new(entry.display_name())
@@ -197,6 +199,14 @@ impl SimulationApp {
                                                 .color(TEXT_DIM)
                                                 .monospace(),
                                         );
+                                        if entry.seed != 0 {
+                                            ui.label(
+                                                RichText::new(format!("seed {}", entry.seed))
+                                                    .size(9.0)
+                                                    .color(TEXT_DIM)
+                                                    .monospace(),
+                                            ).on_hover_text("Reproducibility seed — share this to reproduce the initial state");
+                                        }
                                     });
 
                                     // Stats

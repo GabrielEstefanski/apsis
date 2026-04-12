@@ -143,8 +143,17 @@ impl SimulationApp {
             backend.scale = self.scale;
             backend.trail_width = self.trail_width;
             backend.trail_buffer = if self.show_trails {
+                let bodies = self.system.bodies();
+                let dom_mass = bodies.iter().map(|b| b.mass).fold(0.0_f64, f64::max);
+                backend.trail_visibility = Some(
+                    bodies
+                        .iter()
+                        .map(|b| dom_mass == 0.0 || b.mass / dom_mass >= self.trail_min_mass_ratio)
+                        .collect(),
+                );
                 Some(self.system.clone_trail_buf())
             } else {
+                backend.trail_visibility = None;
                 None
             };
         }
@@ -328,10 +337,10 @@ impl SimulationApp {
                 device,
                 queue,
                 format,
-                screen: {
-                    let r = ctx.input(|i| i.content_rect());
-                    [r.width(), r.height()]
-                },
+                // Canvas dimensions (not full window) so `to_ndc` maps correctly
+                // into the canvas-rect viewport that egui_wgpu sets for callbacks.
+                screen: [rect.width(), rect.height()],
+                viewport_min: [rect.min.x, rect.min.y],
             },
         ));
 
@@ -512,13 +521,12 @@ impl SimulationApp {
 
     fn draw_playbar(&mut self, ctx: &egui::Context, canvas_rect: egui::Rect, time: f32) {
         use crate::app::theme::{
-            ACCENT, ACCENT_DIM, BORDER, DANGER, SUCCESS, TEXT_DIM, TEXT_PRI, TEXT_SEC,
+            ACCENT, ACCENT_DIM, SUCCESS, TEXT_DIM, TEXT_SEC,
         };
 
-        // Anchor: bottom-center of the canvas, 16 px above the edge
-        let bar_w   = 360.0_f32;
-        let bar_h   = 44.0_f32;
-        let anchor  = egui::pos2(
+        let bar_w = 400.0_f32;
+        let bar_h = 44.0_f32;
+        let anchor = egui::pos2(
             canvas_rect.center().x - bar_w * 0.5,
             canvas_rect.max.y - bar_h - 16.0,
         );
@@ -527,20 +535,22 @@ impl SimulationApp {
             .fixed_pos(anchor)
             .order(egui::Order::Foreground)
             .show(ctx, |ui| {
-                // Glass-morphism frame
                 egui::Frame::NONE
                     .fill(egui::Color32::from_rgba_unmultiplied(14, 14, 20, 220))
-                    .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(50, 50, 70, 180)))
+                    .stroke(egui::Stroke::new(
+                        1.0,
+                        egui::Color32::from_rgba_unmultiplied(50, 50, 70, 180),
+                    ))
                     .corner_radius(10.0)
-                    .inner_margin(egui::Margin::symmetric(14, 0))
+                    .inner_margin(egui::Margin::symmetric(12, 0))
                     .show(ui, |ui| {
-                        ui.set_width(bar_w - 28.0);
+                        ui.set_width(bar_w - 24.0);
                         ui.set_height(bar_h);
 
                         ui.horizontal_centered(|ui| {
-                            ui.spacing_mut().item_spacing.x = 6.0;
+                            ui.spacing_mut().item_spacing.x = 5.0;
 
-                            // ── Simulation time display ───────────────────────
+                            // ── Simulation time ───────────────────────────────
                             let m = self.system.metrics();
                             let t_str = fmt_sim_time(m.t);
                             ui.label(
@@ -550,107 +560,101 @@ impl SimulationApp {
                                     .color(TEXT_SEC),
                             );
 
-                            // ── Playback controls ─────────────────────────────
-                            // ½× speed
-                            let half_btn = ui.add(
-                                egui::Button::new(egui::RichText::new("½×").size(11.0).color(TEXT_DIM))
-                                    .fill(egui::Color32::TRANSPARENT)
-                                    .stroke(egui::Stroke::NONE)
-                                    .min_size(egui::vec2(28.0, 28.0)),
-                            ).on_hover_text("Halve steps/frame (slow down)");
-                            if half_btn.clicked() && self.steps_per_frame > 1 {
-                                self.steps_per_frame = (self.steps_per_frame / 2).max(1);
-                            }
+                            ui.add(egui::Separator::default().vertical().spacing(4.0));
 
-                            // ── Play / Pause (main button) ────────────────────
+                            // ── Play / Pause ──────────────────────────────────
                             let (icon, icon_col) = if self.paused {
                                 ("▶", SUCCESS)
                             } else {
                                 ("⏸", ACCENT)
                             };
 
-                            // Pulsing glow ring behind the button when running
-                            let btn_center_pos = ui.next_widget_position()
-                                + egui::vec2(18.0, 18.0); // approximate center
+                            // Pulsing glow ring when running
+                            let btn_pos = ui.next_widget_position() + egui::vec2(18.0, 18.0);
                             if !self.paused {
                                 let pulse = ((time * 2.0).sin() * 0.5 + 0.5) * 0.35 + 0.1;
                                 ui.painter().circle_stroke(
-                                    btn_center_pos,
+                                    btn_pos,
                                     22.0,
-                                    egui::Stroke::new(1.5,
+                                    egui::Stroke::new(
+                                        1.5,
                                         egui::Color32::from_rgba_unmultiplied(
-                                            ACCENT.r(), ACCENT.g(), ACCENT.b(),
+                                            ACCENT.r(),
+                                            ACCENT.g(),
+                                            ACCENT.b(),
                                             (pulse * 180.0) as u8,
-                                        )),
+                                        ),
+                                    ),
                                 );
                             }
 
-                            let play_btn = ui.add(
-                                egui::Button::new(
-                                    egui::RichText::new(icon).size(18.0).color(icon_col),
+                            let play_btn = ui
+                                .add(
+                                    egui::Button::new(
+                                        egui::RichText::new(icon).size(18.0).color(icon_col),
+                                    )
+                                    .fill(if self.paused {
+                                        ACCENT_DIM
+                                    } else {
+                                        egui::Color32::from_rgba_unmultiplied(30, 50, 35, 180)
+                                    })
+                                    .stroke(egui::Stroke::new(
+                                        1.0,
+                                        icon_col.gamma_multiply(0.5),
+                                    ))
+                                    .min_size(egui::vec2(36.0, 36.0)),
                                 )
-                                .fill(if self.paused { ACCENT_DIM } else { egui::Color32::from_rgba_unmultiplied(30, 50, 35, 180) })
-                                .stroke(egui::Stroke::new(1.0, icon_col.gamma_multiply(0.5)))
-                                .min_size(egui::vec2(36.0, 36.0)),
-                            ).on_hover_text(if self.paused { "Play (Space)" } else { "Pause (Space)" });
+                                .on_hover_text(if self.paused {
+                                    "Play (Space)"
+                                } else {
+                                    "Pause (Space)"
+                                });
                             if play_btn.clicked() {
                                 self.paused = !self.paused;
                             }
 
-                            // 2× speed
-                            let double_btn = ui.add(
-                                egui::Button::new(egui::RichText::new("2×").size(11.0).color(TEXT_DIM))
-                                    .fill(egui::Color32::TRANSPARENT)
-                                    .stroke(egui::Stroke::NONE)
-                                    .min_size(egui::vec2(28.0, 28.0)),
-                            ).on_hover_text("Double steps/frame (speed up)");
-                            if double_btn.clicked() {
-                                self.steps_per_frame = (self.steps_per_frame * 2).min(10000);
-                            }
+                            ui.add(egui::Separator::default().vertical().spacing(4.0));
 
-                            ui.add(egui::Separator::default().vertical().spacing(6.0));
-
-                            // ── Steps/frame badge ─────────────────────────────
+                            // ── Speed slider (logarithmic steps/frame) ────────
+                            // Label shows current multiplier; slider gives fine control.
                             let spf_col = if self.steps_per_frame > 1 { ACCENT } else { TEXT_DIM };
                             ui.label(
                                 egui::RichText::new(format!("×{}", self.steps_per_frame))
                                     .monospace()
                                     .size(10.0)
                                     .color(spf_col),
-                            ).on_hover_text("Steps per frame — drag to adjust");
+                            );
 
-                            ui.add(egui::Separator::default().vertical().spacing(6.0));
-
-                            // ── dt drag ───────────────────────────────────────
-                            ui.label(egui::RichText::new("dt").size(9.5).color(TEXT_DIM));
-                            let mut dt = self.system.dt();
-                            let speed = (dt * 0.05).max(1e-7);
-                            let r = ui.add(
-                                egui::DragValue::new(&mut dt)
-                                    .speed(speed)
-                                    .range(1e-7_f64..=10.0)
-                                    .max_decimals(6)
-                                    .min_decimals(1),
-                            ).on_hover_text("Integration timestep. Smaller = more accurate.");
-                            if r.changed() {
-                                self.system.set_dt(dt);
+                            let mut spf_f = self.steps_per_frame as f32;
+                            let slider_r = ui.add_sized(
+                                [110.0, 20.0],
+                                egui::Slider::new(&mut spf_f, 1.0..=10000.0)
+                                    .logarithmic(true)
+                                    .show_value(false),
+                            );
+                            if slider_r.changed() {
+                                self.steps_per_frame = spf_f.round().max(1.0) as u32;
                             }
 
-                            // ── Recording indicator ───────────────────────────
-                            if self.recorder.is_some() {
-                                let pulse_alpha = ((time * 2.5).sin() * 0.4 + 0.6) * 255.0;
-                                ui.add_space(4.0);
-                                let (dot_rect, _) = ui.allocate_exact_size(
-                                    egui::vec2(10.0, 10.0), egui::Sense::hover(),
+                            ui.add(egui::Separator::default().vertical().spacing(4.0));
+
+                            // ── dt ────────────────────────────────────────────
+                            ui.label(egui::RichText::new("dt").size(9.5).color(TEXT_DIM));
+                            let mut dt = self.system.dt();
+                            let dt_speed = (dt * 0.05).max(1e-7);
+                            let dt_r = ui
+                                .add(
+                                    egui::DragValue::new(&mut dt)
+                                        .speed(dt_speed)
+                                        .range(1e-7_f64..=10.0)
+                                        .max_decimals(6)
+                                        .min_decimals(1),
+                                )
+                                .on_hover_text(
+                                    "Integration timestep — smaller = more accurate",
                                 );
-                                ui.painter().circle_filled(
-                                    dot_rect.center(), 4.5,
-                                    egui::Color32::from_rgba_unmultiplied(
-                                        DANGER.r(), DANGER.g(), DANGER.b(),
-                                        pulse_alpha as u8,
-                                    ),
-                                );
-                                ui.label(egui::RichText::new("REC").size(8.5).color(DANGER));
+                            if dt_r.changed() {
+                                self.system.set_dt(dt);
                             }
                         });
                     });
