@@ -6,7 +6,12 @@ use crate::{
 pub fn three_body_lagrange_triangle() -> Template {
     let m: f64 = 1.0;
     let r: f64 = 1.0;
-    let v = (m / r).sqrt();
+
+    // Para triângulo equilátero estável:
+    // ω² = (G * m_total) / R³  com R = distância ao CoM = r
+    // m_total = 3m  →  ω = sqrt(3m / r³)
+    let omega = (3.0 * m / (r * r * r)).sqrt();
+    let v = omega * r;
 
     let p1 = [r, 0.0];
     let p2 = [-0.5 * r, (3.0_f64).sqrt() / 2.0 * r];
@@ -28,30 +33,32 @@ pub fn three_body_lagrange_triangle() -> Template {
     let bodies = vec![
         TemplateBody {
             mass: m,
-            radius: 0.006,
             position: Some(p1),
             velocity: scale(norm(perp(p1)), v),
             material: Material::Rocky,
+            spin: 0.0,
         },
         TemplateBody {
             mass: m,
-            radius: 0.006,
             position: Some(p2),
             velocity: scale(norm(perp(p2)), v),
             material: Material::Rocky,
+            spin: 0.0,
         },
         TemplateBody {
             mass: m,
-            radius: 0.006,
             position: Some(p3),
             velocity: scale(norm(perp(p3)), v),
             material: Material::Rocky,
+            spin: 0.0,
         },
     ];
 
     Template {
         name: "Three Body - Lagrange (Newtonian)",
+        description: "Three equal-mass bodies in a stable rotating equilateral triangle configuration.",
         bodies,
-        scale: 1.0,
+        display_scale: 1.0,
+        suggested_dt: Some(0.001),
     }
 }

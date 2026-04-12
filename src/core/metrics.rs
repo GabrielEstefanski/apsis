@@ -70,4 +70,17 @@ pub struct Metrics {
     pub max_acc: f64,
     pub jerk: f64,
     pub max_vel: f64,
+
+    // ── Softening diagnostics ─────────────────────────────────────────────── //
+    /// Minimum pairwise separation observed at the last step (simulation units).
+    ///
+    /// Set to `f64::MAX` when fewer than 2 bodies are present or when N is too
+    /// large for O(N²) computation (> [`N_CLOSENESS_THRESHOLD`]).
+    pub r_min: f64,
+
+    /// Maximum effective pairwise softening length at the last step:
+    ///   `ε_ij = √((ε²_i + ε²_j) / 2)`,  maximised over all pairs.
+    ///
+    /// Zero when no pairs exist.
+    pub softening_max: f64,
 }

@@ -4,57 +4,63 @@ use crate::templates::{Template, TemplateBody};
 pub fn star() -> Template {
     Template {
         name: "Star",
+        description: "Single star at rest.",
         bodies: vec![TemplateBody {
             mass: 1.0,
-            radius: 0.05,
             position: Some([0.0, 0.0]),
             velocity: [0.0, 0.0],
             material: Material::Star,
+            spin: 0.0,
         }],
-        scale: 1.0,
+        display_scale: 1.0,
+        suggested_dt: None,
     }
 }
 
 pub fn brown_dwarf() -> Template {
     Template {
         name: "Brown Dwarf",
+        description: "Single brown dwarf at rest.",
         bodies: vec![TemplateBody {
             mass: 0.04,
-            radius: 0.025,
             position: Some([0.0, 0.0]),
             velocity: [0.0, 0.0],
             material: Material::BrownDwarf,
+            spin: 0.0,
         }],
-        scale: 1.0,
+        display_scale: 1.0,
+        suggested_dt: None,
     }
 }
 
 pub fn gas_giant() -> Template {
     Template {
         name: "Gas Giant",
+        description: "Single gas giant (Jupiter-like) at rest.",
         bodies: vec![TemplateBody {
-            // Jupiter ≈ 9.5e-4 M_sun
-            mass: 9.5e-4,
-            radius: 0.008,
+            mass: 9.5e-4, // ≈ Jupiter mass in solar units
             position: Some([0.0, 0.0]),
             velocity: [0.0, 0.0],
             material: Material::Gas,
+            spin: 0.0,
         }],
-        scale: 1.0,
+        display_scale: 1.0,
+        suggested_dt: None,
     }
 }
 
 pub fn rocky_planet() -> Template {
     Template {
         name: "Rocky Planet",
+        description: "Single rocky planet (Earth-like) at rest.",
         bodies: vec![TemplateBody {
-            // Earth ≈ 3.0e-6 M_sun
-            mass: 3.0e-6,
-            radius: 0.002,
+            mass: 3.0e-6, // ≈ Earth mass in solar units
             position: Some([0.0, 0.0]),
             velocity: [0.0, 0.0],
             material: Material::Rocky,
+            spin: 0.0,
         }],
-        scale: 1.0,
+        display_scale: 1.0,
+        suggested_dt: None,
     }
 }

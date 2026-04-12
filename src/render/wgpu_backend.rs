@@ -1,4 +1,5 @@
 use std::mem::size_of;
+use std::sync::Arc;
 
 use bytemuck::{Pod, Zeroable};
 
@@ -10,8 +11,11 @@ const MIN_BUFFER_CAPACITY: u32 = 256;
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct ScreenUniform {
+    /// Canvas dimensions in logical pixels (width, height).
     size: [f32; 2],
-    _pad: [f32; 2],
+    /// Canvas origin in logical pixels (rect.min.x, rect.min.y).
+    /// Used by `to_ndc` to convert window-absolute coords → canvas-local NDC.
+    viewport_min: [f32; 2],
 }
 
 #[repr(C)]
@@ -165,11 +169,14 @@ pub struct WgpuBackend {
     trail: Option<TrailRenderer>,
     grid: Option<GridRenderer>,
 
-    pub trail_buffer: Option<crate::core::trail_buffer::TrailBuffer>,
+    pub trail_buffer: Option<Arc<crate::core::trail_buffer::TrailBuffer>>,
+    pub trail_visibility: Option<Vec<bool>>,
     pub center: [f32; 2],
     pub scale: f32,
     pub show_grid: bool,
     pub trail_width: f32,
+    pub trail_decay_k: f32,
+    pub trail_tail_desaturate: f32,
 }
 
 impl WgpuBackend {
@@ -182,10 +189,13 @@ impl WgpuBackend {
             grid: None,
 
             trail_buffer: None,
+            trail_visibility: None,
             center: [0.0, 0.0],
             scale: 1.0,
             show_grid: true,
             trail_width: 1.5,
+            trail_decay_k: 6.0,         // novo
+            trail_tail_desaturate: 0.5, // novo
         }
     }
 
@@ -259,17 +269,28 @@ impl WgpuBackend {
         queue: &wgpu::Queue,
         pass: &mut wgpu::RenderPass<'_>,
         screen: [f32; 2],
+        viewport_min: [f32; 2],
         format: wgpu::TextureFormat,
-        trail_buf: Option<&crate::core::trail_buffer::TrailBuffer>,
         center: [f32; 2],
         scale: f32,
     ) {
+        // ── 0. Setup ─────────────────────────────────────────────
         self.ensure_gpu(device, format);
 
         self.center = center;
         self.scale = scale;
 
-        // ── 1. Grid (fundo) ─────────────────────────────────
+        // ── 1. Upload base (GPU) ─────────────────────────────────
+        let screen_uniform = ScreenUniform {
+            size: screen,
+            viewport_min,
+        };
+
+        let (circle_count, line_count) = {
+            let gpu = self.gpu.as_mut().unwrap();
+            gpu.upload(device, queue, screen_uniform, &self.circles, &self.lines)
+        };
+
         if self.show_grid {
             if let Some(grid) = &self.grid {
                 grid.upload(queue, center, scale, screen);
@@ -277,25 +298,30 @@ impl WgpuBackend {
             }
         }
 
-        let (circle_count, line_count) = {
-            let gpu = self.gpu.as_mut().unwrap();
-            let screen_uniform = ScreenUniform {
-                size: screen,
-                _pad: [0.0; 2],
-            };
-            gpu.upload(device, queue, screen_uniform, &self.circles, &self.lines)
-        };
+        if let (Some(trail_renderer), Some(trail_buf)) =
+            (self.trail.as_mut(), self.trail_buffer.as_deref())
+        {
+            let gpu = self.gpu.as_ref().unwrap();
 
-        let gpu = self.gpu.as_ref().unwrap();
+            trail_renderer.upload(
+                device,
+                queue,
+                trail_buf,
+                self.trail_visibility.as_deref(),
+                center,
+                scale,
+                self.trail_width,
+                self.trail_decay_k,
+                self.trail_tail_desaturate,
+            );
 
-        // ── 2. Trails ────────────────────────────────────────
-        if let (Some(trail), Some(buf)) = (self.trail.as_mut(), trail_buf) {
-            trail.upload(device, queue, buf, center, scale, self.trail_width);
-            trail.draw(pass, &gpu.bind_group_screen);
+            trail_renderer.draw(pass, &gpu.bind_group_screen);
         }
 
-        // ── 3. Corpos (circles / lines) ──────────────────────
-        gpu.draw(pass, circle_count, line_count);
+        {
+            let gpu = self.gpu.as_ref().unwrap();
+            gpu.draw(pass, circle_count, line_count);
+        }
     }
 }
 
@@ -340,10 +366,6 @@ fn ensure_instance_capacity<T: Pod>(
     let new_cap = needed.next_power_of_two().max(MIN_BUFFER_CAPACITY);
     let (new_buf, new_cap) = alloc_instance_buf::<T>(device, new_cap, label);
 
-    // Copy existing GPU data into the new larger buffer so growth is seamless.
-    // Instance buffers are fully rewritten each frame via write_buffer, so this
-    // is mostly for correctness; the real win is avoiding the old buffer's
-    // data being stale during the brief window between resize and upload.
     if *cap > 0 {
         let copy_bytes = *cap as u64 * size_of::<T>() as u64;
         let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -506,16 +528,20 @@ fn build_line_pipeline(
 /// added in a future pass.
 const PRIMITIVES_SHADER: &str = r#"
 struct ScreenUniform {
+    /// Canvas dimensions in logical pixels.
     size: vec2<f32>,
-    _pad: vec2<f32>,
+    /// Canvas origin in logical pixels (rect.min). Subtracted before normalising
+    /// so that window-absolute coords map correctly into the canvas viewport.
+    viewport_min: vec2<f32>,
 };
 
 @group(0) @binding(0)
 var<uniform> screen: ScreenUniform;
 
 fn to_ndc(p: vec2<f32>) -> vec4<f32> {
-    let x =  (p.x / screen.size.x) * 2.0 - 1.0;
-    let y = -(p.y / screen.size.y) * 2.0 + 1.0;
+    let local = p - screen.viewport_min;
+    let x =  (local.x / screen.size.x) * 2.0 - 1.0;
+    let y = -(local.y / screen.size.y) * 2.0 + 1.0;
     return vec4<f32>(x, y, 0.0, 1.0);
 }
 

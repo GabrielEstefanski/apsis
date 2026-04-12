@@ -1,9 +1,9 @@
-use crate::app::theme::{ACCENT, BORDER, TEXT_DIM, TEXT_PRI, TEXT_SEC};
+use crate::app::theme::{ACCENT, BORDER, DANGER, SUCCESS, TEXT_DIM, TEXT_PRI, TEXT_SEC};
 use crate::app::theme::secondary_btn;
 use crate::app::config::PhysicsConfig;
 use crate::app::ui::SimulationApp;
 use crate::physics::integrator::Integrator;
-use eframe::egui::{self, Color32, RichText, Stroke};
+use eframe::egui::{self, Align, Color32, Layout, RichText, Stroke};
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -104,6 +104,76 @@ impl SimulationApp {
                 .color(TEXT_DIM),
         );
 
+        // Softening validity indicator
+        {
+            let m = self.system.metrics();
+            let r_min = m.r_min;
+            let soft_max = m.softening_max;
+            let has_data = r_min < f64::MAX && r_min > 1e-30 && soft_max > 0.0;
+
+            if has_data {
+                let ratio = soft_max / r_min;
+                // Fractional force error ≈ (3/2)(ε/r)² for ε/r << 1
+                let force_err_pct = (1.5 * ratio * ratio * 100.0).min(9999.0);
+
+                let (dot, color, sev_label) = if ratio > 0.3 {
+                    ("▲", DANGER, "critical")
+                } else if ratio > 0.1 {
+                    ("▲", ACCENT, "warning")
+                } else {
+                    ("●", SUCCESS, "ok")
+                };
+
+                ui.add_space(2.0);
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(dot).size(9.0).color(color));
+                    ui.label(RichText::new("softening").size(9.5).color(TEXT_DIM));
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        ui.label(
+                            RichText::new(sev_label)
+                                .size(9.5)
+                                .color(color)
+                                .strong(),
+                        );
+                    });
+                });
+
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(format!("  ε/r_min = {ratio:.3e}")).size(9.0).color(TEXT_DIM));
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        ui.label(
+                            RichText::new(format!("~{force_err_pct:.1}% err"))
+                                .size(9.0)
+                                .color(color),
+                        );
+                    });
+                });
+
+                if ratio > 0.1 {
+                    egui::Frame::NONE
+                        .fill(Color32::from_rgba_unmultiplied(
+                            color.r(), color.g(), color.b(), 18,
+                        ))
+                        .stroke(Stroke::new(0.5, color.gamma_multiply(0.4)))
+                        .corner_radius(3.0)
+                        .inner_margin(egui::Margin::symmetric(6, 3))
+                        .show(ui, |ui| {
+                            ui.set_width(ui.available_width());
+                            let hint = if ratio > 0.3 {
+                                "force accuracy severely compromised — reduce ε scale or increase body separations"
+                            } else {
+                                "close encounter detected — reduce ε scale or switch to Yoshida 4th-order"
+                            };
+                            ui.add(egui::Label::new(
+                                RichText::new(hint).size(9.0).color(color),
+                            ).wrap());
+                        });
+                } else {
+                    ui.add_space(18.0);
+                }
+            }
+        }
+
         // ── GRAVITY ───────────────────────────────────────────────────────────
         section(ui, "GRAVITY");
 
@@ -188,7 +258,7 @@ impl SimulationApp {
 
         let spf_tip = "Physics steps computed per rendered frame.\n\
             Increase to speed up simulated time without changing Δt.\n\
-            Also controllable with the ½× / 2× buttons in the playbar.";
+            Also controllable with the speed slider in the playbar.";
 
         param_row(ui, "steps / frame", spf_tip, LBL_W, |ui| {
             ui.add_sized(
@@ -219,6 +289,21 @@ impl SimulationApp {
             self.physics_cfg.trail_every = trail_every;
             self.system.set_trail_every(trail_every);
         }
+
+        let mr_tip = "Minimum mass ratio (body / dominant body) for a trail to be shown.\n\
+            Raise to hide more bodies (e.g. 1e-4 hides asteroid-mass objects).\n\
+            Lower to show trails for smaller bodies (0 = all bodies).";
+
+        param_row(ui, "min mass ratio", mr_tip, LBL_W, |ui| {
+            ui.add_sized(
+                egui::vec2(DV_W, 18.0),
+                egui::DragValue::new(&mut self.trail_min_mass_ratio)
+                    .speed(1e-8)
+                    .range(0.0_f64..=1.0)
+                    .custom_formatter(|v, _| format!("{v:.1e}"))
+                    .custom_parser(|s| s.parse::<f64>().ok()),
+            )
+        });
 
         // ── RESET ─────────────────────────────────────────────────────────────
         ui.add_space(10.0);

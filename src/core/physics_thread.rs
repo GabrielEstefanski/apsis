@@ -44,7 +44,7 @@ use crate::physics::orbital::OrbitalElements;
 pub struct RenderState {
     pub bodies: Vec<Body>,
     pub names: Vec<String>,
-    pub trail_buf: TrailBuffer,
+    pub trail_buf: Arc<TrailBuffer>,
     pub metrics: Metrics,
     pub orbital_elements: Vec<Option<OrbitalElements>>,
     pub softening_scale: f64,
@@ -74,8 +74,6 @@ pub enum PhysicsCmd {
     LoadBodies(Vec<Body>),
     ZeroComVelocity,
     RestoreSnapshot(SimSnapshot),
-    /// Request a full snapshot; the physics thread sends it back through `tx`.
-    RequestSnapshot(mpsc::SyncSender<SimSnapshot>),
     Shutdown,
 }
 
@@ -92,14 +90,18 @@ pub struct PhysicsHandle {
     loading: Arc<AtomicBool>,
 
     // ── Local cache (updated by sync()) ──────────────────────────────────
-    // trail_buf is intentionally excluded — use clone_trail_buf() so we
-    // avoid cloning the (potentially large) buffer through an extra level.
     bodies: Vec<Body>,
     names: Vec<String>,
     metrics: Metrics,
     orbital_elements: Vec<Option<OrbitalElements>>,
     softening_scale: f64,
     trail_every: usize,
+    /// Last successfully cloned trail buffer.
+    ///
+    /// `clone_trail_buf` tries a fresh `try_lock` first; if the physics thread
+    /// currently holds the mutex it falls back here instead of returning an
+    /// empty buffer (which caused per-frame trail flicker).
+    cached_trail_buf: Arc<TrailBuffer>,
 
     _thread: thread::JoinHandle<()>,
 }
@@ -112,48 +114,79 @@ impl PhysicsHandle {
     /// values from the previous frame are kept.
     pub fn sync(&mut self) {
         if let Ok(rs) = self.render.try_lock() {
-            self.bodies             = rs.bodies.clone();
-            self.names              = rs.names.clone();
-            self.metrics            = rs.metrics;
-            self.orbital_elements   = rs.orbital_elements.clone();
-            self.softening_scale    = rs.softening_scale;
-            self.trail_every        = rs.trail_every;
+            self.bodies = rs.bodies.clone();
+            self.names = rs.names.clone();
+            self.metrics = rs.metrics;
+            self.orbital_elements = rs.orbital_elements.clone();
+            self.softening_scale = rs.softening_scale;
+            self.trail_every = rs.trail_every;
+            self.cached_trail_buf = rs.trail_buf.clone();
         }
     }
 
-    /// Clone the trail buffer directly from the shared render state.
+    /// Clone the trail buffer for the current frame.
     ///
-    /// Prefer this over `trail_buf()` when passing to the GPU backend: it
-    /// bypasses the local cache and saves one clone per frame.
-    pub fn clone_trail_buf(&self) -> TrailBuffer {
+    /// Tries a fresh `try_lock` for the lowest-latency snapshot.  If the
+    /// physics thread currently holds the mutex, returns the cached copy from
+    /// the last successful [`sync`] instead of an empty buffer — this
+    /// eliminates the per-frame trail flicker that occurred on lock contention.
+    pub fn clone_trail_buf(&self) -> Arc<TrailBuffer> {
         self.render
             .try_lock()
             .map(|rs| rs.trail_buf.clone())
-            .unwrap_or_else(|_| TrailBuffer::new(0))
+            .unwrap_or_else(|_| self.cached_trail_buf.clone())
     }
 
     // ── Read methods — same signatures as System ──────────────────────────
 
     /// `true` while the physics thread is processing a heavy command (load / restore).
     /// The UI uses this to display the loading overlay.
-    pub fn is_loading(&self) -> bool { self.loading.load(Ordering::Relaxed) }
+    pub fn is_loading(&self) -> bool {
+        self.loading.load(Ordering::Relaxed)
+    }
 
-    pub fn bodies(&self) -> &[Body]                             { &self.bodies }
-    pub fn names(&self)  -> &[String]                           { &self.names }
-    pub fn total_mass(&self) -> f64 { self.bodies.iter().map(|b| b.mass).sum() }
+    pub fn bodies(&self) -> &[Body] {
+        &self.bodies
+    }
+    pub fn names(&self) -> &[String] {
+        &self.names
+    }
+    pub fn total_mass(&self) -> f64 {
+        self.bodies.iter().map(|b| b.mass).sum()
+    }
     pub fn name(&self, idx: usize) -> &str {
         self.names.get(idx).map(|s| s.as_str()).unwrap_or("")
     }
-    pub fn metrics(&self)            -> Metrics                 { self.metrics }
-    pub fn orbital_elements(&self)   -> &[Option<OrbitalElements>] { &self.orbital_elements }
-    pub fn t(&self)                  -> f64  { self.metrics.t }
-    pub fn steps(&self)              -> u64  { self.metrics.steps }
-    pub fn dt(&self)                 -> f64  { self.metrics.dt }
-    pub fn theta(&self)              -> f64  { self.metrics.theta }
-    pub fn integrator(&self)         -> Integrator { self.metrics.integrator }
-    pub fn softening_scale(&self)    -> f64  { self.softening_scale }
-    pub fn g_factor(&self)           -> f64  { self.metrics.g_factor }
-    pub fn trail_every(&self)        -> usize { self.trail_every }
+    pub fn metrics(&self) -> Metrics {
+        self.metrics
+    }
+    pub fn orbital_elements(&self) -> &[Option<OrbitalElements>] {
+        &self.orbital_elements
+    }
+    pub fn t(&self) -> f64 {
+        self.metrics.t
+    }
+    pub fn steps(&self) -> u64 {
+        self.metrics.steps
+    }
+    pub fn dt(&self) -> f64 {
+        self.metrics.dt
+    }
+    pub fn theta(&self) -> f64 {
+        self.metrics.theta
+    }
+    pub fn integrator(&self) -> Integrator {
+        self.metrics.integrator
+    }
+    pub fn softening_scale(&self) -> f64 {
+        self.softening_scale
+    }
+    pub fn g_factor(&self) -> f64 {
+        self.metrics.g_factor
+    }
+    pub fn trail_every(&self) -> usize {
+        self.trail_every
+    }
 
     // ── Write methods — tunnel through command channel ────────────────────
 
@@ -162,53 +195,88 @@ impl PhysicsHandle {
         let _ = self.cmd_tx.send(cmd);
     }
 
-    pub fn set_paused(&self, paused: bool)                      { self.send(PhysicsCmd::SetPaused(paused)); }
-    pub fn set_steps_per_frame(&self, s: u32)                   { self.send(PhysicsCmd::SetStepsPerFrame(s)); }
-    pub fn set_dt(&self, dt: f64)                               { self.send(PhysicsCmd::SetDt(dt)); }
-    pub fn set_theta(&self, theta: f64)                         { self.send(PhysicsCmd::SetTheta(theta)); }
-    pub fn set_softening_scale(&self, s: f64)                   { self.send(PhysicsCmd::SetSofteningScale(s)); }
-    pub fn set_g_factor(&self, g: f64)                          { self.send(PhysicsCmd::SetGFactor(g)); }
-    pub fn set_integrator(&self, i: Integrator)                 { self.send(PhysicsCmd::SetIntegrator(i)); }
-    pub fn set_trail_every(&self, n: usize)                     { self.send(PhysicsCmd::SetTrailEvery(n)); }
-    pub fn add_body(&self, body: Body)                          { self.send(PhysicsCmd::AddBody(body)); }
+    pub fn set_paused(&self, paused: bool) {
+        self.send(PhysicsCmd::SetPaused(paused));
+    }
+    pub fn set_steps_per_frame(&self, s: u32) {
+        self.send(PhysicsCmd::SetStepsPerFrame(s));
+    }
+    pub fn set_dt(&self, dt: f64) {
+        self.send(PhysicsCmd::SetDt(dt));
+    }
+    pub fn set_theta(&self, theta: f64) {
+        self.send(PhysicsCmd::SetTheta(theta));
+    }
+    pub fn set_softening_scale(&self, s: f64) {
+        self.send(PhysicsCmd::SetSofteningScale(s));
+    }
+    pub fn set_g_factor(&self, g: f64) {
+        self.send(PhysicsCmd::SetGFactor(g));
+    }
+    pub fn set_integrator(&self, i: Integrator) {
+        self.send(PhysicsCmd::SetIntegrator(i));
+    }
+    pub fn set_trail_every(&self, n: usize) {
+        self.send(PhysicsCmd::SetTrailEvery(n));
+    }
+    pub fn add_body(&self, body: Body) {
+        self.send(PhysicsCmd::AddBody(body));
+    }
     /// Add a batch of bodies in one operation. Sets the loading flag immediately
     /// so the overlay appears in the same frame as the user action.
     pub fn add_bodies(&self, bodies: Vec<Body>) {
         self.loading.store(true, Ordering::Relaxed);
         self.send(PhysicsCmd::AddBodies(bodies));
     }
-    pub fn remove_body(&self, idx: usize)                       { self.send(PhysicsCmd::RemoveBody(idx)); }
-    pub fn update_body(&self, idx: usize, body: Body)           { self.send(PhysicsCmd::UpdateBody(idx, body)); }
-    pub fn set_name(&self, idx: usize, name: String)            { self.send(PhysicsCmd::SetName(idx, name)); }
+    pub fn remove_body(&self, idx: usize) {
+        self.send(PhysicsCmd::RemoveBody(idx));
+    }
+    pub fn update_body(&self, idx: usize, body: Body) {
+        self.send(PhysicsCmd::UpdateBody(idx, body));
+    }
+    pub fn set_name(&self, idx: usize, name: String) {
+        self.send(PhysicsCmd::SetName(idx, name));
+    }
     pub fn load_bodies(&self, bodies: Vec<Body>) {
         self.loading.store(true, Ordering::Relaxed);
         self.send(PhysicsCmd::LoadBodies(bodies));
     }
-    pub fn zero_com_velocity(&self)                             { self.send(PhysicsCmd::ZeroComVelocity); }
+    pub fn zero_com_velocity(&self) {
+        self.send(PhysicsCmd::ZeroComVelocity);
+    }
     pub fn restore_from_snapshot(&self, snap: &SimSnapshot) {
         self.loading.store(true, Ordering::Relaxed);
         self.send(PhysicsCmd::RestoreSnapshot(snap.clone()));
     }
 
-    /// Request a full snapshot from the physics thread.
-    /// Blocks up to 2 s; intended only for user-triggered saves (rare).
+    /// Build a snapshot from the locally cached render state.
+    ///
+    /// This is non-blocking and always returns valid data, using the body
+    /// positions and metrics that were last synced from the physics thread.
+    /// At worst the data is one frame stale — completely acceptable for saves.
+    ///
+    /// (The old blocking-RPC path via `RequestSnapshot` was removed because it
+    /// could time out when the physics thread was mid-batch with high
+    /// `steps_per_frame`, producing an empty snapshot with 0 bodies / 0 steps.)
     pub fn to_snapshot(&self) -> SimSnapshot {
-        let (tx, rx) = mpsc::sync_channel(1);
-        self.send(PhysicsCmd::RequestSnapshot(tx));
-        rx.recv_timeout(Duration::from_secs(2)).unwrap_or_else(|_| SimSnapshot {
-            save_id: 0,
-            t: 0.0,
-            steps: 0,
-            dt: 0.01,
-            theta: 0.5,
-            softening_scale: 1.0,
-            g_factor: 1.0,
-            integrator: Integrator::VelocityVerlet,
-            trail_every: 1,
-            sim_name: String::new(),
-            bodies: vec![],
-            names: vec![],
-        })
+        use crate::core::snapshot::BodyRecord;
+        let m = self.metrics;
+        SimSnapshot {
+            save_id: 0, // set by caller
+            t: m.t,
+            steps: m.steps,
+            dt: m.dt,
+            theta: m.theta,
+            softening_scale: self.softening_scale,
+            g_factor: m.g_factor,
+            integrator: m.integrator,
+            trail_every: self.trail_every,
+            sim_name: String::new(), // set by caller
+            seed: 0,                 // set by caller
+            trail: None,             // set by caller
+            bodies: self.bodies.iter().map(BodyRecord::from_body).collect(),
+            names: self.names.clone(),
+        }
     }
 }
 
@@ -224,18 +292,18 @@ pub fn spawn(mut system: System, paused: bool) -> PhysicsHandle {
     // Snapshot initial state before moving system into the thread.
     system.update_orbital_elements();
     let initial = RenderState {
-        bodies:           system.bodies().to_vec(),
-        names:            system.names().to_vec(),
-        trail_buf:        system.trail_buf().clone(),
-        metrics:          system.metrics(),
+        bodies: system.bodies().to_vec(),
+        names: system.names().to_vec(),
+        trail_buf: Arc::new(system.trail_buf().clone()),
+        metrics: system.metrics(),
         orbital_elements: system.orbital_elements().to_vec(),
-        softening_scale:  system.softening_scale(),
-        trail_every:      system.trail_every(),
+        softening_scale: system.softening_scale(),
+        trail_every: system.trail_every(),
     };
 
-    let render      = Arc::new(Mutex::new(initial.clone()));
-    let render_thr  = render.clone();
-    let loading     = Arc::new(AtomicBool::new(false));
+    let render = Arc::new(Mutex::new(initial.clone()));
+    let render_thr = render.clone();
+    let loading = Arc::new(AtomicBool::new(false));
     let loading_thr = loading.clone();
 
     let thread = thread::spawn(move || {
@@ -246,13 +314,14 @@ pub fn spawn(mut system: System, paused: bool) -> PhysicsHandle {
         cmd_tx,
         render,
         loading,
-        bodies:           initial.bodies,
-        names:            initial.names,
-        metrics:          initial.metrics,
+        bodies: initial.bodies,
+        names: initial.names,
+        metrics: initial.metrics,
         orbital_elements: initial.orbital_elements,
-        softening_scale:  initial.softening_scale,
-        trail_every:      initial.trail_every,
-        _thread:          thread,
+        softening_scale: initial.softening_scale,
+        trail_every: initial.trail_every,
+        cached_trail_buf: initial.trail_buf,
+        _thread: thread,
     }
 }
 
@@ -280,11 +349,11 @@ fn publish_positions(system: &System, rs: &mut RenderState) {
 /// at ~60 Hz.
 fn publish_full(system: &System, rs: &mut RenderState) {
     publish_positions(system, rs);
-    rs.names            = system.names().to_vec();
-    rs.trail_buf        = system.trail_buf().clone();
+    rs.names = system.names().to_vec();
+    rs.trail_buf = Arc::new(system.trail_buf().clone());
     rs.orbital_elements = system.orbital_elements().to_vec();
-    rs.softening_scale  = system.softening_scale();
-    rs.trail_every      = system.trail_every();
+    rs.softening_scale = system.softening_scale();
+    rs.trail_every = system.trail_every();
 }
 
 // ── Physics loop ──────────────────────────────────────────────────────────────
@@ -296,70 +365,97 @@ fn physics_loop(
     loading: Arc<AtomicBool>,
     initial_paused: bool,
 ) {
-    let mut paused          = initial_paused;
+    let mut paused = initial_paused;
     let mut steps_per_frame = 1u32;
+    let mut needs_full_publish = false;
 
-    // Full publish (trail + everything) at ~60 Hz.
-    let full_interval       = Duration::from_millis(16);
-    let mut last_full       = Instant::now().checked_sub(full_interval)
-                                .unwrap_or_else(Instant::now);
+    let mut trail_time_acc: f64 = 0.0;
+    let sample_interval: f64 = 0.01;
 
-    // Position-only publish (bodies + metrics, no trail clone) at ~120 Hz.
-    // Keeps the canvas smooth even when each step batch takes many milliseconds.
-    let pos_interval        = Duration::from_millis(8);
-    let mut last_pos        = Instant::now();
+    let full_interval = Duration::from_millis(16);
+    let mut last_full = Instant::now()
+        .checked_sub(full_interval)
+        .unwrap_or_else(Instant::now);
 
-    // Check elapsed time every this many steps to avoid calling Instant::now()
-    // on every single step in fast simulations.
+    let pos_interval = Duration::from_millis(8);
+    let mut last_pos = Instant::now();
+
     const POS_CHECK_STEPS: u32 = 8;
-
-    // Minimum wall time per physics batch — caps at ~10 000 batches/s for
-    // trivial simulations so we don't spin at 100 % CPU.
-    let min_batch_period    = Duration::from_micros(100);
+    let min_batch_period = Duration::from_micros(100);
 
     loop {
         let batch_start = Instant::now();
 
-        // ── Drain commands ────────────────────────────────────────────────
         while let Ok(cmd) = cmd_rx.try_recv() {
             match cmd {
-                PhysicsCmd::Shutdown                  => return,
-                PhysicsCmd::SetPaused(p)              => paused = p,
-                PhysicsCmd::SetStepsPerFrame(s)       => steps_per_frame = s.max(1),
-                PhysicsCmd::SetDt(dt)                 => system.set_dt(dt),
-                PhysicsCmd::SetTheta(theta)           => system.set_theta(theta),
-                PhysicsCmd::SetSofteningScale(s)      => system.set_softening_scale(s),
-                PhysicsCmd::SetGFactor(g)             => system.set_g_factor(g),
-                PhysicsCmd::SetIntegrator(i)          => system.set_integrator(i),
-                PhysicsCmd::SetTrailEvery(n)          => system.set_trail_every(n),
-                PhysicsCmd::AddBody(b)                => system.add_body(b),
-                PhysicsCmd::AddBodies(bodies)         => {
+                PhysicsCmd::Shutdown => return,
+                PhysicsCmd::SetPaused(p) => paused = p,
+                PhysicsCmd::SetStepsPerFrame(s) => steps_per_frame = s.max(1),
+                PhysicsCmd::SetDt(dt) => {
+                    system.set_dt(dt);
+                    needs_full_publish = true;
+                }
+                PhysicsCmd::SetTheta(theta) => {
+                    system.set_theta(theta);
+                    needs_full_publish = true;
+                }
+                PhysicsCmd::SetSofteningScale(s) => {
+                    system.set_softening_scale(s);
+                    needs_full_publish = true;
+                }
+                PhysicsCmd::SetGFactor(g) => {
+                    system.set_g_factor(g);
+                    needs_full_publish = true;
+                }
+                PhysicsCmd::SetIntegrator(i) => {
+                    system.set_integrator(i);
+                    needs_full_publish = true;
+                }
+                PhysicsCmd::SetTrailEvery(n) => {
+                    system.set_trail_every(n);
+                    needs_full_publish = true;
+                }
+                PhysicsCmd::AddBody(b) => {
+                    system.add_body(b);
+                    needs_full_publish = true;
+                }
+                PhysicsCmd::AddBodies(bodies) => {
                     loading.store(true, Ordering::Relaxed);
                     system.add_bodies(bodies);
                     loading.store(false, Ordering::Relaxed);
+                    needs_full_publish = true;
                 }
-                PhysicsCmd::RemoveBody(idx)           => system.remove_body(idx),
-                PhysicsCmd::UpdateBody(idx, b)        => system.update_body(idx, b),
-                PhysicsCmd::SetName(idx, name)        => system.set_name(idx, name),
-                PhysicsCmd::LoadBodies(bodies)        => {
+                PhysicsCmd::RemoveBody(idx) => {
+                    system.remove_body(idx);
+                    needs_full_publish = true;
+                }
+                PhysicsCmd::UpdateBody(idx, b) => {
+                    system.update_body(idx, b);
+                    needs_full_publish = true;
+                }
+                PhysicsCmd::SetName(idx, name) => {
+                    system.set_name(idx, name);
+                    needs_full_publish = true;
+                }
+                PhysicsCmd::LoadBodies(bodies) => {
                     loading.store(true, Ordering::Relaxed);
                     system.load_bodies(bodies);
                     loading.store(false, Ordering::Relaxed);
+                    needs_full_publish = true;
                 }
-                PhysicsCmd::ZeroComVelocity           => system.zero_com_velocity(),
-                PhysicsCmd::RestoreSnapshot(snap)     => {
+                PhysicsCmd::ZeroComVelocity => {
+                    system.zero_com_velocity();
+                    needs_full_publish = true;
+                }
+                PhysicsCmd::RestoreSnapshot(snap) => {
                     loading.store(true, Ordering::Relaxed);
                     system.restore_from_snapshot(&snap);
                     loading.store(false, Ordering::Relaxed);
-                }
-                PhysicsCmd::RequestSnapshot(tx)       => {
-                    let snap = system.to_snapshot();
-                    let _ = tx.try_send(snap);
+                    needs_full_publish = true;
                 }
             }
         }
 
-        // ── Step + mid-batch position publish ────────────────────────────
         if !paused {
             let mut steps_since_check = 0u32;
 
@@ -367,40 +463,61 @@ fn physics_loop(
                 system.step();
                 steps_since_check += 1;
 
-                // Every POS_CHECK_STEPS steps, check if it's time for a fast
-                // position-only publish (no trail clone — just bodies + metrics).
+                trail_time_acc += system.metrics().dt;
+
+                if trail_time_acc >= sample_interval {
+                    system.push_trail();
+
+                    trail_time_acc -= sample_interval;
+                }
+
                 if steps_since_check >= POS_CHECK_STEPS {
                     steps_since_check = 0;
+
                     let now = Instant::now();
-                    if now.duration_since(last_pos) >= pos_interval {
+
+                    if now.duration_since(last_full) >= full_interval {
+                        system.update_orbital_elements();
+
+                        if let Ok(mut rs) = render.try_lock() {
+                            publish_full(&system, &mut rs);
+                        }
+
+                        last_full = now;
                         last_pos = now;
+                        needs_full_publish = false;
+                    } else if now.duration_since(last_pos) >= pos_interval {
+                        last_pos = now;
+
                         if let Ok(mut rs) = render.try_lock() {
                             publish_positions(&system, &mut rs);
                         }
                     }
                 }
             }
-
-            system.push_trail();
         }
 
-        // ── Full publish at ~60 Hz (includes trail + names + orbital elems) ──
+        // ── Post-batch full publish ────────────────────────────────
         let now = Instant::now();
-        if now.duration_since(last_full) >= full_interval {
+
+        if needs_full_publish || (!paused && now.duration_since(last_full) >= full_interval) {
             system.update_orbital_elements();
+
             if let Ok(mut rs) = render.try_lock() {
                 publish_full(&system, &mut rs);
             }
+
             last_full = now;
-            last_pos  = now; // full publish already updated positions
+            last_pos = now;
+            needs_full_publish = false;
         }
 
-        // ── Throttle ──────────────────────────────────────────────────────
+        // ── Throttle ──────────────────────────────────────────────
         if paused {
-            // Sleep longer when idle — nothing to compute.
             thread::sleep(Duration::from_millis(8));
         } else {
             let elapsed = batch_start.elapsed();
+
             if elapsed < min_batch_period {
                 thread::sleep(min_batch_period - elapsed);
             }
