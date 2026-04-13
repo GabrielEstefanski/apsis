@@ -1,5 +1,9 @@
+pub mod alpha_centauri_ab;
+pub mod hd_80606_b_system;
 pub mod hierachical;
 pub mod jupiter_trojan;
+pub mod kepler_36;
 pub mod solar_system;
 pub mod sun_earth_lagrange;
 pub mod sun_earth_unstable_lagrange;
+pub mod trappist_one;

@@ -21,6 +21,7 @@ pub fn jupiter_trojans() -> Template {
     let mut bodies = vec![
         // Sun
         TemplateBody {
+            name: Some("Sun"),
             mass: m_sun,
             position: Some([0.0, 0.0]),
             velocity: [0.0, 0.0],
@@ -29,6 +30,7 @@ pub fn jupiter_trojans() -> Template {
         },
         // Jupiter
         TemplateBody {
+            name: Some("Jupiter"),
             mass: m_jupiter,
             position: Some(j_pos),
             velocity: j_vel,
@@ -54,6 +56,7 @@ pub fn jupiter_trojans() -> Template {
             vel[1] *= 1.0 + vel_disp * (random::<f64>() - 0.5);
 
             bodies.push(TemplateBody {
+                name: None,
                 mass: 1e-12,
                 position: Some(pos),
                 velocity: vel,

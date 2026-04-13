@@ -9,6 +9,7 @@ pub fn simple_three_body() -> Template {
 
     // ── Central star (Sun-like) ── //
     bodies.push(TemplateBody {
+        name: Some("Primary Star"),
         mass: 1.0,
         position: Some([0.0, 0.0]),
         velocity: [0.0, 0.0],
@@ -22,6 +23,7 @@ pub fn simple_three_body() -> Template {
     let (earth_pos, earth_vel) = circular_orbit(1.0, 1.0, earth_phase);
 
     bodies.push(TemplateBody {
+        name: Some("Earth-like Planet"),
         mass: 3.0e-6,
         position: Some(earth_pos),
         velocity: earth_vel,
@@ -45,6 +47,7 @@ pub fn simple_three_body() -> Template {
     let moon_vel = [earth_vel[0] + rel_vel[0], earth_vel[1] + rel_vel[1]];
 
     bodies.push(TemplateBody {
+        name: Some("Moon"),
         mass: 3.7e-8,
         position: Some(moon_pos),
         velocity: moon_vel,

@@ -191,6 +191,7 @@ pub fn solar_system() -> Template {
 
     // ── Sun ───────────────────────────────────────────────────────────────── //
     bodies.push(TemplateBody {
+        name: Some("Sun"),
         mass: M_SUN,
         material: Material::Star,
         position: Some([0.0, 0.0]),
@@ -214,6 +215,7 @@ pub fn solar_system() -> Template {
         }
 
         bodies.push(TemplateBody {
+            name: Some(p.name),
             mass: p.mass,
             material: p.material,
             position: Some(pos),
@@ -240,6 +242,7 @@ pub fn solar_system() -> Template {
         let (moon_pos, moon_vel) = place_moon(earth_pos, earth_vel, M_EARTH, moon_a, phase);
 
         bodies.push(TemplateBody {
+            name: Some("Moon"),
             mass: M_MOON,
             position: Some(moon_pos),
             velocity: moon_vel,
@@ -267,6 +270,7 @@ pub fn solar_system() -> Template {
         vel[1] *= ecc_factor;
 
         bodies.push(TemplateBody {
+            name: None,
             mass: 1e-10,
             position: Some(pos),
             velocity: vel,
@@ -296,6 +300,7 @@ pub fn solar_system() -> Template {
         let (pos, vel) = place_comet(M_SUN, r_peri, e, omega);
 
         bodies.push(TemplateBody {
+            name: None,
             mass: 1e-12,
             position: Some(pos),
             velocity: vel,

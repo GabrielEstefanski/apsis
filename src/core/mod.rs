@@ -10,6 +10,8 @@
 //! | [`collision`]   | Inelastic merge, energy-based collision detection |
 //! | [`adaptive`]    | [`DtController`], [`ThetaController`] |
 //! | [`diagnostics`] | Per-step acceleration and jerk statistics |
+//! | [`recorder`]    | [`Recorder`] struct: recording and replay of simulations |
+//! | [`snapshot`]     | [`Snapshot`] struct: serialisable system state for recording and replay |
 
 pub mod calibration;
 pub mod diagnostics;

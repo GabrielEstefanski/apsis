@@ -141,6 +141,7 @@ impl SimulationApp {
                             self.sim_seed = if snap.seed != 0 { snap.seed } else { crate::core::snapshot::SimSnapshot::new_seed() };
                             self.paused = true;
                             self.selected_body = None;
+                            self.follow_selected_body = false;
                             self.selection_form = None;
                             self.pending_load = None;
                             self.pending_fit = true;

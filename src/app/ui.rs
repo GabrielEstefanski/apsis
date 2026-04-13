@@ -182,6 +182,7 @@ pub struct SimulationApp {
     // Camera inertia + animation
     pub(super) zoom_vel: f32,
     pub(super) pan_vel: egui::Vec2,
+    pub(super) follow_selected_body: bool,
     /// Smooth-pan target offset; `None` when idle.
     pub(super) camera_anim_target: Option<egui::Vec2>,
     /// When `true`, `draw_frame` will call `fit_to_view` on the next frame
@@ -308,6 +309,7 @@ impl SimulationApp {
 
             zoom_vel: 0.0,
             pan_vel: egui::Vec2::ZERO,
+            follow_selected_body: false,
             camera_anim_target: None,
             pending_fit: false,
             hovered_body: None,

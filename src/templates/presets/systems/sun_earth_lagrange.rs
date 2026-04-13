@@ -24,6 +24,7 @@ pub fn sun_earth_lagrange() -> Template {
         bodies: vec![
             // Sun
             TemplateBody {
+                name: Some("Sun"),
                 mass: m_sun,
                 position: Some([0.0, 0.0]),
                 velocity: [0.0, 0.0],
@@ -32,6 +33,7 @@ pub fn sun_earth_lagrange() -> Template {
             },
             // Earth
             TemplateBody {
+                name: Some("Earth"),
                 mass: m_earth,
                 position: Some(earth_pos),
                 velocity: earth_vel,
@@ -40,6 +42,7 @@ pub fn sun_earth_lagrange() -> Template {
             },
             // Trojan at L4
             TemplateBody {
+                name: Some("L4 Probe"),
                 mass: 1e-12,
                 position: Some(l4_pos),
                 velocity: l4_vel,
@@ -48,6 +51,7 @@ pub fn sun_earth_lagrange() -> Template {
             },
             // Trojan at L5
             TemplateBody {
+                name: Some("L5 Probe"),
                 mass: 1e-12,
                 position: Some(l5_pos),
                 velocity: l5_vel,

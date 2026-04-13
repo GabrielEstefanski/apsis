@@ -58,7 +58,7 @@ impl SimulationApp {
                             let template = (entry.build)();
                             let bodies = instantiate_at(&template, 0.0, 0.0);
                             self.push_undo(UndoRecord::AddedBodies(bodies.len()));
-                            self.system.add_bodies(bodies);
+                            self.system.add_named_bodies(bodies);
                             self.pending_fit = true;
                             self.reset_drift_peaks();
                             // Seed the simulation name from the template (user can rename later)
