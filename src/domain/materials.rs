@@ -351,6 +351,31 @@ impl Material {
             Material::WhiteDwarf => "White Dwarf",
         }
     }
+
+    pub fn q_pr(self) -> f64 {
+        match self {
+            // Grain-dominated surfaces — primary targets of radiation pressure
+            Material::Asteroid => 1.0, // dark silicate, near-perfect absorber
+            Material::Comet => 0.9,    // mixed ice/dust, slight backscatter
+            Material::Icy => 0.7,      // high-albedo surface, partial reflector
+
+            // All other classes are radiation sources or too massive to be
+            // meaningfully deflected — treated as non-receivers.
+            _ => 0.0,
+        }
+    }
+
+    /// Returns `true` if bodies of this material class interact with radiation
+    /// pressure as receivers.
+    ///
+    /// Used by [`RadiationField`] to skip non-receivers cheaply without
+    /// constructing [`RadiationParams`].
+    ///
+    /// [`RadiationField`]: crate::physics::radiation::perturbation::RadiationField
+    #[inline]
+    pub fn is_radiation_receiver(self) -> bool {
+        self.q_pr() > 0.0
+    }
 }
 
 // ── Density function ──────────────────────────────────────────────────────────
@@ -546,6 +571,34 @@ mod tests {
                     p.rho_max
                 );
             }
+        }
+    }
+
+    #[test]
+    fn radiation_receivers_are_small_bodies_only() {
+        // Only grain/rubble-dominated materials should receive radiation pressure.
+        // Massive bodies (planets, stars) have β ≪ 1 and are correctly excluded.
+        assert!(Material::Asteroid.is_radiation_receiver());
+        assert!(Material::Comet.is_radiation_receiver());
+        assert!(Material::Icy.is_radiation_receiver());
+
+        assert!(!Material::Rocky.is_radiation_receiver());
+        assert!(!Material::Gas.is_radiation_receiver());
+        assert!(!Material::IceGiant.is_radiation_receiver());
+        assert!(!Material::Star.is_radiation_receiver());
+        assert!(!Material::BrownDwarf.is_radiation_receiver());
+        assert!(!Material::WhiteDwarf.is_radiation_receiver());
+    }
+
+    #[test]
+    fn q_pr_within_physical_bounds() {
+        for &mat in Material::ALL {
+            let q = mat.q_pr();
+            assert!(
+                q >= 0.0 && q <= 2.0,
+                "{}: Q_pr = {q} outside physical range [0, 2]",
+                mat.display_name()
+            );
         }
     }
 }

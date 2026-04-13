@@ -18,6 +18,7 @@ pub fn binary_star() -> Template {
         description: "Two equal-mass stars in a circular orbit.",
         bodies: vec![
             TemplateBody {
+                name: Some("Star A"),
                 mass: m,
                 position: Some([-r, 0.0]),
                 velocity: [0.0, -v_body],
@@ -25,6 +26,7 @@ pub fn binary_star() -> Template {
                 spin: omega,
             },
             TemplateBody {
+                name: Some("Star B"),
                 mass: m,
                 position: Some([r, 0.0]),
                 velocity: [0.0, v_body],
@@ -67,6 +69,7 @@ pub fn star_companion() -> Template {
         description: "A solar-mass star with a brown dwarf companion.",
         bodies: vec![
             TemplateBody {
+                name: Some("Primary Star"),
                 mass: m1,
                 position: Some([-r1, 0.0]),
                 velocity: [0.0, -v1],
@@ -74,6 +77,7 @@ pub fn star_companion() -> Template {
                 spin: omega,
             },
             TemplateBody {
+                name: Some("Companion"),
                 mass: m2,
                 position: Some([r2, 0.0]),
                 velocity: [0.0, v2],

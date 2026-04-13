@@ -1,12 +1,24 @@
-use crate::app::theme::{ACCENT, BORDER, DANGER, SUCCESS, TEXT_DIM, TEXT_PRI, TEXT_SEC};
-use crate::app::theme::secondary_btn;
 use crate::app::config::PhysicsConfig;
+use crate::app::theme::secondary_btn;
+use crate::app::theme::{ACCENT, BORDER, DANGER, SUCCESS, TEXT_DIM, TEXT_PRI, TEXT_SEC};
 use crate::app::ui::SimulationApp;
 use crate::physics::integrator::Integrator;
 use eframe::egui::{self, Align, Color32, Layout, RichText, Stroke};
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// ── Layout constants ──────────────────────────────────────────────────────────
 
+/// Width of all `DragValue` number inputs (px).
+const DV_W: f32 = 72.0;
+
+/// Width of all `Slider` widgets (px).
+const SL_W: f32 = 120.0;
+
+/// Width of the label column in `param_row` (px).
+const LBL_W: f32 = 80.0;
+
+// ── Section / row helpers ─────────────────────────────────────────────────────
+
+/// Renders a labelled section divider with a hairline rule.
 fn section(ui: &mut egui::Ui, title: &str) {
     ui.add_space(6.0);
     ui.horizontal(|ui| {
@@ -14,15 +26,21 @@ fn section(ui: &mut egui::Ui, title: &str) {
         ui.add_space(4.0);
         let r = ui.available_rect_before_wrap();
         ui.painter().line_segment(
-            [egui::pos2(r.left(), r.center().y), egui::pos2(r.right(), r.center().y)],
+            [
+                egui::pos2(r.left(), r.center().y),
+                egui::pos2(r.right(), r.center().y),
+            ],
             Stroke::new(0.5, BORDER),
         );
     });
     ui.add_space(3.0);
 }
 
-/// A label + fixed-width right-aligned widget row.
-/// `label_w` is the label column width; the widget gets the rest.
+/// Renders a two-column parameter row: a fixed-width label on the left and a
+/// right-aligned widget on the right.
+///
+/// `label_w` sets the label column width in pixels; the widget receives the
+/// remaining horizontal space.  Returns whatever `add` returns.
 fn param_row<R>(
     ui: &mut egui::Ui,
     label: &str,
@@ -34,30 +52,31 @@ fn param_row<R>(
         ui.add_sized(
             egui::vec2(label_w, 18.0),
             egui::Label::new(RichText::new(label).size(10.0).color(TEXT_SEC)),
-        ).on_hover_text(tip);
+        )
+        .on_hover_text(tip);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             add(ui)
-        }).inner
-    }).inner
+        })
+        .inner
+    })
+    .inner
 }
 
-// The DragValue width we want all number inputs to be (px).
-const DV_W: f32 = 72.0;
-// The Slider width.
-const SL_W: f32 = 120.0;
-// The label column.
-const LBL_W: f32 = 80.0;
-
-// ── Config tab ────────────────────────────────────────────────────────────────
+// ── Config panel ──────────────────────────────────────────────────────────────
 
 impl SimulationApp {
+    /// Renders the **Config** side-panel tab.
+    ///
+    /// Exposes controls for force accuracy (Barnes–Hut θ, Plummer softening),
+    /// gravity scaling, integration algorithm and time step, trail sampling,
+    /// and a one-click reset to factory defaults.
     pub(super) fn panel_tab_config(&mut self, ui: &mut egui::Ui) {
         ui.add_space(4.0);
 
         // ── FORCE ACCURACY ────────────────────────────────────────────────────
+
         section(ui, "FORCE ACCURACY");
 
-        // θ — Barnes-Hut opening angle
         let theta_tip = "Barnes–Hut opening angle θ.\n\
             θ → 0   exact O(N²), maximum accuracy\n\
             θ = 0.5 balanced default\n\
@@ -72,14 +91,14 @@ impl SimulationApp {
                     .step_by(0.05)
                     .show_value(true)
                     .custom_formatter(|v, _| format!("{v:.2}")),
-            ).changed()
+            )
+            .changed()
         });
         if changed {
             self.physics_cfg.theta = theta;
             self.system.set_theta(theta);
         }
 
-        // ε — Plummer softening scale
         let eps_tip = "Global Plummer softening scale.\n\
             Per-body default: ε = 0.02 · m^(1/3)\n\
             1.0 = default  |  > 1 suppresses singularities  |  < 1 sharper forces";
@@ -92,19 +111,25 @@ impl SimulationApp {
                     .logarithmic(true)
                     .show_value(true)
                     .custom_formatter(|v, _| format!("{v:.3}")),
-            ).changed()
+            )
+            .changed()
         });
         if changed {
             self.physics_cfg.softening_scale = eps;
             self.system.set_softening_scale(eps);
         }
+
         ui.label(
-            RichText::new(format!("  ε_eff = 0.02·m^⅓·{:.3}", self.physics_cfg.softening_scale))
-                .size(9.0)
-                .color(TEXT_DIM),
+            RichText::new(format!(
+                "  ε_eff = 0.02·m^⅓·{:.3}",
+                self.physics_cfg.softening_scale
+            ))
+            .size(9.0)
+            .color(TEXT_DIM),
         );
 
-        // Softening validity indicator
+        // Softening validity indicator: estimates the fractional force error
+        // from the ratio ε_max / r_min and flags critical close encounters.
         {
             let m = self.system.metrics();
             let r_min = m.r_min;
@@ -113,7 +138,8 @@ impl SimulationApp {
 
             if has_data {
                 let ratio = soft_max / r_min;
-                // Fractional force error ≈ (3/2)(ε/r)² for ε/r << 1
+
+                // Fractional force error ≈ (3/2)(ε/r)² for ε/r ≪ 1.
                 let force_err_pct = (1.5 * ratio * ratio * 100.0).min(9999.0);
 
                 let (dot, color, sev_label) = if ratio > 0.3 {
@@ -129,17 +155,16 @@ impl SimulationApp {
                     ui.label(RichText::new(dot).size(9.0).color(color));
                     ui.label(RichText::new("softening").size(9.5).color(TEXT_DIM));
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        ui.label(
-                            RichText::new(sev_label)
-                                .size(9.5)
-                                .color(color)
-                                .strong(),
-                        );
+                        ui.label(RichText::new(sev_label).size(9.5).color(color).strong());
                     });
                 });
 
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new(format!("  ε/r_min = {ratio:.3e}")).size(9.0).color(TEXT_DIM));
+                    ui.label(
+                        RichText::new(format!("  ε/r_min = {ratio:.3e}"))
+                            .size(9.0)
+                            .color(TEXT_DIM),
+                    );
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         ui.label(
                             RichText::new(format!("~{force_err_pct:.1}% err"))
@@ -152,7 +177,10 @@ impl SimulationApp {
                 if ratio > 0.1 {
                     egui::Frame::NONE
                         .fill(Color32::from_rgba_unmultiplied(
-                            color.r(), color.g(), color.b(), 18,
+                            color.r(),
+                            color.g(),
+                            color.b(),
+                            18,
                         ))
                         .stroke(Stroke::new(0.5, color.gamma_multiply(0.4)))
                         .corner_radius(3.0)
@@ -160,13 +188,15 @@ impl SimulationApp {
                         .show(ui, |ui| {
                             ui.set_width(ui.available_width());
                             let hint = if ratio > 0.3 {
-                                "force accuracy severely compromised — reduce ε scale or increase body separations"
+                                "force accuracy severely compromised — \
+                                 reduce ε scale or increase body separations"
                             } else {
-                                "close encounter detected — reduce ε scale or switch to Yoshida 4th-order"
+                                "close encounter detected — \
+                                 reduce ε scale or switch to Yoshida 4th-order"
                             };
-                            ui.add(egui::Label::new(
-                                RichText::new(hint).size(9.0).color(color),
-                            ).wrap());
+                            ui.add(
+                                egui::Label::new(RichText::new(hint).size(9.0).color(color)).wrap(),
+                            );
                         });
                 } else {
                     ui.add_space(18.0);
@@ -175,6 +205,7 @@ impl SimulationApp {
         }
 
         // ── GRAVITY ───────────────────────────────────────────────────────────
+
         section(ui, "GRAVITY");
 
         let g_tip = "Effective gravitational constant G_eff = G₀ · factor.\n\
@@ -189,7 +220,8 @@ impl SimulationApp {
                     .logarithmic(true)
                     .show_value(true)
                     .custom_formatter(|v, _| format!("{v:.4}")),
-            ).changed()
+            )
+            .changed()
         });
         if changed {
             self.physics_cfg.g_factor = g;
@@ -197,12 +229,15 @@ impl SimulationApp {
         }
 
         // ── INTEGRATION ───────────────────────────────────────────────────────
+
         section(ui, "INTEGRATION");
 
         let integ_tip = "Integration algorithm.\n\
             Velocity Verlet (2nd): standard leapfrog, 2 force evals/step.\n\
             Yoshida 4th: Forest–Ruth composition, 3 evals/step but\n\
-            allows 5–10× larger Δt for equal energy conservation.";
+            allows 5–10× larger Δt for equal energy conservation.\n\
+            Wisdom–Holman (2nd): exact Keplerian drift + perturbation kicks;\n\
+            optimal for nearly-Keplerian systems (star + planets).";
 
         param_row(ui, "algorithm", integ_tip, LBL_W, |ui| {
             egui::ComboBox::from_id_salt("integrator_sel")
@@ -213,7 +248,11 @@ impl SimulationApp {
                 )
                 .width(SL_W)
                 .show_ui(ui, |ui| {
-                    for variant in [Integrator::VelocityVerlet, Integrator::Yoshida4] {
+                    for variant in [
+                        Integrator::VelocityVerlet,
+                        Integrator::Yoshida4,
+                        Integrator::WisdomHolman,
+                    ] {
                         let r = ui.selectable_value(
                             &mut self.physics_cfg.integrator,
                             variant,
@@ -237,6 +276,34 @@ impl SimulationApp {
             .color(TEXT_DIM),
         );
 
+        // Wisdom–Holman applicability warning.
+        if self.physics_cfg.integrator == Integrator::WisdomHolman {
+            egui::Frame::NONE
+                .fill(Color32::from_rgba_unmultiplied(
+                    ACCENT.r(),
+                    ACCENT.g(),
+                    ACCENT.b(),
+                    18,
+                ))
+                .stroke(Stroke::new(0.5, ACCENT.gamma_multiply(0.4)))
+                .corner_radius(3.0)
+                .inner_margin(egui::Margin::symmetric(6, 3))
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(
+                                "bodies[0] must be the dominant central mass. \
+                             Accuracy degrades near planet–planet close encounters.",
+                            )
+                            .size(9.0)
+                            .color(ACCENT),
+                        )
+                        .wrap(),
+                    );
+                });
+        }
+
         ui.add_space(4.0);
 
         let dt_tip = "Fixed time step Δt.\n\
@@ -253,7 +320,9 @@ impl SimulationApp {
                     .range(1e-7_f64..=10.0)
                     .max_decimals(7),
             );
-            if r.changed() { self.system.set_dt(dt); }
+            if r.changed() {
+                self.system.set_dt(dt);
+            }
         });
 
         let spf_tip = "Physics steps computed per rendered frame.\n\
@@ -270,6 +339,7 @@ impl SimulationApp {
         });
 
         // ── TRAILS ────────────────────────────────────────────────────────────
+
         section(ui, "TRAILS");
 
         let te_tip = "Trail sampling: record one trail point every N frames.\n\
@@ -283,7 +353,8 @@ impl SimulationApp {
                 egui::DragValue::new(&mut trail_every)
                     .speed(1)
                     .range(1..=256usize),
-            ).changed()
+            )
+            .changed()
         });
         if changed {
             self.physics_cfg.trail_every = trail_every;
@@ -306,6 +377,7 @@ impl SimulationApp {
         });
 
         // ── RESET ─────────────────────────────────────────────────────────────
+
         ui.add_space(10.0);
         if secondary_btn(ui, "Reset to defaults") {
             let defaults = PhysicsConfig::default();

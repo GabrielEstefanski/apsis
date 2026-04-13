@@ -33,6 +33,7 @@ pub fn sun_earth_unstable_lagrange() -> Template {
         bodies: vec![
             // Sun
             TemplateBody {
+                name: Some("Sun"),
                 mass: m_sun,
                 position: Some([0.0, 0.0]),
                 velocity: [0.0, 0.0],
@@ -41,6 +42,7 @@ pub fn sun_earth_unstable_lagrange() -> Template {
             },
             // Earth
             TemplateBody {
+                name: Some("Earth"),
                 mass: m_earth,
                 position: Some(earth_pos),
                 velocity: earth_vel,
@@ -49,6 +51,7 @@ pub fn sun_earth_unstable_lagrange() -> Template {
             },
             // L1 (unstable)
             TemplateBody {
+                name: Some("L1 Probe"),
                 mass: 1e-12,
                 position: Some(l1_pos),
                 velocity: l1_vel,
@@ -57,6 +60,7 @@ pub fn sun_earth_unstable_lagrange() -> Template {
             },
             // L2 (unstable)
             TemplateBody {
+                name: Some("L2 Probe"),
                 mass: 1e-12,
                 position: Some(l2_pos),
                 velocity: l2_vel,
@@ -65,6 +69,7 @@ pub fn sun_earth_unstable_lagrange() -> Template {
             },
             // L3 (unstable)
             TemplateBody {
+                name: Some("L3 Probe"),
                 mass: 1e-12,
                 position: Some(l3_pos),
                 velocity: l3_vel,

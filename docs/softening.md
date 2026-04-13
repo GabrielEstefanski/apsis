@@ -1,7 +1,6 @@
 # Plummer Softening — Technical Reference
 
 **Module:** `src/domain/body.rs`, `src/physics/gravity/kernel.rs`  
-**Phase:** 0.2 — Softening honesto
 
 ---
 

@@ -257,6 +257,7 @@ impl SimulationApp {
             self.push_undo(UndoRecord::RemovedBody { body, name });
             self.system.remove_body(idx);
             self.selected_body = None;
+            self.follow_selected_body = false;
             self.selection_form = None;
         }
     }

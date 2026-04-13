@@ -25,7 +25,11 @@ use crate::core::calibration;
 use crate::core::diagnostics::{DiagnosticsComputer, SimulationDiagnostics};
 use crate::core::metrics::Metrics;
 use crate::core::trail_buffer::{TrailBuffer, adaptive_capacity};
-use crate::domain::body::Body;
+use crate::domain::body::{Body, NamedBody};
+
+const MASS_TO_SOLAR: f64 = 1.0;
+const RADIUS_TO_SOLAR: f64 = 1.0 / 0.00465;
+const L_SUN: f64 = 1.0;
 
 /// Number of bodies that actually need individual trail rendering.
 ///
@@ -39,6 +43,17 @@ fn auto_name(material: crate::domain::materials::Material, existing: &[String]) 
     let prefix = material.display_name();
     let count = existing.iter().filter(|n| n.starts_with(prefix)).count() + 1;
     format!("{prefix} {count}")
+}
+
+fn resolved_name(
+    explicit: Option<String>,
+    material: crate::domain::materials::Material,
+    existing: &[String],
+) -> String {
+    explicit
+        .map(|name| name.trim().to_owned())
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| auto_name(material, existing))
 }
 
 fn trail_body_count(bodies: &[Body]) -> usize {
@@ -59,7 +74,9 @@ use crate::physics::energy::{
     angular_momentum_z, center_of_mass_state, kinetic_energy, total_energy,
 };
 use crate::physics::gravity::BarnesHutEngine;
-use crate::physics::integrator::{Integrator, Y4_C, Y4_D, drift, evaluate_accelerations, kick};
+use crate::physics::integrator::{
+    Integrator, PerturbationForce, Y4_C, Y4_D, drift, evaluate_accelerations, kick,
+};
 use crate::physics::orbital::{self, OrbitalElements};
 
 /// Central simulation state for an N-body gravitational system.
@@ -139,6 +156,8 @@ pub struct System {
 
     /// Maximum effective pairwise softening length cached from the most recent step.
     softening_max: f64,
+
+    perturbations: Vec<Box<dyn PerturbationForce>>,
 }
 
 impl System {
@@ -171,7 +190,10 @@ impl System {
         trail_buf.update_colors(&bodies);
 
         let total_mass = bodies.iter().map(|b| b.mass).sum();
-        let names = bodies.iter().map(|b| auto_name(b.material, &[])).collect::<Vec<_>>();
+        let names = bodies
+            .iter()
+            .map(|b| auto_name(b.material, &[]))
+            .collect::<Vec<_>>();
         // Re-generate with correct counters (so Star 1, Star 2 … instead of all "Star 1")
         let names = {
             let mut acc: Vec<String> = Vec::with_capacity(bodies.len());
@@ -210,6 +232,7 @@ impl System {
             names,
             r_min,
             softening_max,
+            perturbations: Vec::new(),
         }
     }
 }
@@ -220,6 +243,7 @@ impl System {
         match self.integrator {
             Integrator::VelocityVerlet => self.step_vv(),
             Integrator::Yoshida4 => self.step_yoshida4(),
+            Integrator::WisdomHolman => self.step_wisdom_holman(),
         }
 
         let dt = self.current_dt;
@@ -248,34 +272,45 @@ impl System {
         self.softening_max = soft_max;
     }
 
-    // ── Velocity Verlet (KDK leapfrog, 2nd-order) ────────────────────────────
+    // ── Velocity Verlet (KDK leapfrog, 2nd-order symplectic) ─────────────────────
+    //
+    // Scheme: F(t) → kick(½dt) → drift(dt) → F(t+dt) → kick(½dt)
+    //
+    // The two half-kicks bracketing the drift are equivalent to a single
+    // full kick at the midpoint, giving 2nd-order accuracy with one force
+    // evaluation per amortised step.
 
     fn step_vv(&mut self) {
         let dt = self.current_dt;
         let theta = self.theta;
 
-        // Force at x(t)
         let raw_pe =
             evaluate_accelerations(&self.bodies, theta, &mut self.engine, &mut self.scratch_acc);
         self.last_potential = self.scale_acc_and_pe(raw_pe);
+        self.apply_perturbations();
 
-        kick(&mut self.bodies, &self.scratch_acc, 0.5 * dt); // half-kick
+        kick(&mut self.bodies, &self.scratch_acc, 0.5 * dt);
         drift(&mut self.bodies, dt);
 
-        // Force at x(t + dt)
         let raw_pe =
             evaluate_accelerations(&self.bodies, theta, &mut self.engine, &mut self.scratch_acc);
         self.last_potential = self.scale_acc_and_pe(raw_pe);
+        self.apply_perturbations();
 
-        kick(&mut self.bodies, &self.scratch_acc, 0.5 * dt); // half-kick
+        kick(&mut self.bodies, &self.scratch_acc, 0.5 * dt);
     }
 
-    // ── Yoshida 4th-order (Forest–Ruth DKD, 4th-order) ───────────────────────
+    // ── Yoshida 4th-order (Forest–Ruth DKD composition) ──────────────────────────
     //
     // Scheme: drift(c₀) → F → kick(d₀) → drift(c₁) → F → kick(d₁) → drift(c₂) → F → kick(d₂) → drift(c₃)
     //
-    // d₁ = w₀ ≈ −1.70, so the middle sub-step is a *backward* kick — correct
-    // and essential for the 4th-order cancellation of error terms.
+    // The middle kick coefficient d₁ = w₀ ≈ −1.70 is negative, meaning the
+    // second sub-step is a backward kick in time. This is not a bug — it is the
+    // mechanism by which leading error terms cancel to achieve 4th-order accuracy.
+    //
+    // References:
+    //   Forest & Ruth (1990). Nucl. Instrum. Methods Phys. Res. A 290, 395–400.
+    //   Yoshida (1990). Phys. Lett. A 150, 262–268.
 
     fn step_yoshida4(&mut self) {
         let dt = self.current_dt;
@@ -291,12 +326,165 @@ impl System {
                 &mut self.scratch_acc,
             );
             self.last_potential = self.scale_acc_and_pe(raw_pe);
+            self.apply_perturbations();
 
             kick(&mut self.bodies, &self.scratch_acc, Y4_D[i] * dt);
         }
 
-        // Final drift to complete the DKD stencil
         drift(&mut self.bodies, Y4_C[3] * dt);
+    }
+
+    /// Evaluates inter-planetary perturbation accelerations (excluding the central
+    /// body), computes the heliocentric indirect-term correction, and applies a
+    /// velocity kick of magnitude `dt` to all planets.
+    ///
+    /// # Heliocentric indirect term
+    ///
+    /// In heliocentric coordinates the perturbation Hamiltonian contains a
+    /// momentum-dependent cross term that contributes an additional acceleration
+    ///
+    /// ```text
+    /// a_indirect,i = −(Σ_j m_j a_j) / M₀
+    /// ```
+    ///
+    /// where `a_j` are the **raw** (pre-scaled) inter-planetary accelerations and
+    /// the sum runs over all planets. The indirect term shares the same `g_factor`
+    /// scaling as the direct perturbation and must be computed before
+    /// [`scale_acc_and_pe`] is called to avoid a spurious double-application.
+    ///
+    /// # Returns
+    ///
+    /// The total gravitational potential at the evaluated positions:
+    /// inter-planetary interaction energy plus the central `−μ Σ mᵢ/rᵢ` term.
+    fn wh_kick(&mut self, dt: f64, mu: f64) -> f64 {
+        let theta = self.theta;
+        let total_m0 = self.bodies[0].mass;
+
+        let raw_pe = evaluate_accelerations(
+            &self.bodies[1..],
+            theta,
+            &mut self.engine,
+            &mut self.scratch_acc,
+        );
+
+        let (ax_bary_raw, ay_bary_raw) = self
+            .scratch_acc
+            .iter()
+            .zip(self.bodies[1..].iter())
+            .fold((0.0_f64, 0.0_f64), |(ax, ay), (&(axi, ayi), b)| {
+                (ax + b.mass * axi, ay + b.mass * ayi)
+            });
+
+        let indirect_x_raw = -ax_bary_raw / total_m0;
+        let indirect_y_raw = -ay_bary_raw / total_m0;
+
+        let potential = self.scale_acc_and_pe(raw_pe) + self.central_potential(mu);
+
+        // Non-gravitational perturbations act on planets only (bodies[1..]),
+        // aligned with scratch_acc which has length N-1.
+        self.apply_perturbations_planets();
+
+        let indirect_x = indirect_x_raw * self.g_factor;
+        let indirect_y = indirect_y_raw * self.g_factor;
+        for (i, &(ax, ay)) in self.scratch_acc.iter().enumerate() {
+            self.bodies[i + 1].vx += (ax + indirect_x) * dt;
+            self.bodies[i + 1].vy += (ay + indirect_y) * dt;
+        }
+
+        potential
+    }
+
+    // ── Wisdom–Holman mixed-variable symplectic (2nd-order) ──────────────────────
+    //
+    // Scheme (heliocentric frame):
+    //
+    //   kick_pert(½dt)  →  drift_Kepler(dt)  →  kick_pert(½dt)
+    //
+    // The Hamiltonian is split as H = H_Kepler + H_pert. H_Kepler is integrated
+    // exactly via the analytic universal-variable propagator; H_pert contributes
+    // velocity kicks that include the heliocentric indirect term (momentum
+    // cross-term) required to preserve symplecticity.
+    //
+    // The integration is performed entirely in heliocentric coordinates and
+    // converted back to the inertial barycentric frame at the end of each step
+    // via total-momentum conservation.
+    //
+    // Assumptions:
+    //   - `bodies[0]` is the dominant central mass.
+    //   - The system is hierarchical: M_central ≫ all other masses.
+    //   - Close encounters between planets degrade accuracy; switch to Yoshida4
+    //     if any separation approaches the mutual Hill radius.
+    //
+    // References:
+    //   Wisdom, J. & Holman, M. (1991). Astron. J. 102, 1528–1538.
+
+    fn step_wisdom_holman(&mut self) {
+        let dt = self.current_dt;
+        let mu = self.g_factor * self.bodies[0].mass;
+        let total_m0 = self.bodies[0].mass;
+
+        // ── To heliocentric frame ─────────────────────────────────────────────
+        let (cx0, cy0, cvx0, cvy0) = (
+            self.bodies[0].x,
+            self.bodies[0].y,
+            self.bodies[0].vx,
+            self.bodies[0].vy,
+        );
+        for b in &mut self.bodies[1..] {
+            b.x -= cx0;
+            b.y -= cy0;
+            b.vx -= cvx0;
+            b.vy -= cvy0;
+        }
+
+        // ── First half-kick (perturbations + indirect term) ───────────────────
+        // Potential at t is recorded but immediately overwritten; diagnostics
+        // always report the end-of-step value at x(t + dt).
+        let _ = self.wh_kick(0.5 * dt, mu);
+
+        // ── Exact Keplerian drift ─────────────────────────────────────────────
+        // bodies[0] is the origin and remains at rest in this frame.
+        for i in 1..self.bodies.len() {
+            let b = &self.bodies[i];
+            let (nx, ny, nvx, nvy) =
+                crate::physics::kepler::kepler_step(b.x, b.y, b.vx, b.vy, dt, mu);
+            self.bodies[i].x = nx;
+            self.bodies[i].y = ny;
+            self.bodies[i].vx = nvx;
+            self.bodies[i].vy = nvy;
+        }
+
+        // ── Second half-kick (perturbations + indirect term) ──────────────────
+        // Potential at x(t + dt) — this is the value exposed by metrics().
+        self.last_potential = self.wh_kick(0.5 * dt, mu);
+
+        // ── Back to inertial (barycentric) frame ──────────────────────────────
+        // Recover the central-body velocity from total-momentum conservation:
+        //   M₀ v₀ = −Σᵢ mᵢ vᵢ
+        // then shift all positions by the central body's inertial displacement.
+        let (px, py) = self.bodies[1..]
+            .iter()
+            .fold((0.0_f64, 0.0_f64), |(px, py), b| {
+                (px + b.mass * b.vx, py + b.mass * b.vy)
+            });
+
+        self.bodies[0].vx = -px / total_m0;
+        self.bodies[0].vy = -py / total_m0;
+        self.bodies[0].x += self.bodies[0].vx * dt;
+        self.bodies[0].y += self.bodies[0].vy * dt;
+
+        let (cx1, cy1, cvx1, cvy1) = (
+            self.bodies[0].x,
+            self.bodies[0].y,
+            self.bodies[0].vx,
+            self.bodies[0].vy,
+        );
+        for b in &mut self.bodies[1..] {
+            b.x += cx1;
+            b.y += cy1;
+            b.vx += cvx1;
+            b.vy += cvy1;
+        }
     }
 }
 
@@ -391,19 +579,72 @@ impl System {
         self.rel_angular_momentum_error = (lz - baseline) / denom;
     }
 
-    /// Removes the centre-of-mass velocity so the system is in its rest frame.
-    pub fn zero_com_velocity(&mut self) {
-        calibration::zero_com_velocity(&mut self.bodies, self.total_mass);
+    fn central_potential(&self, mu: f64) -> f64 {
+        self.bodies[1..]
+            .iter()
+            .map(|b| {
+                let r = (b.x * b.x + b.y * b.y).sqrt().max(1e-30);
+                -mu * b.mass / r
+            })
+            .sum()
+    }
+}
+
+impl System {
+    /// Registers a non-gravitational perturbation force.
+    ///
+    /// The force is applied at every subsequent integration step until
+    /// removed via [`clear_perturbations`]. Multiple perturbations are
+    /// applied in registration order and accumulate additively.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use physics::radiation::perturbation::RadiationField;
+    ///
+    /// system.add_perturbation(Box::new(RadiationField::new(source, n, true)));
+    /// ```
+    pub fn add_perturbation(&mut self, p: Box<dyn PerturbationForce>) {
+        self.perturbations.push(p);
     }
 
-    /// Recenters the system so that the centre of mass is at the origin.
+    /// Removes all registered perturbation forces.
+    pub fn clear_perturbations(&mut self) {
+        self.perturbations.clear();
+    }
+
+    /// Returns the number of currently registered perturbations.
+    pub fn perturbation_count(&self) -> usize {
+        self.perturbations.len()
+    }
+
+    /// Accumulates all registered perturbation forces into `scratch_acc`.
     ///
-    /// The trail buffer is translated by the same vector so stored positions
-    /// remain visually consistent.
-    pub fn recenter_com(&mut self) {
-        if let Some((dx, dy)) = calibration::com_offset(&self.bodies, self.total_mass) {
-            calibration::apply_body_shift(&mut self.bodies, dx, dy);
-            self.trail_buf.translate(-dx as f32, -dy as f32);
+    /// Must be called **after** [`scale_acc_and_pe`] so gravitational and
+    /// non-gravitational contributions are separable in diagnostics.
+    /// Perturbation forces are independent of `g_factor`.
+    fn apply_perturbations(&mut self) {
+        if self.perturbations.is_empty() {
+            return;
+        }
+        for p in &self.perturbations {
+            p.accumulate(&self.bodies, &mut self.scratch_acc);
+        }
+    }
+
+    /// Variant of [`apply_perturbations`] for use inside [`wh_kick`].
+    ///
+    /// During the Wisdom–Holman sub-step the Barnes–Hut tree is built from
+    /// `bodies[1..]` only, so `scratch_acc` has length `N − 1`.
+    /// This helper passes the matching slice of `bodies` to each perturbation
+    /// so indices remain aligned.
+    fn apply_perturbations_planets(&mut self) {
+        if self.perturbations.is_empty() {
+            return;
+        }
+        let bodies_planets = &self.bodies[1..];
+        for p in &self.perturbations {
+            p.accumulate_offset(bodies_planets, &mut self.scratch_acc, 1);
         }
     }
 }
@@ -422,6 +663,7 @@ impl System {
         }
         self.total_mass += body.mass;
         self.names.push(auto_name(body.material, &self.names));
+        body.update_luminosity(MASS_TO_SOLAR, RADIUS_TO_SOLAR, L_SUN);
         self.bodies.push(body);
 
         let n = self.bodies.len();
@@ -430,6 +672,11 @@ impl System {
         self.trail_buf.update_colors(&self.bodies);
 
         self.initial_energy = None;
+    }
+
+    /// Adds a single body while preserving an explicit display name when given.
+    pub fn add_named_body(&mut self, named_body: NamedBody) {
+        self.add_named_bodies(vec![named_body]);
     }
 
     /// Add multiple bodies in a single batch.
@@ -445,6 +692,7 @@ impl System {
             }
             self.total_mass += body.mass;
             self.names.push(auto_name(body.material, &self.names));
+            body.update_luminosity(MASS_TO_SOLAR, RADIUS_TO_SOLAR, L_SUN);
             self.bodies.push(body);
         }
 
@@ -455,9 +703,46 @@ impl System {
         self.initial_energy = None;
     }
 
-    /// Read the display name for body `idx`.
-    pub fn name(&self, idx: usize) -> &str {
-        self.names.get(idx).map(|s| s.as_str()).unwrap_or("")
+    /// Add multiple bodies in a single batch while preserving explicit names.
+    ///
+    /// Each `NamedBody` may provide a pre-authored display name. Bodies without
+    /// an explicit name fall back to the standard material-based naming scheme.
+    pub fn add_named_bodies(&mut self, new_bodies: Vec<NamedBody>) {
+        use crate::domain::body::default_softening;
+        for mut named_body in new_bodies {
+            let mut body = named_body.body;
+            body.sync_physical_properties();
+            if (self.softening_scale - 1.0).abs() > 1e-15 {
+                body.softening = default_softening(body.mass) * self.softening_scale;
+            }
+            self.total_mass += body.mass;
+            let name = resolved_name(named_body.name.take(), body.material, &self.names);
+            body.update_luminosity(MASS_TO_SOLAR, RADIUS_TO_SOLAR, L_SUN);
+            self.names.push(name);
+            self.bodies.push(body);
+        }
+
+        let n = self.bodies.len();
+        let cap = adaptive_capacity(trail_body_count(&self.bodies).max(1));
+        self.trail_buf.reset(n, cap);
+        self.trail_buf.update_colors(&self.bodies);
+        self.initial_energy = None;
+    }
+
+    /// Removes the centre-of-mass velocity so the system is in its rest frame.
+    pub fn zero_com_velocity(&mut self) {
+        calibration::zero_com_velocity(&mut self.bodies, self.total_mass);
+    }
+
+    /// Recenters the system so that the centre of mass is at the origin.
+    ///
+    /// The trail buffer is translated by the same vector so stored positions
+    /// remain visually consistent.
+    pub fn recenter_com(&mut self) {
+        if let Some((dx, dy)) = calibration::com_offset(&self.bodies, self.total_mass) {
+            calibration::apply_body_shift(&mut self.bodies, dx, dy);
+            self.trail_buf.translate(-dx as f32, -dy as f32);
+        }
     }
 
     /// All body names (parallel to `bodies()`).
@@ -484,6 +769,7 @@ impl System {
 
         for mut b in bodies {
             b.sync_physical_properties();
+            b.update_luminosity(MASS_TO_SOLAR, RADIUS_TO_SOLAR, L_SUN);
             self.total_mass += b.mass;
             self.names.push(auto_name(b.material, &self.names));
             self.bodies.push(b);
@@ -547,6 +833,7 @@ impl System {
                 self.total_mass += body.mass - slot.mass;
             }
 
+            body.update_luminosity(MASS_TO_SOLAR, RADIUS_TO_SOLAR, L_SUN);
             *slot = body;
 
             if mass_changed {
@@ -741,7 +1028,7 @@ impl System {
     pub fn to_snapshot(&self) -> crate::core::snapshot::SimSnapshot {
         use crate::core::snapshot::{BodyRecord, SimSnapshot};
         SimSnapshot {
-            save_id: 0, // caller sets this via new_id() or save_to_dir()
+            save_id: 0,
             t: self.t,
             steps: self.steps,
             dt: self.current_dt,
@@ -750,9 +1037,9 @@ impl System {
             g_factor: self.g_factor,
             integrator: self.integrator,
             trail_every: self.trail_every,
-            sim_name: String::new(), // set by the app layer before saving
-            seed: 0,                 // set by the app layer before saving
-            trail: None,             // set by the app layer before saving
+            sim_name: String::new(),
+            seed: 0,
+            trail: None,
             bodies: self.bodies.iter().map(BodyRecord::from_body).collect(),
             names: self.names.clone(),
         }
@@ -765,12 +1052,13 @@ impl System {
     /// step establishes new baselines.
     pub fn restore_from_snapshot(&mut self, snap: &crate::core::snapshot::SimSnapshot) {
         let bodies: Vec<Body> = snap.bodies.iter().map(|r| r.into_body()).collect();
-        // Restore names: use saved names if present, else auto-generate
         self.names = if snap.names.len() == bodies.len() {
             snap.names.clone()
         } else {
             let mut acc: Vec<String> = Vec::with_capacity(bodies.len());
-            for b in &bodies { acc.push(auto_name(b.material, &acc)); }
+            for b in &bodies {
+                acc.push(auto_name(b.material, &acc));
+            }
             acc
         };
         let n = bodies.len();
@@ -787,13 +1075,13 @@ impl System {
         self.trail_buf.update_colors(&self.bodies);
         if let Some(trail_snap) = &snap.trail {
             if trail_snap.n_bodies == n as u32
-                && trail_snap.positions.len() == (trail_snap.n_bodies * trail_snap.capacity) as usize
+                && trail_snap.positions.len()
+                    == (trail_snap.n_bodies * trail_snap.capacity) as usize
             {
                 self.trail_buf.restore_from_snapshot(trail_snap);
             }
         }
 
-        // Restore physics parameters
         self.t = snap.t;
         self.steps = snap.steps;
         self.current_dt = snap.dt;
@@ -803,8 +1091,6 @@ impl System {
         self.integrator = snap.integrator;
         self.trail_every = snap.trail_every.max(1);
 
-        // Reset energy / angular-momentum baselines so next step establishes
-        // fresh references relative to the restored state.
         self.initial_energy = None;
         self.initial_angular_momentum = None;
         self.rel_energy_error = 0.0;

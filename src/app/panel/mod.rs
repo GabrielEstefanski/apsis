@@ -55,6 +55,7 @@ impl SimulationApp {
 
         if idx >= self.system.bodies().len() {
             self.selected_body = None;
+            self.follow_selected_body = false;
             self.selection_form = None;
             return;
         }
@@ -103,5 +104,6 @@ impl SimulationApp {
         let center_y = (min_y + max_y) as f32 * 0.5;
 
         self.offset = egui::vec2(-center_x * self.scale, -center_y * self.scale);
+        self.follow_selected_body = false;
     }
 }

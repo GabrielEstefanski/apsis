@@ -11,6 +11,7 @@ pub fn three_body_chaotic_ejection() -> Template {
         description: "Three equal-mass bodies in a chaotic configuration leading to ejection.",
         bodies: vec![
             TemplateBody {
+                name: Some("Body 1"),
                 mass: 1.0,
                 position: Some([-1.0, 0.0]),
                 velocity: [0.3, 0.4],
@@ -18,6 +19,7 @@ pub fn three_body_chaotic_ejection() -> Template {
                 spin: 0.0,
             },
             TemplateBody {
+                name: Some("Body 2"),
                 mass: 1.0,
                 position: Some([1.0, 0.0]),
                 velocity: [0.3, 0.4 + eps],
@@ -25,6 +27,7 @@ pub fn three_body_chaotic_ejection() -> Template {
                 spin: 0.0,
             },
             TemplateBody {
+                name: Some("Body 3"),
                 mass: 1.0,
                 position: Some([0.0, 0.1]),
                 velocity: [-0.6, -0.8],

@@ -32,6 +32,7 @@ pub fn three_body_lagrange_triangle() -> Template {
 
     let bodies = vec![
         TemplateBody {
+            name: Some("Body 1"),
             mass: m,
             position: Some(p1),
             velocity: scale(norm(perp(p1)), v),
@@ -39,6 +40,7 @@ pub fn three_body_lagrange_triangle() -> Template {
             spin: 0.0,
         },
         TemplateBody {
+            name: Some("Body 2"),
             mass: m,
             position: Some(p2),
             velocity: scale(norm(perp(p2)), v),
@@ -46,6 +48,7 @@ pub fn three_body_lagrange_triangle() -> Template {
             spin: 0.0,
         },
         TemplateBody {
+            name: Some("Body 3"),
             mass: m,
             position: Some(p3),
             velocity: scale(norm(perp(p3)), v),

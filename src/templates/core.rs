@@ -51,6 +51,9 @@ use crate::domain::materials::Material;
 /// | Display colour      | `material.props().base_color` |
 #[derive(Debug, Clone, Copy)]
 pub struct TemplateBody {
+    /// Optional authored display name preserved at instantiation time.
+    pub name: Option<&'static str>,
+
     /// Mass [simulation mass units, e.g. M_☉].
     pub mass: f64,
 
@@ -80,6 +83,7 @@ impl TemplateBody {
     /// will be filled in by the scenario builder.
     pub fn at_rest(mass: f64, material: Material) -> Self {
         Self {
+            name: None,
             mass,
             material,
             position: None,
@@ -96,6 +100,7 @@ impl TemplateBody {
         velocity: [f64; 2],
     ) -> Self {
         Self {
+            name: None,
             mass,
             material,
             position: Some(position),

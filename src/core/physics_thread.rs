@@ -30,7 +30,7 @@ use crate::core::metrics::Metrics;
 use crate::core::snapshot::SimSnapshot;
 use crate::core::system::System;
 use crate::core::trail_buffer::TrailBuffer;
-use crate::domain::body::Body;
+use crate::domain::body::{Body, NamedBody};
 use crate::physics::integrator::Integrator;
 use crate::physics::orbital::OrbitalElements;
 
@@ -67,7 +67,9 @@ pub enum PhysicsCmd {
     SetIntegrator(Integrator),
     SetTrailEvery(usize),
     AddBody(Body),
+    AddNamedBody(NamedBody),
     AddBodies(Vec<Body>),
+    AddNamedBodies(Vec<NamedBody>),
     RemoveBody(usize),
     UpdateBody(usize, Body),
     SetName(usize, String),
@@ -222,11 +224,19 @@ impl PhysicsHandle {
     pub fn add_body(&self, body: Body) {
         self.send(PhysicsCmd::AddBody(body));
     }
+    pub fn add_named_body(&self, named_body: NamedBody) {
+        self.send(PhysicsCmd::AddNamedBody(named_body));
+    }
     /// Add a batch of bodies in one operation. Sets the loading flag immediately
     /// so the overlay appears in the same frame as the user action.
     pub fn add_bodies(&self, bodies: Vec<Body>) {
         self.loading.store(true, Ordering::Relaxed);
         self.send(PhysicsCmd::AddBodies(bodies));
+    }
+    /// Add a batch of named bodies while preserving authored template names.
+    pub fn add_named_bodies(&self, bodies: Vec<NamedBody>) {
+        self.loading.store(true, Ordering::Relaxed);
+        self.send(PhysicsCmd::AddNamedBodies(bodies));
     }
     pub fn remove_body(&self, idx: usize) {
         self.send(PhysicsCmd::RemoveBody(idx));
@@ -419,9 +429,19 @@ fn physics_loop(
                     system.add_body(b);
                     needs_full_publish = true;
                 }
+                PhysicsCmd::AddNamedBody(named_body) => {
+                    system.add_named_body(named_body);
+                    needs_full_publish = true;
+                }
                 PhysicsCmd::AddBodies(bodies) => {
                     loading.store(true, Ordering::Relaxed);
                     system.add_bodies(bodies);
+                    loading.store(false, Ordering::Relaxed);
+                    needs_full_publish = true;
+                }
+                PhysicsCmd::AddNamedBodies(bodies) => {
+                    loading.store(true, Ordering::Relaxed);
+                    system.add_named_bodies(bodies);
                     loading.store(false, Ordering::Relaxed);
                     needs_full_publish = true;
                 }

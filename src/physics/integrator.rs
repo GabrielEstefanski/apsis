@@ -51,6 +51,9 @@ pub enum Integrator {
 
     /// Yoshida / Forest–Ruth composition — 4th-order symplectic.
     Yoshida4,
+
+    /// Wisdom & Holman (1991) symplectic map for Keplerian systems with small perturbations.
+    WisdomHolman,
 }
 
 impl Integrator {
@@ -59,6 +62,7 @@ impl Integrator {
         match self {
             Self::VelocityVerlet => "Velocity Verlet (2nd)",
             Self::Yoshida4 => "Yoshida 4th-order",
+            Self::WisdomHolman => "Wisdom–Holman (2nd, Keplerian)",
         }
     }
 
@@ -67,6 +71,7 @@ impl Integrator {
         match self {
             Self::VelocityVerlet => 2,
             Self::Yoshida4 => 4,
+            Self::WisdomHolman => 2,
         }
     }
 
@@ -79,21 +84,28 @@ impl Integrator {
         match self {
             Self::VelocityVerlet => 2,
             Self::Yoshida4 => 3,
+            Self::WisdomHolman => 1,
         }
     }
 
     /// One-line description shown in the UI tooltip.
     pub fn description(self) -> &'static str {
         match self {
-            Self::VelocityVerlet =>
+            Self::VelocityVerlet => {
                 "2nd-order symplectic leapfrog. Fast; energy oscillates around \
                  the initial value. Phase error ∝ dt². Good for real-time \
-                 visualisation and short integrations.",
-            Self::Yoshida4 =>
+                 visualisation and short integrations."
+            }
+            Self::Yoshida4 => {
                 "4th-order symplectic composition (Forest–Ruth). 3 force evals \
                  per step but phase error ∝ dt⁴ — allows 5–10× larger dt for \
                  the same energy conservation. Required for publication-quality \
-                 long-term runs.",
+                 long-term runs."
+            }
+            Self::WisdomHolman => {
+                "Symplectic map for Keplerian systems with small perturbations. \
+                 Not implemented yet."
+            }
         }
     }
 }
@@ -114,7 +126,7 @@ pub const Y4_C: [f64; 4] = [
     Y4_W1 * 0.5,
     (Y4_W1 + Y4_W0) * 0.5,
     (Y4_W0 + Y4_W1) * 0.5, // == Y4_C[1] by symmetry
-    Y4_W1 * 0.5,            // == Y4_C[0] by symmetry
+    Y4_W1 * 0.5,           // == Y4_C[0] by symmetry
 ];
 
 /// Kick (velocity) coefficients: d[i] applied after force eval i.
@@ -160,5 +172,29 @@ pub fn drift(bodies: &mut [Body], dt: f64) {
     for body in bodies.iter_mut() {
         body.x += body.vx * dt;
         body.y += body.vy * dt;
+    }
+}
+
+pub trait PerturbationForce: Send + Sync {
+    /// Accumulates non-gravitational accelerations into `scratch_acc`.
+    ///
+    /// `scratch_acc[i]` corresponds to `bodies[i]`. Implementations must
+    /// **add** to existing values, not overwrite, so multiple perturbations
+    /// compose correctly.
+    fn accumulate(&self, bodies: &[Body], scratch_acc: &mut [(f64, f64)]);
+
+    /// Accumulates accelerations for a sub-slice of bodies starting at
+    /// global index `offset` within `System::bodies`.
+    ///
+    /// Used by [`System::apply_perturbations_planets`] during the
+    /// Wisdom–Holman sub-step, where `scratch_acc` covers only `bodies[1..]`
+    /// and the global index of each entry is `local_index + offset`.
+    ///
+    /// The default implementation ignores `offset` and delegates to
+    /// [`accumulate`] — correct for perturbations that derive params
+    /// dynamically from the body slice rather than from a pre-indexed vec.
+    fn accumulate_offset(&self, bodies: &[Body], scratch_acc: &mut [(f64, f64)], offset: usize) {
+        let _ = offset;
+        self.accumulate(bodies, scratch_acc);
     }
 }

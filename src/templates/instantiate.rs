@@ -1,7 +1,8 @@
-use crate::domain::body::Body;
+use crate::domain::body::{Body, NamedBody};
 use crate::templates::Template;
 
-pub fn instantiate(template: &Template) -> Vec<Body> {
+/// Instantiate a template at the origin while preserving explicit body names.
+pub fn instantiate(template: &Template) -> Vec<NamedBody> {
     instantiate_at(template, 0.0, 0.0)
 }
 
@@ -10,7 +11,7 @@ pub fn instantiate(template: &Template) -> Vec<Body> {
 /// Body positions in the template are relative to an arbitrary origin; this
 /// function translates the whole system so its CoM lands exactly at the
 /// requested world position.
-pub fn instantiate_at(template: &Template, cx: f64, cy: f64) -> Vec<Body> {
+pub fn instantiate_at(template: &Template, cx: f64, cy: f64) -> Vec<NamedBody> {
     let total_mass: f64 = template.bodies.iter().map(|t| t.mass).sum();
 
     let (com_x, com_y) = if total_mass > 0.0 {
@@ -44,7 +45,10 @@ pub fn instantiate_at(template: &Template, cx: f64, cy: f64) -> Vec<Body> {
 
             b.omega_z = t.spin;
 
-            b
+            NamedBody {
+                body: b,
+                name: t.name.map(str::to_owned),
+            }
         })
         .collect()
 }

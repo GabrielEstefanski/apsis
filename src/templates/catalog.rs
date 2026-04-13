@@ -49,6 +49,26 @@ pub const TEMPLATES: &[TemplateEntry] = &[
         build: solar_system,
     },
     TemplateEntry {
+        name: "TRAPPIST-1",
+        category: TemplateCategory::Systems,
+        build: trappist_1,
+    },
+    TemplateEntry {
+        name: "Kepler-36",
+        category: TemplateCategory::Systems,
+        build: kepler_36,
+    },
+    TemplateEntry {
+        name: "Alpha Centauri AB",
+        category: TemplateCategory::Systems,
+        build: alpha_centauri_ab,
+    },
+    TemplateEntry {
+        name: "HD 80606 System",
+        category: TemplateCategory::Systems,
+        build: hd_80606,
+    },
+    TemplateEntry {
         name: "Sun–Earth L4/L5",
         category: TemplateCategory::Systems,
         build: sun_earth_lagrange,
