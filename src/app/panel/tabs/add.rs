@@ -3,8 +3,8 @@ use crate::app::theme::{
 };
 use crate::app::theme::primary_btn;
 use crate::app::ui::{BodyForm, SimulationApp, SpawnTab, UndoRecord};
-use crate::domain::body::{Body, radius_from_density_mass};
-use crate::domain::materials::{Material, density};
+use crate::core::body::{Body, radius_from_density_mass};
+use crate::core::materials::{Material, density};
 use crate::physics::gravity::G;
 use eframe::egui::{self, Color32, RichText, Stroke};
 

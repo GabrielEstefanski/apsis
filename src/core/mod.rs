@@ -13,8 +13,10 @@
 //! | [`recorder`]    | [`Recorder`] struct: recording and replay of simulations |
 //! | [`snapshot`]     | [`Snapshot`] struct: serialisable system state for recording and replay |
 
+pub mod body;
 pub mod calibration;
 pub mod diagnostics;
+pub mod materials;
 pub mod metrics;
 pub mod physics_thread;
 pub mod recorder;

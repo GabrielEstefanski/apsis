@@ -8,7 +8,12 @@
       "Bash(python3 -c ':*)",
       "Bash(cargo metadata:*)",
       "Bash(python3 -c \"import json,sys; m=json.load\\(sys.stdin\\); [print\\(p['manifest_path']\\) for p in m['packages'] if p['name']=='egui']\")",
-      "Bash(python -c \"import json,sys; m=json.load\\(sys.stdin\\); [print\\(f'{p[\\\\\"name\\\\\"]} {p[\\\\\"version\\\\\"]}'\\) for p in m['packages']]\")"
+      "Bash(python -c \"import json,sys; m=json.load\\(sys.stdin\\); [print\\(f'{p[\\\\\"name\\\\\"]} {p[\\\\\"version\\\\\"]}'\\) for p in m['packages']]\")",
+      "Skill(update-config)",
+      "mcp__obsidian__obsidian_list_files_in_dir",
+      "mcp__obsidian__obsidian_get_file_contents",
+      "mcp__obsidian__obsidian_append_content",
+      "mcp__obsidian__obsidian_patch_content"
     ]
   }
 }

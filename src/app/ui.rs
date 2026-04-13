@@ -5,8 +5,8 @@ use crate::core::physics_thread::{PhysicsHandle, spawn as spawn_physics};
 use crate::core::recorder::SimRecorder;
 use crate::core::snapshot::{SaveEntry, SimSnapshot, list_saves};
 use crate::core::system::System;
-use crate::domain::body::Body;
-use crate::domain::materials::Material;
+use crate::core::body::Body;
+use crate::core::materials::Material;
 use crate::render::{TrailRenderer, WgpuBackend};
 use crate::templates::Template;
 use std::sync::{Arc, Mutex};
@@ -119,7 +119,7 @@ impl BodyForm {
             self.vx.parse().ok()?,
             self.vy.parse().ok()?,
             mass,
-            crate::domain::materials::Material::Rocky,
+            crate::core::materials::Material::Rocky,
         );
 
         b.density = density;

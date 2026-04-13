@@ -17,7 +17,7 @@ use std::f64::consts::TAU;
 
 use rand::random;
 
-use crate::domain::materials::Material;
+use crate::core::materials::Material;
 use crate::templates::{Template, TemplateBody, builders::circular_orbit};
 
 // ── Physical constants in simulation units ────────────────────────────────────

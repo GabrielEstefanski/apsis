@@ -38,7 +38,7 @@
 //! - Forest & Ruth (1990). *Nucl. Instrum. Methods Phys. Res.* A 290, 395–400.
 //! - Yoshida (1990). *Phys. Lett. A* 150, 262–268.
 
-use crate::domain::body::Body;
+use crate::core::body::Body;
 use crate::physics::gravity::BarnesHutEngine;
 
 // ── Integrator enum ───────────────────────────────────────────────────────────

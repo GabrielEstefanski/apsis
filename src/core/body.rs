@@ -1,4 +1,4 @@
-use crate::domain::materials::{Material, density};
+use crate::core::materials::{Material, density};
 use std::f64::consts::PI;
 
 /// Base softening length for a body of mass 1.0.

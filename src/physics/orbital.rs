@@ -37,7 +37,7 @@
 
 use std::f64::consts::TAU;
 
-use crate::domain::body::Body;
+use crate::core::body::Body;
 
 // ── Orbit classification ──────────────────────────────────────────────────────
 
@@ -263,7 +263,7 @@ pub fn compute_all(bodies: &[Body], g_factor: f64) -> Vec<Option<OrbitalElements
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{body::Body, materials::Material};
+    use crate::core::{body::Body, materials::Material};
     use std::f64::consts::{PI, TAU};
 
     // ── Helpers ───────────────────────────────────────────────────────────────

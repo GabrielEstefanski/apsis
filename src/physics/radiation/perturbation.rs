@@ -14,7 +14,7 @@
 
 use std::f64::consts::PI;
 
-use crate::domain::body::Body;
+use crate::core::body::Body;
 use crate::physics::integrator::PerturbationForce;
 use crate::physics::radiation::force::{pr_drag_acceleration, radiation_acceleration};
 use crate::physics::radiation::params::RadiationParams;

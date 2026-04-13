@@ -30,7 +30,7 @@ use crate::core::metrics::Metrics;
 use crate::core::snapshot::SimSnapshot;
 use crate::core::system::System;
 use crate::core::trail_buffer::TrailBuffer;
-use crate::domain::body::{Body, NamedBody};
+use crate::core::body::{Body, NamedBody};
 use crate::physics::integrator::Integrator;
 use crate::physics::orbital::OrbitalElements;
 

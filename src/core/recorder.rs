@@ -41,8 +41,8 @@ use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
+use crate::core::body::Body;
 use crate::core::metrics::Metrics;
-use crate::domain::body::Body;
 use crate::physics::energy::per_body_potential_energy;
 use crate::physics::orbital::OrbitalElements;
 
@@ -90,11 +90,7 @@ impl SimRecorder {
     /// `base_path` should be a full path **without** extension, e.g.
     /// `/home/user/results/run01`.  The recorder appends `_bodies.csv` and
     /// `_system.csv` automatically.
-    pub fn create(
-        base_path: &Path,
-        interval: f64,
-        meta: &RecordMetadata,
-    ) -> std::io::Result<Self> {
+    pub fn create(base_path: &Path, interval: f64, meta: &RecordMetadata) -> std::io::Result<Self> {
         let bodies_path = Self::suffixed(base_path, "_bodies.csv");
         let system_path = Self::suffixed(base_path, "_system.csv");
 
@@ -181,8 +177,14 @@ impl SimRecorder {
                     o.primary_idx as i64,
                 ),
                 None => (
-                    f64::NAN, f64::NAN, f64::NAN, f64::NAN, f64::NAN, f64::NAN,
-                    "none", -1_i64,
+                    f64::NAN,
+                    f64::NAN,
+                    f64::NAN,
+                    f64::NAN,
+                    f64::NAN,
+                    f64::NAN,
+                    "none",
+                    -1_i64,
                 ),
             };
 
@@ -190,10 +192,21 @@ impl SimRecorder {
                 self.bodies_writer,
                 "{t:.6e},{i},{:.6e},{:.6e},{:.6e},{:.6e},{:.6e},{:.6e},{:.6e},\
                  {},{},{},{},{},{:.4},{},{}",
-                body.x, body.y, body.vx, body.vy, body.mass, ke, pe,
-                fmt_f64(a), fmt_f64(e), fmt_f64(period),
-                fmt_f64(h), fmt_f64(eps), omega_deg,
-                orb_type, primary,
+                body.x,
+                body.y,
+                body.vx,
+                body.vy,
+                body.mass,
+                ke,
+                pe,
+                fmt_f64(a),
+                fmt_f64(e),
+                fmt_f64(period),
+                fmt_f64(h),
+                fmt_f64(eps),
+                omega_deg,
+                orb_type,
+                primary,
             )?;
         }
 
@@ -237,8 +250,12 @@ impl SimRecorder {
     }
 
     /// Paths of the two output files.
-    pub fn bodies_path(&self) -> PathBuf { Self::suffixed(&self.base_path, "_bodies.csv") }
-    pub fn system_path(&self) -> PathBuf { Self::suffixed(&self.base_path, "_system.csv") }
+    pub fn bodies_path(&self) -> PathBuf {
+        Self::suffixed(&self.base_path, "_bodies.csv")
+    }
+    pub fn system_path(&self) -> PathBuf {
+        Self::suffixed(&self.base_path, "_system.csv")
+    }
 
     // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -259,7 +276,11 @@ impl Drop for SimRecorder {
 
 /// Formats a float as `NaN` when it is NaN, otherwise in scientific notation.
 fn fmt_f64(v: f64) -> String {
-    if v.is_nan() { "NaN".into() } else { format!("{v:.6e}") }
+    if v.is_nan() {
+        "NaN".into()
+    } else {
+        format!("{v:.6e}")
+    }
 }
 
 /// Converts `f64::INFINITY` and `f64::NEG_INFINITY` to `NaN` for CSV output.
