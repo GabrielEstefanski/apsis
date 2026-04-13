@@ -21,11 +21,11 @@
 //! This system is intended for scientific and numerical experiments in
 //! gravitational dynamics, not for general-purpose physics engines.
 
+use crate::core::body::{Body, NamedBody};
 use crate::core::calibration;
 use crate::core::diagnostics::{DiagnosticsComputer, SimulationDiagnostics};
 use crate::core::metrics::Metrics;
 use crate::core::trail_buffer::{TrailBuffer, adaptive_capacity};
-use crate::domain::body::{Body, NamedBody};
 
 const MASS_TO_SOLAR: f64 = 1.0;
 const RADIUS_TO_SOLAR: f64 = 1.0 / 0.00465;
@@ -39,7 +39,7 @@ const L_SUN: f64 = 1.0;
 /// to the total body count (which can be dominated by asteroid belts).
 /// Generate an auto-name for a new body given existing names.
 /// Counts existing names that start with the material prefix and appends N+1.
-fn auto_name(material: crate::domain::materials::Material, existing: &[String]) -> String {
+fn auto_name(material: crate::core::materials::Material, existing: &[String]) -> String {
     let prefix = material.display_name();
     let count = existing.iter().filter(|n| n.starts_with(prefix)).count() + 1;
     format!("{prefix} {count}")
@@ -47,7 +47,7 @@ fn auto_name(material: crate::domain::materials::Material, existing: &[String]) 
 
 fn resolved_name(
     explicit: Option<String>,
-    material: crate::domain::materials::Material,
+    material: crate::core::materials::Material,
     existing: &[String],
 ) -> String {
     explicit
@@ -656,7 +656,7 @@ impl System {
     /// history is lost.  Energy baseline is reset because the system
     /// topology has changed.
     pub fn add_body(&mut self, mut body: Body) {
-        use crate::domain::body::default_softening;
+        use crate::core::body::default_softening;
         body.sync_physical_properties();
         if (self.softening_scale - 1.0).abs() > 1e-15 {
             body.softening = default_softening(body.mass) * self.softening_scale;
@@ -684,7 +684,7 @@ impl System {
     /// More efficient than calling [`add_body`] in a loop: the trail buffer is
     /// reset only once and the energy baseline is invalidated once.
     pub fn add_bodies(&mut self, new_bodies: Vec<Body>) {
-        use crate::domain::body::default_softening;
+        use crate::core::body::default_softening;
         for mut body in new_bodies {
             body.sync_physical_properties();
             if (self.softening_scale - 1.0).abs() > 1e-15 {
@@ -708,7 +708,7 @@ impl System {
     /// Each `NamedBody` may provide a pre-authored display name. Bodies without
     /// an explicit name fall back to the standard material-based naming scheme.
     pub fn add_named_bodies(&mut self, new_bodies: Vec<NamedBody>) {
-        use crate::domain::body::default_softening;
+        use crate::core::body::default_softening;
         for mut named_body in new_bodies {
             let mut body = named_body.body;
             body.sync_physical_properties();
@@ -930,7 +930,7 @@ impl System {
     ///
     /// Also rescales all existing body softenings immediately.
     pub fn set_softening_scale(&mut self, scale: f64) {
-        use crate::domain::body::default_softening;
+        use crate::core::body::default_softening;
         self.softening_scale = scale.max(0.0);
         for b in &mut self.bodies {
             b.softening = default_softening(b.mass) * self.softening_scale;

@@ -279,8 +279,8 @@ impl SimulationApp {
                             (0.0, 0.0)
                         };
 
-                        use crate::domain::materials::density as mat_density;
-                        let mut body = crate::domain::body::Body::new(
+                        use crate::core::materials::density as mat_density;
+                        let mut body = crate::core::body::Body::new(
                             wx,
                             wy,
                             vx,

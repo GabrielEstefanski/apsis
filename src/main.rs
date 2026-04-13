@@ -2,7 +2,6 @@ use wgpu::*;
 
 mod app;
 mod core;
-mod domain;
 mod physics;
 mod render;
 mod templates;

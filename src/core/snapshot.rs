@@ -61,8 +61,8 @@ use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::domain::body::Body;
-use crate::domain::materials::Material;
+use crate::core::body::Body;
+use crate::core::materials::Material;
 use crate::physics::integrator::Integrator;
 
 // ── Constants ─────────────────────────────────────────────────────────────────

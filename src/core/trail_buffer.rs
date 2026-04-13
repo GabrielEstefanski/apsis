@@ -32,8 +32,8 @@
 //! body count, keeping `n_bodies × capacity` (total GPU buffer size) roughly
 //! constant across the supported simulation scales.
 
+use crate::core::body::Body;
 use crate::core::snapshot::TrailSnapshot;
-use crate::domain::body::Body;
 
 // ── Tuning ────────────────────────────────────────────────────────────────────
 

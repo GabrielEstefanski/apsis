@@ -1,5 +1,5 @@
 use crate::{
-    domain::materials::Material,
+    core::materials::Material,
     templates::{Template, TemplateBody},
 };
 

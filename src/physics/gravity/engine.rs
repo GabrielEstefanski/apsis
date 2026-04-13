@@ -28,7 +28,7 @@
 //! - Barnes & Hut (1986). *Nature* 324, 446–449.
 //! - Dehnen (2014). *Comput. Astrophys. Cosmol.* 1, 1.
 
-use crate::domain::body::Body;
+use crate::core::body::Body;
 use rayon::prelude::*;
 
 use super::kernel::{G, pair_eps2, plummer_acc, plummer_phi};
@@ -366,7 +366,7 @@ fn bh_eval_body(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::body::Body;
+    use crate::core::body::Body;
 
     fn eval(bodies: &[Body]) -> (Vec<(f64, f64)>, f64) {
         let mut engine = BarnesHutEngine::new(16);
@@ -390,7 +390,7 @@ mod tests {
                 0.0,
                 0.0,
                 1.0,
-                crate::domain::materials::Material::Rocky,
+                crate::core::materials::Material::Rocky,
             ),
             Body::new(
                 3.0,
@@ -398,7 +398,7 @@ mod tests {
                 0.0,
                 0.0,
                 2.0,
-                crate::domain::materials::Material::Rocky,
+                crate::core::materials::Material::Rocky,
             ),
         ];
         let (acc, _) = eval(&bodies);
@@ -422,7 +422,7 @@ mod tests {
                 0.0,
                 0.0,
                 1.0,
-                crate::domain::materials::Material::Rocky,
+                crate::core::materials::Material::Rocky,
             ),
             Body::new(
                 4.0,
@@ -430,7 +430,7 @@ mod tests {
                 0.0,
                 0.0,
                 1.0,
-                crate::domain::materials::Material::Rocky,
+                crate::core::materials::Material::Rocky,
             ),
         ];
         let (acc, _) = eval(&bodies);
@@ -451,7 +451,7 @@ mod tests {
                 0.0,
                 0.0,
                 1.0,
-                crate::domain::materials::Material::Rocky,
+                crate::core::materials::Material::Rocky,
             ),
             Body::new(
                 0.0,
@@ -459,7 +459,7 @@ mod tests {
                 0.0,
                 0.0,
                 1.0,
-                crate::domain::materials::Material::Rocky,
+                crate::core::materials::Material::Rocky,
             ), // center
             Body::new(
                 5.0,
@@ -467,7 +467,7 @@ mod tests {
                 0.0,
                 0.0,
                 1.0,
-                crate::domain::materials::Material::Rocky,
+                crate::core::materials::Material::Rocky,
             ),
         ];
         let (acc, _) = eval(&bodies);
@@ -486,7 +486,7 @@ mod tests {
                 0.0,
                 0.0,
                 1.0,
-                crate::domain::materials::Material::Rocky,
+                crate::core::materials::Material::Rocky,
             ),
             Body::new(
                 2.0,
@@ -494,7 +494,7 @@ mod tests {
                 0.0,
                 0.0,
                 1.0,
-                crate::domain::materials::Material::Rocky,
+                crate::core::materials::Material::Rocky,
             ),
         ];
         let (_, potential) = eval(&bodies);

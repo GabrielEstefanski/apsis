@@ -1,4 +1,4 @@
-use crate::domain::materials::Material;
+use crate::core::materials::Material;
 use crate::templates::{Template, TemplateBody};
 
 pub fn binary_star() -> Template {
