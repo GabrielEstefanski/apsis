@@ -21,6 +21,9 @@
 //! This system is intended for scientific and numerical experiments in
 //! gravitational dynamics, not for general-purpose physics engines.
 
+use crate::core::adaptive::{
+    AccelerationStats, DtAdaptationConfig, DtController, DtMode, ThetaController,
+};
 use crate::core::body::{Body, NamedBody};
 use crate::core::calibration;
 use crate::core::diagnostics::{DiagnosticsComputer, SimulationDiagnostics};
@@ -132,8 +135,37 @@ pub struct System {
     /// so it remains correct even if dt changes mid-run).
     t: f64,
 
-    /// Fixed time step.
+    /// Timestep currently used by the integrator.
+    ///
+    /// In [`DtMode::Fixed`] this always equals `user_dt`.
+    /// In [`DtMode::Adaptive`] it is the output of [`DtController`] and may
+    /// differ from `user_dt`.
     current_dt: f64,
+
+    /// User-requested timestep — the value set via [`set_dt`] and used as the
+    /// proposed baseline by the adaptive controller.
+    user_dt: f64,
+
+    /// Timestep management policy.  Default: [`DtMode::Fixed`].
+    ///
+    /// See [`DtMode`] for the full scientific rationale and the consequences
+    /// of each choice.
+    dt_mode: DtMode,
+
+    /// Adaptive timestep controller.  Only consulted when
+    /// `dt_mode == DtMode::Adaptive`.
+    dt_ctrl: DtController,
+
+    /// Adaptive Barnes–Hut opening-angle controller.  Only active when
+    /// `adaptive_theta == true`.
+    theta_ctrl: ThetaController,
+
+    /// Whether the adaptive θ controller is active.  Default: `false`.
+    ///
+    /// Note: varying θ between steps changes force accuracy per step but does
+    /// **not** break symplecticity.  For reproducible force-accuracy budgets in
+    /// published runs, keep this `false` and set θ manually.
+    adaptive_theta: bool,
 
     /// Gravitational scaling factor (G multiplier).
     g_factor: f64,
@@ -225,6 +257,21 @@ impl System {
             steps: 0,
             t: 0.0,
             current_dt: dt,
+            user_dt: dt,
+            dt_mode: DtMode::Fixed,
+            dt_ctrl: DtController::new(DtAdaptationConfig {
+                // Always ready; `dt_mode` is the master switch.
+                enabled: true,
+                min_dt: 1e-9,
+                max_dt: 1e6,
+                target_rel_energy_error: 1e-6,
+                accel_epsilon: 0.1,
+                grow_limit: 1.2,
+                shrink_limit: 0.5,
+                dt_slew_fraction: 0.1,
+            }),
+            theta_ctrl: ThetaController::new(1e-3, 0.05, 1.5).with_initial_theta(theta),
+            adaptive_theta: false,
             g_factor: 1.0,
             initial_angular_momentum: None,
             rel_angular_momentum_error: 0.0,
@@ -256,6 +303,33 @@ impl System {
 
         self.update_energy_tracking();
         self.update_angular_momentum_tracking();
+
+        // ── Adaptive controllers ──────────────────────────────────────────────
+        // Run after diagnostics and energy tracking so all inputs are fresh.
+        //
+        // DtMode::Fixed: current_dt is always user_dt; the DtController is
+        //   never consulted.  The symplectic guarantee is fully preserved.
+        //
+        // DtMode::Adaptive: DtController modulates current_dt each step.
+        //   The symplectic guarantee is broken — see DtMode documentation.
+        self.current_dt = match self.dt_mode {
+            DtMode::Fixed => self.user_dt,
+            DtMode::Adaptive => {
+                let stats = AccelerationStats::new(self.last_diag.max_acc, self.last_diag.jerk);
+                self.dt_ctrl
+                    .update(self.user_dt, self.rel_energy_error, stats)
+            }
+        };
+
+        // Adaptive θ: does not break symplecticity but does vary force accuracy
+        // per step.  Only active when explicitly enabled.
+        // `theta_error_proxy` requires the quadtree to be built — guaranteed
+        // here because the final force eval of the step leaves the tree populated.
+        // For N ≤ EXACT_THRESHOLD the tree is empty and the proxy returns 0.0.
+        if self.adaptive_theta && !self.bodies.is_empty() {
+            let e_theta = self.engine.theta_error_proxy(0, &self.bodies, self.theta);
+            self.theta = self.theta_ctrl.update(e_theta, self.current_dt);
+        }
 
         // Periodically remove COM drift.  The trail buffer is translated by
         // the same vector so stored positions remain consistent.
@@ -332,6 +406,29 @@ impl System {
         }
 
         drift(&mut self.bodies, Y4_C[3] * dt);
+
+        // ── Consistent energy snapshot ────────────────────────────────────────
+        // After the final drift the phase-space point is (q(t+dt), v(t+dt)).
+        // `last_potential` still holds PE(q‴) — the potential at the positions
+        // BEFORE the drift — which is inconsistent with the current body state.
+        // Without this correction, `update_energy_tracking` computes
+        //   E_shadow = KE(v(t+dt)) + PE(q‴)
+        // which oscillates at O(dt) rather than O(dt⁴), making Y4 appear
+        // dramatically worse than VV in the metrics panel.
+        //
+        // Re-evaluating the potential at q(t+dt) costs one additional force call
+        // per step (3 → 4 total).  The accelerations are also updated so that
+        // `scratch_acc` is consistent with the final positions, which improves
+        // jerk diagnostics on the next step.
+        {
+            let raw_pe = evaluate_accelerations(
+                &self.bodies,
+                theta,
+                &mut self.engine,
+                &mut self.scratch_acc,
+            );
+            self.last_potential = self.scale_acc_and_pe(raw_pe);
+        }
     }
 
     /// Evaluates inter-planetary perturbation accelerations (excluding the central
@@ -788,6 +885,11 @@ impl System {
         self.last_kinetic = 0.0;
         self.diagnostics = DiagnosticsComputer::new();
         self.last_diag = SimulationDiagnostics::default();
+        // Reset controllers: the system topology changed; slew history from
+        // a previous run is stale.  dt/theta settings are preserved since
+        // load_bodies doesn't alter those parameters.
+        self.dt_ctrl.reset();
+        self.theta_ctrl.set(self.theta);
 
         self.zero_com_velocity();
         self.recenter_com();
@@ -847,6 +949,59 @@ impl System {
 }
 
 impl System {
+    // ── Timestep guidance ────────────────────────────────────────────────────
+
+    /// Computes a physics-justified recommended timestep from the current system
+    /// state, using two complementary N-body criteria:
+    ///
+    /// 1. **Power et al. (2003) acceleration criterion:**
+    ///    `dt_acc = η · √(ε_min / a_max)`
+    ///    Ensures no body moves more than ~η softening lengths per step.
+    ///
+    /// 2. **Aarseth jerk criterion:**
+    ///    `dt_jerk = η · √(a_max / j_max)`
+    ///    Limits the fractional change in acceleration per step.
+    ///    Only used after the first integration step (requires computed jerk).
+    ///
+    /// Returns the **minimum** of both estimates, clamped to `[1e-9, 1e6]`.
+    /// Returns `None` before the first force evaluation or when no bodies exist.
+    ///
+    /// `η = 0.05` is a conservative default suitable for publication-quality
+    /// runs.  For exploratory work η = 0.1 is commonly used.
+    ///
+    /// # References
+    /// - Power et al. (2003). MNRAS 338, 14–34. §3.
+    /// - Aarseth, S. J. (2003). *Gravitational N-Body Simulations*. Cambridge. §2.
+    fn compute_recommended_dt(&self) -> Option<f64> {
+        if self.bodies.is_empty() || self.last_diag.max_acc <= 1e-30 {
+            return None;
+        }
+
+        // `body.softening` already incorporates `softening_scale`
+        // (applied during add_body / load_bodies / set_softening_scale).
+        let eps_min = self
+            .bodies
+            .iter()
+            .map(|b| b.softening)
+            .fold(f64::MAX, f64::min);
+
+        if eps_min >= f64::MAX || eps_min <= 0.0 {
+            return None;
+        }
+
+        const ETA: f64 = 0.05;
+
+        let dt_acc = ETA * (eps_min / self.last_diag.max_acc).sqrt();
+
+        let dt_jerk = if self.last_diag.jerk > 1e-30 {
+            ETA * (self.last_diag.max_acc / self.last_diag.jerk).sqrt()
+        } else {
+            f64::MAX
+        };
+
+        Some(dt_acc.min(dt_jerk).clamp(1e-9, 1e6))
+    }
+
     /// Returns an immutable slice of all bodies in the simulation.
     pub fn bodies(&self) -> &[Body] {
         &self.bodies
@@ -894,7 +1049,12 @@ impl System {
     }
 
     pub fn set_dt(&mut self, dt: f64) {
+        self.user_dt = dt;
         self.current_dt = dt;
+        // Discard the controller's slew history so the next step starts
+        // fresh from the new user-requested value rather than sleweing from
+        // the previous adapted value.
+        self.dt_ctrl.reset();
     }
 
     /// Returns the active integrator.
@@ -912,12 +1072,75 @@ impl System {
         self.theta
     }
 
-    /// Sets the Barnes–Hut opening angle θ (clamped to [0.1, 1.5]).
+    /// Sets the Barnes–Hut opening angle θ (clamped to [0.05, 1.5]).
     ///
     /// Smaller θ → more accurate (approaches O(N²) as θ → 0).
     /// Larger θ → faster but less accurate.
+    ///
+    /// Also syncs the adaptive controller's internal state so that if
+    /// adaptation is later enabled, it starts from the user-set value.
     pub fn set_theta(&mut self, theta: f64) {
-        self.theta = theta.clamp(0.05, 1.5);
+        let t = theta.clamp(0.05, 1.5);
+        self.theta = t;
+        self.theta_ctrl.set(t);
+    }
+
+    /// Returns the user-requested timestep.
+    ///
+    /// When adaptive dt is disabled this equals `dt()`.  When enabled, `dt()`
+    /// may differ as the controller modulates it step-by-step.
+    pub fn user_dt(&self) -> f64 {
+        self.user_dt
+    }
+
+    /// Set the timestep management policy.
+    ///
+    /// # Scientific implications
+    ///
+    /// Setting [`DtMode::Adaptive`] breaks the symplectic structure of the
+    /// integrator and may produce secular energy drift.  See [`DtMode`] for
+    /// the full rationale.  **Use [`DtMode::Fixed`] for any run whose results
+    /// will be analysed or cited.**
+    ///
+    /// Switching to [`DtMode::Fixed`] immediately restores `current_dt` to
+    /// `user_dt` and resets the controller's slew history so no adapted state
+    /// bleeds into the fixed-dt run.
+    pub fn set_dt_mode(&mut self, mode: DtMode) {
+        self.dt_mode = mode;
+        if mode == DtMode::Fixed {
+            self.current_dt = self.user_dt;
+            self.dt_ctrl.reset();
+        }
+    }
+
+    /// Returns the active timestep management policy.
+    pub fn dt_mode(&self) -> DtMode {
+        self.dt_mode
+    }
+
+    /// Enable or disable the adaptive Barnes–Hut θ controller.
+    ///
+    /// **Disabled by default.**  When enabled, θ is adjusted each step based
+    /// on the BH force-truncation error proxy, targeting the controller's
+    /// configured error tolerance.  When disabled, θ is fixed at the
+    /// user-set value.
+    ///
+    /// Note: varying θ does **not** break symplecticity, but it does change
+    /// the force accuracy budget per step, making quantitative error analysis
+    /// harder.  For reproducible accuracy in published runs, keep θ fixed.
+    ///
+    /// Disabling re-syncs the controller's internal state to the current θ
+    /// so that re-enabling starts from a consistent baseline.
+    pub fn set_adaptive_theta(&mut self, enabled: bool) {
+        self.adaptive_theta = enabled;
+        if !enabled {
+            self.theta_ctrl.set(self.theta);
+        }
+    }
+
+    /// Returns `true` if the adaptive θ controller is active.
+    pub fn adaptive_theta_enabled(&self) -> bool {
+        self.adaptive_theta
     }
 
     /// Returns the current global softening scale factor.
@@ -990,6 +1213,9 @@ impl System {
             g_factor: self.g_factor,
             theta: self.theta,
             dt: self.current_dt,
+            user_dt: self.user_dt,
+            dt_mode: self.dt_mode,
+            adaptive_theta: self.adaptive_theta,
 
             max_acc: self.last_diag.max_acc,
             jerk: self.last_diag.jerk,
@@ -997,6 +1223,8 @@ impl System {
 
             r_min: self.r_min,
             softening_max: self.softening_max,
+
+            recommended_dt: self.compute_recommended_dt(),
         }
     }
 
@@ -1085,6 +1313,7 @@ impl System {
         self.t = snap.t;
         self.steps = snap.steps;
         self.current_dt = snap.dt;
+        self.user_dt = snap.dt;
         self.theta = snap.theta;
         self.softening_scale = snap.softening_scale;
         self.g_factor = snap.g_factor;
@@ -1101,9 +1330,180 @@ impl System {
         self.diagnostics = crate::core::diagnostics::DiagnosticsComputer::new();
         self.last_diag = crate::core::diagnostics::SimulationDiagnostics::default();
         self.orbital_cache.clear();
+        // Reset controllers: discard stale slew history from the previous run.
+        self.dt_ctrl.reset();
+        self.theta_ctrl.set(snap.theta);
 
         let (r_min, softening_max) = Self::compute_closeness(&self.bodies);
         self.r_min = r_min;
         self.softening_max = softening_max;
+    }
+}
+
+// ── End-to-end integration tests ─────────────────────────────────────────────
+//
+// These tests verify that the full simulation pipeline — force evaluation,
+// integrator, energy tracking — correctly conserves the Hamiltonian over many
+// orbital periods.  They test the *integrated system*, not individual
+// primitives.
+//
+// Physical scenario
+// ─────────────────
+// Two equal-mass bodies in a circular orbit about their common centre of mass.
+//
+//   G = 1 (simulation units), M₁ = M₂ = 1
+//   Positions: (−1, 0) and (+1, 0) — separation d = 2, orbital radius r = 1
+//   Velocities: (0, −0.5) and (0, +0.5) — counter-clockwise orbit
+//
+// Derivation of initial conditions:
+//   Circular orbit requires centripetal = gravitational acceleration:
+//     v²/r = G·M_partner/d²  →  v²/1 = 1·1/4  →  v = 0.5   ✓
+//   Orbital period:
+//     T = 2πr/v = 2π·1/0.5 = 4π ≈ 12.566
+//   Centre-of-mass velocity: (m₁·v₁ + m₂·v₂)/(m₁+m₂) = (−0.5+0.5)/2 = 0  ✓
+//   Angular momentum: Lz = m(x₁vy₁ − y₁vx₁) + m(x₂vy₂ − y₂vx₂)
+//                       = 1·(−1·(−0.5)) + 1·(1·0.5) = 1.0 > 0 (CCW)  ✓
+//
+// Energy-error measurement
+// ────────────────────────
+// `System::update_energy_tracking` sets E₀ on the first step, then tracks
+//   δE/E₀ = (Eₙ − E₀) / |E₀|
+// continuously.  `metrics().rel_energy_error` returns the instantaneous value.
+// We record the *maximum* over all steps: for symplectic integrators the error
+// oscillates rather than drifts, so the final sample can underestimate the
+// true peak.
+//
+// Tolerance derivation
+// ────────────────────
+// With dt = 0.01 and T = 4π, the ratio dt/T ≈ 7.96 × 10⁻⁴.
+//
+// Velocity Verlet (2nd order):
+//   Amplitude of energy oscillation ~ (dt/T)² ≈ 6.3 × 10⁻⁷
+//   Tolerance 1 × 10⁻⁴ gives a factor-of-160 safety margin.
+//
+// Yoshida 4th-order:
+//   Amplitude ~ (dt/T)⁴ ≈ 4 × 10⁻¹³
+//   Tolerance 1 × 10⁻⁷ gives ≥ 10⁶× safety margin (also validates that
+//   Yoshida4 is *observably* more accurate than VV for the same dt).
+//
+// Both tolerances accommodate:
+//   - Plummer softening (ε = 0.02 per unit-mass body): modifies potential
+//     smoothly but the modified system still has a symplectic structure
+//   - Floating-point rounding: accumulated over ~10⁵ steps, remains ≪ 1 × 10⁻⁷
+//   - Bounded oscillatory transients from the first few orbits
+#[cfg(test)]
+mod integration_tests {
+    use super::*;
+    use crate::core::materials::Material;
+    use crate::physics::integrator::Integrator;
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    /// Constructs the two-body circular-orbit scenario described above.
+    ///
+    /// θ = 0.5: exact O(N²) forces are used regardless (N = 2 < EXACT_THRESHOLD
+    /// = 64), so θ has no effect on accuracy here.
+    /// `DtMode::Fixed` is the default — integration is fully symplectic.
+    fn two_body_circular_system(integrator: Integrator, dt: f64) -> System {
+        let bodies = vec![
+            Body::new(-1.0, 0.0, 0.0, -0.5, 1.0, Material::Rocky),
+            Body::new(1.0, 0.0, 0.0, 0.5, 1.0, Material::Rocky),
+        ];
+        let mut sys = System::new(bodies, 0.5, dt, 10, 1);
+        sys.set_integrator(integrator);
+        sys
+    }
+
+    /// Runs `sys` for `n_periods` orbital periods and returns the maximum
+    /// relative energy error |δE/E₀| observed over all steps.
+    ///
+    /// Tracking the maximum is essential for symplectic integrators: their
+    /// energy error oscillates, so sampling only the final step would miss the
+    /// true peak and could give a falsely optimistic result.
+    fn max_rel_energy_error(sys: &mut System, n_periods: u64, dt: f64) -> f64 {
+        // T = 4π (derived above)
+        const PERIOD: f64 = 4.0 * std::f64::consts::PI;
+        let total_steps = (n_periods as f64 * PERIOD / dt).ceil() as u64;
+
+        let mut peak: f64 = 0.0;
+        for _ in 0..total_steps {
+            sys.step();
+            peak = peak.max(sys.metrics().rel_energy_error.abs());
+        }
+        peak
+    }
+
+    // ── Tests ─────────────────────────────────────────────────────────────────
+
+    /// Velocity Verlet energy conservation over 100 circular orbits.
+    ///
+    /// VV is a 2nd-order symplectic integrator: energy error is bounded and
+    /// oscillatory with amplitude O((dt/T)²).
+    ///
+    /// With dt = 0.01, T = 4π:
+    ///   (dt/T)² ≈ 6.3 × 10⁻⁷ → tolerance 10⁻⁴ (factor-of-160 safety margin)
+    #[test]
+    fn energy_conservation_velocity_verlet() {
+        const DT: f64 = 0.01;
+        const N_PERIODS: u64 = 100;
+        const TOLERANCE: f64 = 1e-4;
+
+        let mut sys = two_body_circular_system(Integrator::VelocityVerlet, DT);
+        let peak_err = max_rel_energy_error(&mut sys, N_PERIODS, DT);
+
+        assert!(
+            peak_err < TOLERANCE,
+            "VelocityVerlet: peak |δE/E₀| = {:.3e} exceeds {:.0e} \
+             after {} periods (dt = {}, T = 4π ≈ 12.566)",
+            peak_err,
+            TOLERANCE,
+            N_PERIODS,
+            DT,
+        );
+    }
+
+    /// Yoshida 4th-order energy conservation over 100 circular orbits.
+    ///
+    /// Yoshida4 is a 4th-order symplectic integrator: energy error amplitude
+    /// is O((dt/T)⁴), far smaller than VV for the same dt.
+    ///
+    /// With dt = 0.01, T = 4π:
+    ///   (dt/T)⁴ ≈ 4 × 10⁻¹³ → tolerance 10⁻⁷
+    ///
+    /// The tighter tolerance vs. VV validates that the higher-order method
+    /// delivers its theoretical accuracy advantage in the full pipeline.
+    #[test]
+    #[ignore = "diagnostic — run with --ignored to inspect raw peak errors"]
+    fn print_peak_errors_diagnostic() {
+        for &(label, integrator, dt) in &[
+            ("VV    dt=0.01 ", Integrator::VelocityVerlet, 0.01_f64),
+            ("VV    dt=0.001", Integrator::VelocityVerlet, 0.001_f64),
+            ("Y4    dt=0.01 ", Integrator::Yoshida4, 0.01_f64),
+            ("Y4    dt=0.001", Integrator::Yoshida4, 0.001_f64),
+        ] {
+            let mut sys = two_body_circular_system(integrator, dt);
+            let peak = max_rel_energy_error(&mut sys, 10, dt);
+            println!("{label}  peak |δE/E₀| = {peak:.3e}");
+        }
+    }
+
+    #[test]
+    fn energy_conservation_yoshida4() {
+        const DT: f64 = 0.01;
+        const N_PERIODS: u64 = 100;
+        const TOLERANCE: f64 = 1e-7;
+
+        let mut sys = two_body_circular_system(Integrator::Yoshida4, DT);
+        let peak_err = max_rel_energy_error(&mut sys, N_PERIODS, DT);
+
+        assert!(
+            peak_err < TOLERANCE,
+            "Yoshida4: peak |δE/E₀| = {:.3e} exceeds {:.0e} \
+             after {} periods (dt = {}, T = 4π ≈ 12.566)",
+            peak_err,
+            TOLERANCE,
+            N_PERIODS,
+            DT,
+        );
     }
 }

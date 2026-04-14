@@ -1,5 +1,3 @@
-use wgpu::*;
-
 mod app;
 mod core;
 mod physics;

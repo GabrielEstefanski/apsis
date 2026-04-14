@@ -325,6 +325,60 @@ impl SimulationApp {
             }
         });
 
+        // Recommended Δt hint — Physics-justified suggestion derived from the
+        // Power et al. (2003) acceleration criterion and Aarseth jerk criterion.
+        // Clicking "apply" sets dt directly; the run stays fully symplectic.
+        {
+            let current_dt = self.system.dt();
+            let rec = self.system.metrics().recommended_dt;
+
+            if let Some(rec) = rec {
+                // Ratio > 1 means the user's dt is larger (coarser) than recommended.
+                let ratio = current_dt / rec;
+                let (status_color, status_label) = if ratio <= 2.0 {
+                    (SUCCESS, "ok")
+                } else if ratio <= 10.0 {
+                    (ACCENT, "coarse")
+                } else {
+                    (DANGER, "too large")
+                };
+
+                ui.horizontal(|ui| {
+                    ui.add_space(4.0);
+                    ui.label(
+                        RichText::new(format!("suggested  {:.2e}", rec))
+                            .size(9.0)
+                            .color(TEXT_DIM),
+                    );
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui
+                            .add_sized(
+                                egui::vec2(42.0, 14.0),
+                                egui::Button::new(RichText::new("apply").size(9.0)),
+                            )
+                            .on_hover_text(
+                                "Set Δt to the recommended value (Power et al. 2003 + Aarseth criterion).\n\
+                                 Keeps DtMode::Fixed — integration remains fully symplectic.",
+                            )
+                            .clicked()
+                        {
+                            self.system.set_dt(rec);
+                        }
+                        ui.add_space(4.0);
+                        ui.label(
+                            RichText::new(status_label)
+                                .size(9.0)
+                                .color(status_color)
+                                .strong(),
+                        );
+                    });
+                });
+            } else {
+                // Reserve height so layout is stable before first step.
+                ui.add_space(16.0);
+            }
+        }
+
         let spf_tip = "Physics steps computed per rendered frame.\n\
             Increase to speed up simulated time without changing Δt.\n\
             Also controllable with the speed slider in the playbar.";

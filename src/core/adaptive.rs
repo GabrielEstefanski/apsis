@@ -1,3 +1,79 @@
+/// Timestep management policy for the N-body integrator.
+///
+/// # Symplecticity and why this distinction matters
+///
+/// Symplectic integrators (Velocity Verlet, Yoshida 4th-order, Wisdom–Holman)
+/// are derived from a generating function that exactly preserves the symplectic
+/// 2-form on phase space. This guarantees that the numerical flow is conjugate to
+/// the exact flow of a *modified Hamiltonian* H̃, which differs from the true H
+/// by terms of order O(dtᵖ⁺¹) (p = integrator order). As a consequence, energy
+/// error is **bounded and oscillatory** for all time — it cannot drift secularly.
+///
+/// This guarantee holds **only when dt is constant**. When dt varies between
+/// steps, the per-step maps Φ_{dt₁}, Φ_{dt₂}, … are each individually symplectic
+/// but their composition Φ_{dt₁} ∘ Φ_{dt₂} ∘ … is not a single symplectic map.
+/// The modified Hamiltonian changes with each step; there is no single conserved
+/// quantity bounding the error. Energy error may then drift monotonically, at a
+/// rate proportional to the magnitude and frequency of dt changes.
+///
+/// For a result intended for publication or long-term stability analysis this is
+/// not an acceptable trade-off. The only rigorous options are:
+///
+/// 1. **Fixed dt** — the standard approach; choose dt small enough for the system.
+/// 2. **Time-transformed Hamiltonians** (Mikkola & Tanikawa 1999; Preto & Tremaine
+///    1999) — reformulate in a fictitious time variable so that dt_fictitious is
+///    constant while the physical step size adapts; still symplectic. Not
+///    implemented here.
+///
+/// `Adaptive` mode is provided as an **interactive convenience only**:
+/// exploring a new scenario, finding a stable dt, or running qualitative
+/// demonstrations. It must not be used for any run whose results are cited.
+///
+/// # Selection guide
+///
+/// | Mode | Energy error | Suitable for |
+/// |------|-------------|--------------|
+/// | [`Fixed`] | Bounded, oscillatory — O(dtᵖ) amplitude | Long-term integration, publication |
+/// | [`Adaptive`] | Potentially secular drift | Interactive exploration, dt tuning |
+///
+/// # References
+///
+/// - Hairer, E., Lubich, C., & Wanner, G. (2006). *Geometric Numerical
+///   Integration: Structure-Preserving Algorithms for Ordinary Differential
+///   Equations* (2nd ed.). Springer. §VI.
+/// - Leimkuhler, B., & Reich, S. (2004). *Simulating Hamiltonian Dynamics*.
+///   Cambridge University Press. §4.2.
+/// - Yoshida, H. (1990). Construction of higher order symplectic integrators.
+///   *Phys. Lett. A* 150, 262–268.
+/// - Mikkola, S., & Tanikawa, K. (1999). Explicit symplectic algorithms for
+///   time-transformed Hamiltonians. *Cel. Mech. Dyn. Astron.* 74, 287–295.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DtMode {
+    /// **Constant timestep.** The integration is symplectic — energy error is
+    /// bounded and oscillatory for all time. The magnitude of oscillation scales
+    /// as O(dtᵖ), where p is the integrator order (2 for Velocity Verlet and
+    /// Wisdom–Holman; 4 for Yoshida 4th-order).
+    ///
+    /// This is the only mode compatible with publication-quality results and
+    /// long-term stability studies. The [`DtController`] is not consulted when
+    /// this mode is active; `current_dt` equals `user_dt` exactly.
+    Fixed,
+
+    /// **Adaptive timestep.** [`DtController`] modulates `dt` each step based
+    /// on the relative energy error and an acceleration-based CFL criterion.
+    ///
+    /// # ⚠ Symplecticity is broken in this mode
+    ///
+    /// Varying dt breaks the symplectic structure of the integrator. Energy
+    /// error is no longer guaranteed to remain bounded; it may drift secularly.
+    /// The severity depends on the rate and magnitude of dt changes, but even
+    /// small variations accumulate over long integrations.
+    ///
+    /// **Use only for interactive exploration and initial condition setup.**
+    /// Switch to [`Fixed`] before any run whose output will be analysed or cited.
+    Adaptive,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct AccelerationStats {
     pub max_acc: f64,
