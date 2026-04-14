@@ -1,6 +1,7 @@
 /target
-.claude
+/.claude
 .venv
 /memory
 /saves
 /records
+.claude

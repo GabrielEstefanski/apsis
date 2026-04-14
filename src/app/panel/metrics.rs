@@ -164,6 +164,21 @@ impl SimulationApp {
                 lbl(ui, "θ");
                 val(ui, &format!("{:.3}", m.theta), TEXT_SEC, 10.5);
                 ui.end_row();
+
+                // Row: rec. dt (only when a physics-justified suggestion exists)
+                if let Some(rec) = m.recommended_dt {
+                    let ratio = m.dt / rec;
+                    let color = if ratio <= 2.0 { TEXT_DIM }
+                                else if ratio <= 10.0 { ACCENT }
+                                else { DANGER };
+                    lbl(ui, "rec. dt");
+                    val(ui, &format!("{:.2e}", rec), color, 10.5);
+                    // Intentionally leave the two right-side columns blank
+                    // so the row still occupies exactly two columns.
+                    lbl(ui, "");
+                    val(ui, "", TEXT_DIM, 10.5);
+                    ui.end_row();
+                }
             });
 
         // ── Integrator ────────────────────────────────────────────────────────

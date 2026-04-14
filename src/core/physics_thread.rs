@@ -26,6 +26,7 @@ use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use crate::core::adaptive::DtMode;
 use crate::core::metrics::Metrics;
 use crate::core::snapshot::SimSnapshot;
 use crate::core::system::System;
@@ -76,6 +77,8 @@ pub enum PhysicsCmd {
     LoadBodies(Vec<Body>),
     ZeroComVelocity,
     RestoreSnapshot(SimSnapshot),
+    SetDtMode(DtMode),
+    SetAdaptiveTheta(bool),
     Shutdown,
 }
 
@@ -253,6 +256,12 @@ impl PhysicsHandle {
     }
     pub fn zero_com_velocity(&self) {
         self.send(PhysicsCmd::ZeroComVelocity);
+    }
+    pub fn set_dt_mode(&self, mode: DtMode) {
+        self.send(PhysicsCmd::SetDtMode(mode));
+    }
+    pub fn set_adaptive_theta(&self, enabled: bool) {
+        self.send(PhysicsCmd::SetAdaptiveTheta(enabled));
     }
     pub fn restore_from_snapshot(&self, snap: &SimSnapshot) {
         self.loading.store(true, Ordering::Relaxed);
@@ -465,6 +474,14 @@ fn physics_loop(
                 }
                 PhysicsCmd::ZeroComVelocity => {
                     system.zero_com_velocity();
+                    needs_full_publish = true;
+                }
+                PhysicsCmd::SetDtMode(mode) => {
+                    system.set_dt_mode(mode);
+                    needs_full_publish = true;
+                }
+                PhysicsCmd::SetAdaptiveTheta(enabled) => {
+                    system.set_adaptive_theta(enabled);
                     needs_full_publish = true;
                 }
                 PhysicsCmd::RestoreSnapshot(snap) => {

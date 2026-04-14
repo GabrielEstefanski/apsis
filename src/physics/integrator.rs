@@ -80,10 +80,16 @@ impl Integrator {
     /// VV's two evaluations can be amortised to one by sharing the endpoint
     /// across consecutive steps, but this implementation keeps them explicit
     /// for simplicity and restart-safety.
+    ///
+    /// Yoshida4 performs 4 evaluations: 3 for the Forest–Ruth composition plus
+    /// 1 final evaluation at q(t+dt) after the closing drift.  Without the 4th
+    /// evaluation `last_potential` is at q‴ (pre-drift), making the energy
+    /// diagnostic O(dt) instead of O(dt⁴).  The extra call is cheap relative
+    /// to the 5–10× larger dt that Yoshida4 tolerates.
     pub fn force_evals_per_step(self) -> u32 {
         match self {
             Self::VelocityVerlet => 2,
-            Self::Yoshida4 => 3,
+            Self::Yoshida4 => 4,
             Self::WisdomHolman => 1,
         }
     }
@@ -97,7 +103,7 @@ impl Integrator {
                  visualisation and short integrations."
             }
             Self::Yoshida4 => {
-                "4th-order symplectic composition (Forest–Ruth). 3 force evals \
+                "4th-order symplectic composition (Forest–Ruth). 4 force evals \
                  per step but phase error ∝ dt⁴ — allows 5–10× larger dt for \
                  the same energy conservation. Required for publication-quality \
                  long-term runs."
@@ -159,12 +165,6 @@ pub fn kick(bodies: &mut [Body], acc: &[(f64, f64)], dt: f64) {
         body.vx += ax * dt;
         body.vy += ay * dt;
     }
-}
-
-/// Thin alias kept for backward compatibility.
-#[inline(always)]
-pub fn half_kick(bodies: &mut [Body], acc: &[(f64, f64)], dt: f64) {
-    kick(bodies, acc, dt);
 }
 
 /// Advance all positions using the current velocities: `x += v · dt`.

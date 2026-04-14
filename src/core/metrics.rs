@@ -1,3 +1,4 @@
+use crate::core::adaptive::DtMode;
 use crate::physics::integrator::Integrator;
 
 /// Snapshot of the physical state of the simulation at a single instant.
@@ -63,8 +64,26 @@ pub struct Metrics {
     /// Barnes–Hut opening angle θ.
     pub theta: f64,
 
-    /// Fixed integration time step.
+    /// Current integration timestep (may differ from `user_dt` when
+    /// `dt_mode == DtMode::Adaptive`).
     pub dt: f64,
+
+    /// User-requested timestep (the adaptation target; equals `dt` when
+    /// `dt_mode == DtMode::Fixed`).
+    pub user_dt: f64,
+
+    /// Active timestep management policy.
+    ///
+    /// `DtMode::Adaptive` breaks symplecticity — the UI should surface a
+    /// warning whenever this is not `Fixed`.
+    pub dt_mode: DtMode,
+
+    /// Whether the adaptive Barnes–Hut θ controller is active.
+    ///
+    /// Varying θ between steps changes the force accuracy per step, making
+    /// error analysis harder than with a fixed θ.  Unlike adaptive dt, this
+    /// does not break symplecticity.
+    pub adaptive_theta: bool,
 
     // ── Diagnostics ───────────────────────────────────────────────────────── //
     pub max_acc: f64,
@@ -83,4 +102,30 @@ pub struct Metrics {
     ///
     /// Zero when no pairs exist.
     pub softening_max: f64,
+
+    // ── Timestep guidance ─────────────────────────────────────────────────── //
+    /// Recommended timestep derived from the current system state.
+    ///
+    /// Computed as the minimum of two standard N-body criteria:
+    ///
+    /// 1. **Power et al. (2003) acceleration criterion:**
+    ///    `dt_acc = η · √(ε_min / a_max)`, η = 0.05
+    ///    — ensures each body moves less than one softening length per step.
+    ///
+    /// 2. **Aarseth jerk criterion:**
+    ///    `dt_jerk = η · √(a_max / j_max)`
+    ///    — limits the fractional change in acceleration per step.
+    ///    Available only after the first step (jerk is zero before).
+    ///
+    /// `None` when no bodies are present or before the first force evaluation.
+    ///
+    /// The UI should display this alongside the current `dt` and offer a
+    /// one-click apply.  Accepting the suggestion and setting
+    /// `dt_mode = DtMode::Fixed` gives a fully symplectic run with
+    /// physics-justified step size.
+    ///
+    /// # References
+    /// - Power et al. (2003). MNRAS 338, 14–34. §3.
+    /// - Aarseth, S. J. (2003). *Gravitational N-Body Simulations*. Cambridge. §2.
+    pub recommended_dt: Option<f64>,
 }
