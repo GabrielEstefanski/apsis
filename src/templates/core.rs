@@ -29,7 +29,7 @@
 //! (planet + moon) must add the parent velocity explicitly — see the solar
 //! system template for the canonical pattern.
 
-use crate::core::materials::Material;
+use crate::domain::materials::Material;
 
 // ── TemplateBody ──────────────────────────────────────────────────────────────
 

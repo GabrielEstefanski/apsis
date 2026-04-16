@@ -1,7 +1,7 @@
 use bytemuck::{Pod, Zeroable};
 use std::mem::size_of;
 
-use crate::core::trail_buffer::TrailBuffer;
+use crate::render::trail_buffer::TrailBuffer;
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]

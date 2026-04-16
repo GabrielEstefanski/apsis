@@ -1,4 +1,4 @@
-use crate::core::body::{Body, NamedBody};
+use crate::domain::body::{Body, NamedBody};
 use crate::templates::Template;
 
 /// Instantiate a template at the origin while preserving explicit body names.

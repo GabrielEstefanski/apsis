@@ -1,5 +1,5 @@
 use crate::{
-    core::materials::Material,
+    domain::materials::Material,
     templates::{Template, TemplateBody, UnitSystem, builders::circular_orbit},
 };
 
