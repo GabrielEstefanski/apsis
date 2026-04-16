@@ -27,10 +27,6 @@ fn main() {
     let app = SimulationApp::new(system);
 
     let native_options = eframe::NativeOptions::default();
-    eframe::run_native(
-        "Gravity Simulator",
-        native_options,
-        Box::new(|_| Ok(Box::new(app))),
-    )
-    .unwrap();
+    eframe::run_native("Gravity Simulator", native_options, Box::new(|_| Ok(Box::new(app))))
+        .unwrap();
 }

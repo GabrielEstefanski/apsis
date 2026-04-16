@@ -210,10 +210,7 @@ impl SimulationApp {
             if response.drag_started() {
                 if let Some(pos) = pointer.press_origin() {
                     // Only start a place-drag if not clicking an existing body
-                    if self
-                        .find_body_at(pos, center_after_pan, render_params)
-                        .is_none()
-                    {
+                    if self.find_body_at(pos, center_after_pan, render_params).is_none() {
                         self.place_drag_start = Some(pos);
                     }
                 }
@@ -262,10 +259,7 @@ impl SimulationApp {
                 let start = self.place_drag_start.take();
                 if let Some(cursor) = ctx.input(|i| i.pointer.interact_pos()) {
                     // Don't spawn if clicking an existing body
-                    if self
-                        .find_body_at(cursor, center_after_pan, render_params)
-                        .is_none()
-                    {
+                    if self.find_body_at(cursor, center_after_pan, render_params).is_none() {
                         let spawn_pos = start.unwrap_or(cursor);
                         let wx = (spawn_pos.x - center_after_pan.x) as f64 / self.scale as f64;
                         let wy = (spawn_pos.y - center_after_pan.y) as f64 / self.scale as f64;
@@ -333,12 +327,12 @@ impl SimulationApp {
                                 -body.x as f32 * self.scale,
                                 -body.y as f32 * self.scale,
                             ));
-                        }
+                        },
                         None => {
                             self.selected_body = None;
                             self.follow_selected_body = false;
                             self.selection_form = None;
-                        }
+                        },
                     }
                 }
             }
@@ -499,11 +493,7 @@ impl SimulationApp {
             }
 
             // ── Name label ───────────────────────────────────────────────
-            let importance = if max_mass > 0.0 {
-                body.mass / max_mass
-            } else {
-                0.0
-            };
+            let importance = if max_mass > 0.0 { body.mass / max_mass } else { 0.0 };
             let show_label = visual_r >= 5.0 || importance >= importance_threshold || is_selected;
 
             if show_label {
@@ -568,11 +558,7 @@ impl SimulationApp {
             Color32::from_rgba_premultiplied(120, 120, 200, 150),
         );
         // Inner dot
-        painter.circle_filled(
-            cx,
-            3.5,
-            Color32::from_rgba_premultiplied(180, 180, 255, 200),
-        );
+        painter.circle_filled(cx, 3.5, Color32::from_rgba_premultiplied(180, 180, 255, 200));
 
         // ── "LOADING" label ────────────────────────────────────────────────────
         let label_pos = egui::pos2(cx.x, cx.y + 36.0);
@@ -602,10 +588,8 @@ impl SimulationApp {
 
         let bar_w = 400.0_f32;
         let bar_h = 44.0_f32;
-        let anchor = egui::pos2(
-            canvas_rect.center().x - bar_w * 0.5,
-            canvas_rect.max.y - bar_h - 16.0,
-        );
+        let anchor =
+            egui::pos2(canvas_rect.center().x - bar_w * 0.5, canvas_rect.max.y - bar_h - 16.0);
 
         egui::Area::new(egui::Id::new("playbar"))
             .fixed_pos(anchor)
@@ -630,20 +614,14 @@ impl SimulationApp {
                             let m = self.system.metrics();
                             let t_str = fmt_sim_time(m.t);
                             ui.label(
-                                egui::RichText::new(t_str)
-                                    .monospace()
-                                    .size(10.5)
-                                    .color(TEXT_SEC),
+                                egui::RichText::new(t_str).monospace().size(10.5).color(TEXT_SEC),
                             );
 
                             ui.add(egui::Separator::default().vertical().spacing(4.0));
 
                             // ── Play / Pause ──────────────────────────────────
-                            let (icon, icon_col) = if self.paused {
-                                ("▶", SUCCESS)
-                            } else {
-                                ("⏸", ACCENT)
-                            };
+                            let (icon, icon_col) =
+                                if self.paused { ("▶", SUCCESS) } else { ("⏸", ACCENT) };
 
                             // Pulsing glow ring when running
                             let btn_pos = ui.next_widget_position() + egui::vec2(18.0, 18.0);
@@ -690,11 +668,7 @@ impl SimulationApp {
 
                             // ── Speed slider (logarithmic steps/frame) ────────
                             // Label shows current multiplier; slider gives fine control.
-                            let spf_col = if self.steps_per_frame > 1 {
-                                ACCENT
-                            } else {
-                                TEXT_DIM
-                            };
+                            let spf_col = if self.steps_per_frame > 1 { ACCENT } else { TEXT_DIM };
                             ui.label(
                                 egui::RichText::new(format!("×{}", self.steps_per_frame))
                                     .monospace()

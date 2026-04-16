@@ -101,17 +101,17 @@ impl Integrator {
                 "2nd-order symplectic leapfrog. Fast; energy oscillates around \
                  the initial value. Phase error ∝ dt². Good for real-time \
                  visualisation and short integrations."
-            }
+            },
             Self::Yoshida4 => {
                 "4th-order symplectic composition (Forest–Ruth). 4 force evals \
                  per step but phase error ∝ dt⁴ — allows 5–10× larger dt for \
                  the same energy conservation. Required for publication-quality \
                  long-term runs."
-            }
+            },
             Self::WisdomHolman => {
                 "Symplectic map for Keplerian systems with small perturbations. \
                  Not implemented yet."
-            }
+            },
         }
     }
 }

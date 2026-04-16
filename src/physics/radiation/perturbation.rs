@@ -49,11 +49,7 @@ impl RadiationField {
     /// assign radiation parameters to individual bodies manually, or
     /// [`from_bodies`] to populate automatically from materials.
     pub fn new(source: RadiationSource, n_bodies: usize, include_pr_drag: bool) -> Self {
-        Self {
-            source,
-            body_params: vec![None; n_bodies],
-            include_pr_drag,
-        }
+        Self { source, body_params: vec![None; n_bodies], include_pr_drag }
     }
 
     /// Assigns radiation parameters to the body at `index`.
@@ -106,20 +102,10 @@ impl RadiationField {
             let body_params = bodies
                 .iter()
                 .enumerate()
-                .map(|(i, b)| {
-                    if i == src_idx {
-                        None
-                    } else {
-                        body_radiation_params(b)
-                    }
-                })
+                .map(|(i, b)| if i == src_idx { None } else { body_radiation_params(b) })
                 .collect();
 
-            fields.push(Self {
-                source,
-                body_params,
-                include_pr_drag,
-            });
+            fields.push(Self { source, body_params, include_pr_drag });
         }
 
         fields

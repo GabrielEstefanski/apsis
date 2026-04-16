@@ -26,10 +26,7 @@ fn section(ui: &mut egui::Ui, title: &str) {
         ui.add_space(4.0);
         let r = ui.available_rect_before_wrap();
         ui.painter().line_segment(
-            [
-                egui::pos2(r.left(), r.center().y),
-                egui::pos2(r.right(), r.center().y),
-            ],
+            [egui::pos2(r.left(), r.center().y), egui::pos2(r.right(), r.center().y)],
             Stroke::new(0.5, BORDER),
         );
     });
@@ -54,10 +51,7 @@ fn param_row<R>(
             egui::Label::new(RichText::new(label).size(10.0).color(TEXT_SEC)),
         )
         .on_hover_text(tip);
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            add(ui)
-        })
-        .inner
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| add(ui)).inner
     })
     .inner
 }
@@ -120,12 +114,9 @@ impl SimulationApp {
         }
 
         ui.label(
-            RichText::new(format!(
-                "  ε_eff = 0.02·m^⅓·{:.3}",
-                self.physics_cfg.softening_scale
-            ))
-            .size(9.0)
-            .color(TEXT_DIM),
+            RichText::new(format!("  ε_eff = 0.02·m^⅓·{:.3}", self.physics_cfg.softening_scale))
+                .size(9.0)
+                .color(TEXT_DIM),
         );
 
         // Softening validity indicator: estimates the fractional force error
@@ -161,9 +152,7 @@ impl SimulationApp {
 
                 ui.horizontal(|ui| {
                     ui.label(
-                        RichText::new(format!("  ε/r_min = {ratio:.3e}"))
-                            .size(9.0)
-                            .color(TEXT_DIM),
+                        RichText::new(format!("  ε/r_min = {ratio:.3e}")).size(9.0).color(TEXT_DIM),
                     );
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         ui.label(
@@ -176,12 +165,7 @@ impl SimulationApp {
 
                 if ratio > 0.1 {
                     egui::Frame::NONE
-                        .fill(Color32::from_rgba_unmultiplied(
-                            color.r(),
-                            color.g(),
-                            color.b(),
-                            18,
-                        ))
+                        .fill(Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), 18))
                         .stroke(Stroke::new(0.5, color.gamma_multiply(0.4)))
                         .corner_radius(3.0)
                         .inner_margin(egui::Margin::symmetric(6, 3))
@@ -242,17 +226,13 @@ impl SimulationApp {
         param_row(ui, "algorithm", integ_tip, LBL_W, |ui| {
             egui::ComboBox::from_id_salt("integrator_sel")
                 .selected_text(
-                    RichText::new(self.physics_cfg.integrator.label())
-                        .size(10.0)
-                        .color(TEXT_PRI),
+                    RichText::new(self.physics_cfg.integrator.label()).size(10.0).color(TEXT_PRI),
                 )
                 .width(SL_W)
                 .show_ui(ui, |ui| {
-                    for variant in [
-                        Integrator::VelocityVerlet,
-                        Integrator::Yoshida4,
-                        Integrator::WisdomHolman,
-                    ] {
+                    for variant in
+                        [Integrator::VelocityVerlet, Integrator::Yoshida4, Integrator::WisdomHolman]
+                    {
                         let r = ui.selectable_value(
                             &mut self.physics_cfg.integrator,
                             variant,
@@ -279,12 +259,7 @@ impl SimulationApp {
         // Wisdom–Holman applicability warning.
         if self.physics_cfg.integrator == Integrator::WisdomHolman {
             egui::Frame::NONE
-                .fill(Color32::from_rgba_unmultiplied(
-                    ACCENT.r(),
-                    ACCENT.g(),
-                    ACCENT.b(),
-                    18,
-                ))
+                .fill(Color32::from_rgba_unmultiplied(ACCENT.r(), ACCENT.g(), ACCENT.b(), 18))
                 .stroke(Stroke::new(0.5, ACCENT.gamma_multiply(0.4)))
                 .corner_radius(3.0)
                 .inner_margin(egui::Margin::symmetric(6, 3))
@@ -315,10 +290,7 @@ impl SimulationApp {
             let speed = (dt * 0.05).max(1e-7);
             let r = ui.add_sized(
                 egui::vec2(DV_W, 18.0),
-                egui::DragValue::new(&mut dt)
-                    .speed(speed)
-                    .range(1e-7_f64..=10.0)
-                    .max_decimals(7),
+                egui::DragValue::new(&mut dt).speed(speed).range(1e-7_f64..=10.0).max_decimals(7),
             );
             if r.changed() {
                 self.system.set_dt(dt);
@@ -386,9 +358,7 @@ impl SimulationApp {
         param_row(ui, "steps / frame", spf_tip, LBL_W, |ui| {
             ui.add_sized(
                 egui::vec2(DV_W, 18.0),
-                egui::DragValue::new(&mut self.steps_per_frame)
-                    .speed(1)
-                    .range(1..=10_000u32),
+                egui::DragValue::new(&mut self.steps_per_frame).speed(1).range(1..=10_000u32),
             );
         });
 
@@ -404,9 +374,7 @@ impl SimulationApp {
         let changed = param_row(ui, "sample every", te_tip, LBL_W, |ui| {
             ui.add_sized(
                 egui::vec2(DV_W, 18.0),
-                egui::DragValue::new(&mut trail_every)
-                    .speed(1)
-                    .range(1..=256usize),
+                egui::DragValue::new(&mut trail_every).speed(1).range(1..=256usize),
             )
             .changed()
         });

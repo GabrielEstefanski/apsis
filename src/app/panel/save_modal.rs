@@ -15,11 +15,7 @@ impl SimulationApp {
             .order(egui::Order::Background)
             .show(ctx, |ui| {
                 let screen = ctx.screen_rect();
-                ui.painter().rect_filled(
-                    screen,
-                    0.0,
-                    Color32::from_black_alpha(160),
-                );
+                ui.painter().rect_filled(screen, 0.0, Color32::from_black_alpha(160));
             });
 
         // ── Modal window ────────────────────────────────────────────────────

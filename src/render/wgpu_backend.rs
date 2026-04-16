@@ -38,11 +38,7 @@ struct LightingUniform {
 
 impl Default for LightingUniform {
     fn default() -> Self {
-        Self {
-            primary_light_pos: [f32::NAN, f32::NAN],
-            intensity: 0.6,
-            ambient: 0.35,
-        }
+        Self { primary_light_pos: [f32::NAN, f32::NAN], intensity: 0.6, ambient: 0.35 }
     }
 }
 
@@ -122,14 +118,8 @@ impl GpuResources {
             label: Some("screen_bg"),
             layout: &screen_bgl,
             entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: screen_buf.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: lighting_buf.as_entire_binding(),
-                },
+                wgpu::BindGroupEntry { binding: 0, resource: screen_buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: lighting_buf.as_entire_binding() },
             ],
         });
 
@@ -319,9 +309,7 @@ impl WgpuBackend {
         self.light_sources
             .iter()
             .max_by(|a, b| {
-                a.luminosity
-                    .partial_cmp(&b.luminosity)
-                    .unwrap_or(std::cmp::Ordering::Equal)
+                a.luminosity.partial_cmp(&b.luminosity).unwrap_or(std::cmp::Ordering::Equal)
             })
             .map(|s| s.screen_pos)
             .unwrap_or([f32::NAN, f32::NAN])
@@ -376,11 +364,7 @@ impl WgpuBackend {
         }
         if self.trail.is_none() {
             let gpu = self.gpu.as_ref().unwrap();
-            self.trail = Some(TrailRenderer::new(
-                device,
-                &gpu.bind_group_layout_screen,
-                format,
-            ));
+            self.trail = Some(TrailRenderer::new(device, &gpu.bind_group_layout_screen, format));
         }
         if self.grid.is_none() {
             self.grid = Some(GridRenderer::new(device, format));
@@ -408,21 +392,11 @@ impl WgpuBackend {
         let mut lighting = self.lighting;
         lighting.primary_light_pos = self.primary_light_pos();
 
-        let screen_uniform = ScreenUniform {
-            size: screen,
-            viewport_min,
-        };
+        let screen_uniform = ScreenUniform { size: screen, viewport_min };
 
         let (circle_count, line_count) = {
             let gpu = self.gpu.as_mut().unwrap();
-            gpu.upload(
-                device,
-                queue,
-                screen_uniform,
-                lighting,
-                &self.circles,
-                &self.lines,
-            )
+            gpu.upload(device, queue, screen_uniform, lighting, &self.circles, &self.lines)
         };
 
         if self.show_grid {
@@ -468,12 +442,7 @@ fn dist2(a: [f32; 2], b: [f32; 2]) -> f32 {
 
 #[inline]
 fn rgba_u8_to_f32(r: u8, g: u8, b: u8, a: u8) -> [f32; 4] {
-    [
-        r as f32 / 255.0,
-        g as f32 / 255.0,
-        b as f32 / 255.0,
-        a as f32 / 255.0,
-    ]
+    [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, a as f32 / 255.0]
 }
 
 fn alloc_instance_buf<T: Pod>(

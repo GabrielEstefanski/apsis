@@ -47,60 +47,15 @@ struct Planet {
 /// IAU 2012 nominal planetary masses and semi-major axes.
 /// Sources: Prša et al. (2016); Williams (2023) NASA fact sheets.
 const PLANETS: &[Planet] = &[
-    Planet {
-        name: "Mercury",
-        mass: 1.652e-7,
-        a: 0.38710,
-        material: Material::Rocky,
-    },
-    Planet {
-        name: "Venus",
-        mass: 2.448e-6,
-        a: 0.72333,
-        material: Material::Rocky,
-    },
-    Planet {
-        name: "Earth",
-        mass: M_EARTH,
-        a: 1.00000,
-        material: Material::Rocky,
-    },
-    Planet {
-        name: "Mars",
-        mass: 3.213e-7,
-        a: 1.52366,
-        material: Material::Rocky,
-    },
-    Planet {
-        name: "Jupiter",
-        mass: 9.543e-4,
-        a: 5.20336,
-        material: Material::Gas,
-    },
-    Planet {
-        name: "Saturn",
-        mass: 2.857e-4,
-        a: 9.53707,
-        material: Material::Gas,
-    },
-    Planet {
-        name: "Uranus",
-        mass: 4.366e-5,
-        a: 19.1913,
-        material: Material::IceGiant,
-    },
-    Planet {
-        name: "Neptune",
-        mass: 5.151e-5,
-        a: 30.0690,
-        material: Material::IceGiant,
-    },
-    Planet {
-        name: "Pluto",
-        mass: 6.591e-9,
-        a: 39.4817,
-        material: Material::Icy,
-    },
+    Planet { name: "Mercury", mass: 1.652e-7, a: 0.38710, material: Material::Rocky },
+    Planet { name: "Venus", mass: 2.448e-6, a: 0.72333, material: Material::Rocky },
+    Planet { name: "Earth", mass: M_EARTH, a: 1.00000, material: Material::Rocky },
+    Planet { name: "Mars", mass: 3.213e-7, a: 1.52366, material: Material::Rocky },
+    Planet { name: "Jupiter", mass: 9.543e-4, a: 5.20336, material: Material::Gas },
+    Planet { name: "Saturn", mass: 2.857e-4, a: 9.53707, material: Material::Gas },
+    Planet { name: "Uranus", mass: 4.366e-5, a: 19.1913, material: Material::IceGiant },
+    Planet { name: "Neptune", mass: 5.151e-5, a: 30.0690, material: Material::IceGiant },
+    Planet { name: "Pluto", mass: 6.591e-9, a: 39.4817, material: Material::Icy },
 ];
 
 // ── Moon placement ────────────────────────────────────────────────────────────

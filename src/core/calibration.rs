@@ -112,10 +112,7 @@ mod tests {
 
     #[test]
     fn com_velocity_is_zero_after_correction() {
-        let mut bodies = vec![
-            body(-1.0, 0.0, 2.0, 1.0, 1.0),
-            body(1.0, 0.0, 4.0, 3.0, 3.0),
-        ];
+        let mut bodies = vec![body(-1.0, 0.0, 2.0, 1.0, 1.0), body(1.0, 0.0, 4.0, 3.0, 3.0)];
         let m: f64 = bodies.iter().map(|b| b.mass).sum();
         zero_com_velocity(&mut bodies, m);
 
@@ -155,10 +152,7 @@ mod tests {
 
     #[test]
     fn recenter_com_preserves_relative_positions() {
-        let mut bodies = vec![
-            body(100.0, 0.0, 0.0, 0.0, 2.0),
-            body(104.0, 0.0, 0.0, 0.0, 1.0),
-        ];
+        let mut bodies = vec![body(100.0, 0.0, 0.0, 0.0, 2.0), body(104.0, 0.0, 0.0, 0.0, 1.0)];
         let m = 3.0;
         let mut trails = vec![VecDeque::new(), VecDeque::new()];
         let dx_before = bodies[1].x - bodies[0].x;
@@ -172,15 +166,10 @@ mod tests {
 
     #[test]
     fn recenter_com_shifts_trail_points_consistently() {
-        let mut bodies = vec![
-            body(10.0, 0.0, 0.0, 0.0, 1.0),
-            body(20.0, 0.0, 0.0, 0.0, 1.0),
-        ];
+        let mut bodies = vec![body(10.0, 0.0, 0.0, 0.0, 1.0), body(20.0, 0.0, 0.0, 0.0, 1.0)];
         let m = 2.0;
-        let mut trails: Vec<VecDeque<(f64, f64)>> = vec![
-            VecDeque::from([(10.0_f64, 0.0_f64)]),
-            VecDeque::from([(20.0_f64, 0.0_f64)]),
-        ];
+        let mut trails: Vec<VecDeque<(f64, f64)>> =
+            vec![VecDeque::from([(10.0_f64, 0.0_f64)]), VecDeque::from([(20.0_f64, 0.0_f64)])];
         recenter_com(&mut bodies, &mut trails, m);
 
         // Trail point for body 0 should have shifted by the same -x_cm

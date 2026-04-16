@@ -150,19 +150,9 @@ pub fn dominant_primary(bodies: &[Body], idx: usize) -> Option<usize> {
             let rj2 = (bj.x - bi.x).powi(2) + (bj.y - bi.y).powi(2);
             let rk2 = (bk.x - bi.x).powi(2) + (bk.y - bi.y).powi(2);
             // Compare m_j/r_j² vs m_k/r_k²  (G cancels)
-            let score_j = if rj2 > 0.0 {
-                bj.mass / rj2
-            } else {
-                f64::INFINITY
-            };
-            let score_k = if rk2 > 0.0 {
-                bk.mass / rk2
-            } else {
-                f64::INFINITY
-            };
-            score_j
-                .partial_cmp(&score_k)
-                .unwrap_or(std::cmp::Ordering::Equal)
+            let score_j = if rj2 > 0.0 { bj.mass / rj2 } else { f64::INFINITY };
+            let score_k = if rk2 > 0.0 { bk.mass / rk2 } else { f64::INFINITY };
+            score_j.partial_cmp(&score_k).unwrap_or(std::cmp::Ordering::Equal)
         })
         .map(|(j, _)| j)
 }
@@ -229,16 +219,7 @@ pub fn compute_elements(
         (a, f64::INFINITY, OrbitType::Hyperbolic)
     };
 
-    Some(OrbitalElements {
-        primary_idx,
-        a,
-        e,
-        period,
-        h,
-        energy,
-        omega,
-        orbit_type,
-    })
+    Some(OrbitalElements { primary_idx, a, e, period, h, energy, omega, orbit_type })
 }
 
 // ── Batch computation ─────────────────────────────────────────────────────────
@@ -332,11 +313,7 @@ mod tests {
     fn circular_orbit_energy_is_negative() {
         let (p, s) = circular_orbit(10.0, 1e6);
         let el = elements(p, s);
-        assert!(
-            el.energy < 0.0,
-            "energia = {}, deve ser negativa",
-            el.energy
-        );
+        assert!(el.energy < 0.0, "energia = {}, deve ser negativa", el.energy);
     }
 
     // ── 2. Momento angular ────────────────────────────────────────────────────
@@ -539,10 +516,7 @@ mod tests {
         let satellite = body(0.0, 0.0, 0.0, 0.0, 1.0);
         let bodies = vec![sun, earth, satellite];
         let primary = dominant_primary(&bodies, 2).unwrap();
-        assert_eq!(
-            primary, 1,
-            "primário deve ser a Terra (índice 1), não o Sol"
-        );
+        assert_eq!(primary, 1, "primário deve ser a Terra (índice 1), não o Sol");
     }
 
     #[test]

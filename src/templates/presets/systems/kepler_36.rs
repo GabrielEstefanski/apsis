@@ -17,10 +17,7 @@ pub fn kepler_36() -> Template {
     });
 
     // Planets
-    let planets = [
-        ("b", 0.115, 4.0e-6, Material::Rocky),
-        ("c", 0.128, 2.0e-5, Material::Gas),
-    ];
+    let planets = [("b", 0.115, 4.0e-6, Material::Rocky), ("c", 0.128, 2.0e-5, Material::Gas)];
 
     for (name, a, mass, material) in planets {
         let phase = rand::random::<f64>() * std::f64::consts::TAU;

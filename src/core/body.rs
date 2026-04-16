@@ -327,10 +327,7 @@ mod tests {
     fn white_dwarf_typical_luminosity_in_range() {
         // A WD with R = 0.01 R☉ should give L ~ 10⁻³–10⁻² L☉
         let l = white_dwarf_luminosity(0.01);
-        assert!(
-            l > 1e-4 && l < 0.1,
-            "WD luminosity out of expected range: {l}"
-        );
+        assert!(l > 1e-4 && l < 0.1, "WD luminosity out of expected range: {l}");
     }
 
     #[test]

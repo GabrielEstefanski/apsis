@@ -92,20 +92,11 @@ impl GridRenderer {
             }],
         });
 
-        Self {
-            pipeline,
-            uniform_buf,
-            bind_group,
-        }
+        Self { pipeline, uniform_buf, bind_group }
     }
 
     pub fn upload(&self, queue: &wgpu::Queue, center: [f32; 2], scale: f32, screen: [f32; 2]) {
-        let u = GridUniform {
-            screen_size: screen,
-            center,
-            scale,
-            _pad: [0.0; 3],
-        };
+        let u = GridUniform { screen_size: screen, center, scale, _pad: [0.0; 3] };
         queue.write_buffer(&self.uniform_buf, 0, bytemuck::bytes_of(&u));
     }
 
