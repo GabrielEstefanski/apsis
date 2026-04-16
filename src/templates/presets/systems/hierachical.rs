@@ -2,7 +2,7 @@ use rand::random;
 use std::f64::consts::TAU;
 
 use crate::core::materials::Material;
-use crate::templates::{Template, TemplateBody, builders::circular_orbit};
+use crate::templates::{Template, TemplateBody, UnitSystem, builders::circular_orbit};
 
 pub fn simple_three_body() -> Template {
     let mut bodies = Vec::with_capacity(3);
@@ -61,5 +61,6 @@ pub fn simple_three_body() -> Template {
         bodies,
         display_scale: 1.0,
         suggested_dt: Some(0.0005),
+        units: UnitSystem::solar_au(),
     }
 }

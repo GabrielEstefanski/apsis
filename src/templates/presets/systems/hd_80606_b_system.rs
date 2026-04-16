@@ -1,6 +1,6 @@
 use crate::{
     core::materials::Material,
-    templates::{Template, TemplateBody},
+    templates::{Template, TemplateBody, UnitSystem},
 };
 
 pub fn hd_80606() -> Template {
@@ -47,5 +47,6 @@ pub fn hd_80606() -> Template {
         bodies,
         display_scale: 1.0,
         suggested_dt: Some(0.0001),
+        units: UnitSystem::solar_au(),
     }
 }

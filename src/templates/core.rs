@@ -110,6 +110,119 @@ impl TemplateBody {
     }
 }
 
+// ── UnitSystem ────────────────────────────────────────────────────────────────
+
+/// Physical unit system used by a simulation template.
+///
+/// Declares the meaning of the three independent simulation base units —
+/// mass, length, and time — together with optional SI conversion factors.
+///
+/// # Design
+///
+/// The simulator always runs with `G = 1 × g_factor` in internal units.
+/// Different presets use the same numerical equations but assign different
+/// physical interpretations to their numbers:
+///
+/// | Preset class       | Mass unit | Length unit | Time unit           |
+/// |--------------------|-----------|-------------|---------------------|
+/// | Solar system, etc. | M_☉       | AU          | T_AU ≈ 58.1 days    |
+/// | Figure-eight, etc. | –         | –           | –  (dimensionless)  |
+///
+/// The SI conversion factors allow downstream tools (Python, Julia, REBOUND) to
+/// reconstruct physical values from the raw CSV numbers without re-deriving
+/// the unit mapping.  They are `None` for purely dimensionless presets.
+///
+/// # Derived units
+///
+/// Given `mass_unit`, `length_unit`, `time_unit`:
+///
+/// | Quantity              | Derived unit                               |
+/// |-----------------------|--------------------------------------------|
+/// | Velocity              | `length / time`                            |
+/// | Energy                | `mass · length² / time²`                  |
+/// | Angular momentum      | `mass · length² / time`                   |
+/// | Specific ang. mom.    | `length² / time`                           |
+/// | Specific energy       | `length² / time²`                         |
+/// | Period                | `time`                                     |
+/// | Semi-major axis       | `length`                                   |
+#[derive(Debug, Clone, Copy)]
+pub struct UnitSystem {
+    /// Short label for UI and CSV metadata, e.g. `"AU / M_☉ / T_AU"`.
+    pub label: &'static str,
+
+    /// Human-readable mass unit name, e.g. `"M_☉"` or `"–"` for dimensionless.
+    pub mass_unit: &'static str,
+
+    /// Human-readable length unit name, e.g. `"AU"` or `"–"`.
+    pub length_unit: &'static str,
+
+    /// Human-readable time unit name, e.g. `"T_AU"`, `"yr"`, or `"–"`.
+    pub time_unit: &'static str,
+
+    /// Kilograms per simulation mass unit.  `None` for dimensionless presets.
+    pub mass_to_kg: Option<f64>,
+
+    /// Metres per simulation length unit.  `None` for dimensionless presets.
+    pub length_to_m: Option<f64>,
+
+    /// Seconds per simulation time unit.  `None` for dimensionless presets.
+    pub time_to_s: Option<f64>,
+}
+
+impl UnitSystem {
+    /// Solar-system units: mass in M_☉, length in AU, time in T_AU.
+    ///
+    /// The time unit T_AU is defined by setting G = 1 in these base units:
+    ///
+    /// ```text
+    /// T_AU = √(AU³ / (G_SI · M_☉))
+    ///      = √(3.348 × 10³³ / 1.327 × 10²⁰)  s
+    ///      ≈ 5.022 × 10⁶ s  ≈ 58.1 days
+    /// ```
+    ///
+    /// Equivalently, Earth's orbital period is 2π T_AU ≈ 365.25 days ≈ 1 year.
+    ///
+    /// This is the natural unit system for all physically-calibrated presets
+    /// in this simulator (Solar System, TRAPPIST-1, Alpha Centauri, etc.).
+    pub const fn solar_au() -> Self {
+        Self {
+            label: "AU / M_☉ / T_AU",
+            mass_unit: "M_☉",
+            length_unit: "AU",
+            // T_AU = sqrt(AU³ / (G_SI · M_☉)) ≈ 5.022e6 s ≈ 58.1 days
+            time_unit: "T_AU",
+            mass_to_kg: Some(1.989e30),
+            length_to_m: Some(1.496e11),
+            time_to_s: Some(5.022e6),
+        }
+    }
+
+    /// Dimensionless units: G = 1, no physical anchor.
+    ///
+    /// Used for mathematically-defined scenarios (figure-eight, Pythagorean
+    /// three-body, Lagrange triangle) where the masses and distances are
+    /// chosen to satisfy a specific mathematical condition rather than to
+    /// match any physical system.  Results cannot be directly compared with
+    /// observations without choosing an explicit physical mapping first.
+    pub const fn dimensionless() -> Self {
+        Self {
+            label: "dimensionless (G = 1)",
+            mass_unit: "–",
+            length_unit: "–",
+            time_unit: "–",
+            mass_to_kg: None,
+            length_to_m: None,
+            time_to_s: None,
+        }
+    }
+
+    /// Returns `true` if this unit system has a physical SI mapping.
+    #[inline]
+    pub fn is_physical(&self) -> bool {
+        self.mass_to_kg.is_some()
+    }
+}
+
 // ── Template ──────────────────────────────────────────────────────────────────
 
 /// Complete initial-condition specification for one simulation scenario.
@@ -157,6 +270,18 @@ pub struct Template {
     /// scenarios that require a specific cadence (e.g. close binary stars that
     /// need a small fixed step for accuracy).
     pub suggested_dt: Option<f64>,
+
+    /// Physical unit system used by this template.
+    ///
+    /// Declares the meaning of the simulation's base units (mass, length, time)
+    /// and provides optional SI conversion factors.  This field is purely
+    /// informational — it does not affect the physics — but it is essential for
+    /// interpreting exported CSV data and for comparing results with the
+    /// literature.
+    ///
+    /// Use [`UnitSystem::solar_au`] for physically-calibrated scenarios and
+    /// [`UnitSystem::dimensionless`] for mathematically-defined ones.
+    pub units: UnitSystem,
 }
 
 impl Template {

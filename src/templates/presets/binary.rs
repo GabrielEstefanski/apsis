@@ -1,5 +1,5 @@
 use crate::core::materials::Material;
-use crate::templates::{Template, TemplateBody};
+use crate::templates::{Template, TemplateBody, UnitSystem};
 
 pub fn binary_star() -> Template {
     let a = 1.0_f64;
@@ -36,6 +36,7 @@ pub fn binary_star() -> Template {
         ],
         display_scale: 1.0,
         suggested_dt: Some(0.001),
+        units: UnitSystem::solar_au(),
     }
 }
 
@@ -87,5 +88,6 @@ pub fn star_companion() -> Template {
         ],
         display_scale: 1.0,
         suggested_dt: Some(0.001),
+        units: UnitSystem::solar_au(),
     }
 }

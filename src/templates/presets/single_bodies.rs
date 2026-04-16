@@ -1,5 +1,5 @@
 use crate::core::materials::Material;
-use crate::templates::{Template, TemplateBody};
+use crate::templates::{Template, TemplateBody, UnitSystem};
 
 pub fn star() -> Template {
     Template {
@@ -15,6 +15,7 @@ pub fn star() -> Template {
         }],
         display_scale: 1.0,
         suggested_dt: None,
+        units: UnitSystem::solar_au(),
     }
 }
 
@@ -32,6 +33,7 @@ pub fn brown_dwarf() -> Template {
         }],
         display_scale: 1.0,
         suggested_dt: None,
+        units: UnitSystem::solar_au(),
     }
 }
 
@@ -49,6 +51,7 @@ pub fn gas_giant() -> Template {
         }],
         display_scale: 1.0,
         suggested_dt: None,
+        units: UnitSystem::solar_au(),
     }
 }
 
@@ -66,5 +69,6 @@ pub fn rocky_planet() -> Template {
         }],
         display_scale: 1.0,
         suggested_dt: None,
+        units: UnitSystem::solar_au(),
     }
 }

@@ -45,6 +45,7 @@ use crate::core::body::Body;
 use crate::core::metrics::Metrics;
 use crate::physics::energy::per_body_potential_energy;
 use crate::physics::orbital::OrbitalElements;
+use crate::templates::UnitSystem;
 
 // ── Metadata snapshot ─────────────────────────────────────────────────────────
 
@@ -59,6 +60,10 @@ pub struct RecordMetadata {
     pub softening_scale: f64,
     pub g_factor: f64,
     pub record_interval: f64,
+    /// Physical unit system used by the template that produced this recording.
+    /// Written into the metadata block so downstream tools can interpret the
+    /// numerical values without re-deriving the unit mapping.
+    pub units: UnitSystem,
 }
 
 // ── SimRecorder ───────────────────────────────────────────────────────────────
@@ -291,6 +296,23 @@ fn nan_if_inf(v: f64) -> f64 {
 // ── Metadata block builder ────────────────────────────────────────────────────
 
 fn build_metadata_block(timestamp: &str, m: &RecordMetadata) -> String {
+    // Unit conversion lines: emit SI factors when available, "–" otherwise.
+    let mass_to_kg = m
+        .units
+        .mass_to_kg
+        .map(|v| format!("{v:.4e} kg"))
+        .unwrap_or_else(|| "–".into());
+    let length_to_m = m
+        .units
+        .length_to_m
+        .map(|v| format!("{v:.4e} m"))
+        .unwrap_or_else(|| "–".into());
+    let time_to_s = m
+        .units
+        .time_to_s
+        .map(|v| format!("{v:.4e} s"))
+        .unwrap_or_else(|| "–".into());
+
     format!(
         "# GRAVITY SIMULATOR — Scientific Dataset\n\
          # ─────────────────────────────────────────────────────\n\
@@ -303,6 +325,11 @@ fn build_metadata_block(timestamp: &str, m: &RecordMetadata) -> String {
          # softening_scale:  {:.3}\n\
          # g_factor:         {:.4}\n\
          # record_interval:  {:.2e}\n\
+         # ─────────────────────────────────────────────────────\n\
+         # unit_system:      {}\n\
+         # unit_mass:        {}  (1 sim mass = {mass_to_kg})\n\
+         # unit_length:      {}  (1 sim length = {length_to_m})\n\
+         # unit_time:        {}  (1 sim time = {time_to_s})\n\
          # ─────────────────────────────────────────────────────",
         m.n_bodies,
         m.integrator_label,
@@ -312,6 +339,10 @@ fn build_metadata_block(timestamp: &str, m: &RecordMetadata) -> String {
         m.softening_scale,
         m.g_factor,
         m.record_interval,
+        m.units.label,
+        m.units.mass_unit,
+        m.units.length_unit,
+        m.units.time_unit,
     )
 }
 

@@ -8,7 +8,7 @@ use crate::core::system::System;
 use crate::core::body::Body;
 use crate::core::materials::Material;
 use crate::render::{TrailRenderer, WgpuBackend};
-use crate::templates::Template;
+use crate::templates::{Template, UnitSystem};
 use std::sync::{Arc, Mutex};
 
 // ── Undo ──────────────────────────────────────────────────────────────────────
@@ -198,6 +198,14 @@ pub struct SimulationApp {
     pub(super) queue: Option<Arc<wgpu::Queue>>,
     pub(super) format: Option<wgpu::TextureFormat>,
 
+    // ── Unit system ───────────────────────────────────────────────────────────
+    /// Unit system of the most recently loaded template.
+    ///
+    /// Updated each time a template is dropped onto the canvas.  Used to
+    /// annotate the CSV metadata header with physical unit information.
+    /// Defaults to `UnitSystem::dimensionless()` until a template is loaded.
+    pub(super) active_units: UnitSystem,
+
     // ── CSV export ────────────────────────────────────────────────────────────
     /// Active recorder, `None` when not recording.
     pub(super) recorder: Option<SimRecorder>,
@@ -318,6 +326,8 @@ impl SimulationApp {
             device: None,
             queue: None,
             format: None,
+
+            active_units: UnitSystem::dimensionless(),
 
             recorder: None,
             record_interval: 0.01,

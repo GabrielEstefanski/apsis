@@ -1,6 +1,6 @@
 use crate::{
     core::materials::Material,
-    templates::{Template, TemplateBody},
+    templates::{Template, TemplateBody, UnitSystem},
 };
 
 pub fn three_body_lagrange_triangle() -> Template {
@@ -63,5 +63,6 @@ pub fn three_body_lagrange_triangle() -> Template {
         bodies,
         display_scale: 1.0,
         suggested_dt: Some(0.001),
+        units: UnitSystem::dimensionless(),
     }
 }

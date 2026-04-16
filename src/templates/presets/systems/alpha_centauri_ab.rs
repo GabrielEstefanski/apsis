@@ -1,6 +1,6 @@
 use crate::{
     core::materials::Material,
-    templates::{Template, TemplateBody},
+    templates::{Template, TemplateBody, UnitSystem},
 };
 
 pub fn alpha_centauri_ab() -> Template {
@@ -70,5 +70,6 @@ pub fn alpha_centauri_ab() -> Template {
         bodies,
         display_scale: 1.0,
         suggested_dt: Some(0.002),
+        units: UnitSystem::solar_au(),
     }
 }
