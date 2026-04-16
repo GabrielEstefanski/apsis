@@ -7,7 +7,6 @@ pub struct PhysicsConfig {
     pub integrator: Integrator,
 
     // ── Force accuracy ────────────────────────────────────────────────────────
-
     /// Barnes–Hut opening angle θ ∈ [0.05, 1.5].
     ///
     /// Controls the accuracy/performance trade-off of the tree force solver:
@@ -27,19 +26,16 @@ pub struct PhysicsConfig {
     pub softening_scale: f64,
 
     // ── Gravity ───────────────────────────────────────────────────────────────
-
     /// Effective gravitational strength multiplier.
     ///
     /// Scales all accelerations: `G_eff = G₀ · g_factor` (G₀ = 1.0).
     pub g_factor: f64,
 
     // ── Trails ────────────────────────────────────────────────────────────────
-
     /// Trail sampling interval: record a trail point every N rendered frames.
     pub trail_every: usize,
 
     // ── Unit labels (cosmetic) ────────────────────────────────────────────────
-
     /// Display label appended to mass values, e.g. `"M"`, `"M☉"`, `"kg"`.
     pub mass_label: String,
 

@@ -77,11 +77,7 @@ fn trail_body_count(bodies: &[Body]) -> usize {
     if max_mass <= 0.0 {
         return bodies.len();
     }
-    bodies
-        .iter()
-        .filter(|b| b.mass / max_mass > 1e-6)
-        .count()
-        .max(1)
+    bodies.iter().filter(|b| b.mass / max_mass > 1e-6).count().max(1)
 }
 use crate::physics::energy::{
     angular_momentum_z, center_of_mass_state, kinetic_energy, total_energy,
@@ -232,10 +228,7 @@ impl System {
         trail_buf.update_colors(&bodies);
 
         let total_mass = bodies.iter().map(|b| b.mass).sum();
-        let names = bodies
-            .iter()
-            .map(|b| auto_name(b.material, &[]))
-            .collect::<Vec<_>>();
+        let names = bodies.iter().map(|b| auto_name(b.material, &[])).collect::<Vec<_>>();
         // Re-generate with correct counters (so Star 1, Star 2 … instead of all "Star 1")
         let names = {
             let mut acc: Vec<String> = Vec::with_capacity(bodies.len());
@@ -307,9 +300,7 @@ impl System {
         self.steps += 1;
         self.t += dt;
 
-        self.last_diag = self
-            .diagnostics
-            .compute(&self.scratch_acc, &self.bodies, dt);
+        self.last_diag = self.diagnostics.compute(&self.scratch_acc, &self.bodies, dt);
 
         self.update_energy_tracking();
         self.update_angular_momentum_tracking();
@@ -326,9 +317,8 @@ impl System {
             DtMode::Fixed => self.user_dt,
             DtMode::Adaptive => {
                 let stats = AccelerationStats::new(self.last_diag.max_acc, self.last_diag.jerk);
-                self.dt_ctrl
-                    .update(self.user_dt, self.rel_energy_error, stats)
-            }
+                self.dt_ctrl.update(self.user_dt, self.rel_energy_error, stats)
+            },
         };
 
         // Adaptive θ: does not break symplecticity but does vary force accuracy
@@ -540,12 +530,8 @@ impl System {
         let total_m0 = self.bodies[0].mass;
 
         // ── To heliocentric frame ─────────────────────────────────────────────
-        let (cx0, cy0, cvx0, cvy0) = (
-            self.bodies[0].x,
-            self.bodies[0].y,
-            self.bodies[0].vx,
-            self.bodies[0].vy,
-        );
+        let (cx0, cy0, cvx0, cvy0) =
+            (self.bodies[0].x, self.bodies[0].y, self.bodies[0].vx, self.bodies[0].vy);
         for b in &mut self.bodies[1..] {
             b.x -= cx0;
             b.y -= cy0;
@@ -580,21 +566,15 @@ impl System {
         // then shift all positions by the central body's inertial displacement.
         let (px, py) = self.bodies[1..]
             .iter()
-            .fold((0.0_f64, 0.0_f64), |(px, py), b| {
-                (px + b.mass * b.vx, py + b.mass * b.vy)
-            });
+            .fold((0.0_f64, 0.0_f64), |(px, py), b| (px + b.mass * b.vx, py + b.mass * b.vy));
 
         self.bodies[0].vx = -px / total_m0;
         self.bodies[0].vy = -py / total_m0;
         self.bodies[0].x += self.bodies[0].vx * dt;
         self.bodies[0].y += self.bodies[0].vy * dt;
 
-        let (cx1, cy1, cvx1, cvy1) = (
-            self.bodies[0].x,
-            self.bodies[0].y,
-            self.bodies[0].vx,
-            self.bodies[0].vy,
-        );
+        let (cx1, cy1, cvx1, cvy1) =
+            (self.bodies[0].x, self.bodies[0].y, self.bodies[0].vx, self.bodies[0].vy);
         for b in &mut self.bodies[1..] {
             b.x += cx1;
             b.y += cy1;
@@ -670,7 +650,7 @@ impl System {
             None => {
                 self.initial_energy = Some(total);
                 total
-            }
+            },
         };
 
         let denom = baseline.abs().max(1e-12);
@@ -686,7 +666,7 @@ impl System {
             None => {
                 self.initial_angular_momentum = Some(lz);
                 lz
-            }
+            },
         };
 
         self.abs_angular_momentum_error = (lz - baseline).abs();
@@ -998,11 +978,7 @@ impl System {
 
         // `body.softening` already incorporates `softening_scale`
         // (applied during add_body / load_bodies / set_softening_scale).
-        let eps_min = self
-            .bodies
-            .iter()
-            .map(|b| b.softening)
-            .fold(f64::MAX, f64::min);
+        let eps_min = self.bodies.iter().map(|b| b.softening).fold(f64::MAX, f64::min);
 
         if eps_min >= f64::MAX || eps_min <= 0.0 {
             return None;
@@ -1111,10 +1087,7 @@ impl System {
         let m0 = self.bodies[0].mass;
         let m_rest: f64 = self.bodies[1..].iter().map(|b| b.mass).sum();
         // bodies[0] must also be the heaviest individual body.
-        let max_other = self.bodies[1..]
-            .iter()
-            .map(|b| b.mass)
-            .fold(0.0_f64, f64::max);
+        let max_other = self.bodies[1..].iter().map(|b| b.mass).fold(0.0_f64, f64::max);
         m0 >= max_other && m0 >= WH_DOMINANCE_RATIO * m_rest
     }
 
@@ -1911,9 +1884,9 @@ mod benchmark_figure8 {
     // Initial conditions: Chenciner & Montgomery (2000), G = 1, m = 1.
     // Layout: (x, y, vx, vy)
     const IC: [(f64, f64, f64, f64); 3] = [
-        (-0.97000436,  0.24308753,  0.46620369,  0.43236573),
-        ( 0.97000436, -0.24308753,  0.46620369,  0.43236573),
-        ( 0.0,         0.0,        -0.93240737, -0.86473146),
+        (-0.97000436, 0.24308753, 0.46620369, 0.43236573),
+        (0.97000436, -0.24308753, 0.46620369, 0.43236573),
+        (0.0, 0.0, -0.93240737, -0.86473146),
     ];
 
     /// Period from Simó (2002) in G = 1, m = 1 units.

@@ -16,19 +16,15 @@ pub struct BeltRing {
 }
 
 pub fn compute_render_hints(bodies: &[Body]) -> Vec<BodyRenderHints> {
-    let dominant = bodies.iter().enumerate().max_by(|a, b| {
-        a.1.mass
-            .partial_cmp(&b.1.mass)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
+    let dominant = bodies
+        .iter()
+        .enumerate()
+        .max_by(|a, b| a.1.mass.partial_cmp(&b.1.mass).unwrap_or(std::cmp::Ordering::Equal));
 
     let Some((dom_idx, dom)) = dominant else {
         return bodies
             .iter()
-            .map(|_| BodyRenderHints {
-                show_trail: true,
-                belt_ring: None,
-            })
+            .map(|_| BodyRenderHints { show_trail: true, belt_ring: None })
             .collect();
     };
 
@@ -36,10 +32,7 @@ pub fn compute_render_hints(bodies: &[Body]) -> Vec<BodyRenderHints> {
         .iter()
         .map(|b| {
             let mass_ratio = b.mass / dom.mass;
-            BodyRenderHints {
-                show_trail: mass_ratio > TRAIL_MASS_RATIO,
-                belt_ring: None,
-            }
+            BodyRenderHints { show_trail: mass_ratio > TRAIL_MASS_RATIO, belt_ring: None }
         })
         .collect();
 
@@ -73,10 +66,7 @@ pub fn detect_belts(bodies: &[Body], dom_idx: usize, hints: &mut [BodyRenderHint
     while i < sorted.len() {
         let anchor = sorted[i].1;
         let band_max = anchor * (1.0 + BELT_BAND_FRACTION);
-        let group: Vec<_> = sorted[i..]
-            .iter()
-            .take_while(|(_, r)| *r <= band_max)
-            .collect();
+        let group: Vec<_> = sorted[i..].iter().take_while(|(_, r)| *r <= band_max).collect();
 
         if group.len() >= BELT_MIN_MEMBERS {
             let mean_r = group.iter().map(|(_, r)| r).sum::<f64>() / group.len() as f64;

@@ -78,10 +78,7 @@ pub fn section(ui: &mut egui::Ui, label: &str) {
         ui.add_space(4.0);
         let rect = ui.available_rect_before_wrap();
         ui.painter().line_segment(
-            [
-                Pos2::new(rect.left(), rect.center().y),
-                Pos2::new(rect.right(), rect.center().y),
-            ],
+            [Pos2::new(rect.left(), rect.center().y), Pos2::new(rect.right(), rect.center().y)],
             Stroke::new(0.5, TEXT_DIM),
         );
     });
@@ -90,9 +87,7 @@ pub fn section(ui: &mut egui::Ui, label: &str) {
 
 pub fn metric(ui: &mut egui::Ui, label: &str, value: &str, color: Color32) {
     ui.horizontal(|ui| {
-        ui.add(
-            egui::Label::new(RichText::new(label).size(11.0).color(TEXT_SEC)).truncate(),
-        );
+        ui.add(egui::Label::new(RichText::new(label).size(11.0).color(TEXT_SEC)).truncate());
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.add(
                 egui::Label::new(RichText::new(value).monospace().size(11.0).color(color))

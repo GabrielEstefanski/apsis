@@ -1,0 +1,13 @@
+edition = "2021"
+max_width = 100
+hard_tabs = false
+tab_spaces = 4
+
+use_small_heuristics = "Max"
+
+reorder_imports = true
+reorder_modules = true
+
+fn_params_layout = "Tall"
+
+match_block_trailing_comma = true
