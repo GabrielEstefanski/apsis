@@ -24,11 +24,11 @@
 use crate::core::adaptive::{
     AccelerationStats, DtAdaptationConfig, DtController, DtMode, ThetaController,
 };
-use crate::core::body::{Body, NamedBody};
+use crate::domain::body::{Body, NamedBody};
 use crate::core::calibration;
 use crate::core::diagnostics::{DiagnosticsComputer, SimulationDiagnostics};
 use crate::core::metrics::Metrics;
-use crate::core::trail_buffer::{TrailBuffer, adaptive_capacity};
+use crate::render::trail_buffer::{TrailBuffer, adaptive_capacity};
 
 const MASS_TO_SOLAR: f64 = 1.0;
 const RADIUS_TO_SOLAR: f64 = 1.0 / 0.00465;
@@ -52,7 +52,7 @@ const WH_DOMINANCE_RATIO: f64 = 10.0;
 /// to the total body count (which can be dominated by asteroid belts).
 /// Generate an auto-name for a new body given existing names.
 /// Counts existing names that start with the material prefix and appends N+1.
-fn auto_name(material: crate::core::materials::Material, existing: &[String]) -> String {
+fn auto_name(material: crate::domain::materials::Material, existing: &[String]) -> String {
     let prefix = material.display_name();
     let count = existing.iter().filter(|n| n.starts_with(prefix)).count() + 1;
     format!("{prefix} {count}")
@@ -60,7 +60,7 @@ fn auto_name(material: crate::core::materials::Material, existing: &[String]) ->
 
 fn resolved_name(
     explicit: Option<String>,
-    material: crate::core::materials::Material,
+    material: crate::domain::materials::Material,
     existing: &[String],
 ) -> String {
     explicit
@@ -549,7 +549,7 @@ impl System {
         for i in 1..self.bodies.len() {
             let b = &self.bodies[i];
             let (nx, ny, nvx, nvy) =
-                crate::physics::kepler::kepler_step(b.x, b.y, b.vx, b.vy, dt, mu);
+                crate::physics::integrator::kepler_step(b.x, b.y, b.vx, b.vy, dt, mu);
             self.bodies[i].x = nx;
             self.bodies[i].y = ny;
             self.bodies[i].vx = nvx;
@@ -752,7 +752,7 @@ impl System {
     /// history is lost.  Energy baseline is reset because the system
     /// topology has changed.
     pub fn add_body(&mut self, mut body: Body) {
-        use crate::core::body::default_softening;
+        use crate::domain::body::default_softening;
         body.sync_physical_properties();
         if (self.softening_scale - 1.0).abs() > 1e-15 {
             body.softening = default_softening(body.mass) * self.softening_scale;
@@ -780,7 +780,7 @@ impl System {
     /// More efficient than calling [`add_body`] in a loop: the trail buffer is
     /// reset only once and the energy baseline is invalidated once.
     pub fn add_bodies(&mut self, new_bodies: Vec<Body>) {
-        use crate::core::body::default_softening;
+        use crate::domain::body::default_softening;
         for mut body in new_bodies {
             body.sync_physical_properties();
             if (self.softening_scale - 1.0).abs() > 1e-15 {
@@ -804,7 +804,7 @@ impl System {
     /// Each `NamedBody` may provide a pre-authored display name. Bodies without
     /// an explicit name fall back to the standard material-based naming scheme.
     pub fn add_named_bodies(&mut self, new_bodies: Vec<NamedBody>) {
-        use crate::core::body::default_softening;
+        use crate::domain::body::default_softening;
         for mut named_body in new_bodies {
             let mut body = named_body.body;
             body.sync_physical_properties();
@@ -1177,7 +1177,7 @@ impl System {
     ///
     /// Also rescales all existing body softenings immediately.
     pub fn set_softening_scale(&mut self, scale: f64) {
-        use crate::core::body::default_softening;
+        use crate::domain::body::default_softening;
         self.softening_scale = scale.max(0.0);
         for b in &mut self.bodies {
             b.softening = default_softening(b.mass) * self.softening_scale;
@@ -1277,8 +1277,8 @@ impl System {
     // ── Snapshot (save / load) ───────────────────────────────────────────────
 
     /// Capture the minimal state required for deterministic reproduction.
-    pub fn to_snapshot(&self) -> crate::core::snapshot::SimSnapshot {
-        use crate::core::snapshot::{BodyRecord, SimSnapshot};
+    pub fn to_snapshot(&self) -> crate::io::snapshot::SimSnapshot {
+        use crate::io::snapshot::{BodyRecord, SimSnapshot};
         SimSnapshot {
             save_id: 0,
             t: self.t,
@@ -1302,7 +1302,7 @@ impl System {
     /// The trail buffer is cleared (it is cosmetic and cannot be restored).
     /// Energy / angular-momentum references are reset so the first post-load
     /// step establishes new baselines.
-    pub fn restore_from_snapshot(&mut self, snap: &crate::core::snapshot::SimSnapshot) {
+    pub fn restore_from_snapshot(&mut self, snap: &crate::io::snapshot::SimSnapshot) {
         let bodies: Vec<Body> = snap.bodies.iter().map(|r| r.into_body()).collect();
         self.names = if snap.names.len() == bodies.len() {
             snap.names.clone()
@@ -1322,7 +1322,7 @@ impl System {
         // Rebuild trail buffer — restore saved trail if dimensions match,
         // otherwise start empty.
         let cap =
-            crate::core::trail_buffer::adaptive_capacity(trail_body_count(&self.bodies).max(1));
+            crate::render::trail_buffer::adaptive_capacity(trail_body_count(&self.bodies).max(1));
         self.trail_buf.reset(n, cap);
         self.trail_buf.update_colors(&self.bodies);
         if let Some(trail_snap) = &snap.trail {
@@ -1418,7 +1418,7 @@ impl System {
 #[cfg(test)]
 mod integration_tests {
     use super::*;
-    use crate::core::materials::Material;
+    use crate::domain::materials::Material;
     use crate::physics::integrator::Integrator;
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -1540,7 +1540,7 @@ mod integration_tests {
 #[cfg(test)]
 mod wh_guard_tests {
     use super::*;
-    use crate::core::materials::Material;
+    use crate::domain::materials::Material;
     use crate::physics::integrator::Integrator;
 
     /// A Sun-like body at the origin plus one lightweight planet.
@@ -1705,7 +1705,7 @@ mod wh_guard_tests {
 #[cfg(test)]
 mod benchmark_kepler {
     use super::*;
-    use crate::core::materials::Material;
+    use crate::domain::materials::Material;
     use crate::physics::integrator::Integrator;
 
     // ── Kepler helpers ────────────────────────────────────────────────────────
@@ -1878,7 +1878,7 @@ mod benchmark_kepler {
 #[cfg(test)]
 mod benchmark_figure8 {
     use super::*;
-    use crate::core::materials::Material;
+    use crate::domain::materials::Material;
     use crate::physics::integrator::Integrator;
 
     // Initial conditions: Chenciner & Montgomery (2000), G = 1, m = 1.

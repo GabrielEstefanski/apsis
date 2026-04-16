@@ -41,7 +41,7 @@ use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
-use crate::core::body::Body;
+use crate::domain::body::Body;
 use crate::core::metrics::Metrics;
 use crate::physics::energy::per_body_potential_energy;
 use crate::physics::orbital::OrbitalElements;

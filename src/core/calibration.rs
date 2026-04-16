@@ -8,7 +8,7 @@
 //! Separating calibration from simulation orchestration keeps every function
 //! single-purpose, trivially testable, and reusable across different integrators.
 
-use crate::core::body::Body;
+use crate::domain::body::Body;
 use std::collections::VecDeque;
 
 // ── Tuning constants ────────────────────────────────────────────────────────── //
@@ -101,11 +101,11 @@ pub fn apply_body_shift(bodies: &mut [Body], dx: f64, dy: f64) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::body::Body;
+    use crate::domain::body::Body;
     use std::collections::VecDeque;
 
     fn body(x: f64, y: f64, vx: f64, vy: f64, mass: f64) -> Body {
-        Body::new(x, y, vx, vy, mass, crate::core::materials::Material::Rocky)
+        Body::new(x, y, vx, vy, mass, crate::domain::materials::Material::Rocky)
     }
 
     // ── zero_com_velocity ────────────────────────────────────────────────── //

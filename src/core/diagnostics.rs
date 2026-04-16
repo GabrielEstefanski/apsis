@@ -1,4 +1,4 @@
-use crate::core::body::Body;
+use crate::domain::body::Body;
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SimulationDiagnostics {

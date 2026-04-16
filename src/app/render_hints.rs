@@ -1,4 +1,4 @@
-use crate::core::body::Body;
+use crate::domain::body::Body;
 
 const BELT_MIN_MEMBERS: usize = 8;
 const BELT_BAND_FRACTION: f64 = 0.15;

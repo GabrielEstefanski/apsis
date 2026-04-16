@@ -229,7 +229,7 @@ pub struct WgpuBackend {
     trail: Option<TrailRenderer>,
     grid: Option<GridRenderer>,
 
-    pub trail_buffer: Option<Arc<crate::core::trail_buffer::TrailBuffer>>,
+    pub trail_buffer: Option<Arc<crate::render::trail_buffer::TrailBuffer>>,
     pub trail_visibility: Option<Vec<bool>>,
     pub center: [f32; 2],
     pub scale: f32,

@@ -27,11 +27,11 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use crate::core::adaptive::DtMode;
-use crate::core::body::{Body, NamedBody};
+use crate::domain::body::{Body, NamedBody};
 use crate::core::metrics::Metrics;
-use crate::core::snapshot::SimSnapshot;
+use crate::io::snapshot::SimSnapshot;
 use crate::core::system::System;
-use crate::core::trail_buffer::TrailBuffer;
+use crate::render::trail_buffer::TrailBuffer;
 use crate::physics::integrator::Integrator;
 use crate::physics::orbital::OrbitalElements;
 
@@ -278,7 +278,7 @@ impl PhysicsHandle {
     /// could time out when the physics thread was mid-batch with high
     /// `steps_per_frame`, producing an empty snapshot with 0 bodies / 0 steps.)
     pub fn to_snapshot(&self) -> SimSnapshot {
-        use crate::core::snapshot::BodyRecord;
+        use crate::io::snapshot::BodyRecord;
         let m = self.metrics;
         SimSnapshot {
             save_id: 0, // set by caller

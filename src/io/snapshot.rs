@@ -61,8 +61,8 @@ use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::core::body::Body;
-use crate::core::materials::Material;
+use crate::domain::body::Body;
+use crate::domain::materials::Material;
 use crate::physics::integrator::Integrator;
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -162,7 +162,7 @@ impl BodyRecord {
     }
 }
 
-/// Serialised state of a [`TrailBuffer`](crate::core::trail_buffer::TrailBuffer).
+/// Serialised state of a [`TrailBuffer`](crate::render::trail_buffer::TrailBuffer).
 ///
 /// The `positions` array is stored column-major:
 /// `positions[col * n_bodies + body_idx]`, matching the in-memory layout of
