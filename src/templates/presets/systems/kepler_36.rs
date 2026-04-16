@@ -1,6 +1,6 @@
 use crate::{
     core::materials::Material,
-    templates::{Template, TemplateBody, builders::circular_orbit},
+    templates::{Template, TemplateBody, UnitSystem, builders::circular_orbit},
 };
 
 pub fn kepler_36() -> Template {
@@ -43,5 +43,6 @@ pub fn kepler_36() -> Template {
         bodies,
         display_scale: 1.0,
         suggested_dt: Some(0.0002),
+        units: UnitSystem::solar_au(),
     }
 }

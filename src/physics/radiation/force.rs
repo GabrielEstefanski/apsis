@@ -283,18 +283,25 @@ mod tests {
     }
 
     #[test]
-    fn pr_moving_source_is_equivalent_to_body_at_rest() {
-        // Moving the source at +v is physically equivalent to the body moving at −v.
-        let s_moving = RadiationSource {
-            vx: 0.5,
+    fn pr_galilean_invariance() {
+        // The force depends only on the relative velocity v_rel = v_body − v_source.
+        // Therefore these two scenarios must give identical accelerations:
+        //   (a) body at vel = +0.5, source at rest
+        //   (b) body at rest,        source at vel = −0.5
+        // Both yield dvx = vel[0] − source.vx = 0.5 − 0 = 0 − (−0.5) = 0.5.
+        let s_moving_neg = RadiationSource {
+            vx: -0.5,
             ..unit_source()
         };
         let a_body_moving =
             pr_drag_acceleration([1.0, 0.0], [0.5, 0.0], &unit_params(), &unit_source());
-        let a_source_moving =
-            pr_drag_acceleration([1.0, 0.0], [0.0, 0.0], &unit_params(), &s_moving);
-        assert!((a_body_moving[0] - a_source_moving[0]).abs() < 1e-15);
-        assert!((a_body_moving[1] - a_source_moving[1]).abs() < 1e-15);
+        let a_source_moving_neg =
+            pr_drag_acceleration([1.0, 0.0], [0.0, 0.0], &unit_params(), &s_moving_neg);
+        // Both paths compute the same dvx; the results must be bit-for-bit equal.
+        assert_eq!(
+            a_body_moving, a_source_moving_neg,
+            "PR force must depend only on v_rel: body@+v ≡ source@−v"
+        );
     }
 
     #[test]

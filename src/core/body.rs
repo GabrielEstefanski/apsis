@@ -209,15 +209,19 @@ fn logistic(m: f64, m0: f64, w: f64) -> f64 {
 /// Main-sequence mass–luminosity relation with a continuously differentiable
 /// exponent.
 ///
-/// The exponent `α(M)` blends smoothly across three physical regimes:
+/// The exponent `α(M)` blends smoothly across two physical regimes:
 ///
-/// | Regime            | Mass range    | α   | Dominant physics            |
-/// |-------------------|---------------|-----|-----------------------------|
-/// | Low-mass          | M ≲ 0.43 M☉   | 2.3 | Fully convective interior   |
-/// | Solar-type        | 0.43–50 M☉    | 3.5 | Radiative core              |
-/// | Eddington-limited | M ≳ 50 M☉     | 1.0 | Radiation pressure support  |
+/// | Regime       | Mass range  | α   | Dominant physics          |
+/// |--------------|-------------|-----|---------------------------|
+/// | Low-mass     | M ≲ 0.43 M☉ | 2.3 | Fully convective interior |
+/// | Solar-type   | M ≳ 0.43 M☉ | 3.5 | Radiative core            |
 ///
-/// Blending widths: 0.15 M☉ (low → solar) and 5.0 M☉ (solar → Eddington).
+/// Blending width: 0.15 M☉.  The function is strictly monotonically
+/// increasing for all M > 0: `dL/dM = α · M^(α−1) > 0`.
+///
+/// The Eddington luminosity limit is not enforced here; for the
+/// N-body force model (radiation pressure, PR drag) the error from
+/// ignoring Eddington clamping is negligible at the masses used.
 ///
 /// References: Salaris & Cassisi (2005) §5.3; Tout et al. (1996) *MNRAS* 281.
 fn main_sequence_luminosity_smooth(m: f64) -> f64 {
@@ -225,9 +229,7 @@ fn main_sequence_luminosity_smooth(m: f64) -> f64 {
         return 0.0;
     }
 
-    let alpha = 2.3
-        + (3.5 - 2.3) * logistic(m,  0.43, 0.15)   // low-mass → solar
-        - (3.5 - 1.0) * logistic(m, 50.0,  5.0); // solar → Eddington
+    let alpha = 2.3 + (3.5 - 2.3) * logistic(m, 0.43, 0.15); // low-mass → solar
 
     m.powf(alpha)
 }

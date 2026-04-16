@@ -18,7 +18,7 @@ use std::f64::consts::TAU;
 use rand::random;
 
 use crate::core::materials::Material;
-use crate::templates::{Template, TemplateBody, builders::circular_orbit};
+use crate::templates::{Template, TemplateBody, UnitSystem, builders::circular_orbit};
 
 // ── Physical constants in simulation units ────────────────────────────────────
 
@@ -315,5 +315,6 @@ pub fn solar_system() -> Template {
         bodies,
         display_scale: 1.0,
         suggested_dt: Some(0.001), // ~0.36 days; ~1/1000 of Earth's orbital period
+        units: UnitSystem::solar_au(),
     }
 }

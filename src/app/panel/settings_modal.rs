@@ -176,6 +176,7 @@ impl SimulationApp {
                             softening_scale:   self.physics_cfg.softening_scale,
                             g_factor:          self.physics_cfg.g_factor,
                             record_interval:   self.record_interval,
+                            units:             self.active_units,
                         };
                         match SimRecorder::create(
                             Path::new(&self.record_base_path),

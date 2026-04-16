@@ -7,5 +7,5 @@ pub mod presets;
 
 pub use catalog::TEMPLATES;
 pub use category::TemplateCategory;
-pub use core::{Template, TemplateBody};
+pub use core::{Template, TemplateBody, UnitSystem};
 pub use instantiate::instantiate_at;

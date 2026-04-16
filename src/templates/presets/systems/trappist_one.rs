@@ -1,6 +1,6 @@
 use crate::{
     core::materials::Material,
-    templates::{Template, TemplateBody, builders::circular_orbit},
+    templates::{Template, TemplateBody, UnitSystem, builders::circular_orbit},
 };
 
 pub fn trappist_1() -> Template {
@@ -47,5 +47,6 @@ pub fn trappist_1() -> Template {
         bodies,
         display_scale: 1.0,
         suggested_dt: Some(0.0001), // CRÍTICO
+        units: UnitSystem::solar_au(),
     }
 }
