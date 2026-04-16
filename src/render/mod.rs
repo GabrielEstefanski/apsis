@@ -1,5 +1,6 @@
 pub mod callback_trait;
 pub mod grid_renderer;
+pub mod trail_buffer;
 pub mod trail_renderer;
 pub mod wgpu_backend;
 

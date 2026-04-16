@@ -1,7 +1,7 @@
 use rand::random;
 use std::f64::consts::TAU;
 
-use crate::core::materials::Material;
+use crate::domain::materials::Material;
 use crate::templates::{Template, TemplateBody, UnitSystem, builders::circular_orbit};
 
 pub fn simple_three_body() -> Template {

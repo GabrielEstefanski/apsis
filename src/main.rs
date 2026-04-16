@@ -1,5 +1,7 @@
 mod app;
 mod core;
+mod domain;
+mod io;
 mod physics;
 mod render;
 mod templates;
