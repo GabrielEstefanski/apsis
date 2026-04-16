@@ -207,11 +207,7 @@ pub struct SaveEntry {
 impl SaveEntry {
     /// Returns the simulation name, or `"Unnamed"` if none was set.
     pub fn display_name(&self) -> &str {
-        if self.sim_name.is_empty() {
-            "Unnamed"
-        } else {
-            &self.sim_name
-        }
+        if self.sim_name.is_empty() { "Unnamed" } else { &self.sim_name }
     }
 
     /// Returns a human-readable UTC timestamp derived from [`save_id`](Self::save_id).
@@ -352,10 +348,7 @@ fn u8_to_material(v: u8) -> Material {
 // ── Snapshot I/O ──────────────────────────────────────────────────────────────
 
 fn unix_millis() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
+    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
 }
 
 impl SimSnapshot {
@@ -449,7 +442,7 @@ impl SimSnapshot {
                     wf32(&mut w, pos[0])?;
                     wf32(&mut w, pos[1])?;
                 }
-            }
+            },
             None => wu8(&mut w, 0)?,
         }
 
@@ -467,10 +460,7 @@ impl SimSnapshot {
         let mut magic = [0u8; 4];
         r.read_exact(&mut magic)?;
         if magic != MAGIC {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "not a .grav file",
-            ));
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "not a .grav file"));
         }
 
         let ver = ru16(&mut r)?;
@@ -565,13 +555,7 @@ impl SimSnapshot {
                 for _ in 0..total {
                     positions.push([rf32(&mut r)?, rf32(&mut r)?]);
                 }
-                Some(TrailSnapshot {
-                    n_bodies: tn,
-                    capacity: cap,
-                    head: hd,
-                    len: ln,
-                    positions,
-                })
+                Some(TrailSnapshot { n_bodies: tn, capacity: cap, head: hd, len: ln, positions })
             } else {
                 None
             }
@@ -608,10 +592,7 @@ impl SimSnapshot {
         let mut magic = [0u8; 4];
         r.read_exact(&mut magic)?;
         if magic != MAGIC {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "not a .grav file",
-            ));
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "not a .grav file"));
         }
 
         let ver = ru16(&mut r)?;
@@ -636,15 +617,7 @@ impl SimSnapshot {
 
         let n_bodies = ru32(&mut r)?;
 
-        Ok(SaveEntry {
-            path: path.to_owned(),
-            save_id,
-            t,
-            steps,
-            n_bodies,
-            sim_name,
-            seed,
-        })
+        Ok(SaveEntry { path: path.to_owned(), save_id, t, steps, n_bodies, sim_name, seed })
     }
 }
 

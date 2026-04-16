@@ -12,32 +12,12 @@ pub struct TemplateEntry {
 
 pub const TEMPLATES: &[TemplateEntry] = &[
     // ── Single bodies ──────────────────────────────────────────────────────── //
-    TemplateEntry {
-        name: "Star",
-        category: TemplateCategory::Bodies,
-        build: star,
-    },
-    TemplateEntry {
-        name: "Brown Dwarf",
-        category: TemplateCategory::Bodies,
-        build: brown_dwarf,
-    },
-    TemplateEntry {
-        name: "Gas Giant",
-        category: TemplateCategory::Bodies,
-        build: gas_giant,
-    },
-    TemplateEntry {
-        name: "Rocky Planet",
-        category: TemplateCategory::Bodies,
-        build: rocky_planet,
-    },
+    TemplateEntry { name: "Star", category: TemplateCategory::Bodies, build: star },
+    TemplateEntry { name: "Brown Dwarf", category: TemplateCategory::Bodies, build: brown_dwarf },
+    TemplateEntry { name: "Gas Giant", category: TemplateCategory::Bodies, build: gas_giant },
+    TemplateEntry { name: "Rocky Planet", category: TemplateCategory::Bodies, build: rocky_planet },
     // ── Multi-body systems ─────────────────────────────────────────────────── //
-    TemplateEntry {
-        name: "Binary Stars",
-        category: TemplateCategory::Systems,
-        build: binary_star,
-    },
+    TemplateEntry { name: "Binary Stars", category: TemplateCategory::Systems, build: binary_star },
     TemplateEntry {
         name: "Star + Comp.",
         category: TemplateCategory::Systems,
@@ -48,26 +28,14 @@ pub const TEMPLATES: &[TemplateEntry] = &[
         category: TemplateCategory::Systems,
         build: solar_system,
     },
-    TemplateEntry {
-        name: "TRAPPIST-1",
-        category: TemplateCategory::Systems,
-        build: trappist_1,
-    },
-    TemplateEntry {
-        name: "Kepler-36",
-        category: TemplateCategory::Systems,
-        build: kepler_36,
-    },
+    TemplateEntry { name: "TRAPPIST-1", category: TemplateCategory::Systems, build: trappist_1 },
+    TemplateEntry { name: "Kepler-36", category: TemplateCategory::Systems, build: kepler_36 },
     TemplateEntry {
         name: "Alpha Centauri AB",
         category: TemplateCategory::Systems,
         build: alpha_centauri_ab,
     },
-    TemplateEntry {
-        name: "HD 80606 System",
-        category: TemplateCategory::Systems,
-        build: hd_80606,
-    },
+    TemplateEntry { name: "HD 80606 System", category: TemplateCategory::Systems, build: hd_80606 },
     TemplateEntry {
         name: "Sun–Earth L4/L5",
         category: TemplateCategory::Systems,

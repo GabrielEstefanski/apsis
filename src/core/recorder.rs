@@ -181,16 +181,9 @@ impl SimRecorder {
                     o.orbit_type.label(),
                     o.primary_idx as i64,
                 ),
-                None => (
-                    f64::NAN,
-                    f64::NAN,
-                    f64::NAN,
-                    f64::NAN,
-                    f64::NAN,
-                    f64::NAN,
-                    "none",
-                    -1_i64,
-                ),
+                None => {
+                    (f64::NAN, f64::NAN, f64::NAN, f64::NAN, f64::NAN, f64::NAN, "none", -1_i64)
+                },
             };
 
             writeln!(
@@ -281,11 +274,7 @@ impl Drop for SimRecorder {
 
 /// Formats a float as `NaN` when it is NaN, otherwise in scientific notation.
 fn fmt_f64(v: f64) -> String {
-    if v.is_nan() {
-        "NaN".into()
-    } else {
-        format!("{v:.6e}")
-    }
+    if v.is_nan() { "NaN".into() } else { format!("{v:.6e}") }
 }
 
 /// Converts `f64::INFINITY` and `f64::NEG_INFINITY` to `NaN` for CSV output.
@@ -297,21 +286,11 @@ fn nan_if_inf(v: f64) -> f64 {
 
 fn build_metadata_block(timestamp: &str, m: &RecordMetadata) -> String {
     // Unit conversion lines: emit SI factors when available, "–" otherwise.
-    let mass_to_kg = m
-        .units
-        .mass_to_kg
-        .map(|v| format!("{v:.4e} kg"))
-        .unwrap_or_else(|| "–".into());
-    let length_to_m = m
-        .units
-        .length_to_m
-        .map(|v| format!("{v:.4e} m"))
-        .unwrap_or_else(|| "–".into());
-    let time_to_s = m
-        .units
-        .time_to_s
-        .map(|v| format!("{v:.4e} s"))
-        .unwrap_or_else(|| "–".into());
+    let mass_to_kg =
+        m.units.mass_to_kg.map(|v| format!("{v:.4e} kg")).unwrap_or_else(|| "–".into());
+    let length_to_m =
+        m.units.length_to_m.map(|v| format!("{v:.4e} m")).unwrap_or_else(|| "–".into());
+    let time_to_s = m.units.time_to_s.map(|v| format!("{v:.4e} s")).unwrap_or_else(|| "–".into());
 
     format!(
         "# GRAVITY SIMULATOR — Scientific Dataset\n\
@@ -356,7 +335,7 @@ fn chrono_or_fallback() -> String {
             // Very simple: seconds since epoch as a decimal
             // A proper implementation would use chrono, but we keep deps minimal.
             format!("unix+{}", d.as_secs())
-        }
+        },
         Err(_) => "unknown".into(),
     }
 }

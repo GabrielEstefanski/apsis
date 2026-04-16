@@ -15,11 +15,7 @@ impl SimulationApp {
             for (tab, label) in TABS {
                 let active = self.panel_tab == *tab;
                 let col = if active { TEXT_PRI } else { TEXT_SEC };
-                let fill = if active {
-                    ACCENT_DIM
-                } else {
-                    Color32::TRANSPARENT
-                };
+                let fill = if active { ACCENT_DIM } else { Color32::TRANSPARENT };
                 if ui
                     .add(
                         egui::Button::new(RichText::new(*label).size(10.5).color(col))

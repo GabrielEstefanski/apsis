@@ -191,12 +191,12 @@ impl TrailBuffer {
             PositionsDirty::Columns(v) => {
                 v.push(self.head);
                 return self.advance_head();
-            }
+            },
             PositionsDirty::Clean => {
                 let mut v = Vec::with_capacity(INCREMENTAL_LIMIT);
                 v.push(self.head);
                 PositionsDirty::Columns(v)
-            }
+            },
         };
 
         self.advance_head();

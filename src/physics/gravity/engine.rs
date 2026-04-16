@@ -54,9 +54,7 @@ impl BarnesHutEngine {
     /// `max_depth` bounds the quadtree depth; 16 is sufficient for all
     /// practical particle counts.
     pub fn new(max_depth: usize) -> Self {
-        Self {
-            tree: QuadTree::new(max_depth),
-        }
+        Self { tree: QuadTree::new(max_depth) }
     }
 
     /// Rebuild the quadtree from the current body positions.
@@ -148,11 +146,7 @@ impl BarnesHutEngine {
             }
         }
 
-        if weight_sum > 0.0 {
-            (violation_sum / weight_sum).sqrt()
-        } else {
-            0.0
-        }
+        if weight_sum > 0.0 { (violation_sum / weight_sum).sqrt() } else { 0.0 }
     }
 
     fn node_density(&self, node: &Node, x: f64, y: f64, theta: f64) -> f64 {
@@ -384,22 +378,8 @@ mod tests {
     #[test]
     fn total_force_on_system_is_zero() {
         let bodies = vec![
-            Body::new(
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                1.0,
-                crate::core::materials::Material::Rocky,
-            ),
-            Body::new(
-                3.0,
-                0.0,
-                0.0,
-                0.0,
-                2.0,
-                crate::core::materials::Material::Rocky,
-            ),
+            Body::new(0.0, 0.0, 0.0, 0.0, 1.0, crate::core::materials::Material::Rocky),
+            Body::new(3.0, 0.0, 0.0, 0.0, 2.0, crate::core::materials::Material::Rocky),
         ];
         let (acc, _) = eval(&bodies);
 
@@ -416,22 +396,8 @@ mod tests {
     #[test]
     fn force_direction_is_attractive() {
         let bodies = vec![
-            Body::new(
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                1.0,
-                crate::core::materials::Material::Rocky,
-            ),
-            Body::new(
-                4.0,
-                0.0,
-                0.0,
-                0.0,
-                1.0,
-                crate::core::materials::Material::Rocky,
-            ),
+            Body::new(0.0, 0.0, 0.0, 0.0, 1.0, crate::core::materials::Material::Rocky),
+            Body::new(4.0, 0.0, 0.0, 0.0, 1.0, crate::core::materials::Material::Rocky),
         ];
         let (acc, _) = eval(&bodies);
         assert!(acc[0].0 > 0.0, "b0 should accelerate toward b1 (+x)");
@@ -445,30 +411,9 @@ mod tests {
     #[test]
     fn symmetric_configuration_has_zero_net_x_force_on_center() {
         let bodies = vec![
-            Body::new(
-                -5.0,
-                0.0,
-                0.0,
-                0.0,
-                1.0,
-                crate::core::materials::Material::Rocky,
-            ),
-            Body::new(
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                1.0,
-                crate::core::materials::Material::Rocky,
-            ), // center
-            Body::new(
-                5.0,
-                0.0,
-                0.0,
-                0.0,
-                1.0,
-                crate::core::materials::Material::Rocky,
-            ),
+            Body::new(-5.0, 0.0, 0.0, 0.0, 1.0, crate::core::materials::Material::Rocky),
+            Body::new(0.0, 0.0, 0.0, 0.0, 1.0, crate::core::materials::Material::Rocky), // center
+            Body::new(5.0, 0.0, 0.0, 0.0, 1.0, crate::core::materials::Material::Rocky),
         ];
         let (acc, _) = eval(&bodies);
         assert!(acc[1].0.abs() < 1e-12, "net Fx on center = {}", acc[1].0);
@@ -480,22 +425,8 @@ mod tests {
     #[test]
     fn gravitational_potential_is_negative() {
         let bodies = vec![
-            Body::new(
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                1.0,
-                crate::core::materials::Material::Rocky,
-            ),
-            Body::new(
-                2.0,
-                0.0,
-                0.0,
-                0.0,
-                1.0,
-                crate::core::materials::Material::Rocky,
-            ),
+            Body::new(0.0, 0.0, 0.0, 0.0, 1.0, crate::core::materials::Material::Rocky),
+            Body::new(2.0, 0.0, 0.0, 0.0, 1.0, crate::core::materials::Material::Rocky),
         ];
         let (_, potential) = eval(&bodies);
         assert!(potential < 0.0, "PE = {potential}");

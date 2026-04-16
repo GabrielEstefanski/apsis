@@ -15,12 +15,7 @@ impl SimulationApp {
             let (dot_rect, _) =
                 ui.allocate_exact_size(egui::vec2(12.0, 12.0), egui::Sense::hover());
             ui.painter().circle_filled(dot_rect.center(), 5.0, col);
-            ui.label(
-                RichText::new(format!("body #{}", idx))
-                    .size(12.0)
-                    .color(TEXT_PRI)
-                    .strong(),
-            );
+            ui.label(RichText::new(format!("body #{}", idx)).size(12.0).color(TEXT_PRI).strong());
         });
 
         ui.add_space(10.0);
@@ -30,14 +25,14 @@ impl SimulationApp {
         let ut = &self.physics_cfg.time_label.clone();
 
         section(ui, "LIVE");
-        metric(ui, "x",       &format!("{:.5e} {ul}", body.x),            TEXT_DIM);
-        metric(ui, "y",       &format!("{:.5e} {ul}", body.y),            TEXT_DIM);
-        metric(ui, "vx",      &format!("{:.5e} {ul}/{ut}", body.vx),      TEXT_DIM);
-        metric(ui, "vy",      &format!("{:.5e} {ul}/{ut}", body.vy),      TEXT_DIM);
-        metric(ui, "mass",    &format!("{:.5e} {um}", body.mass),         TEXT_DIM);
-        metric(ui, "r",       &format!("{:.5e} {ul}", body.physical_radius), TEXT_DIM);
-        metric(ui, "soft ε",  &format!("{:.5e} {ul}", body.softening),    TEXT_DIM);
-        metric(ui, "ρ",       &format!("{:.4e} {um}/{ul}³", body.density),TEXT_DIM);
+        metric(ui, "x", &format!("{:.5e} {ul}", body.x), TEXT_DIM);
+        metric(ui, "y", &format!("{:.5e} {ul}", body.y), TEXT_DIM);
+        metric(ui, "vx", &format!("{:.5e} {ul}/{ut}", body.vx), TEXT_DIM);
+        metric(ui, "vy", &format!("{:.5e} {ul}/{ut}", body.vy), TEXT_DIM);
+        metric(ui, "mass", &format!("{:.5e} {um}", body.mass), TEXT_DIM);
+        metric(ui, "r", &format!("{:.5e} {ul}", body.physical_radius), TEXT_DIM);
+        metric(ui, "soft ε", &format!("{:.5e} {ul}", body.softening), TEXT_DIM);
+        metric(ui, "ρ", &format!("{:.4e} {um}/{ul}³", body.density), TEXT_DIM);
 
         // ── ORBITAL ELEMENTS ─────────────────────────────────────────── //
         section(ui, "ORBITAL");
@@ -51,7 +46,7 @@ impl SimulationApp {
             // Orbit type badge
             let (type_str, type_col) = match el.orbit_type {
                 OrbitType::Elliptical => ("elliptical", SUCCESS),
-                OrbitType::Parabolic  => ("parabolic",  ACCENT),
+                OrbitType::Parabolic => ("parabolic", ACCENT),
                 OrbitType::Hyperbolic => ("hyperbolic", DANGER),
             };
             ui.horizontal(|ui| {
@@ -61,19 +56,11 @@ impl SimulationApp {
                 });
             });
 
-            metric(
-                ui,
-                "primary",
-                &format!("body #{}", el.primary_idx),
-                TEXT_DIM,
-            );
+            metric(ui, "primary", &format!("body #{}", el.primary_idx), TEXT_DIM);
 
             // Semi-major axis
-            let a_str = if el.a.is_finite() {
-                format!("{:.4e} {}", el.a, u_dist)
-            } else {
-                "∞".into()
-            };
+            let a_str =
+                if el.a.is_finite() { format!("{:.4e} {}", el.a, u_dist) } else { "∞".into() };
             metric(ui, "a  (semi-major)", &a_str, TEXT_PRI);
 
             // Eccentricity
@@ -88,36 +75,18 @@ impl SimulationApp {
             metric(ui, "T  (period)", &t_str, TEXT_PRI);
 
             // Specific angular momentum
-            metric(
-                ui,
-                "h  (ang. mom.)",
-                &format!("{:.4e}", el.h),
-                TEXT_DIM,
-            );
+            metric(ui, "h  (ang. mom.)", &format!("{:.4e}", el.h), TEXT_DIM);
 
             // Specific orbital energy
-            metric(
-                ui,
-                "ε  (orb. energy)",
-                &format!("{:.4e}", el.energy),
-                TEXT_DIM,
-            );
+            metric(ui, "ε  (orb. energy)", &format!("{:.4e}", el.energy), TEXT_DIM);
 
             // Argument of periapsis (degrees) — only meaningful for eccentric orbits
             if el.e > 1e-4 {
-                metric(
-                    ui,
-                    "ω  (peri. arg.)",
-                    &format!("{:.2}°", el.omega.to_degrees()),
-                    TEXT_DIM,
-                );
+                metric(ui, "ω  (peri. arg.)", &format!("{:.2}°", el.omega.to_degrees()), TEXT_DIM);
             }
         } else {
             ui.label(
-                RichText::new("  N/A — system has < 2 bodies")
-                    .size(10.0)
-                    .color(TEXT_DIM)
-                    .italics(),
+                RichText::new("  N/A — system has < 2 bodies").size(10.0).color(TEXT_DIM).italics(),
             );
         }
 
@@ -128,13 +97,9 @@ impl SimulationApp {
         let color_changed = ui.color_edit_button_rgb(&mut color_rgb).changed();
         let is_custom = body.color != body.material.props().base_color;
         ui.label(
-            RichText::new(if is_custom {
-                "custom"
-            } else {
-                "auto (material)"
-            })
-            .size(9.5)
-            .color(TEXT_DIM),
+            RichText::new(if is_custom { "custom" } else { "auto (material)" })
+                .size(9.5)
+                .color(TEXT_DIM),
         );
         let reset_color = is_custom && secondary_btn(ui, "Reset color");
 
@@ -193,12 +158,7 @@ impl SimulationApp {
             ui.add_space(2.0);
             ui.horizontal(|ui| {
                 ui.label(RichText::new("r_phys →").size(10.0).color(TEXT_DIM));
-                ui.label(
-                    RichText::new(&radius_preview)
-                        .monospace()
-                        .size(10.0)
-                        .color(TEXT_SEC),
-                );
+                ui.label(RichText::new(&radius_preview).monospace().size(10.0).color(TEXT_SEC));
             });
 
             let err = form.error.clone();
@@ -244,10 +204,10 @@ impl SimulationApp {
                         self.system.set_name(idx, name);
                     }
                     self.selection_form.as_mut().unwrap().error = None;
-                }
+                },
                 None => {
                     self.selection_form.as_mut().unwrap().error = Some("invalid values".into());
-                }
+                },
             }
         }
 
