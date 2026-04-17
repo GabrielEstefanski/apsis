@@ -2,7 +2,7 @@ use crate::app::config::PhysicsConfig;
 use crate::app::theme::secondary_btn;
 use crate::app::theme::{ACCENT, BORDER, DANGER, SUCCESS, TEXT_DIM, TEXT_PRI, TEXT_SEC};
 use crate::app::ui::SimulationApp;
-use crate::physics::integrator::Integrator;
+use crate::physics::integrator::IntegratorKind;
 use eframe::egui::{self, Align, Color32, Layout, RichText, Stroke};
 
 // ── Layout constants ──────────────────────────────────────────────────────────
@@ -230,9 +230,7 @@ impl SimulationApp {
                 )
                 .width(SL_W)
                 .show_ui(ui, |ui| {
-                    for variant in
-                        [Integrator::VelocityVerlet, Integrator::Yoshida4, Integrator::WisdomHolman]
-                    {
+                    for variant in IntegratorKind::ALL {
                         let r = ui.selectable_value(
                             &mut self.physics_cfg.integrator,
                             variant,
@@ -257,7 +255,7 @@ impl SimulationApp {
         );
 
         // Wisdom–Holman applicability warning.
-        if self.physics_cfg.integrator == Integrator::WisdomHolman {
+        if self.physics_cfg.integrator == IntegratorKind::WisdomHolman {
             egui::Frame::NONE
                 .fill(Color32::from_rgba_unmultiplied(ACCENT.r(), ACCENT.g(), ACCENT.b(), 18))
                 .stroke(Stroke::new(0.5, ACCENT.gamma_multiply(0.4)))

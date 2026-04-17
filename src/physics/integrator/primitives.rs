@@ -1,35 +1,17 @@
 //! Primitive kernels shared by all symplectic integrators.
 //!
-//! These are the three operators that every KDK-style scheme composes:
+//! These are the two stateless operators that every KDK-style scheme composes:
 //!
 //! | Operator | Effect |
 //! |----------|--------|
-//! | [`evaluate_accelerations`] | Rebuild gravity structure and fill `scratch_acc` |
-//! | [`kick`]                   | `v += a · dt` — momentum update |
-//! | [`drift`]                  | `x += v · dt` — position update |
+//! | [`kick`]  | `v += a · dt` — momentum update |
+//! | [`drift`] | `x += v · dt` — position update |
 //!
-//! Kept here rather than on a specific integrator so that custom composition
-//! schemes (Yoshida variants, SABA, user plugins) can reuse the same primitives
-//! without pulling in the whole enum.
+//! Force evaluation is handled by the [`ForceModel`](super::force_model::ForceModel)
+//! trait; integrators call it directly or via the thin
+//! [`helpers::evaluate`](super::helpers::evaluate) wrapper.
 
 use crate::domain::body::Body;
-use crate::physics::gravity::BarnesHutEngine;
-
-/// Rebuild the gravity structure and fill `scratch_acc` with accelerations.
-///
-/// Returns the raw (unscaled) gravitational potential energy.
-pub fn evaluate_accelerations(
-    bodies: &[Body],
-    theta: f64,
-    engine: &mut BarnesHutEngine,
-    scratch_acc: &mut Vec<(f64, f64)>,
-) -> f64 {
-    if scratch_acc.len() != bodies.len() {
-        scratch_acc.resize(bodies.len(), (0.0, 0.0));
-    }
-    engine.build(bodies);
-    engine.evaluate(bodies, theta, scratch_acc)
-}
 
 /// Apply a velocity kick: `v += a · dt`.
 ///
