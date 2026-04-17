@@ -63,7 +63,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::domain::body::Body;
 use crate::domain::materials::Material;
-use crate::physics::integrator::Integrator;
+use crate::physics::integrator::IntegratorKind;
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -94,7 +94,7 @@ pub struct SimSnapshot {
     /// Gravitational constant multiplier `G_eff = G₀ · g_factor`.
     pub g_factor: f64,
     /// Active symplectic integrator.
-    pub integrator: Integrator,
+    pub integrator_kind: IntegratorKind,
     /// Trail ring-buffer sampling interval (frames between recorded points).
     pub trail_every: usize,
     /// User-assigned simulation label (v3+). Empty string for older saves.
@@ -286,31 +286,31 @@ fn rf64(r: &mut impl Read) -> io::Result<f64> {
     Ok(f64::from_le_bytes(b))
 }
 
-// ── Integrator codec ──────────────────────────────────────────────────────────
+// ── IntegratorKind codec ──────────────────────────────────────────────────────────
 
-/// Encodes an [`Integrator`] as a single byte for on-disk storage.
+/// Encodes an [`IntegratorKind`] as a single byte for on-disk storage.
 ///
 /// | Byte | Variant |
 /// |------|---------|
 /// | 0    | `VelocityVerlet` |
 /// | 1    | `Yoshida4` |
 /// | 2    | `WisdomHolman` (v5+) |
-fn integrator_to_u8(i: Integrator) -> u8 {
+fn integrator_to_u8(i: IntegratorKind) -> u8 {
     match i {
-        Integrator::VelocityVerlet => 0,
-        Integrator::Yoshida4 => 1,
-        Integrator::WisdomHolman => 2,
+        IntegratorKind::VelocityVerlet => 0,
+        IntegratorKind::Yoshida4 => 1,
+        IntegratorKind::WisdomHolman => 2,
     }
 }
 
-/// Decodes an [`Integrator`] from a single byte.
+/// Decodes an [`IntegratorKind`] from a single byte.
 ///
 /// Unknown values fall back to `VelocityVerlet` for forward compatibility.
-fn u8_to_integrator(v: u8) -> Integrator {
+fn u8_to_integrator(v: u8) -> IntegratorKind {
     match v {
-        1 => Integrator::Yoshida4,
-        2 => Integrator::WisdomHolman,
-        _ => Integrator::VelocityVerlet,
+        1 => IntegratorKind::Yoshida4,
+        2 => IntegratorKind::WisdomHolman,
+        _ => IntegratorKind::VelocityVerlet,
     }
 }
 
@@ -395,7 +395,7 @@ impl SimSnapshot {
         wf64(&mut w, self.theta)?;
         wf64(&mut w, self.softening_scale)?;
         wf64(&mut w, self.g_factor)?;
-        wu8(&mut w, integrator_to_u8(self.integrator))?;
+        wu8(&mut w, integrator_to_u8(self.integrator_kind))?;
         wu32(&mut w, self.trail_every as u32)?;
 
         // v3: simulation name
@@ -480,7 +480,7 @@ impl SimSnapshot {
         let g_factor = rf64(&mut r)?;
         let mut integ_byte = [0u8; 1];
         r.read_exact(&mut integ_byte)?;
-        let integrator = u8_to_integrator(integ_byte[0]);
+        let integrator_kind = u8_to_integrator(integ_byte[0]);
         let trail_every = ru32(&mut r)? as usize;
 
         let sim_name = if ver >= 3 {
@@ -571,7 +571,7 @@ impl SimSnapshot {
             theta,
             softening_scale,
             g_factor,
-            integrator,
+            integrator_kind,
             trail_every,
             sim_name,
             seed,

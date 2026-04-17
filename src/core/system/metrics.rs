@@ -1,0 +1,85 @@
+//! Metrics assembly and recommended-dt computation.
+
+use crate::core::metrics::Metrics;
+use crate::core::system::System;
+use crate::physics::energy::{angular_momentum_z, center_of_mass_state, kinetic_energy, total_energy};
+
+impl System {
+    /// Assemble a [`Metrics`] snapshot of the current simulation state.
+    pub fn metrics(&self) -> Metrics {
+        let kinetic = self.last_kinetic;
+        let potential = self.last_potential;
+        let total = total_energy(kinetic, potential);
+
+        let lz = angular_momentum_z(&self.bodies);
+        let (com_x, com_y, com_vx, com_vy) = center_of_mass_state(&self.bodies);
+
+        Metrics {
+            kinetic,
+            potential,
+            total_energy: total,
+            rel_energy_error: self.rel_energy_error,
+
+            angular_momentum_z: lz,
+            rel_angular_momentum_error: self.rel_angular_momentum_error,
+            abs_angular_momentum_error: self.abs_angular_momentum_error,
+
+            com_x,
+            com_y,
+            com_vx,
+            com_vy,
+
+            t: self.t,
+            steps: self.steps,
+
+            integrator_kind: self.integrator.kind(),
+            g_factor: self.g_factor,
+            theta: self.force_model.theta(),
+            dt: self.current_dt,
+            user_dt: self.user_dt,
+            dt_mode: self.dt_mode,
+            adaptive_theta: self.adaptive_theta,
+
+            max_acc: self.last_diag.max_acc,
+            jerk: self.last_diag.jerk,
+            max_vel: self.last_diag.max_vel,
+
+            r_min: self.r_min,
+            softening_max: self.softening_max,
+
+            recommended_dt: self.recommended_dt(),
+        }
+    }
+
+    /// Accelerations computed during the last integration step.
+    pub fn last_accelerations(&self) -> &[(f64, f64)] {
+        &self.scratch_acc
+    }
+
+    /// Physics-justified recommended timestep from the current system state.
+    ///
+    /// Uses two criteria (Power et al. 2003 acceleration + Aarseth jerk).
+    /// Returns `None` before the first force evaluation or when N = 0.
+    pub fn recommended_dt(&self) -> Option<f64> {
+        if self.bodies.is_empty() || self.last_diag.max_acc <= 1e-30 {
+            return None;
+        }
+
+        let eps_min = self.bodies.iter().map(|b| b.softening).fold(f64::MAX, f64::min);
+        if eps_min >= f64::MAX || eps_min <= 0.0 {
+            return None;
+        }
+
+        const ETA: f64 = 0.05;
+
+        let dt_acc = ETA * (eps_min / self.last_diag.max_acc).sqrt();
+
+        let dt_jerk = if self.last_diag.jerk > 1e-30 {
+            ETA * (self.last_diag.max_acc / self.last_diag.jerk).sqrt()
+        } else {
+            f64::MAX
+        };
+
+        Some(dt_acc.min(dt_jerk).clamp(1e-9, 1e6))
+    }
+}

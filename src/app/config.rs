@@ -1,10 +1,10 @@
-use crate::physics::integrator::Integrator;
+use crate::physics::integrator::IntegratorKind;
 
 /// Runtime physics configuration — tunable constants and display unit labels.
 #[derive(Clone)]
 pub struct PhysicsConfig {
     /// Active integration algorithm.
-    pub integrator: Integrator,
+    pub integrator: IntegratorKind,
 
     // ── Force accuracy ────────────────────────────────────────────────────────
     /// Barnes–Hut opening angle θ ∈ [0.05, 1.5].
@@ -49,7 +49,7 @@ pub struct PhysicsConfig {
 impl Default for PhysicsConfig {
     fn default() -> Self {
         Self {
-            integrator: Integrator::VelocityVerlet,
+            integrator: IntegratorKind::VelocityVerlet,
             theta: 0.5,
             softening_scale: 1.0,
             g_factor: 1.0,
