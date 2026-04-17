@@ -32,7 +32,7 @@ use crate::core::metrics::Metrics;
 use crate::io::snapshot::SimSnapshot;
 use crate::core::system::System;
 use crate::render::trail_buffer::TrailBuffer;
-use crate::physics::integrator::Integrator;
+use crate::physics::integrator::IntegratorKind;
 use crate::physics::orbital::OrbitalElements;
 
 // ── Render state ──────────────────────────────────────────────────────────────
@@ -65,7 +65,7 @@ pub enum PhysicsCmd {
     SetTheta(f64),
     SetSofteningScale(f64),
     SetGFactor(f64),
-    SetIntegrator(Integrator),
+    SetIntegrator(IntegratorKind),
     SetTrailEvery(usize),
     AddBody(Body),
     AddNamedBody(NamedBody),
@@ -180,8 +180,8 @@ impl PhysicsHandle {
     pub fn theta(&self) -> f64 {
         self.metrics.theta
     }
-    pub fn integrator(&self) -> Integrator {
-        self.metrics.integrator
+    pub fn integrator_kind(&self) -> IntegratorKind {
+        self.metrics.integrator_kind
     }
     pub fn softening_scale(&self) -> f64 {
         self.softening_scale
@@ -218,8 +218,8 @@ impl PhysicsHandle {
     pub fn set_g_factor(&self, g: f64) {
         self.send(PhysicsCmd::SetGFactor(g));
     }
-    pub fn set_integrator(&self, i: Integrator) {
-        self.send(PhysicsCmd::SetIntegrator(i));
+    pub fn set_integrator(&self, kind: IntegratorKind) {
+        self.send(PhysicsCmd::SetIntegrator(kind));
     }
     pub fn set_trail_every(&self, n: usize) {
         self.send(PhysicsCmd::SetTrailEvery(n));
@@ -288,7 +288,7 @@ impl PhysicsHandle {
             theta: m.theta,
             softening_scale: self.softening_scale,
             g_factor: m.g_factor,
-            integrator: m.integrator,
+            integrator_kind: m.integrator_kind,
             trail_every: self.trail_every,
             sim_name: String::new(), // set by caller
             seed: 0,                 // set by caller

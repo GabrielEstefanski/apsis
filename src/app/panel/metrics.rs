@@ -202,12 +202,14 @@ impl SimulationApp {
             ui.label(RichText::new("integr.").size(10.5).color(TEXT_SEC));
             ui.add_space(2.0);
             ui.add(
-                egui::Label::new(RichText::new(m.integrator.label()).size(10.5).color(TEXT_DIM))
-                    .truncate(),
+                egui::Label::new(
+                    RichText::new(m.integrator_kind.label()).size(10.5).color(TEXT_DIM),
+                )
+                .truncate(),
             );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.label(
-                    RichText::new(format!("O({})", m.integrator.order()))
+                    RichText::new(format!("O({})", m.integrator_kind.order()))
                         .monospace()
                         .size(10.0)
                         .color(ACCENT),

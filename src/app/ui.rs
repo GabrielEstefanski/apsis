@@ -263,7 +263,7 @@ pub struct SimulationApp {
 impl SimulationApp {
     pub fn new(system: System) -> Self {
         let mut physics_cfg = PhysicsConfig::default();
-        physics_cfg.integrator = system.integrator();
+        physics_cfg.integrator = system.integrator_kind();
         physics_cfg.theta = system.theta();
         physics_cfg.softening_scale = system.softening_scale();
         physics_cfg.trail_every = system.trail_every();
