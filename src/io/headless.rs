@@ -44,16 +44,13 @@ pub fn run(config: &RunConfig) -> Result<(), Box<dyn std::error::Error>> {
     std::fs::create_dir_all(out_dir)?;
 
     // ── Locate template ────────────────────────────────────────────────────────
-    let entry = TEMPLATES
-        .iter()
-        .find(|e| e.name == config.preset)
-        .ok_or_else(|| {
-            format!(
-                "preset {:?} not found; available: {}",
-                config.preset,
-                TEMPLATES.iter().map(|e| e.name).collect::<Vec<_>>().join(", ")
-            )
-        })?;
+    let entry = TEMPLATES.iter().find(|e| e.name == config.preset).ok_or_else(|| {
+        format!(
+            "preset {:?} not found; available: {}",
+            config.preset,
+            TEMPLATES.iter().map(|e| e.name).collect::<Vec<_>>().join(", ")
+        )
+    })?;
 
     // ── Build system ───────────────────────────────────────────────────────────
     let template = (entry.build)(config.seed);
@@ -61,9 +58,9 @@ pub fn run(config: &RunConfig) -> Result<(), Box<dyn std::error::Error>> {
 
     let mut system = System::new(
         vec![],
-        0.6,   // θ — standard accuracy
+        0.6, // θ — standard accuracy
         config.dt,
-        32,    // max BH tree depth
+        32, // max BH tree depth
         1,
     );
     system.set_seed(config.seed);
@@ -91,11 +88,8 @@ pub fn run(config: &RunConfig) -> Result<(), Box<dyn std::error::Error>> {
 
     // Scheduled targets
     let mut next_snapshot = if config.snapshot_interval > 0.0 { 0.0 } else { f64::INFINITY };
-    let snap_interval = if config.snapshot_interval > 0.0 {
-        config.snapshot_interval
-    } else {
-        f64::INFINITY
-    };
+    let snap_interval =
+        if config.snapshot_interval > 0.0 { config.snapshot_interval } else { f64::INFINITY };
 
     let n_bodies = system.bodies().len();
     eprintln!(
