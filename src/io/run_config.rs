@@ -28,15 +28,17 @@
 
 use std::path::Path;
 
+use crate::physics::integrator::IntegratorKind;
+
 /// Fully specified parameters for a headless batch run.
 #[derive(serde::Deserialize, Debug, Clone)]
 pub struct RunConfig {
     /// Template name — must match [`TemplateEntry::name`] exactly.
     pub preset: String,
 
-    /// Integration algorithm: `"velocity_verlet"`, `"yoshida4"`, or
-    /// `"wisdom_holman"`.
-    pub integrator: String,
+    /// Integration algorithm slug — see [`IntegratorKind::slug`] for valid values.
+    #[serde(deserialize_with = "deserialize_integrator_kind")]
+    pub integrator: IntegratorKind,
 
     /// Fixed timestep (simulation units matching the preset's unit system).
     pub dt: f64,
@@ -67,4 +69,12 @@ impl RunConfig {
         let cfg: Self = toml::from_str(&text)?;
         Ok(cfg)
     }
+}
+
+fn deserialize_integrator_kind<'de, D>(d: D) -> Result<IntegratorKind, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let s = <String as serde::Deserialize>::deserialize(d)?;
+    s.parse::<IntegratorKind>().map_err(serde::de::Error::custom)
 }
