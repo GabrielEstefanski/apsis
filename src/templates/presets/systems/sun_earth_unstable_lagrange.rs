@@ -1,9 +1,9 @@
 use crate::{
-    core::materials::Material,
+    domain::materials::Material,
     templates::{Template, TemplateBody, UnitSystem, builders::circular_orbit},
 };
 
-pub fn sun_earth_unstable_lagrange() -> Template {
+pub fn sun_earth_unstable_lagrange(_seed: u64) -> Template {
     let m_sun = 1.0;
     let m_earth = 3.0e-6;
 
@@ -38,7 +38,6 @@ pub fn sun_earth_unstable_lagrange() -> Template {
                 position: Some([0.0, 0.0]),
                 velocity: [0.0, 0.0],
                 material: Material::Star,
-                spin: 0.0,
             },
             // Earth
             TemplateBody {
@@ -47,7 +46,6 @@ pub fn sun_earth_unstable_lagrange() -> Template {
                 position: Some(earth_pos),
                 velocity: earth_vel,
                 material: Material::Rocky,
-                spin: 0.0,
             },
             // L1 (unstable)
             TemplateBody {
@@ -56,7 +54,6 @@ pub fn sun_earth_unstable_lagrange() -> Template {
                 position: Some(l1_pos),
                 velocity: l1_vel,
                 material: Material::Asteroid,
-                spin: 0.0,
             },
             // L2 (unstable)
             TemplateBody {
@@ -65,7 +62,6 @@ pub fn sun_earth_unstable_lagrange() -> Template {
                 position: Some(l2_pos),
                 velocity: l2_vel,
                 material: Material::Asteroid,
-                spin: 0.0,
             },
             // L3 (unstable)
             TemplateBody {
@@ -74,7 +70,6 @@ pub fn sun_earth_unstable_lagrange() -> Template {
                 position: Some(l3_pos),
                 velocity: l3_vel,
                 material: Material::Asteroid,
-                spin: 0.0,
             },
         ],
         display_scale: 1.0,

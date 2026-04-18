@@ -7,88 +7,33 @@ reviews:
   poem: false
 
   path_filters:
-    - "!node_modules/**"
-    - "!dist/**"
-    - "!build/**"
-    - "!coverage/**"
-    - "!*.lock"
-    - "!*.min.js"
+    - "!target/**"
+    - "!Cargo.lock"
 
   path_instructions:
-    - path: "src/frontend/**"
+    - path: "**"
       instructions: |
-        This is a Vue 3 + TypeScript frontend.
-        Focus on:
-        - Component reusability
-        - Avoid large components
-        - Proper use of reactive state (ref/reactive)
-        - Avoid unnecessary watchers
-        - Separation of concerns
+        This is a Rust project.
 
-    - path: "src/backend/**"
-      instructions: |
-        This is an ASP.NET backend using Clean Architecture.
-        Focus on:
-        - Dependency Injection
-        - Separation between layers (Application, Domain, Infrastructure)
-        - Avoid business logic in controllers
-        - Proper async/await usage
-        - Avoid blocking calls
+        Follow idiomatic Rust practices:
+        - Prefer ownership and borrowing over cloning
+        - Avoid unnecessary allocations
+        - Use Result and Option properly
+        - Avoid unwrap() in production code
+        - Handle errors explicitly
+        - Prefer iterators over manual loops when appropriate
+        - Keep functions small and focused
 
-    - path: "src/shared/**"
-      instructions: |
-        Shared code must be framework-agnostic and reusable.
-        Avoid coupling with frontend or backend specifics.
+        Code quality:
+        - Follow Clippy recommendations
+        - Avoid code duplication
+        - Ensure clear and descriptive naming
+        - Avoid overly complex expressions
 
   rules:
     - focus: bugs
     - focus: performance
     - focus: readability
-    - focus: security
 
   tone: concise
-
   comment_severity_threshold: medium
-
-  collapse_walkthrough: true
-
----
-
-project:
-  description: |
-    Fullstack application using Vue 3, TypeScript and ASP.NET.
-    Follows Clean Architecture principles.
-
-  standards:
-    - Use SOLID principles
-    - Prefer composition over inheritance
-    - Avoid tight coupling
-    - Keep functions small and focused
-    - Prefer explicit types over implicit any
-    - Avoid magic numbers
-
-  naming_conventions:
-    - Use meaningful and intention-revealing names
-    - Avoid abbreviations unless widely known
-    - Boolean variables must be prefixed with is/has/can
-
----
-
-ignored_patterns:
-  - "**/*.spec.ts"
-  - "**/*.test.ts"
-  - "**/*.mock.ts"
-
----
-
-review_preferences:
-  suggest_improvements: true
-  detect_code_smells: true
-  detect_security_issues: true
-  detect_performance_issues: true
-  detect_anti_patterns: true
-
----
-
-chat:
-  auto_reply: false

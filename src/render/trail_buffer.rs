@@ -32,8 +32,8 @@
 //! body count, keeping `n_bodies × capacity` (total GPU buffer size) roughly
 //! constant across the supported simulation scales.
 
-use crate::core::body::Body;
-use crate::core::snapshot::TrailSnapshot;
+use crate::domain::body::Body;
+use crate::io::snapshot::TrailSnapshot;
 
 // ── Tuning ────────────────────────────────────────────────────────────────────
 
@@ -191,12 +191,12 @@ impl TrailBuffer {
             PositionsDirty::Columns(v) => {
                 v.push(self.head);
                 return self.advance_head();
-            }
+            },
             PositionsDirty::Clean => {
                 let mut v = Vec::with_capacity(INCREMENTAL_LIMIT);
                 v.push(self.head);
                 PositionsDirty::Columns(v)
-            }
+            },
         };
 
         self.advance_head();

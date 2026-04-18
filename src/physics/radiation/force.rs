@@ -141,10 +141,7 @@ pub fn pr_drag_acceleration(
     let a_mag = flux * params.q_pr * params.area / (params.mass * source.c);
 
     // a_PR = a_mag · (r̂ − v_rel / c)
-    [
-        a_mag * (dx * inv_r - dvx * inv_c),
-        a_mag * (dy * inv_r - dvy * inv_c),
-    ]
+    [a_mag * (dx * inv_r - dvx * inv_c), a_mag * (dy * inv_r - dvy * inv_c)]
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -155,23 +152,12 @@ mod tests {
 
     /// A minimal source at the origin with unit luminosity and c = 1.
     fn unit_source() -> RadiationSource {
-        RadiationSource {
-            x: 0.0,
-            y: 0.0,
-            vx: 0.0,
-            vy: 0.0,
-            luminosity: 1.0,
-            c: 1.0,
-        }
+        RadiationSource { x: 0.0, y: 0.0, vx: 0.0, vy: 0.0, luminosity: 1.0, c: 1.0 }
     }
 
     /// Unit radiation parameters: area = 1, mass = 1, Q_pr = 1.
     fn unit_params() -> RadiationParams {
-        RadiationParams {
-            area: 1.0,
-            mass: 1.0,
-            q_pr: 1.0,
-        }
+        RadiationParams { area: 1.0, mass: 1.0, q_pr: 1.0 }
     }
 
     // ── radiation_acceleration ────────────────────────────────────────────────
@@ -179,14 +165,8 @@ mod tests {
     #[test]
     fn rad_points_away_from_source() {
         let a = radiation_acceleration([1.0, 0.0], &unit_params(), &unit_source());
-        assert!(
-            a[0] > 0.0,
-            "radial component should be positive (away from source)"
-        );
-        assert!(
-            a[1].abs() < 1e-15,
-            "no tangential component for body on x-axis"
-        );
+        assert!(a[0] > 0.0, "radial component should be positive (away from source)");
+        assert!(a[1].abs() < 1e-15, "no tangential component for body on x-axis");
     }
 
     #[test]
@@ -194,18 +174,12 @@ mod tests {
         let a1 = radiation_acceleration([1.0, 0.0], &unit_params(), &unit_source());
         let a2 = radiation_acceleration([2.0, 0.0], &unit_params(), &unit_source());
         let ratio = a1[0] / a2[0];
-        assert!(
-            (ratio - 4.0).abs() < 1e-12,
-            "expected r⁻² falloff (ratio = 4), got {ratio}"
-        );
+        assert!((ratio - 4.0).abs() < 1e-12, "expected r⁻² falloff (ratio = 4), got {ratio}");
     }
 
     #[test]
     fn rad_scales_linearly_with_luminosity() {
-        let s2 = RadiationSource {
-            luminosity: 2.0,
-            ..unit_source()
-        };
+        let s2 = RadiationSource { luminosity: 2.0, ..unit_source() };
         let a1 = radiation_acceleration([1.0, 0.0], &unit_params(), &unit_source());
         let a2 = radiation_acceleration([1.0, 0.0], &unit_params(), &s2);
         assert!((a2[0] / a1[0] - 2.0).abs() < 1e-12);
@@ -213,10 +187,7 @@ mod tests {
 
     #[test]
     fn rad_scales_linearly_with_q_pr() {
-        let p2 = RadiationParams {
-            q_pr: 2.0,
-            ..unit_params()
-        };
+        let p2 = RadiationParams { q_pr: 2.0, ..unit_params() };
         let a1 = radiation_acceleration([1.0, 0.0], &unit_params(), &unit_source());
         let a2 = radiation_acceleration([1.0, 0.0], &p2, &unit_source());
         assert!((a2[0] / a1[0] - 2.0).abs() < 1e-12);
@@ -224,10 +195,7 @@ mod tests {
 
     #[test]
     fn rad_zero_luminosity_gives_zero() {
-        let s = RadiationSource {
-            luminosity: 0.0,
-            ..unit_source()
-        };
+        let s = RadiationSource { luminosity: 0.0, ..unit_source() };
         let a = radiation_acceleration([1.0, 0.0], &unit_params(), &s);
         assert_eq!(a, [0.0, 0.0]);
     }
@@ -263,10 +231,7 @@ mod tests {
         // Body at (1, 0) moving in +y (circular orbit direction).
         // The tangential drag component should be in −y.
         let a = pr_drag_acceleration([1.0, 0.0], [0.0, 1.0], &unit_params(), &unit_source());
-        assert!(
-            a[1] < 0.0,
-            "PR drag should decelerate the tangential velocity"
-        );
+        assert!(a[1] < 0.0, "PR drag should decelerate the tangential velocity");
     }
 
     #[test]
@@ -289,10 +254,7 @@ mod tests {
         //   (a) body at vel = +0.5, source at rest
         //   (b) body at rest,        source at vel = −0.5
         // Both yield dvx = vel[0] − source.vx = 0.5 − 0 = 0 − (−0.5) = 0.5.
-        let s_moving_neg = RadiationSource {
-            vx: -0.5,
-            ..unit_source()
-        };
+        let s_moving_neg = RadiationSource { vx: -0.5, ..unit_source() };
         let a_body_moving =
             pr_drag_acceleration([1.0, 0.0], [0.5, 0.0], &unit_params(), &unit_source());
         let a_source_moving_neg =
@@ -306,10 +268,7 @@ mod tests {
 
     #[test]
     fn pr_zero_luminosity_gives_zero() {
-        let s = RadiationSource {
-            luminosity: 0.0,
-            ..unit_source()
-        };
+        let s = RadiationSource { luminosity: 0.0, ..unit_source() };
         let a = pr_drag_acceleration([1.0, 0.0], [0.5, 0.3], &unit_params(), &s);
         assert_eq!(a, [0.0, 0.0]);
     }

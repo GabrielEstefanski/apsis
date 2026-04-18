@@ -27,12 +27,12 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use crate::core::adaptive::DtMode;
+use crate::domain::body::{Body, NamedBody};
 use crate::core::metrics::Metrics;
-use crate::core::snapshot::SimSnapshot;
+use crate::io::snapshot::SimSnapshot;
 use crate::core::system::System;
-use crate::core::trail_buffer::TrailBuffer;
-use crate::core::body::{Body, NamedBody};
-use crate::physics::integrator::Integrator;
+use crate::render::trail_buffer::TrailBuffer;
+use crate::physics::integrator::IntegratorKind;
 use crate::physics::orbital::OrbitalElements;
 
 // ── Render state ──────────────────────────────────────────────────────────────
@@ -50,6 +50,7 @@ pub struct RenderState {
     pub orbital_elements: Vec<Option<OrbitalElements>>,
     pub softening_scale: f64,
     pub trail_every: usize,
+    pub seed: u64,
 }
 
 // ── Commands ──────────────────────────────────────────────────────────────────
@@ -62,10 +63,12 @@ pub enum PhysicsCmd {
     SetPaused(bool),
     SetDt(f64),
     SetStepsPerFrame(u32),
+    SetExactThreshold(usize),
+    SetSeed(u64),
     SetTheta(f64),
     SetSofteningScale(f64),
     SetGFactor(f64),
-    SetIntegrator(Integrator),
+    SetIntegrator(IntegratorKind),
     SetTrailEvery(usize),
     AddBody(Body),
     AddNamedBody(NamedBody),
@@ -180,8 +183,8 @@ impl PhysicsHandle {
     pub fn theta(&self) -> f64 {
         self.metrics.theta
     }
-    pub fn integrator(&self) -> Integrator {
-        self.metrics.integrator
+    pub fn integrator_kind(&self) -> IntegratorKind {
+        self.metrics.integrator_kind
     }
     pub fn softening_scale(&self) -> f64 {
         self.softening_scale
@@ -209,6 +212,15 @@ impl PhysicsHandle {
     pub fn set_dt(&self, dt: f64) {
         self.send(PhysicsCmd::SetDt(dt));
     }
+    pub fn set_exact_threshold(&self, n: usize) {
+        self.send(PhysicsCmd::SetExactThreshold(n));
+    }
+    pub fn set_seed(&self, seed: u64) {
+        self.send(PhysicsCmd::SetSeed(seed));
+    }
+    pub fn seed(&self) -> u64 {
+        self.render.lock().unwrap().seed
+    }
     pub fn set_theta(&self, theta: f64) {
         self.send(PhysicsCmd::SetTheta(theta));
     }
@@ -218,8 +230,8 @@ impl PhysicsHandle {
     pub fn set_g_factor(&self, g: f64) {
         self.send(PhysicsCmd::SetGFactor(g));
     }
-    pub fn set_integrator(&self, i: Integrator) {
-        self.send(PhysicsCmd::SetIntegrator(i));
+    pub fn set_integrator(&self, kind: IntegratorKind) {
+        self.send(PhysicsCmd::SetIntegrator(kind));
     }
     pub fn set_trail_every(&self, n: usize) {
         self.send(PhysicsCmd::SetTrailEvery(n));
@@ -278,7 +290,7 @@ impl PhysicsHandle {
     /// could time out when the physics thread was mid-batch with high
     /// `steps_per_frame`, producing an empty snapshot with 0 bodies / 0 steps.)
     pub fn to_snapshot(&self) -> SimSnapshot {
-        use crate::core::snapshot::BodyRecord;
+        use crate::io::snapshot::BodyRecord;
         let m = self.metrics;
         SimSnapshot {
             save_id: 0, // set by caller
@@ -288,7 +300,7 @@ impl PhysicsHandle {
             theta: m.theta,
             softening_scale: self.softening_scale,
             g_factor: m.g_factor,
-            integrator: m.integrator,
+            integrator_kind: m.integrator_kind,
             trail_every: self.trail_every,
             sim_name: String::new(), // set by caller
             seed: 0,                 // set by caller
@@ -318,6 +330,7 @@ pub fn spawn(mut system: System, paused: bool) -> PhysicsHandle {
         orbital_elements: system.orbital_elements().to_vec(),
         softening_scale: system.softening_scale(),
         trail_every: system.trail_every(),
+        seed: system.seed(),
     };
 
     let render = Arc::new(Mutex::new(initial.clone()));
@@ -373,6 +386,7 @@ fn publish_full(system: &System, rs: &mut RenderState) {
     rs.orbital_elements = system.orbital_elements().to_vec();
     rs.softening_scale = system.softening_scale();
     rs.trail_every = system.trail_every();
+    rs.seed = system.seed();
 }
 
 // ── Physics loop ──────────────────────────────────────────────────────────────
@@ -392,9 +406,7 @@ fn physics_loop(
     let sample_interval: f64 = 0.01;
 
     let full_interval = Duration::from_millis(16);
-    let mut last_full = Instant::now()
-        .checked_sub(full_interval)
-        .unwrap_or_else(Instant::now);
+    let mut last_full = Instant::now().checked_sub(full_interval).unwrap_or_else(Instant::now);
 
     let pos_interval = Duration::from_millis(8);
     let mut last_pos = Instant::now();
@@ -413,83 +425,91 @@ fn physics_loop(
                 PhysicsCmd::SetDt(dt) => {
                     system.set_dt(dt);
                     needs_full_publish = true;
-                }
+                },
+                PhysicsCmd::SetExactThreshold(n) => {
+                    system.set_exact_threshold(n);
+                    needs_full_publish = true;
+                },
+                PhysicsCmd::SetSeed(s) => {
+                    system.set_seed(s);
+                    needs_full_publish = true;
+                },
                 PhysicsCmd::SetTheta(theta) => {
                     system.set_theta(theta);
                     needs_full_publish = true;
-                }
+                },
                 PhysicsCmd::SetSofteningScale(s) => {
                     system.set_softening_scale(s);
                     needs_full_publish = true;
-                }
+                },
                 PhysicsCmd::SetGFactor(g) => {
                     system.set_g_factor(g);
                     needs_full_publish = true;
-                }
+                },
                 PhysicsCmd::SetIntegrator(i) => {
                     system.set_integrator(i);
                     needs_full_publish = true;
-                }
+                },
                 PhysicsCmd::SetTrailEvery(n) => {
                     system.set_trail_every(n);
                     needs_full_publish = true;
-                }
+                },
                 PhysicsCmd::AddBody(b) => {
                     system.add_body(b);
                     needs_full_publish = true;
-                }
+                },
                 PhysicsCmd::AddNamedBody(named_body) => {
                     system.add_named_body(named_body);
                     needs_full_publish = true;
-                }
+                },
                 PhysicsCmd::AddBodies(bodies) => {
                     loading.store(true, Ordering::Relaxed);
                     system.add_bodies(bodies);
                     loading.store(false, Ordering::Relaxed);
                     needs_full_publish = true;
-                }
+                },
                 PhysicsCmd::AddNamedBodies(bodies) => {
                     loading.store(true, Ordering::Relaxed);
                     system.add_named_bodies(bodies);
                     loading.store(false, Ordering::Relaxed);
                     needs_full_publish = true;
-                }
+                },
                 PhysicsCmd::RemoveBody(idx) => {
                     system.remove_body(idx);
                     needs_full_publish = true;
-                }
+                },
                 PhysicsCmd::UpdateBody(idx, b) => {
                     system.update_body(idx, b);
                     needs_full_publish = true;
-                }
+                },
                 PhysicsCmd::SetName(idx, name) => {
                     system.set_name(idx, name);
                     needs_full_publish = true;
-                }
+                },
                 PhysicsCmd::LoadBodies(bodies) => {
                     loading.store(true, Ordering::Relaxed);
                     system.load_bodies(bodies);
                     loading.store(false, Ordering::Relaxed);
                     needs_full_publish = true;
-                }
+                },
                 PhysicsCmd::ZeroComVelocity => {
                     system.zero_com_velocity();
                     needs_full_publish = true;
-                }
+                },
                 PhysicsCmd::SetDtMode(mode) => {
                     system.set_dt_mode(mode);
                     needs_full_publish = true;
-                }
+                },
                 PhysicsCmd::SetAdaptiveTheta(enabled) => {
                     system.set_adaptive_theta(enabled);
                     needs_full_publish = true;
-                }
+                },
                 PhysicsCmd::RestoreSnapshot(snap) => {
                     loading.store(true, Ordering::Relaxed);
                     system.restore_from_snapshot(&snap);
                     loading.store(false, Ordering::Relaxed);
                     needs_full_publish = true;
-                }
+                },
             }
         }
 

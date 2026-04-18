@@ -1,9 +1,9 @@
 use crate::{
-    core::materials::Material,
+    domain::materials::Material,
     templates::{Template, TemplateBody, UnitSystem},
 };
 
-pub fn three_body_lagrange_triangle() -> Template {
+pub fn three_body_lagrange_triangle(_seed: u64) -> Template {
     let m: f64 = 1.0;
     let r: f64 = 1.0;
 
@@ -37,7 +37,6 @@ pub fn three_body_lagrange_triangle() -> Template {
             position: Some(p1),
             velocity: scale(norm(perp(p1)), v),
             material: Material::Rocky,
-            spin: 0.0,
         },
         TemplateBody {
             name: Some("Body 2"),
@@ -45,7 +44,6 @@ pub fn three_body_lagrange_triangle() -> Template {
             position: Some(p2),
             velocity: scale(norm(perp(p2)), v),
             material: Material::Rocky,
-            spin: 0.0,
         },
         TemplateBody {
             name: Some("Body 3"),
@@ -53,7 +51,6 @@ pub fn three_body_lagrange_triangle() -> Template {
             position: Some(p3),
             velocity: scale(norm(perp(p3)), v),
             material: Material::Rocky,
-            spin: 0.0,
         },
     ];
 

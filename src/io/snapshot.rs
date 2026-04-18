@@ -6,7 +6,7 @@
 //!
 //! ```text
 //! [4]  magic         = b"GRAV"
-//! [2]  schema_ver    u16 LE   — 1, 2, 3, 4, or 5
+//! [2]  schema_ver    u16 LE   — 1, 2, 3, 4, 5, or 6
 //! [8]  save_id       u64 LE   — unix-millis at save time (unique, sortable)
 //! [8]  t             f64 LE   — simulated time
 //! [8]  steps         u64 LE
@@ -23,11 +23,11 @@
 //! [8]  seed          u64 LE   — reproducibility seed
 //! ----------------
 //! [4]  n_bodies      u32 LE
-//! per body (84 bytes):
+//! per body (68 bytes, v6+; 84 bytes in v1–5):
 //!   [8] x  [8] y  [8] vx  [8] vy
 //!   [8] mass  [8] density  [8] softening  [8] physical_radius
-//!   [8] omega_z  [8] moment_inertia
 //!   [1] material_id  [3] color_rgb
+//! (v1–5 stored two extra f64s here: omega_z + moment_inertia — read and discarded on load)
 //! v2+ names section: n_bodies × (u32 len + UTF-8 bytes)
 //! --- v4+ trail section ---
 //! [1]  trail_has     u8       — 0=no trail, 1=trail present
@@ -52,6 +52,7 @@
 //! | 3   | Added `sim_name` to header |
 //! | 4   | Added `seed` field and trail section |
 //! | 5   | `integrator` byte extended: `2 = WisdomHolman` |
+//! | 6   | Removed `omega_z` and `moment_inertia` from per-body record |
 //!
 //! Older files (ver < 5) round-trip cleanly; the `WisdomHolman` variant
 //! simply cannot be expressed in them and defaults to `VelocityVerlet` on
@@ -61,14 +62,14 @@ use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::core::body::Body;
-use crate::core::materials::Material;
-use crate::physics::integrator::Integrator;
+use crate::domain::body::Body;
+use crate::domain::materials::Material;
+use crate::physics::integrator::IntegratorKind;
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 pub const MAGIC: [u8; 4] = *b"GRAV";
-pub const SCHEMA_VERSION: u16 = 5;
+pub const SCHEMA_VERSION: u16 = 6;
 
 // ── Snapshot ──────────────────────────────────────────────────────────────────
 
@@ -94,7 +95,7 @@ pub struct SimSnapshot {
     /// Gravitational constant multiplier `G_eff = G₀ · g_factor`.
     pub g_factor: f64,
     /// Active symplectic integrator.
-    pub integrator: Integrator,
+    pub integrator_kind: IntegratorKind,
     /// Trail ring-buffer sampling interval (frames between recorded points).
     pub trail_every: usize,
     /// User-assigned simulation label (v3+). Empty string for older saves.
@@ -124,8 +125,6 @@ pub struct BodyRecord {
     pub density: f64,
     pub softening: f64,
     pub physical_radius: f64,
-    pub omega_z: f64,
-    pub moment_inertia: f64,
     pub material: Material,
     pub color: [u8; 3],
 }
@@ -142,8 +141,6 @@ impl BodyRecord {
             density: b.density,
             softening: b.softening,
             physical_radius: b.physical_radius,
-            omega_z: b.omega_z,
-            moment_inertia: b.moment_inertia,
             material: b.material,
             color: b.color,
         }
@@ -155,14 +152,12 @@ impl BodyRecord {
         b.density = self.density;
         b.softening = self.softening;
         b.physical_radius = self.physical_radius;
-        b.omega_z = self.omega_z;
-        b.moment_inertia = self.moment_inertia;
         b.color = self.color;
         b
     }
 }
 
-/// Serialised state of a [`TrailBuffer`](crate::core::trail_buffer::TrailBuffer).
+/// Serialised state of a [`TrailBuffer`](crate::render::trail_buffer::TrailBuffer).
 ///
 /// The `positions` array is stored column-major:
 /// `positions[col * n_bodies + body_idx]`, matching the in-memory layout of
@@ -207,11 +202,7 @@ pub struct SaveEntry {
 impl SaveEntry {
     /// Returns the simulation name, or `"Unnamed"` if none was set.
     pub fn display_name(&self) -> &str {
-        if self.sim_name.is_empty() {
-            "Unnamed"
-        } else {
-            &self.sim_name
-        }
+        if self.sim_name.is_empty() { "Unnamed" } else { &self.sim_name }
     }
 
     /// Returns a human-readable UTC timestamp derived from [`save_id`](Self::save_id).
@@ -290,31 +281,31 @@ fn rf64(r: &mut impl Read) -> io::Result<f64> {
     Ok(f64::from_le_bytes(b))
 }
 
-// ── Integrator codec ──────────────────────────────────────────────────────────
+// ── IntegratorKind codec ──────────────────────────────────────────────────────────
 
-/// Encodes an [`Integrator`] as a single byte for on-disk storage.
+/// Encodes an [`IntegratorKind`] as a single byte for on-disk storage.
 ///
 /// | Byte | Variant |
 /// |------|---------|
 /// | 0    | `VelocityVerlet` |
 /// | 1    | `Yoshida4` |
 /// | 2    | `WisdomHolman` (v5+) |
-fn integrator_to_u8(i: Integrator) -> u8 {
+fn integrator_to_u8(i: IntegratorKind) -> u8 {
     match i {
-        Integrator::VelocityVerlet => 0,
-        Integrator::Yoshida4 => 1,
-        Integrator::WisdomHolman => 2,
+        IntegratorKind::VelocityVerlet => 0,
+        IntegratorKind::Yoshida4 => 1,
+        IntegratorKind::WisdomHolman => 2,
     }
 }
 
-/// Decodes an [`Integrator`] from a single byte.
+/// Decodes an [`IntegratorKind`] from a single byte.
 ///
 /// Unknown values fall back to `VelocityVerlet` for forward compatibility.
-fn u8_to_integrator(v: u8) -> Integrator {
+fn u8_to_integrator(v: u8) -> IntegratorKind {
     match v {
-        1 => Integrator::Yoshida4,
-        2 => Integrator::WisdomHolman,
-        _ => Integrator::VelocityVerlet,
+        1 => IntegratorKind::Yoshida4,
+        2 => IntegratorKind::WisdomHolman,
+        _ => IntegratorKind::VelocityVerlet,
     }
 }
 
@@ -352,10 +343,7 @@ fn u8_to_material(v: u8) -> Material {
 // ── Snapshot I/O ──────────────────────────────────────────────────────────────
 
 fn unix_millis() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
+    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
 }
 
 impl SimSnapshot {
@@ -402,7 +390,7 @@ impl SimSnapshot {
         wf64(&mut w, self.theta)?;
         wf64(&mut w, self.softening_scale)?;
         wf64(&mut w, self.g_factor)?;
-        wu8(&mut w, integrator_to_u8(self.integrator))?;
+        wu8(&mut w, integrator_to_u8(self.integrator_kind))?;
         wu32(&mut w, self.trail_every as u32)?;
 
         // v3: simulation name
@@ -424,8 +412,6 @@ impl SimSnapshot {
             wf64(&mut w, b.density)?;
             wf64(&mut w, b.softening)?;
             wf64(&mut w, b.physical_radius)?;
-            wf64(&mut w, b.omega_z)?;
-            wf64(&mut w, b.moment_inertia)?;
             wu8(&mut w, material_to_u8(b.material))?;
             w.write_all(&b.color)?;
         }
@@ -449,7 +435,7 @@ impl SimSnapshot {
                     wf32(&mut w, pos[0])?;
                     wf32(&mut w, pos[1])?;
                 }
-            }
+            },
             None => wu8(&mut w, 0)?,
         }
 
@@ -458,8 +444,8 @@ impl SimSnapshot {
 
     /// Deserialises a snapshot from a `.grav` file.
     ///
-    /// Supports all schema versions 1–[`SCHEMA_VERSION`]. Fields absent in
-    /// older versions are set to zero / empty defaults.
+    /// Supports all schema versions 1–[`SCHEMA_VERSION`]. Fields absent or
+    /// removed in older/newer versions are defaulted or discarded.
     pub fn load_from(path: &Path) -> io::Result<Self> {
         use std::io::BufReader;
         let mut r = BufReader::new(std::fs::File::open(path)?);
@@ -467,10 +453,7 @@ impl SimSnapshot {
         let mut magic = [0u8; 4];
         r.read_exact(&mut magic)?;
         if magic != MAGIC {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "not a .grav file",
-            ));
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "not a .grav file"));
         }
 
         let ver = ru16(&mut r)?;
@@ -490,7 +473,7 @@ impl SimSnapshot {
         let g_factor = rf64(&mut r)?;
         let mut integ_byte = [0u8; 1];
         r.read_exact(&mut integ_byte)?;
-        let integrator = u8_to_integrator(integ_byte[0]);
+        let integrator_kind = u8_to_integrator(integ_byte[0]);
         let trail_every = ru32(&mut r)? as usize;
 
         let sim_name = if ver >= 3 {
@@ -515,8 +498,11 @@ impl SimSnapshot {
             let density = rf64(&mut r)?;
             let softening = rf64(&mut r)?;
             let physical_radius = rf64(&mut r)?;
-            let omega_z = rf64(&mut r)?;
-            let moment_inertia = rf64(&mut r)?;
+            if ver < 6 {
+                // v1–5 stored omega_z + moment_inertia here — read and discard
+                let _ = rf64(&mut r)?;
+                let _ = rf64(&mut r)?;
+            }
             let mut mat_byte = [0u8; 1];
             r.read_exact(&mut mat_byte)?;
             let material = u8_to_material(mat_byte[0]);
@@ -532,8 +518,6 @@ impl SimSnapshot {
                 density,
                 softening,
                 physical_radius,
-                omega_z,
-                moment_inertia,
                 material,
                 color,
             });
@@ -565,13 +549,7 @@ impl SimSnapshot {
                 for _ in 0..total {
                     positions.push([rf32(&mut r)?, rf32(&mut r)?]);
                 }
-                Some(TrailSnapshot {
-                    n_bodies: tn,
-                    capacity: cap,
-                    head: hd,
-                    len: ln,
-                    positions,
-                })
+                Some(TrailSnapshot { n_bodies: tn, capacity: cap, head: hd, len: ln, positions })
             } else {
                 None
             }
@@ -587,7 +565,7 @@ impl SimSnapshot {
             theta,
             softening_scale,
             g_factor,
-            integrator,
+            integrator_kind,
             trail_every,
             sim_name,
             seed,
@@ -608,10 +586,7 @@ impl SimSnapshot {
         let mut magic = [0u8; 4];
         r.read_exact(&mut magic)?;
         if magic != MAGIC {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "not a .grav file",
-            ));
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "not a .grav file"));
         }
 
         let ver = ru16(&mut r)?;
@@ -636,15 +611,7 @@ impl SimSnapshot {
 
         let n_bodies = ru32(&mut r)?;
 
-        Ok(SaveEntry {
-            path: path.to_owned(),
-            save_id,
-            t,
-            steps,
-            n_bodies,
-            sim_name,
-            seed,
-        })
+        Ok(SaveEntry { path: path.to_owned(), save_id, t, steps, n_bodies, sim_name, seed })
     }
 }
 

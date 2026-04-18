@@ -1,0 +1,34 @@
+# Example run.toml — copy to run.toml and edit as needed.
+# Run with: gravity-sim --config run.toml
+
+# Template name (must match exactly one entry in the template catalog).
+# Available presets: Star, Brown Dwarf, Gas Giant, Rocky Planet,
+#   Binary Stars, Star + Comp., Solar System, TRAPPIST-1, Kepler-36,
+#   Alpha Centauri AB, HD 80606 System, Sun–Earth L4/L5, Sun–Earth L1/L2/L3,
+#   Jupiter Trojans, Hierarchical,
+#   3-Body Chaotic Ejection, 3-Body Figure Eight, 3-Body Lagrange Triangle
+preset = "Solar System"
+
+# Integration algorithm: velocity_verlet | yoshida4 | wisdom_holman
+integrator = "yoshida4"
+
+# Fixed timestep (in simulation units — AU/yr for solar-system presets).
+dt = 0.001
+
+# Total simulated time to advance.
+duration = 100.0
+
+# Simulated time between .grav snapshot saves (0 = disable).
+snapshot_interval = 10.0
+
+# Simulated time between CSV data rows (0 = disable).
+csv_interval = 0.1
+
+# Reproducibility seed (0 = OS entropy / non-deterministic).
+seed = 42
+
+# Output directory (created automatically).
+out_dir = "out/solar-run"
+
+# Label embedded in snapshot sim_name and CSV metadata.
+sim_name = "solar-run-01"

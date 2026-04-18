@@ -1,7 +1,7 @@
 use bytemuck::{Pod, Zeroable};
 use std::mem::size_of;
 
-use crate::core::trail_buffer::TrailBuffer;
+use crate::render::trail_buffer::TrailBuffer;
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -142,18 +142,9 @@ impl TrailRenderer {
             label: Some("trail::bg"),
             layout: &bind_group_layout,
             entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: pos_buf.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: color_buf.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: state_buf.as_entire_binding(),
-                },
+                wgpu::BindGroupEntry { binding: 0, resource: pos_buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: color_buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 2, resource: state_buf.as_entire_binding() },
             ],
         });
 
@@ -215,10 +206,7 @@ impl TrailRenderer {
                 label: Some("trail::bg"),
                 layout: &self.bind_group_layout,
                 entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: self.pos_buf.as_entire_binding(),
-                    },
+                    wgpu::BindGroupEntry { binding: 0, resource: self.pos_buf.as_entire_binding() },
                     wgpu::BindGroupEntry {
                         binding: 1,
                         resource: self.color_buf.as_entire_binding(),
@@ -245,7 +233,11 @@ impl TrailRenderer {
             for step in 0..delta as u32 {
                 let col = (first_col + step) % cap;
                 let offset = col as u64 * col_bytes;
-                queue.write_buffer(&self.pos_buf, offset, bytemuck::cast_slice(trail.column_slice(col)));
+                queue.write_buffer(
+                    &self.pos_buf,
+                    offset,
+                    bytemuck::cast_slice(trail.column_slice(col)),
+                );
             }
         }
 

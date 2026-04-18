@@ -2,11 +2,11 @@ use crate::app::config::PhysicsConfig;
 use crate::app::render_hints::{BodyRenderHints, compute_render_hints};
 use crate::app::theme::{BG, apply_visuals};
 use crate::core::physics_thread::{PhysicsHandle, spawn as spawn_physics};
-use crate::core::recorder::SimRecorder;
-use crate::core::snapshot::{SaveEntry, SimSnapshot, list_saves};
 use crate::core::system::System;
-use crate::core::body::Body;
-use crate::core::materials::Material;
+use crate::domain::body::Body;
+use crate::domain::materials::Material;
+use crate::io::recorder::SimRecorder;
+use crate::io::snapshot::{SaveEntry, SimSnapshot, list_saves};
 use crate::render::{TrailRenderer, WgpuBackend};
 use crate::templates::{Template, UnitSystem};
 use std::sync::{Arc, Mutex};
@@ -119,7 +119,7 @@ impl BodyForm {
             self.vx.parse().ok()?,
             self.vy.parse().ok()?,
             mass,
-            crate::core::materials::Material::Rocky,
+            crate::domain::materials::Material::Rocky,
         );
 
         b.density = density;
@@ -263,7 +263,7 @@ pub struct SimulationApp {
 impl SimulationApp {
     pub fn new(system: System) -> Self {
         let mut physics_cfg = PhysicsConfig::default();
-        physics_cfg.integrator = system.integrator();
+        physics_cfg.integrator = system.integrator_kind();
         physics_cfg.theta = system.theta();
         physics_cfg.softening_scale = system.softening_scale();
         physics_cfg.trail_every = system.trail_every();
@@ -385,13 +385,17 @@ impl SimulationApp {
             // Suppress noise from the very first steps before the system stabilises.
             if m.steps > 10 && m.total_energy.abs() > 1e-30 {
                 let ae = m.rel_energy_error.abs();
-                if ae > self.energy_drift_peak { self.energy_drift_peak = ae; }
+                if ae > self.energy_drift_peak {
+                    self.energy_drift_peak = ae;
+                }
             }
-            let lz_trivial = m.angular_momentum_z.abs() < 1e-10
-                || m.rel_angular_momentum_error.abs() > 1e3;
+            let lz_trivial =
+                m.angular_momentum_z.abs() < 1e-10 || m.rel_angular_momentum_error.abs() > 1e3;
             if m.steps > 10 && !lz_trivial {
                 let alz = m.rel_angular_momentum_error.abs();
-                if alz > self.lz_drift_peak { self.lz_drift_peak = alz; }
+                if alz > self.lz_drift_peak {
+                    self.lz_drift_peak = alz;
+                }
             }
         }
 
@@ -400,12 +404,8 @@ impl SimulationApp {
             let t = self.system.t();
             if rec.should_record(t) {
                 let metrics = self.system.metrics();
-                let _ = rec.record(
-                    t,
-                    self.system.bodies(),
-                    &metrics,
-                    self.system.orbital_elements(),
-                );
+                let _ =
+                    rec.record(t, self.system.bodies(), &metrics, self.system.orbital_elements());
             }
         }
 
@@ -418,16 +418,26 @@ impl SimulationApp {
         }
 
         // ── Global keyboard shortcuts ─────────────────────────────────────────
-        let (ctrl_z, space, key_f, key_h) = ctx.input_mut(|i| (
-            i.consume_key(egui::Modifiers::CTRL, egui::Key::Z),
-            i.consume_key(egui::Modifiers::NONE, egui::Key::Space),
-            i.consume_key(egui::Modifiers::NONE, egui::Key::F),
-            i.consume_key(egui::Modifiers::NONE, egui::Key::H),
-        ));
-        if ctrl_z  { self.perform_undo(); }
-        if space   { self.paused = !self.paused; }
-        if key_f   { self.fit_to_view(); }
-        if key_h   { self.show_shortcuts_modal = !self.show_shortcuts_modal; }
+        let (ctrl_z, space, key_f, key_h) = ctx.input_mut(|i| {
+            (
+                i.consume_key(egui::Modifiers::CTRL, egui::Key::Z),
+                i.consume_key(egui::Modifiers::NONE, egui::Key::Space),
+                i.consume_key(egui::Modifiers::NONE, egui::Key::F),
+                i.consume_key(egui::Modifiers::NONE, egui::Key::H),
+            )
+        });
+        if ctrl_z {
+            self.perform_undo();
+        }
+        if space {
+            self.paused = !self.paused;
+        }
+        if key_f {
+            self.fit_to_view();
+        }
+        if key_h {
+            self.show_shortcuts_modal = !self.show_shortcuts_modal;
+        }
 
         self.draw_toolbar(&ctx);
         self.draw_panel(&ctx);
@@ -437,11 +447,9 @@ impl SimulationApp {
         self.draw_settings_modal(&ctx);
         self.draw_name_prompt(&ctx);
 
-        egui::CentralPanel::default()
-            .frame(egui::Frame::NONE.fill(BG))
-            .show(&ctx, |ui| {
-                self.draw_canvas(ui);
-            });
+        egui::CentralPanel::default().frame(egui::Frame::NONE.fill(BG)).show(&ctx, |ui| {
+            self.draw_canvas(ui);
+        });
 
         if !self.paused {
             // Running: repaint every frame to keep the canvas live.
@@ -484,14 +492,16 @@ impl SimulationApp {
             Ok(p) => {
                 self.last_save_instant = std::time::Instant::now();
                 Ok(p)
-            }
+            },
             Err(e) => Err(e.to_string()),
         }
     }
 
     /// Draw the "Name this simulation" prompt window.
     pub(super) fn draw_name_prompt(&mut self, ctx: &egui::Context) {
-        if !self.show_name_prompt { return; }
+        if !self.show_name_prompt {
+            return;
+        }
 
         egui::Window::new("Name this simulation")
             .id(egui::Id::new("name_prompt"))
@@ -516,25 +526,31 @@ impl SimulationApp {
                 let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                 ui.horizontal(|ui| {
                     let confirmed = enter
-                        || ui.add(
+                        || ui
+                            .add(
+                                egui::Button::new(
+                                    egui::RichText::new("Save")
+                                        .size(10.5)
+                                        .color(crate::app::theme::SUCCESS),
+                                )
+                                .fill(egui::Color32::TRANSPARENT)
+                                .stroke(egui::Stroke::new(1.0, crate::app::theme::SUCCESS))
+                                .min_size(egui::vec2(60.0, 22.0)),
+                            )
+                            .clicked();
+
+                    let skipped = ui
+                        .add(
                             egui::Button::new(
-                                egui::RichText::new("Save").size(10.5)
-                                    .color(crate::app::theme::SUCCESS),
+                                egui::RichText::new("Skip")
+                                    .size(10.5)
+                                    .color(crate::app::theme::TEXT_DIM),
                             )
                             .fill(egui::Color32::TRANSPARENT)
-                            .stroke(egui::Stroke::new(1.0, crate::app::theme::SUCCESS))
-                            .min_size(egui::vec2(60.0, 22.0)),
-                        ).clicked();
-
-                    let skipped = ui.add(
-                        egui::Button::new(
-                            egui::RichText::new("Skip").size(10.5)
-                                .color(crate::app::theme::TEXT_DIM),
+                            .stroke(egui::Stroke::new(0.5, crate::app::theme::BORDER))
+                            .min_size(egui::vec2(48.0, 22.0)),
                         )
-                        .fill(egui::Color32::TRANSPARENT)
-                        .stroke(egui::Stroke::new(0.5, crate::app::theme::BORDER))
-                        .min_size(egui::vec2(48.0, 22.0)),
-                    ).clicked();
+                        .clicked();
 
                     if confirmed || skipped {
                         let name = self.pending_name_input.trim().to_owned();
@@ -543,9 +559,8 @@ impl SimulationApp {
                         // Now that we have a name, complete the deferred save.
                         if let Ok(_) = self.do_save_named() {
                             if self.show_save_modal {
-                                self.save_modal_entries = list_saves(
-                                    std::path::Path::new(&self.save_dir),
-                                );
+                                self.save_modal_entries =
+                                    list_saves(std::path::Path::new(&self.save_dir));
                             }
                         }
                     }
@@ -588,13 +603,13 @@ impl SimulationApp {
                             self.selection_form = None;
                         }
                     }
-                }
+                },
                 UndoRecord::RemovedBody { body, name } => {
                     // The body will land at index `bodies().len()` after the add.
                     let future_idx = self.system.bodies().len();
                     self.system.add_body(body);
                     self.system.set_name(future_idx, name);
-                }
+                },
                 UndoRecord::EditedBody { idx, old_body, old_name } => {
                     self.system.update_body(idx, old_body);
                     self.system.set_name(idx, old_name.clone());
@@ -602,7 +617,7 @@ impl SimulationApp {
                     if self.selected_body == Some(idx) {
                         self.selection_form = Some(SelectionForm::from_body(&old_body, &old_name));
                     }
-                }
+                },
             }
         }
     }

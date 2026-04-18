@@ -1,4 +1,4 @@
-use crate::core::body::Body;
+use crate::domain::body::Body;
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SimulationDiagnostics {
@@ -14,9 +14,7 @@ pub struct DiagnosticsComputer {
 
 impl DiagnosticsComputer {
     pub fn new() -> Self {
-        Self {
-            last_acc: Vec::new(),
-        }
+        Self { last_acc: Vec::new() }
     }
 
     pub fn compute(
@@ -56,10 +54,6 @@ impl DiagnosticsComputer {
         }
         self.last_acc.copy_from_slice(acc);
 
-        SimulationDiagnostics {
-            max_acc,
-            jerk: max_jerk,
-            max_vel,
-        }
+        SimulationDiagnostics { max_acc, jerk: max_jerk, max_vel }
     }
 }
