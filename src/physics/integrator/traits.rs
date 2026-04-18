@@ -93,6 +93,32 @@ impl IntegratorKind {
         IntegratorKind::Yoshida4,
         IntegratorKind::WisdomHolman,
     ];
+
+    /// Canonical string slug used in `run.toml` and CLI arguments.
+    pub fn slug(self) -> &'static str {
+        match self {
+            Self::VelocityVerlet => "velocity_verlet",
+            Self::Yoshida4 => "yoshida4",
+            Self::WisdomHolman => "wisdom_holman",
+        }
+    }
+}
+
+impl std::str::FromStr for IntegratorKind {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "velocity_verlet" => Ok(Self::VelocityVerlet),
+            "yoshida4" => Ok(Self::Yoshida4),
+            "wisdom_holman" => Ok(Self::WisdomHolman),
+            _ => Err(format!(
+                "unknown integrator {:?}; valid slugs: {}",
+                s,
+                Self::ALL.iter().map(|k| k.slug()).collect::<Vec<_>>().join(", "),
+            )),
+        }
+    }
 }
 
 // ── IntegratorContext ─────────────────────────────────────────────────────────

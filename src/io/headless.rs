@@ -32,7 +32,6 @@ use std::path::{Path, PathBuf};
 use crate::core::system::System;
 use crate::io::recorder::{RecordMetadata, SimRecorder};
 use crate::io::run_config::RunConfig;
-use crate::physics::integrator::IntegratorKind;
 use crate::templates::{catalog::TEMPLATES, instantiate::instantiate};
 
 /// Run a headless batch simulation described by `config`.
@@ -64,7 +63,7 @@ pub fn run(config: &RunConfig) -> Result<(), Box<dyn std::error::Error>> {
         1,
     );
     system.set_seed(config.seed);
-    system.set_integrator(parse_integrator(&config.integrator)?);
+    system.set_integrator(config.integrator);
     system.add_named_bodies(named_bodies);
 
     // ── Optional CSV recorder ──────────────────────────────────────────────────
@@ -159,15 +158,3 @@ fn save_snapshot(
     Ok(path)
 }
 
-fn parse_integrator(s: &str) -> Result<IntegratorKind, Box<dyn std::error::Error>> {
-    match s {
-        "velocity_verlet" => Ok(IntegratorKind::VelocityVerlet),
-        "yoshida4" => Ok(IntegratorKind::Yoshida4),
-        "wisdom_holman" => Ok(IntegratorKind::WisdomHolman),
-        other => Err(format!(
-            "unknown integrator {:?}; use velocity_verlet | yoshida4 | wisdom_holman",
-            other
-        )
-        .into()),
-    }
-}
