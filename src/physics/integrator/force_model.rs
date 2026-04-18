@@ -44,6 +44,18 @@ pub trait ForceModel: Send {
     /// No-op for models that do not use a hierarchical tree approximation.
     fn set_theta(&mut self, _theta: f64) {}
 
+    /// N threshold below which exact O(N²) evaluation is used instead of BH.
+    ///
+    /// Defaults to 64. Force models without a BH tree may return any constant.
+    fn exact_threshold(&self) -> usize {
+        64
+    }
+
+    /// Set the exact-evaluation threshold.
+    ///
+    /// No-op for force models that do not use a BH tree.
+    fn set_exact_threshold(&mut self, _n: usize) {}
+
     /// Access the underlying Barnes-Hut engine for spatial queries.
     ///
     /// Returns `None` for force models that do not use a Barnes-Hut tree
@@ -91,6 +103,14 @@ impl ForceModel for GravityForceModel {
 
     fn set_theta(&mut self, theta: f64) {
         self.theta = theta.clamp(0.05, 1.5);
+    }
+
+    fn exact_threshold(&self) -> usize {
+        self.engine.exact_threshold()
+    }
+
+    fn set_exact_threshold(&mut self, n: usize) {
+        self.engine.set_exact_threshold(n);
     }
 
     fn bh_engine(&self) -> Option<&BarnesHutEngine> {

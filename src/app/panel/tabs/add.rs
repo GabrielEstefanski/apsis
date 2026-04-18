@@ -513,13 +513,21 @@ impl SimulationApp {
                 let clust_density = density(self.spawn_cluster_material, self.spawn_cluster_mass);
 
                 self.push_undo(UndoRecord::AddedBodies(n));
+                use rand::{SeedableRng, RngExt};
+                use rand::rngs::SmallRng;
+                let seed = self.system.seed();
+                let mut rng: SmallRng = if seed == 0 {
+                    rand::make_rng()
+                } else {
+                    SmallRng::seed_from_u64(seed)
+                };
                 for _ in 0..n {
-                    let r = self.spawn_cluster_radius * rand::random::<f64>().sqrt();
-                    let theta = rand::random::<f64>() * std::f64::consts::TAU;
+                    let r = self.spawn_cluster_radius * rng.random::<f64>().sqrt();
+                    let theta = rng.random::<f64>() * std::f64::consts::TAU;
                     let x = center.com_x + r * theta.cos();
                     let y = center.com_y + r * theta.sin();
-                    let vx = (rand::random::<f64>() - 0.5) * self.spawn_cluster_vel_disp * 2.0;
-                    let vy = (rand::random::<f64>() - 0.5) * self.spawn_cluster_vel_disp * 2.0;
+                    let vx = (rng.random::<f64>() - 0.5) * self.spawn_cluster_vel_disp * 2.0;
+                    let vy = (rng.random::<f64>() - 0.5) * self.spawn_cluster_vel_disp * 2.0;
                     let mut b = Body::new(
                         x,
                         y,

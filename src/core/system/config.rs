@@ -150,6 +150,36 @@ impl System {
         self.force_model.bh_engine()
     }
 
+    // ── Reproducibility seed ──────────────────────────────────────────────────
+
+    /// Current reproducibility seed.
+    pub fn seed(&self) -> u64 {
+        self.seed
+    }
+
+    /// Set the reproducibility seed.
+    ///
+    /// The new seed is used by the next preset instantiation or cluster spawn.
+    /// Does not retroactively affect already-spawned bodies.
+    pub fn set_seed(&mut self, seed: u64) {
+        self.seed = seed;
+    }
+
+    // ── Exact-evaluation threshold ────────────────────────────────────────────
+
+    /// N threshold below which exact O(N²) pairwise gravity is used.
+    ///
+    /// For N ≤ threshold: direct O(N²) sum (exact, no tree overhead).
+    /// For N > threshold: Barnes-Hut O(N log N) traversal.
+    pub fn exact_threshold(&self) -> usize {
+        self.force_model.exact_threshold()
+    }
+
+    /// Set the exact-evaluation threshold (clamped to [1, 10_000]).
+    pub fn set_exact_threshold(&mut self, n: usize) {
+        self.force_model.set_exact_threshold(n);
+    }
+
     // ── Softening ─────────────────────────────────────────────────────────────
 
     pub fn softening_scale(&self) -> f64 {

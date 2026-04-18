@@ -41,13 +41,15 @@ impl SimulationApp {
 
                     // Drag → initiate cross-widget drag to canvas
                     if response.drag_started() {
-                        self.template_drag = Some(Box::new(entry.build));
+                        let seed = self.system.seed();
+                        let build = entry.build;
+                        self.template_drag = Some(Box::new(move || (build)(seed)));
                     }
 
                     // Click (no drag) → spawn at viewport center (world origin of
                     // current offset, i.e. the screen centre in world space)
                     if response.clicked() {
-                        let template = (entry.build)();
+                        let template = (entry.build)(self.system.seed());
                         let bodies = instantiate_at(&template, 0.0, 0.0);
                         self.push_undo(UndoRecord::AddedBodies(bodies.len()));
                         self.system.add_named_bodies(bodies);

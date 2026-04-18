@@ -21,7 +21,7 @@ impl System {
             integrator_kind: self.integrator.kind(),
             trail_every: self.trail_every,
             sim_name: String::new(),
-            seed: 0,
+            seed: self.seed,
             trail: None,
             bodies: self.bodies.iter().map(BodyRecord::from_body).collect(),
             names: self.names.clone(),
@@ -73,6 +73,7 @@ impl System {
         self.integrator = make_integrator(snap.integrator_kind);
         self.trail_every = snap.trail_every.max(1);
 
+        self.seed = snap.seed;
         self.initial_energy = None;
         self.initial_angular_momentum = None;
         self.rel_energy_error = 0.0;

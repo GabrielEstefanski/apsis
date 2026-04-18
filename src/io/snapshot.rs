@@ -6,7 +6,7 @@
 //!
 //! ```text
 //! [4]  magic         = b"GRAV"
-//! [2]  schema_ver    u16 LE   — 1, 2, 3, 4, or 5
+//! [2]  schema_ver    u16 LE   — 1, 2, 3, 4, 5, or 6
 //! [8]  save_id       u64 LE   — unix-millis at save time (unique, sortable)
 //! [8]  t             f64 LE   — simulated time
 //! [8]  steps         u64 LE
@@ -23,11 +23,11 @@
 //! [8]  seed          u64 LE   — reproducibility seed
 //! ----------------
 //! [4]  n_bodies      u32 LE
-//! per body (84 bytes):
+//! per body (68 bytes, v6+; 84 bytes in v1–5):
 //!   [8] x  [8] y  [8] vx  [8] vy
 //!   [8] mass  [8] density  [8] softening  [8] physical_radius
-//!   [8] omega_z  [8] moment_inertia
 //!   [1] material_id  [3] color_rgb
+//! (v1–5 stored two extra f64s here: omega_z + moment_inertia — read and discarded on load)
 //! v2+ names section: n_bodies × (u32 len + UTF-8 bytes)
 //! --- v4+ trail section ---
 //! [1]  trail_has     u8       — 0=no trail, 1=trail present
@@ -52,6 +52,7 @@
 //! | 3   | Added `sim_name` to header |
 //! | 4   | Added `seed` field and trail section |
 //! | 5   | `integrator` byte extended: `2 = WisdomHolman` |
+//! | 6   | Removed `omega_z` and `moment_inertia` from per-body record |
 //!
 //! Older files (ver < 5) round-trip cleanly; the `WisdomHolman` variant
 //! simply cannot be expressed in them and defaults to `VelocityVerlet` on
@@ -68,7 +69,7 @@ use crate::physics::integrator::IntegratorKind;
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 pub const MAGIC: [u8; 4] = *b"GRAV";
-pub const SCHEMA_VERSION: u16 = 5;
+pub const SCHEMA_VERSION: u16 = 6;
 
 // ── Snapshot ──────────────────────────────────────────────────────────────────
 
@@ -124,8 +125,6 @@ pub struct BodyRecord {
     pub density: f64,
     pub softening: f64,
     pub physical_radius: f64,
-    pub omega_z: f64,
-    pub moment_inertia: f64,
     pub material: Material,
     pub color: [u8; 3],
 }
@@ -142,8 +141,6 @@ impl BodyRecord {
             density: b.density,
             softening: b.softening,
             physical_radius: b.physical_radius,
-            omega_z: b.omega_z,
-            moment_inertia: b.moment_inertia,
             material: b.material,
             color: b.color,
         }
@@ -155,8 +152,6 @@ impl BodyRecord {
         b.density = self.density;
         b.softening = self.softening;
         b.physical_radius = self.physical_radius;
-        b.omega_z = self.omega_z;
-        b.moment_inertia = self.moment_inertia;
         b.color = self.color;
         b
     }
@@ -417,8 +412,6 @@ impl SimSnapshot {
             wf64(&mut w, b.density)?;
             wf64(&mut w, b.softening)?;
             wf64(&mut w, b.physical_radius)?;
-            wf64(&mut w, b.omega_z)?;
-            wf64(&mut w, b.moment_inertia)?;
             wu8(&mut w, material_to_u8(b.material))?;
             w.write_all(&b.color)?;
         }
@@ -451,8 +444,8 @@ impl SimSnapshot {
 
     /// Deserialises a snapshot from a `.grav` file.
     ///
-    /// Supports all schema versions 1–[`SCHEMA_VERSION`]. Fields absent in
-    /// older versions are set to zero / empty defaults.
+    /// Supports all schema versions 1–[`SCHEMA_VERSION`]. Fields absent or
+    /// removed in older/newer versions are defaulted or discarded.
     pub fn load_from(path: &Path) -> io::Result<Self> {
         use std::io::BufReader;
         let mut r = BufReader::new(std::fs::File::open(path)?);
@@ -505,8 +498,11 @@ impl SimSnapshot {
             let density = rf64(&mut r)?;
             let softening = rf64(&mut r)?;
             let physical_radius = rf64(&mut r)?;
-            let omega_z = rf64(&mut r)?;
-            let moment_inertia = rf64(&mut r)?;
+            if ver < 6 {
+                // v1–5 stored omega_z + moment_inertia here — read and discard
+                let _ = rf64(&mut r)?;
+                let _ = rf64(&mut r)?;
+            }
             let mut mat_byte = [0u8; 1];
             r.read_exact(&mut mat_byte)?;
             let material = u8_to_material(mat_byte[0]);
@@ -522,8 +518,6 @@ impl SimSnapshot {
                 density,
                 softening,
                 physical_radius,
-                omega_z,
-                moment_inertia,
                 material,
                 color,
             });

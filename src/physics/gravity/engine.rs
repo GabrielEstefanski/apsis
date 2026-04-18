@@ -46,6 +46,8 @@ use super::tree::{EXACT_THRESHOLD, NO_CHILD, Node, QuadTree};
 /// every step without any carry-over from previous steps.
 pub struct BarnesHutEngine {
     tree: QuadTree,
+    /// N ≤ this → exact O(N²); N > this → Barnes-Hut traversal.
+    exact_threshold: usize,
 }
 
 impl BarnesHutEngine {
@@ -54,7 +56,19 @@ impl BarnesHutEngine {
     /// `max_depth` bounds the quadtree depth; 16 is sufficient for all
     /// practical particle counts.
     pub fn new(max_depth: usize) -> Self {
-        Self { tree: QuadTree::new(max_depth) }
+        Self { tree: QuadTree::new(max_depth), exact_threshold: EXACT_THRESHOLD }
+    }
+
+    /// Set the N threshold below which exact O(N²) evaluation is used.
+    ///
+    /// Range is clamped to [1, 10_000].
+    pub fn set_exact_threshold(&mut self, n: usize) {
+        self.exact_threshold = n.clamp(1, 10_000);
+    }
+
+    /// Current exact-evaluation threshold.
+    pub fn exact_threshold(&self) -> usize {
+        self.exact_threshold
     }
 
     /// Rebuild the quadtree from the current body positions.
@@ -69,8 +83,8 @@ impl BarnesHutEngine {
     /// Fills `acc[i] = (aₓ, aᵧ)` for each body.
     /// Returns `PE = Σᵢ<ⱼ −G mᵢ mⱼ / r_ij` (softened).
     ///
-    /// - N ≤ [`EXACT_THRESHOLD`]: uses exact O(N²) pairwise sum.
-    /// - N > [`EXACT_THRESHOLD`]: uses parallel BH traversal.
+    /// - N ≤ `exact_threshold`: uses exact O(N²) pairwise sum.
+    /// - N > `exact_threshold`: uses parallel BH traversal.
     pub fn evaluate(&self, bodies: &[Body], theta: f64, acc: &mut [(f64, f64)]) -> f64 {
         let n = bodies.len();
         acc.fill((0.0, 0.0));
@@ -79,7 +93,7 @@ impl BarnesHutEngine {
             return 0.0;
         }
 
-        if n <= EXACT_THRESHOLD {
+        if n <= self.exact_threshold {
             return exact_eval(bodies, acc);
         }
 

@@ -1,7 +1,7 @@
 use crate::domain::materials::Material;
 use crate::templates::{Template, TemplateBody, UnitSystem};
 
-pub fn star() -> Template {
+pub fn star(_seed: u64) -> Template {
     Template {
         name: "Star",
         description: "Single star at rest.",
@@ -11,7 +11,6 @@ pub fn star() -> Template {
             position: Some([0.0, 0.0]),
             velocity: [0.0, 0.0],
             material: Material::Star,
-            spin: 0.0,
         }],
         display_scale: 1.0,
         suggested_dt: None,
@@ -19,7 +18,7 @@ pub fn star() -> Template {
     }
 }
 
-pub fn brown_dwarf() -> Template {
+pub fn brown_dwarf(_seed: u64) -> Template {
     Template {
         name: "Brown Dwarf",
         description: "Single brown dwarf at rest.",
@@ -29,7 +28,6 @@ pub fn brown_dwarf() -> Template {
             position: Some([0.0, 0.0]),
             velocity: [0.0, 0.0],
             material: Material::BrownDwarf,
-            spin: 0.0,
         }],
         display_scale: 1.0,
         suggested_dt: None,
@@ -37,7 +35,7 @@ pub fn brown_dwarf() -> Template {
     }
 }
 
-pub fn gas_giant() -> Template {
+pub fn gas_giant(_seed: u64) -> Template {
     Template {
         name: "Gas Giant",
         description: "Single gas giant (Jupiter-like) at rest.",
@@ -47,7 +45,6 @@ pub fn gas_giant() -> Template {
             position: Some([0.0, 0.0]),
             velocity: [0.0, 0.0],
             material: Material::Gas,
-            spin: 0.0,
         }],
         display_scale: 1.0,
         suggested_dt: None,
@@ -55,7 +52,7 @@ pub fn gas_giant() -> Template {
     }
 }
 
-pub fn rocky_planet() -> Template {
+pub fn rocky_planet(_seed: u64) -> Template {
     Template {
         name: "Rocky Planet",
         description: "Single rocky planet (Earth-like) at rest.",
@@ -65,7 +62,6 @@ pub fn rocky_planet() -> Template {
             position: Some([0.0, 0.0]),
             velocity: [0.0, 0.0],
             material: Material::Rocky,
-            spin: 0.0,
         }],
         display_scale: 1.0,
         suggested_dt: None,

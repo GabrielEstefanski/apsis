@@ -50,6 +50,7 @@ pub struct RenderState {
     pub orbital_elements: Vec<Option<OrbitalElements>>,
     pub softening_scale: f64,
     pub trail_every: usize,
+    pub seed: u64,
 }
 
 // ── Commands ──────────────────────────────────────────────────────────────────
@@ -62,6 +63,8 @@ pub enum PhysicsCmd {
     SetPaused(bool),
     SetDt(f64),
     SetStepsPerFrame(u32),
+    SetExactThreshold(usize),
+    SetSeed(u64),
     SetTheta(f64),
     SetSofteningScale(f64),
     SetGFactor(f64),
@@ -209,6 +212,15 @@ impl PhysicsHandle {
     pub fn set_dt(&self, dt: f64) {
         self.send(PhysicsCmd::SetDt(dt));
     }
+    pub fn set_exact_threshold(&self, n: usize) {
+        self.send(PhysicsCmd::SetExactThreshold(n));
+    }
+    pub fn set_seed(&self, seed: u64) {
+        self.send(PhysicsCmd::SetSeed(seed));
+    }
+    pub fn seed(&self) -> u64 {
+        self.render.lock().unwrap().seed
+    }
     pub fn set_theta(&self, theta: f64) {
         self.send(PhysicsCmd::SetTheta(theta));
     }
@@ -318,6 +330,7 @@ pub fn spawn(mut system: System, paused: bool) -> PhysicsHandle {
         orbital_elements: system.orbital_elements().to_vec(),
         softening_scale: system.softening_scale(),
         trail_every: system.trail_every(),
+        seed: system.seed(),
     };
 
     let render = Arc::new(Mutex::new(initial.clone()));
@@ -373,6 +386,7 @@ fn publish_full(system: &System, rs: &mut RenderState) {
     rs.orbital_elements = system.orbital_elements().to_vec();
     rs.softening_scale = system.softening_scale();
     rs.trail_every = system.trail_every();
+    rs.seed = system.seed();
 }
 
 // ── Physics loop ──────────────────────────────────────────────────────────────
@@ -410,6 +424,14 @@ fn physics_loop(
                 PhysicsCmd::SetStepsPerFrame(s) => steps_per_frame = s.max(1),
                 PhysicsCmd::SetDt(dt) => {
                     system.set_dt(dt);
+                    needs_full_publish = true;
+                },
+                PhysicsCmd::SetExactThreshold(n) => {
+                    system.set_exact_threshold(n);
+                    needs_full_publish = true;
+                },
+                PhysicsCmd::SetSeed(s) => {
+                    system.set_seed(s);
                     needs_full_publish = true;
                 },
                 PhysicsCmd::SetTheta(theta) => {
