@@ -6,27 +6,14 @@
 use crate::domain::body::Body;
 use crate::physics::gravity::{G, pair_eps2};
 
-/// Total kinetic energy of the system.
-///
-/// Includes both translational and rotational terms:
-/// `KE = 1/2 sum(m v^2) + 1/2 sum(I omega^2)`.
+/// Total kinetic energy of the system: `KE = 1/2 sum(m v^2)`.
 pub fn kinetic_energy(bodies: &[Body]) -> f64 {
-    bodies
-        .iter()
-        .map(|b| {
-            let translational = 0.5 * b.mass * (b.vx * b.vx + b.vy * b.vy);
-            let rotational = 0.5 * b.moment_inertia * b.omega_z * b.omega_z;
-            translational + rotational
-        })
-        .sum()
+    bodies.iter().map(|b| 0.5 * b.mass * (b.vx * b.vx + b.vy * b.vy)).sum()
 }
 
-/// Z-component of the total angular momentum.
-///
-/// Includes orbital and spin contributions:
-/// `Lz = sum(m (x vy - y vx) + I omega)`.
+/// Z-component of the orbital angular momentum: `Lz = sum(m (x vy - y vx))`.
 pub fn angular_momentum_z(bodies: &[Body]) -> f64 {
-    bodies.iter().map(|b| b.mass * (b.x * b.vy - b.y * b.vx) + b.moment_inertia * b.omega_z).sum()
+    bodies.iter().map(|b| b.mass * (b.x * b.vy - b.y * b.vx)).sum()
 }
 
 /// Total mechanical energy: `E = KE + PE`.
@@ -120,14 +107,6 @@ mod tests {
     }
 
     #[test]
-    fn kinetic_energy_includes_rotation() {
-        let mut b = Body::new(0.0, 0.0, 0.0, 0.0, 2.0, crate::domain::materials::Material::Rocky);
-        b.omega_z = 3.0;
-        let expected = 0.5 * b.moment_inertia * b.omega_z * b.omega_z;
-        assert!((kinetic_energy(&[b]) - expected).abs() < 1e-12);
-    }
-
-    #[test]
     fn angular_momentum_z_circular_orbit() {
         let (r, v, m) = (3.0, 2.0, 4.0);
         let b = Body::new(r, 0.0, 0.0, v, m, crate::domain::materials::Material::Rocky);
@@ -151,14 +130,6 @@ mod tests {
         let b1 = Body::new(1.0, 0.0, 0.0, 1.0, 1.0, crate::domain::materials::Material::Rocky);
         let b2 = Body::new(0.0, 2.0, -1.0, 0.0, 1.0, crate::domain::materials::Material::Rocky);
         assert!((angular_momentum_z(&[b1, b2]) - 3.0).abs() < 1e-12);
-    }
-
-    #[test]
-    fn angular_momentum_z_includes_spin() {
-        let mut b = Body::new(0.0, 0.0, 0.0, 0.0, 2.0, crate::domain::materials::Material::Rocky);
-        b.omega_z = -4.0;
-        let expected = b.moment_inertia * b.omega_z;
-        assert!((angular_momentum_z(&[b]) - expected).abs() < 1e-12);
     }
 
     #[test]

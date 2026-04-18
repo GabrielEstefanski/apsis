@@ -15,7 +15,8 @@
 
 use std::f64::consts::TAU;
 
-use rand::random;
+use rand::{SeedableRng, RngExt};
+use rand::rngs::SmallRng;
 
 use crate::domain::materials::Material;
 use crate::templates::{Template, TemplateBody, UnitSystem, builders::circular_orbit};
@@ -141,7 +142,8 @@ fn place_comet(
 
 // ── Template builder ──────────────────────────────────────────────────────────
 
-pub fn solar_system() -> Template {
+pub fn solar_system(seed: u64) -> Template {
+    let mut rng: SmallRng = if seed == 0 { rand::make_rng() } else { SmallRng::seed_from_u64(seed) };
     let mut bodies = Vec::with_capacity(1 + PLANETS.len() + 1 + 600 + 30);
 
     // ── Sun ───────────────────────────────────────────────────────────────── //
@@ -151,7 +153,6 @@ pub fn solar_system() -> Template {
         material: Material::Star,
         position: Some([0.0, 0.0]),
         velocity: [0.0, 0.0],
-        spin: 0.0,
     });
 
     // Track Earth state for Moon placement.
@@ -161,7 +162,7 @@ pub fn solar_system() -> Template {
     // ── Planets ───────────────────────────────────────────────────────────── //
     for p in PLANETS {
         // Random initial phase — physically valid for a snapshot of the system.
-        let phase = random::<f64>() * TAU;
+        let phase = rng.random::<f64>() * TAU;
         let (pos, vel) = circular_orbit(M_SUN, p.a, phase);
 
         if (p.a - 1.0).abs() < 1e-6 {
@@ -175,7 +176,6 @@ pub fn solar_system() -> Template {
             material: p.material,
             position: Some(pos),
             velocity: vel,
-            spin: 0.0,
         });
     }
 
@@ -193,7 +193,7 @@ pub fn solar_system() -> Template {
              {r_hill_earth:.4} AU — orbit may be unstable"
         );
 
-        let phase = random::<f64>() * TAU;
+        let phase = rng.random::<f64>() * TAU;
         let (moon_pos, moon_vel) = place_moon(earth_pos, earth_vel, M_EARTH, moon_a, phase);
 
         bodies.push(TemplateBody {
@@ -202,7 +202,6 @@ pub fn solar_system() -> Template {
             position: Some(moon_pos),
             velocity: moon_vel,
             material: Material::Rocky,
-            spin: 0.0,
         });
     }
 
@@ -211,9 +210,9 @@ pub fn solar_system() -> Template {
     // Eccentricity distribution follows the observed main-belt distribution
     // (Bottke et al. 2005: mean e ≈ 0.14, σ ≈ 0.08).
     for _ in 0..600 {
-        let a = 2.2 + random::<f64>() * 1.0;
-        let e = (random::<f64>() * 0.16 + 0.06).min(0.35); // e ∈ [0.06, 0.35]
-        let phase = random::<f64>() * TAU;
+        let a = 2.2 + rng.random::<f64>() * 1.0;
+        let e = (rng.random::<f64>() * 0.16 + 0.06).min(0.35); // e ∈ [0.06, 0.35]
+        let phase = rng.random::<f64>() * TAU;
 
         // Place at a random true anomaly on the ellipse, not just at periapsis.
         // For simplicity we use the circular speed and apply an eccentricity
@@ -230,7 +229,6 @@ pub fn solar_system() -> Template {
             position: Some(pos),
             velocity: vel,
             material: Material::Asteroid,
-            spin: 0.0,
         });
     }
 
@@ -241,17 +239,17 @@ pub fn solar_system() -> Template {
     for i in 0..30 {
         let (r_peri, e) = if i < 20 {
             // Jupiter-family
-            let r = 1.0 + random::<f64>() * 2.0;
-            let e = 0.50 + random::<f64>() * 0.30;
+            let r = 1.0 + rng.random::<f64>() * 2.0;
+            let e = 0.50 + rng.random::<f64>() * 0.30;
             (r, e)
         } else {
             // Long-period / Oort cloud
-            let r = 0.5 + random::<f64>() * 1.5;
-            let e = 0.97 + random::<f64>() * 0.029;
+            let r = 0.5 + rng.random::<f64>() * 1.5;
+            let e = 0.97 + rng.random::<f64>() * 0.029;
             (r, e)
         };
 
-        let omega = random::<f64>() * TAU;
+        let omega = rng.random::<f64>() * TAU;
         let (pos, vel) = place_comet(M_SUN, r_peri, e, omega);
 
         bodies.push(TemplateBody {
@@ -260,7 +258,6 @@ pub fn solar_system() -> Template {
             position: Some(pos),
             velocity: vel,
             material: Material::Comet,
-            spin: 0.0,
         });
     }
 

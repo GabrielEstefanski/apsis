@@ -357,3 +357,147 @@ fn print_figure8_closure_diagnostic() {
         }
     }
 }
+
+// ── Pythagorean three-body benchmark ─────────────────────────────────────────
+//
+// Burrau (1913) initial conditions: m₁=3 at (1,3), m₂=4 at (-2,-1), m₃=5 at
+// (1,-1), all at rest.  The three separations form a 3-4-5 right triangle.
+// G = 1, ε = 0 (pure Newtonian gravity).
+//
+// Initial potential energy (exact):
+//   r₁₂ = 5, r₁₃ = 4, r₂₃ = 3
+//   E₀ = −G·(m₁m₂/r₁₂ + m₁m₃/r₁₃ + m₂m₃/r₂₃)
+//      = −(12/5 + 15/4 + 20/3) = −769/60 ≈ −12.8167
+//
+// Initial angular momentum: L_z = 0 (all velocities zero).
+//
+// The system is chaotic — one body is eventually ejected (~t ≈ 46–60 in G=1
+// units) — so position tests are limited to t = 1 (well before chaos onset).
+// Energy and angular momentum are conserved by the symplectic integrator
+// throughout.
+
+fn pythagorean_system(dt: f64) -> System {
+    let mut bodies = [
+        Body::new( 1.0,  3.0, 0.0, 0.0, 3.0, Material::Rocky),
+        Body::new(-2.0, -1.0, 0.0, 0.0, 4.0, Material::Rocky),
+        Body::new( 1.0, -1.0, 0.0, 0.0, 5.0, Material::Rocky),
+    ];
+    for b in &mut bodies {
+        b.softening = 0.0;
+    }
+    let mut sys = System::new(bodies.to_vec(), 0.5, dt, 10, 1);
+    sys.set_integrator(IntegratorKind::Yoshida4);
+    sys
+}
+
+/// Verify the three initial separations satisfy the 3-4-5 right-triangle relation.
+#[test]
+fn pythagorean_initial_geometry() {
+    const POS: [(f64, f64); 3] = [(1.0, 3.0), (-2.0, -1.0), (1.0, -1.0)];
+    let d = |a: (f64, f64), b: (f64, f64)| ((a.0-b.0).powi(2) + (a.1-b.1).powi(2)).sqrt();
+    assert!((d(POS[0], POS[1]) - 5.0).abs() < 1e-15, "r₁₂ ≠ 5");
+    assert!((d(POS[0], POS[2]) - 4.0).abs() < 1e-15, "r₁₃ ≠ 4");
+    assert!((d(POS[1], POS[2]) - 3.0).abs() < 1e-15, "r₂₃ ≠ 3");
+}
+
+/// Initial total energy matches the analytical value E₀ = −769/60 ≈ −12.8167.
+#[test]
+fn pythagorean_initial_energy() {
+    const E0_EXACT: f64 = -769.0 / 60.0;
+    let mut sys = pythagorean_system(1e-5);
+    sys.step();
+    let e0 = sys.metrics().total_energy;
+    let rel = (e0 - E0_EXACT).abs() / E0_EXACT.abs();
+    assert!(rel < 1e-6, "E₀ = {e0:.8}, exact = {E0_EXACT:.8}, rel = {rel:.3e}");
+}
+
+/// Yoshida4 keeps peak |δE/E₀| < 1e-8 over t = 1.0 (well before the first
+/// deep close encounter, whose free-fall timescale is t_ff ≈ 1.9 for the
+/// closest pair m₂–m₃ at r=3).  This tight bound confirms excellent accuracy
+/// in the smooth phase and sets the baseline for REBOUND cross-validation.
+#[test]
+fn pythagorean_energy_conservation_y4() {
+    const DT: f64 = 1e-3;
+    const STEPS: u64 = 1_000; // t = 1.0
+    const TOL: f64 = 1e-8;
+
+    let mut sys = pythagorean_system(DT);
+    let mut peak: f64 = 0.0;
+    for _ in 0..STEPS {
+        sys.step();
+        peak = peak.max(sys.metrics().rel_energy_error.abs());
+    }
+    assert!(peak < TOL, "Y4 peak |δE/E₀| = {peak:.3e} > {TOL:.0e} over t=1.0");
+}
+
+/// L_z = 0 initially; symplectic integrator keeps |L_z| < 1e-12 after t = 1.0.
+/// Angular momentum is an exact invariant of the discrete symplectic map and
+/// should be conserved to near-machine-epsilon regardless of encounter severity.
+#[test]
+fn pythagorean_angular_momentum_conserved() {
+    const DT: f64 = 1e-3;
+    let mut sys = pythagorean_system(DT);
+    for _ in 0..1_000 { // t = 1.0
+        sys.step();
+    }
+    let lz = sys.metrics().angular_momentum_z.abs();
+    assert!(lz < 1e-12, "|L_z| = {lz:.3e} after t=1.0, expected < 1e-12");
+}
+
+/// Y4 positions at t = 1.0 with dt=1e-3 match dt=1e-4 (reference) to < 1e-6.
+/// Confirms 4th-order convergence before chaos onset; this tolerance is the
+/// REBOUND comparison baseline for the future cross-validation.
+#[test]
+fn pythagorean_position_convergence_y4() {
+    const T_END: f64 = 1.0;
+    const TOL: f64 = 1e-6;
+
+    let mut ref_sys = pythagorean_system(1e-4);
+    for _ in 0..(T_END / 1e-4) as usize { ref_sys.step(); }
+
+    let mut sys = pythagorean_system(1e-3);
+    for _ in 0..(T_END / 1e-3) as usize { sys.step(); }
+
+    let max_dr = ref_sys.bodies().iter()
+        .zip(sys.bodies().iter())
+        .map(|(r, t)| ((r.x-t.x).powi(2) + (r.y-t.y).powi(2)).sqrt())
+        .fold(0.0_f64, f64::max);
+
+    assert!(
+        max_dr < TOL,
+        "Y4 max |Δr| = {max_dr:.3e} > {TOL:.0e} at t=1 (dt=1e-3 vs dt=1e-4)"
+    );
+}
+
+/// Diagnostic: canonical positions at t = 1, 5, 10 for cross-validation with REBOUND.
+///
+/// Run with:
+///   cargo test -- --ignored print_pythagorean_positions_diagnostic --nocapture
+#[test]
+#[ignore = "diagnostic — prints canonical positions for REBOUND cross-validation"]
+fn print_pythagorean_positions_diagnostic() {
+    const DT: f64 = 1e-4;
+    let mut sys = pythagorean_system(DT);
+
+    println!("\nPythagorean 3-body — Y4, dt={DT}, ε=0, G=1");
+    println!("IC: m=3 at (1,3), m=4 at (-2,-1), m=5 at (1,-1), v=0");
+    println!("E₀ = -769/60 = {:.10}", -769.0_f64 / 60.0);
+
+    let mut steps_done: usize = 0;
+    for &t_snap in &[1.0_f64, 5.0, 10.0] {
+        let target = (t_snap / DT).round() as usize;
+        for _ in steps_done..target { sys.step(); }
+        steps_done = target;
+        let m = sys.metrics();
+        println!(
+            "\nt = {t_snap:.1}  (step {target})  δE/E₀ = {:.3e}  L_z = {:.3e}",
+            m.rel_energy_error, m.angular_momentum_z,
+        );
+        for (i, b) in sys.bodies().iter().enumerate() {
+            println!(
+                "  body{i} m={:.0}:  x={:+.10e}  y={:+.10e}  vx={:+.10e}  vy={:+.10e}",
+                b.mass, b.x, b.y, b.vx, b.vy,
+            );
+        }
+    }
+}

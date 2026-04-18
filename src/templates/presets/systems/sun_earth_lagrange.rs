@@ -3,7 +3,7 @@ use crate::{
     templates::{Template, TemplateBody, UnitSystem, builders::circular_orbit},
 };
 
-pub fn sun_earth_lagrange() -> Template {
+pub fn sun_earth_lagrange(_seed: u64) -> Template {
     let m_sun = 1.0;
     let m_earth = 3.0e-6;
 
@@ -29,7 +29,6 @@ pub fn sun_earth_lagrange() -> Template {
                 position: Some([0.0, 0.0]),
                 velocity: [0.0, 0.0],
                 material: Material::Star,
-                spin: 0.0,
             },
             // Earth
             TemplateBody {
@@ -38,7 +37,6 @@ pub fn sun_earth_lagrange() -> Template {
                 position: Some(earth_pos),
                 velocity: earth_vel,
                 material: Material::Rocky,
-                spin: 0.0,
             },
             // Trojan at L4
             TemplateBody {
@@ -47,7 +45,6 @@ pub fn sun_earth_lagrange() -> Template {
                 position: Some(l4_pos),
                 velocity: l4_vel,
                 material: Material::Asteroid,
-                spin: 0.0,
             },
             // Trojan at L5
             TemplateBody {
@@ -56,7 +53,6 @@ pub fn sun_earth_lagrange() -> Template {
                 position: Some(l5_pos),
                 velocity: l5_vel,
                 material: Material::Asteroid,
-                spin: 0.0,
             },
         ],
         display_scale: 1.0,

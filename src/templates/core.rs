@@ -8,7 +8,7 @@
 //!
 //! `TemplateBody` is intentionally a *descriptor*, not a `Body`. It holds only
 //! the quantities that the scenario author specifies explicitly; all derived
-//! physical properties (density, physical radius, softening, moment of inertia)
+//! physical properties (density, physical radius, softening)
 //! are computed by `Body::new` at instantiation time using the material model.
 //!
 //! This separation means templates are:
@@ -47,7 +47,6 @@ use crate::domain::materials::Material;
 /// | Bulk density        | `density(material, mass)` |
 /// | Physical radius     | `radius_from_mass_density(...)` |
 /// | Softening length    | `default_softening(mass)` |
-/// | Moment of inertia   | `default_moment_inertia(...)` |
 /// | Display colour      | `material.props().base_color` |
 #[derive(Debug, Clone, Copy)]
 pub struct TemplateBody {
@@ -68,12 +67,6 @@ pub struct TemplateBody {
 
     /// Initial velocity in the inertial simulation frame [length / time].
     pub velocity: [f64; 2],
-
-    /// Initial spin angular velocity ω_z [rad / time_unit].
-    ///
-    /// Positive = counter-clockwise.  Most bodies start at rest (`0.0`);
-    /// set this for pre-spun bodies or post-collision fragments.
-    pub spin: f64,
 }
 
 impl TemplateBody {
@@ -82,7 +75,7 @@ impl TemplateBody {
     /// Convenience constructor for the common case where position and velocity
     /// will be filled in by the scenario builder.
     pub fn at_rest(mass: f64, material: Material) -> Self {
-        Self { name: None, mass, material, position: None, velocity: [0.0, 0.0], spin: 0.0 }
+        Self { name: None, mass, material, position: None, velocity: [0.0, 0.0] }
     }
 
     /// Construct a body with explicit position and velocity, no spin.
@@ -92,7 +85,7 @@ impl TemplateBody {
         position: [f64; 2],
         velocity: [f64; 2],
     ) -> Self {
-        Self { name: None, mass, material, position: Some(position), velocity, spin: 0.0 }
+        Self { name: None, mass, material, position: Some(position), velocity }
     }
 }
 

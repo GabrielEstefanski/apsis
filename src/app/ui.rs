@@ -1,12 +1,12 @@
 use crate::app::config::PhysicsConfig;
 use crate::app::render_hints::{BodyRenderHints, compute_render_hints};
 use crate::app::theme::{BG, apply_visuals};
+use crate::core::physics_thread::{PhysicsHandle, spawn as spawn_physics};
+use crate::core::system::System;
 use crate::domain::body::Body;
 use crate::domain::materials::Material;
-use crate::core::physics_thread::{PhysicsHandle, spawn as spawn_physics};
 use crate::io::recorder::SimRecorder;
 use crate::io::snapshot::{SaveEntry, SimSnapshot, list_saves};
-use crate::core::system::System;
 use crate::render::{TrailRenderer, WgpuBackend};
 use crate::templates::{Template, UnitSystem};
 use std::sync::{Arc, Mutex};
