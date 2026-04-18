@@ -1,7 +1,7 @@
 use crate::domain::materials::Material;
 use crate::templates::{Template, TemplateBody, UnitSystem};
 
-pub fn binary_star() -> Template {
+pub fn binary_star(_seed: u64) -> Template {
     let a = 1.0_f64;
     let m = 1.0_f64;
 
@@ -23,7 +23,6 @@ pub fn binary_star() -> Template {
                 position: Some([-r, 0.0]),
                 velocity: [0.0, -v_body],
                 material: Material::Star,
-                spin: omega,
             },
             TemplateBody {
                 name: Some("Star B"),
@@ -31,7 +30,6 @@ pub fn binary_star() -> Template {
                 position: Some([r, 0.0]),
                 velocity: [0.0, v_body],
                 material: Material::Star,
-                spin: omega,
             },
         ],
         display_scale: 1.0,
@@ -45,7 +43,7 @@ pub fn binary_star() -> Template {
 /// Both orbit the shared CoM. The companion's orbit is computed via reduced-mass
 /// Kepler:  v_2 = sqrt(G·(m₁ + m₂) · m₁ / (m₁ + m₂) / a)
 ///               = sqrt(G · m₁ / a)  in mass-ratio approximation for m₁ ≫ m₂.
-pub fn star_companion() -> Template {
+pub fn star_companion(_seed: u64) -> Template {
     let m1 = 1.0_f64;
     let m2 = 0.08_f64;
     let a = 1.0_f64;
@@ -75,7 +73,6 @@ pub fn star_companion() -> Template {
                 position: Some([-r1, 0.0]),
                 velocity: [0.0, -v1],
                 material: Material::Star,
-                spin: omega,
             },
             TemplateBody {
                 name: Some("Companion"),
@@ -83,7 +80,6 @@ pub fn star_companion() -> Template {
                 position: Some([r2, 0.0]),
                 velocity: [0.0, v2],
                 material: Material::BrownDwarf,
-                spin: omega,
             },
         ],
         display_scale: 1.0,

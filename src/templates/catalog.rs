@@ -7,7 +7,8 @@ use crate::templates::{
 pub struct TemplateEntry {
     pub name: &'static str,
     pub category: TemplateCategory,
-    pub build: fn() -> Template,
+    /// Build the template using the provided seed for any random choices.
+    pub build: fn(seed: u64) -> Template,
 }
 
 pub const TEMPLATES: &[TemplateEntry] = &[

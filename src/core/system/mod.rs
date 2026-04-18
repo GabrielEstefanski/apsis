@@ -143,6 +143,10 @@ pub struct System {
 
     /// Registered non-gravitational perturbation forces.
     pub(crate) perturbations: Vec<Box<dyn PerturbationForce>>,
+
+    /// Reproducibility seed. Consumed by preset builders and cluster spawners.
+    /// Persisted in snapshots so a run can be replayed exactly.
+    pub(crate) seed: u64,
 }
 
 impl System {
@@ -240,6 +244,7 @@ impl System {
             r_min,
             softening_max,
             perturbations: Vec::new(),
+            seed: 0,
         }
     }
 }

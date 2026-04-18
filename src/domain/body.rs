@@ -26,7 +26,6 @@ pub struct Body {
     ///
     /// This represents the actual size of the body and is used for:
     /// - energy calculations (e.g. disruption threshold Q*)
-    /// - moment of inertia
     /// - physically meaningful scaling
     ///
     /// Unlike `radius`, this value is **never modified by calibration**.
@@ -40,12 +39,6 @@ pub struct Body {
     /// This value is invariant during simulation except for merge/fragmentation
     /// events where material composition changes.
     pub density: f64,
-
-    /// Angular velocity around the z-axis: ω_z = L_z / I.
-    pub omega_z: f64,
-
-    /// Moment of inertia around z-axis: I_z = (2/5)·m·r² for a uniform sphere.
-    pub moment_inertia: f64,
 
     /// Astrophysical material class.
     pub material: Material,
@@ -91,8 +84,6 @@ impl Body {
             softening,
             physical_radius,
             density,
-            omega_z: 0.0,
-            moment_inertia: default_moment_inertia(mass, physical_radius),
             material,
             color: material.props().base_color,
             luminosity: 0.0,
@@ -107,7 +98,6 @@ impl Body {
 
     pub fn sync_physical_properties(&mut self) {
         self.physical_radius = radius_from_density_mass(self.density, self.mass);
-        self.moment_inertia = default_moment_inertia(self.mass, self.physical_radius);
     }
 
     /// Computes the bolometric luminosity of this body in solar luminosities.
@@ -161,12 +151,6 @@ impl Body {
 /// Default softening before system-scale calibration.
 pub fn default_softening(mass: f64) -> f64 {
     EPS_BASE * mass.abs().cbrt()
-}
-
-/// Moment of inertia for a uniform sphere: I = (2/5)·m·r².
-/// Uses the **physical radius**.
-pub fn default_moment_inertia(mass: f64, radius: f64) -> f64 {
-    0.4 * mass * radius * radius
 }
 
 /// Density from mass and radius: ρ = m / (4/3 π r³).

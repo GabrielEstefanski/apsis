@@ -350,7 +350,7 @@ impl SimulationApp {
                         // Convert screen pos → world pos
                         let wx = (screen_pos.x - center_after_pan.x) as f64 / self.scale as f64;
                         let wy = (screen_pos.y - center_after_pan.y) as f64 / self.scale as f64;
-                        let template = (build_fn)();
+                        let template = build_fn();
                         self.active_units = template.units;
                         let bodies = instantiate_at(&template, wx, wy);
                         self.push_undo(UndoRecord::AddedBodies(bodies.len()));

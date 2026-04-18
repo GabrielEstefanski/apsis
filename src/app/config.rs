@@ -7,6 +7,9 @@ pub struct PhysicsConfig {
     pub integrator: IntegratorKind,
 
     // ── Force accuracy ────────────────────────────────────────────────────────
+    /// N ≤ this → exact O(N²); N > this → Barnes-Hut O(N log N).
+    pub exact_threshold: usize,
+
     /// Barnes–Hut opening angle θ ∈ [0.05, 1.5].
     ///
     /// Controls the accuracy/performance trade-off of the tree force solver:
@@ -31,6 +34,10 @@ pub struct PhysicsConfig {
     /// Scales all accelerations: `G_eff = G₀ · g_factor` (G₀ = 1.0).
     pub g_factor: f64,
 
+    // ── Reproducibility ───────────────────────────────────────────────────────
+    /// Seed used by preset builders and cluster spawners.
+    pub seed: u64,
+
     // ── Trails ────────────────────────────────────────────────────────────────
     /// Trail sampling interval: record a trail point every N rendered frames.
     pub trail_every: usize,
@@ -50,6 +57,8 @@ impl Default for PhysicsConfig {
     fn default() -> Self {
         Self {
             integrator: IntegratorKind::VelocityVerlet,
+            exact_threshold: 64,
+            seed: 0,
             theta: 0.5,
             softening_scale: 1.0,
             g_factor: 1.0,

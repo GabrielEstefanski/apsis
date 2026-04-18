@@ -37,8 +37,6 @@ pub fn instantiate_at(template: &Template, cx: f64, cy: f64) -> Vec<NamedBody> {
             let mut b =
                 Body::new(px + dx, py + dy, t.velocity[0], t.velocity[1], t.mass, t.material);
 
-            b.omega_z = t.spin;
-
             NamedBody { body: b, name: t.name.map(str::to_owned) }
         })
         .collect()

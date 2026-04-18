@@ -1,7 +1,7 @@
 use crate::app::theme::{ACCENT, DANGER, SUCCESS, TEXT_DIM, TEXT_PRI, TEXT_SEC};
 use crate::app::theme::{field, metric, primary_btn, secondary_btn, section};
 use crate::app::ui::{SelectionForm, SimulationApp, UndoRecord};
-use crate::domain::body::{Body, default_moment_inertia, radius_from_density_mass};
+use crate::domain::body::{Body, radius_from_density_mass};
 use crate::physics::orbital::OrbitType;
 use eframe::egui::{self, RichText};
 
@@ -190,7 +190,6 @@ impl SimulationApp {
                 b.density = density;
                 b.sync_physical_properties();
                 b.softening = b.softening.max(b.physical_radius * 2.0);
-                b.moment_inertia = default_moment_inertia(mass, b.physical_radius);
                 Some(b)
             })();
             match parsed {
