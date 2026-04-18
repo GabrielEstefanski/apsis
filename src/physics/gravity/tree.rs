@@ -19,7 +19,7 @@
 //! - `node.body_count` equals the sum of `body_count` of all children (or
 //!   `body_len` for leaves).
 
-use crate::core::body::Body;
+use crate::domain::body::Body;
 
 // ── Constants ─────────────────────────────────────────────────────────────── //
 
@@ -115,10 +115,7 @@ pub(crate) struct QuadTree {
 
 impl QuadTree {
     pub(crate) fn new(max_depth: usize) -> Self {
-        Self {
-            nodes: Vec::new(),
-            max_depth,
-        }
+        Self { nodes: Vec::new(), max_depth }
     }
 
     /// Rebuild the tree from scratch for the given body slice.
@@ -149,11 +146,7 @@ impl QuadTree {
         let cx = 0.5 * (min_x + max_x);
         let cy = 0.5 * (min_y + max_y);
         let mut half = 0.5 * (max_x - min_x).max(max_y - min_y);
-        half = if half <= 0.0 {
-            TREE_PAD
-        } else {
-            half * 1.0001 + TREE_PAD
-        };
+        half = if half <= 0.0 { TREE_PAD } else { half * 1.0001 + TREE_PAD };
 
         self.nodes.push(Node::new(cx, cy, half));
 
@@ -303,11 +296,7 @@ impl QuadTree {
             self.nodes[idx].com_y = wy / m;
         }
 
-        (
-            self.nodes[idx].mass,
-            self.nodes[idx].com_x,
-            self.nodes[idx].com_y,
-        )
+        (self.nodes[idx].mass, self.nodes[idx].com_x, self.nodes[idx].com_y)
     }
 }
 
@@ -316,7 +305,7 @@ impl QuadTree {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::body::Body;
+    use crate::domain::body::Body;
 
     fn make_tree() -> QuadTree {
         QuadTree::new(16)
@@ -327,8 +316,8 @@ mod tests {
     #[test]
     fn root_com_equals_mass_weighted_average() {
         let bodies = vec![
-            Body::new(0.0, 0.0, 0.0, 0.0, 1.0, crate::core::materials::Material::Rocky),
-            Body::new(4.0, 0.0, 0.0, 0.0, 3.0, crate::core::materials::Material::Rocky),
+            Body::new(0.0, 0.0, 0.0, 0.0, 1.0, crate::domain::materials::Material::Rocky),
+            Body::new(4.0, 0.0, 0.0, 0.0, 3.0, crate::domain::materials::Material::Rocky),
         ];
         // COM_x = (1·0 + 3·4) / 4 = 3.0
         let mut tree = make_tree();
@@ -344,7 +333,9 @@ mod tests {
     #[test]
     fn root_body_count_equals_n() {
         let bodies: Vec<Body> = (0..10)
-            .map(|i| Body::new(i as f64, 0.0, 0.0, 0.0, 1.0, crate::core::materials::Material::Rocky))
+            .map(|i| {
+                Body::new(i as f64, 0.0, 0.0, 0.0, 1.0, crate::domain::materials::Material::Rocky)
+            })
             .collect();
         let mut tree = make_tree();
         tree.build(&bodies);
@@ -354,7 +345,8 @@ mod tests {
     /// A single body produces a root that is already a leaf (no subdivision).
     #[test]
     fn single_body_root_is_leaf_with_no_children() {
-        let bodies = vec![Body::new(1.0, 2.0, 0.0, 0.0, 5.0, crate::core::materials::Material::Rocky)];
+        let bodies =
+            vec![Body::new(1.0, 2.0, 0.0, 0.0, 5.0, crate::domain::materials::Material::Rocky)];
         let mut tree = make_tree();
         tree.build(&bodies);
 

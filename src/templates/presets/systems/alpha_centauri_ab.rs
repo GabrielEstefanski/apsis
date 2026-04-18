@@ -1,9 +1,9 @@
 use crate::{
-    core::materials::Material,
+    domain::materials::Material,
     templates::{Template, TemplateBody, UnitSystem},
 };
 
-pub fn alpha_centauri_ab() -> Template {
+pub fn alpha_centauri_ab(_seed: u64) -> Template {
     let mut bodies = Vec::with_capacity(3);
 
     let m1: f64 = 1.10;
@@ -30,7 +30,6 @@ pub fn alpha_centauri_ab() -> Template {
         material: Material::Star,
         position: Some([-r1, 0.0]),
         velocity: [0.0, -v1],
-        spin: 0.0,
     });
 
     bodies.push(TemplateBody {
@@ -39,7 +38,6 @@ pub fn alpha_centauri_ab() -> Template {
         material: Material::Star,
         position: Some([r2, 0.0]),
         velocity: [0.0, v2],
-        spin: 0.0,
     });
 
     let a_p: f64 = 13000.0;
@@ -61,7 +59,6 @@ pub fn alpha_centauri_ab() -> Template {
         material: Material::Star,
         position: Some([x, y]),
         velocity: [vx, vy],
-        spin: 0.0,
     });
 
     Template {

@@ -1,9 +1,12 @@
+use rand::{SeedableRng, RngExt};
+use rand::rngs::SmallRng;
 use crate::{
-    core::materials::Material,
+    domain::materials::Material,
     templates::{Template, TemplateBody, UnitSystem, builders::circular_orbit},
 };
 
-pub fn kepler_36() -> Template {
+pub fn kepler_36(seed: u64) -> Template {
+    let mut rng: SmallRng = if seed == 0 { rand::make_rng() } else { SmallRng::seed_from_u64(seed) };
     let mut bodies = Vec::with_capacity(3);
 
     // ── Star ───────────────────────────── //
@@ -13,17 +16,13 @@ pub fn kepler_36() -> Template {
         material: Material::Star,
         position: Some([0.0, 0.0]),
         velocity: [0.0, 0.0],
-        spin: 0.0,
     });
 
     // Planets
-    let planets = [
-        ("b", 0.115, 4.0e-6, Material::Rocky),
-        ("c", 0.128, 2.0e-5, Material::Gas),
-    ];
+    let planets = [("b", 0.115, 4.0e-6, Material::Rocky), ("c", 0.128, 2.0e-5, Material::Gas)];
 
     for (name, a, mass, material) in planets {
-        let phase = rand::random::<f64>() * std::f64::consts::TAU;
+        let phase = rng.random::<f64>() * std::f64::consts::TAU;
 
         let (pos, vel) = circular_orbit(1.07, a, phase);
 
@@ -33,7 +32,6 @@ pub fn kepler_36() -> Template {
             material,
             position: Some(pos),
             velocity: vel,
-            spin: 0.0,
         });
     }
 

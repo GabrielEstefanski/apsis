@@ -1,4 +1,4 @@
-use crate::core::body::{Body, NamedBody};
+use crate::domain::body::{Body, NamedBody};
 use crate::templates::Template;
 
 /// Instantiate a template at the origin while preserving explicit body names.
@@ -34,21 +34,10 @@ pub fn instantiate_at(template: &Template, cx: f64, cy: f64) -> Vec<NamedBody> {
         .map(|t| {
             let [px, py] = t.position.unwrap_or([0.0, 0.0]);
 
-            let mut b = Body::new(
-                px + dx,
-                py + dy,
-                t.velocity[0],
-                t.velocity[1],
-                t.mass,
-                t.material,
-            );
+            let mut b =
+                Body::new(px + dx, py + dy, t.velocity[0], t.velocity[1], t.mass, t.material);
 
-            b.omega_z = t.spin;
-
-            NamedBody {
-                body: b,
-                name: t.name.map(str::to_owned),
-            }
+            NamedBody { body: b, name: t.name.map(str::to_owned) }
         })
         .collect()
 }

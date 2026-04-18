@@ -1,10 +1,12 @@
-use rand::random;
 use std::f64::consts::TAU;
+use rand::{SeedableRng, RngExt};
+use rand::rngs::SmallRng;
 
-use crate::core::materials::Material;
+use crate::domain::materials::Material;
 use crate::templates::{Template, TemplateBody, UnitSystem, builders::circular_orbit};
 
-pub fn simple_three_body() -> Template {
+pub fn simple_three_body(seed: u64) -> Template {
+    let mut rng: SmallRng = if seed == 0 { rand::make_rng() } else { SmallRng::seed_from_u64(seed) };
     let mut bodies = Vec::with_capacity(3);
 
     // ── Central star (Sun-like) ── //
@@ -14,12 +16,11 @@ pub fn simple_three_body() -> Template {
         position: Some([0.0, 0.0]),
         velocity: [0.0, 0.0],
         material: Material::Star,
-        spin: 0.0,
     });
 
     // ── Planet (Earth-like) ── //
     // Random orbital phase for variability
-    let earth_phase = random::<f64>() * TAU;
+    let earth_phase = rng.random::<f64>() * TAU;
     let (earth_pos, earth_vel) = circular_orbit(1.0, 1.0, earth_phase);
 
     bodies.push(TemplateBody {
@@ -28,11 +29,10 @@ pub fn simple_three_body() -> Template {
         position: Some(earth_pos),
         velocity: earth_vel,
         material: Material::Rocky,
-        spin: 0.0,
     });
 
     // ── Moon (hierarchical orbit around the planet) ── //
-    let moon_phase = random::<f64>() * TAU;
+    let moon_phase = rng.random::<f64>() * TAU;
     let moon_a = 0.00257;
 
     // Relative position in the planet frame
@@ -52,7 +52,6 @@ pub fn simple_three_body() -> Template {
         position: Some(moon_pos),
         velocity: moon_vel,
         material: Material::Icy,
-        spin: 0.0,
     });
 
     Template {

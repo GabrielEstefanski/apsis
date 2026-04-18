@@ -35,11 +35,7 @@ fn stumpff_c(psi: f64) -> f64 {
     if psi.abs() < 1e-6 {
         return 0.5 - psi / 24.0 + psi * psi / 720.0;
     }
-    if psi > 0.0 {
-        (1.0 - psi.sqrt().cos()) / psi
-    } else {
-        ((-psi).sqrt().cosh() - 1.0) / (-psi)
-    }
+    if psi > 0.0 { (1.0 - psi.sqrt().cos()) / psi } else { ((-psi).sqrt().cosh() - 1.0) / (-psi) }
 }
 
 /// Stumpff function `s(ψ) = (√ψ − sin √ψ) / ψ^(3/2)`.

@@ -1,6 +1,6 @@
 use crate::app::theme::{ACCENT, BORDER, DANGER, SUCCESS, TEXT_DIM, TEXT_PRI, TEXT_SEC};
 use crate::app::ui::SimulationApp;
-use crate::core::snapshot::SimSnapshot;
+use crate::io::snapshot::SimSnapshot;
 use eframe::egui::{self, Color32, RichText, Stroke};
 
 impl SimulationApp {
@@ -15,11 +15,7 @@ impl SimulationApp {
             .order(egui::Order::Background)
             .show(ctx, |ui| {
                 let screen = ctx.screen_rect();
-                ui.painter().rect_filled(
-                    screen,
-                    0.0,
-                    Color32::from_black_alpha(160),
-                );
+                ui.painter().rect_filled(screen, 0.0, Color32::from_black_alpha(160));
             });
 
         // ── Modal window ────────────────────────────────────────────────────
@@ -60,7 +56,7 @@ impl SimulationApp {
                         .changed()
                     {
                         // Refresh listing when path changes
-                        self.save_modal_entries = crate::core::snapshot::list_saves(
+                        self.save_modal_entries = crate::io::snapshot::list_saves(
                             std::path::Path::new(&self.save_dir),
                         );
                     }
@@ -91,7 +87,7 @@ impl SimulationApp {
                         Ok(_) => {
                             self.save_modal_error = None;
                             // Refresh listing
-                            self.save_modal_entries = crate::core::snapshot::list_saves(
+                            self.save_modal_entries = crate::io::snapshot::list_saves(
                                 std::path::Path::new(&self.save_dir),
                             );
                         }
@@ -131,14 +127,14 @@ impl SimulationApp {
                         {
                             self.system.restore_from_snapshot(&snap);
                             // Sync app UI state back from snapshot
-                            self.physics_cfg.integrator      = snap.integrator;
+                            self.physics_cfg.integrator      = snap.integrator_kind;
                             self.physics_cfg.theta           = snap.theta;
                             self.physics_cfg.softening_scale = snap.softening_scale;
                             self.physics_cfg.g_factor        = snap.g_factor;
                             self.physics_cfg.trail_every     = snap.trail_every;
                             self.sim_name = snap.sim_name.clone();
                             // Restore seed (0 = old save without seed → generate fresh)
-                            self.sim_seed = if snap.seed != 0 { snap.seed } else { crate::core::snapshot::SimSnapshot::new_seed() };
+                            self.sim_seed = if snap.seed != 0 { snap.seed } else { crate::io::snapshot::SimSnapshot::new_seed() };
                             self.paused = true;
                             self.selected_body = None;
                             self.follow_selected_body = false;

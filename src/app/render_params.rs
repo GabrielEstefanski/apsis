@@ -20,6 +20,6 @@ pub fn compute_render_radius(physical_radius: f64, params: RenderParams) -> f32 
             let scaled = (1.0 - (-k * physical_px).exp()) * 20.0;
 
             scaled.max(params.min_px).max(2.5)
-        }
+        },
     }
 }
