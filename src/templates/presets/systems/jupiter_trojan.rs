@@ -1,11 +1,13 @@
 use crate::{
-    core::materials::Material,
+    domain::materials::Material,
     templates::{Template, TemplateBody, UnitSystem, builders::circular_orbit},
 };
 
-pub fn jupiter_trojans() -> Template {
-    use rand::random;
+pub fn jupiter_trojans(seed: u64) -> Template {
+    use rand::{SeedableRng, RngExt};
+    use rand::rngs::SmallRng;
     use std::f64::consts::{PI, TAU};
+    let mut rng: SmallRng = if seed == 0 { rand::make_rng() } else { SmallRng::seed_from_u64(seed) };
 
     let m_sun = 1.0;
     let m_jupiter = 9.5e-4;
@@ -26,7 +28,6 @@ pub fn jupiter_trojans() -> Template {
             position: Some([0.0, 0.0]),
             velocity: [0.0, 0.0],
             material: Material::Star,
-            spin: 0.0,
         },
         // Jupiter
         TemplateBody {
@@ -35,7 +36,6 @@ pub fn jupiter_trojans() -> Template {
             position: Some(j_pos),
             velocity: j_vel,
             material: Material::Gas,
-            spin: 0.0,
         },
     ];
 
@@ -46,14 +46,14 @@ pub fn jupiter_trojans() -> Template {
 
     for &center in &[l4_angle, l5_angle] {
         for _ in 0..n {
-            let angle = center + (random::<f64>() - 0.5) * spread;
-            let r = a * (1.0 + (random::<f64>() - 0.5) * 0.05);
+            let angle = center + (rng.random::<f64>() - 0.5) * spread;
+            let r = a * (1.0 + (rng.random::<f64>() - 0.5) * 0.05);
 
             let (pos, mut vel) = circular_orbit(m_sun, r, angle);
 
             // Small velocity dispersion to keep the cloud dynamically alive
-            vel[0] *= 1.0 + vel_disp * (random::<f64>() - 0.5);
-            vel[1] *= 1.0 + vel_disp * (random::<f64>() - 0.5);
+            vel[0] *= 1.0 + vel_disp * (rng.random::<f64>() - 0.5);
+            vel[1] *= 1.0 + vel_disp * (rng.random::<f64>() - 0.5);
 
             bodies.push(TemplateBody {
                 name: None,
@@ -61,7 +61,6 @@ pub fn jupiter_trojans() -> Template {
                 position: Some(pos),
                 velocity: vel,
                 material: Material::Asteroid,
-                spin: 0.0,
             });
         }
     }

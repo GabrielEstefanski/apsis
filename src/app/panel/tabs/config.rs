@@ -2,7 +2,7 @@ use crate::app::config::PhysicsConfig;
 use crate::app::theme::secondary_btn;
 use crate::app::theme::{ACCENT, BORDER, DANGER, SUCCESS, TEXT_DIM, TEXT_PRI, TEXT_SEC};
 use crate::app::ui::SimulationApp;
-use crate::physics::integrator::Integrator;
+use crate::physics::integrator::IntegratorKind;
 use eframe::egui::{self, Align, Color32, Layout, RichText, Stroke};
 
 // ── Layout constants ──────────────────────────────────────────────────────────
@@ -26,10 +26,7 @@ fn section(ui: &mut egui::Ui, title: &str) {
         ui.add_space(4.0);
         let r = ui.available_rect_before_wrap();
         ui.painter().line_segment(
-            [
-                egui::pos2(r.left(), r.center().y),
-                egui::pos2(r.right(), r.center().y),
-            ],
+            [egui::pos2(r.left(), r.center().y), egui::pos2(r.right(), r.center().y)],
             Stroke::new(0.5, BORDER),
         );
     });
@@ -54,10 +51,7 @@ fn param_row<R>(
             egui::Label::new(RichText::new(label).size(10.0).color(TEXT_SEC)),
         )
         .on_hover_text(tip);
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            add(ui)
-        })
-        .inner
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| add(ui)).inner
     })
     .inner
 }
@@ -99,6 +93,25 @@ impl SimulationApp {
             self.system.set_theta(theta);
         }
 
+        let thr_tip = "Direct O(N²) threshold.\n\
+            N ≤ this value → exact pairwise sum (always used for benchmarks).\n\
+            N > this value → Barnes-Hut tree approximation.\n\
+            Default 64.  Set to 0 (= 1 after clamp) to force BH at all N.\n\
+            Set high (e.g. 10000) to force exact evaluation at all N.";
+
+        let mut thr = self.physics_cfg.exact_threshold;
+        let changed = param_row(ui, "direct N ≤", thr_tip, LBL_W, |ui| {
+            ui.add_sized(
+                egui::vec2(DV_W, 18.0),
+                egui::DragValue::new(&mut thr).speed(1).range(1..=10_000usize),
+            )
+            .changed()
+        });
+        if changed {
+            self.physics_cfg.exact_threshold = thr;
+            self.system.set_exact_threshold(thr);
+        }
+
         let eps_tip = "Global Plummer softening scale.\n\
             Per-body default: ε = 0.02 · m^(1/3)\n\
             1.0 = default  |  > 1 suppresses singularities  |  < 1 sharper forces";
@@ -120,12 +133,9 @@ impl SimulationApp {
         }
 
         ui.label(
-            RichText::new(format!(
-                "  ε_eff = 0.02·m^⅓·{:.3}",
-                self.physics_cfg.softening_scale
-            ))
-            .size(9.0)
-            .color(TEXT_DIM),
+            RichText::new(format!("  ε_eff = 0.02·m^⅓·{:.3}", self.physics_cfg.softening_scale))
+                .size(9.0)
+                .color(TEXT_DIM),
         );
 
         // Softening validity indicator: estimates the fractional force error
@@ -161,9 +171,7 @@ impl SimulationApp {
 
                 ui.horizontal(|ui| {
                     ui.label(
-                        RichText::new(format!("  ε/r_min = {ratio:.3e}"))
-                            .size(9.0)
-                            .color(TEXT_DIM),
+                        RichText::new(format!("  ε/r_min = {ratio:.3e}")).size(9.0).color(TEXT_DIM),
                     );
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         ui.label(
@@ -176,12 +184,7 @@ impl SimulationApp {
 
                 if ratio > 0.1 {
                     egui::Frame::NONE
-                        .fill(Color32::from_rgba_unmultiplied(
-                            color.r(),
-                            color.g(),
-                            color.b(),
-                            18,
-                        ))
+                        .fill(Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), 18))
                         .stroke(Stroke::new(0.5, color.gamma_multiply(0.4)))
                         .corner_radius(3.0)
                         .inner_margin(egui::Margin::symmetric(6, 3))
@@ -228,6 +231,31 @@ impl SimulationApp {
             self.system.set_g_factor(g);
         }
 
+        // ── REPRODUCIBILITY ───────────────────────────────────────────────────
+
+        section(ui, "REPRODUCIBILITY");
+
+        let seed_tip = "Reproducibility seed.\n\
+            Presets with random elements (solar system, trojans, etc.) use this\n\
+            seed so the same initial conditions can be regenerated.\n\
+            0 = randomised each time a template is loaded.\n\
+            Any nonzero value → fully deterministic preset.";
+
+        // Keep local copy in sync with system seed
+        self.physics_cfg.seed = self.system.seed();
+        let mut seed = self.physics_cfg.seed;
+        let changed = param_row(ui, "seed", seed_tip, LBL_W, |ui| {
+            ui.add_sized(
+                egui::vec2(DV_W, 18.0),
+                egui::DragValue::new(&mut seed).speed(1).range(0..=u64::MAX),
+            )
+            .changed()
+        });
+        if changed {
+            self.physics_cfg.seed = seed;
+            self.system.set_seed(seed);
+        }
+
         // ── INTEGRATION ───────────────────────────────────────────────────────
 
         section(ui, "INTEGRATION");
@@ -242,17 +270,11 @@ impl SimulationApp {
         param_row(ui, "algorithm", integ_tip, LBL_W, |ui| {
             egui::ComboBox::from_id_salt("integrator_sel")
                 .selected_text(
-                    RichText::new(self.physics_cfg.integrator.label())
-                        .size(10.0)
-                        .color(TEXT_PRI),
+                    RichText::new(self.physics_cfg.integrator.label()).size(10.0).color(TEXT_PRI),
                 )
                 .width(SL_W)
                 .show_ui(ui, |ui| {
-                    for variant in [
-                        Integrator::VelocityVerlet,
-                        Integrator::Yoshida4,
-                        Integrator::WisdomHolman,
-                    ] {
+                    for variant in IntegratorKind::ALL {
                         let r = ui.selectable_value(
                             &mut self.physics_cfg.integrator,
                             variant,
@@ -277,14 +299,9 @@ impl SimulationApp {
         );
 
         // Wisdom–Holman applicability warning.
-        if self.physics_cfg.integrator == Integrator::WisdomHolman {
+        if self.physics_cfg.integrator == IntegratorKind::WisdomHolman {
             egui::Frame::NONE
-                .fill(Color32::from_rgba_unmultiplied(
-                    ACCENT.r(),
-                    ACCENT.g(),
-                    ACCENT.b(),
-                    18,
-                ))
+                .fill(Color32::from_rgba_unmultiplied(ACCENT.r(), ACCENT.g(), ACCENT.b(), 18))
                 .stroke(Stroke::new(0.5, ACCENT.gamma_multiply(0.4)))
                 .corner_radius(3.0)
                 .inner_margin(egui::Margin::symmetric(6, 3))
@@ -315,10 +332,7 @@ impl SimulationApp {
             let speed = (dt * 0.05).max(1e-7);
             let r = ui.add_sized(
                 egui::vec2(DV_W, 18.0),
-                egui::DragValue::new(&mut dt)
-                    .speed(speed)
-                    .range(1e-7_f64..=10.0)
-                    .max_decimals(7),
+                egui::DragValue::new(&mut dt).speed(speed).range(1e-7_f64..=10.0).max_decimals(7),
             );
             if r.changed() {
                 self.system.set_dt(dt);
@@ -386,9 +400,7 @@ impl SimulationApp {
         param_row(ui, "steps / frame", spf_tip, LBL_W, |ui| {
             ui.add_sized(
                 egui::vec2(DV_W, 18.0),
-                egui::DragValue::new(&mut self.steps_per_frame)
-                    .speed(1)
-                    .range(1..=10_000u32),
+                egui::DragValue::new(&mut self.steps_per_frame).speed(1).range(1..=10_000u32),
             );
         });
 
@@ -404,9 +416,7 @@ impl SimulationApp {
         let changed = param_row(ui, "sample every", te_tip, LBL_W, |ui| {
             ui.add_sized(
                 egui::vec2(DV_W, 18.0),
-                egui::DragValue::new(&mut trail_every)
-                    .speed(1)
-                    .range(1..=256usize),
+                egui::DragValue::new(&mut trail_every).speed(1).range(1..=256usize),
             )
             .changed()
         });
@@ -435,6 +445,8 @@ impl SimulationApp {
         ui.add_space(10.0);
         if secondary_btn(ui, "Reset to defaults") {
             let defaults = PhysicsConfig::default();
+            self.system.set_exact_threshold(defaults.exact_threshold);
+            self.system.set_seed(defaults.seed);
             self.system.set_theta(defaults.theta);
             self.system.set_softening_scale(defaults.softening_scale);
             self.system.set_g_factor(defaults.g_factor);

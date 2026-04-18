@@ -1,12 +1,14 @@
-use crate::physics::integrator::Integrator;
+use crate::physics::integrator::IntegratorKind;
 
 /// Runtime physics configuration — tunable constants and display unit labels.
 #[derive(Clone)]
 pub struct PhysicsConfig {
     /// Active integration algorithm.
-    pub integrator: Integrator,
+    pub integrator: IntegratorKind,
 
     // ── Force accuracy ────────────────────────────────────────────────────────
+    /// N ≤ this → exact O(N²); N > this → Barnes-Hut O(N log N).
+    pub exact_threshold: usize,
 
     /// Barnes–Hut opening angle θ ∈ [0.05, 1.5].
     ///
@@ -27,19 +29,20 @@ pub struct PhysicsConfig {
     pub softening_scale: f64,
 
     // ── Gravity ───────────────────────────────────────────────────────────────
-
     /// Effective gravitational strength multiplier.
     ///
     /// Scales all accelerations: `G_eff = G₀ · g_factor` (G₀ = 1.0).
     pub g_factor: f64,
 
-    // ── Trails ────────────────────────────────────────────────────────────────
+    // ── Reproducibility ───────────────────────────────────────────────────────
+    /// Seed used by preset builders and cluster spawners.
+    pub seed: u64,
 
+    // ── Trails ────────────────────────────────────────────────────────────────
     /// Trail sampling interval: record a trail point every N rendered frames.
     pub trail_every: usize,
 
     // ── Unit labels (cosmetic) ────────────────────────────────────────────────
-
     /// Display label appended to mass values, e.g. `"M"`, `"M☉"`, `"kg"`.
     pub mass_label: String,
 
@@ -53,7 +56,9 @@ pub struct PhysicsConfig {
 impl Default for PhysicsConfig {
     fn default() -> Self {
         Self {
-            integrator: Integrator::VelocityVerlet,
+            integrator: IntegratorKind::VelocityVerlet,
+            exact_threshold: 64,
+            seed: 0,
             theta: 0.5,
             softening_scale: 1.0,
             g_factor: 1.0,

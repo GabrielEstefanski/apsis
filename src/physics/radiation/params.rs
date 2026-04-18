@@ -28,11 +28,7 @@ impl RadiationParams {
     /// Useful as a default for bodies that should not be affected
     /// (stars, massive planets).
     pub fn inert() -> Self {
-        Self {
-            area: 0.0,
-            mass: 1.0,
-            q_pr: 0.0,
-        }
+        Self { area: 0.0, mass: 1.0, q_pr: 0.0 }
     }
 
     /// Computes the dimensionless β parameter for a given source.

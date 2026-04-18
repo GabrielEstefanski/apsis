@@ -1,9 +1,9 @@
 use crate::{
-    core::materials::Material,
+    domain::materials::Material,
     templates::{Template, TemplateBody, UnitSystem},
 };
 
-pub fn three_body_chaotic_ejection() -> Template {
+pub fn three_body_chaotic_ejection(_seed: u64) -> Template {
     let eps = 0.001;
 
     Template {
@@ -16,7 +16,6 @@ pub fn three_body_chaotic_ejection() -> Template {
                 position: Some([-1.0, 0.0]),
                 velocity: [0.3, 0.4],
                 material: Material::Rocky,
-                spin: 0.0,
             },
             TemplateBody {
                 name: Some("Body 2"),
@@ -24,7 +23,6 @@ pub fn three_body_chaotic_ejection() -> Template {
                 position: Some([1.0, 0.0]),
                 velocity: [0.3, 0.4 + eps],
                 material: Material::Rocky,
-                spin: 0.0,
             },
             TemplateBody {
                 name: Some("Body 3"),
@@ -32,7 +30,6 @@ pub fn three_body_chaotic_ejection() -> Template {
                 position: Some([0.0, 0.1]),
                 velocity: [-0.6, -0.8],
                 material: Material::Rocky,
-                spin: 0.0,
             },
         ],
         display_scale: 1.0,

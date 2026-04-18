@@ -1,5 +1,5 @@
 use crate::core::adaptive::DtMode;
-use crate::physics::integrator::Integrator;
+use crate::physics::integrator::IntegratorKind;
 
 /// Snapshot of the physical state of the simulation at a single instant.
 ///
@@ -56,7 +56,7 @@ pub struct Metrics {
 
     // ── Simulation parameters ─────────────────────────────────────────────── //
     /// Active integration algorithm.
-    pub integrator: Integrator,
+    pub integrator_kind: IntegratorKind,
 
     /// Effective gravitational multiplier (G_eff = G₀ · g_factor).
     pub g_factor: f64,

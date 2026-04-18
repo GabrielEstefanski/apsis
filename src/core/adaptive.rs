@@ -238,21 +238,14 @@ impl DtController {
             return dt;
         }
 
-        let prev = if self.last_dt > 0.0 {
-            self.last_dt
-        } else {
-            clamp(proposed_dt)
-        };
+        let prev = if self.last_dt > 0.0 { self.last_dt } else { clamp(proposed_dt) };
 
         let mut dt = clamp(proposed_dt).min(prev);
 
         let ratio = (rel_energy_error.abs() / cfg.target_rel_energy_error).max(1e-12);
 
-        let energy_scale = if ratio > 1.0 {
-            1.0 / (1.0 + 0.5 * (ratio - 1.0))
-        } else {
-            1.0 + 0.2 * (1.0 - ratio)
-        };
+        let energy_scale =
+            if ratio > 1.0 { 1.0 / (1.0 + 0.5 * (ratio - 1.0)) } else { 1.0 + 0.2 * (1.0 - ratio) };
 
         dt *= energy_scale;
 

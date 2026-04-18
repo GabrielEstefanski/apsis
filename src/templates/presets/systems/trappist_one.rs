@@ -1,9 +1,12 @@
+use rand::{SeedableRng, RngExt};
+use rand::rngs::SmallRng;
 use crate::{
-    core::materials::Material,
+    domain::materials::Material,
     templates::{Template, TemplateBody, UnitSystem, builders::circular_orbit},
 };
 
-pub fn trappist_1() -> Template {
+pub fn trappist_1(seed: u64) -> Template {
+    let mut rng: SmallRng = if seed == 0 { rand::make_rng() } else { SmallRng::seed_from_u64(seed) };
     let mut bodies = Vec::with_capacity(8);
 
     // ── Star ───────────────────────────── //
@@ -13,7 +16,6 @@ pub fn trappist_1() -> Template {
         material: Material::Star,
         position: Some([0.0, 0.0]),
         velocity: [0.0, 0.0],
-        spin: 0.0,
     });
 
     let planets = [
@@ -27,7 +29,7 @@ pub fn trappist_1() -> Template {
     ];
 
     for (name, a, mass) in planets {
-        let phase = rand::random::<f64>() * std::f64::consts::TAU;
+        let phase = rng.random::<f64>() * std::f64::consts::TAU;
 
         let (pos, vel) = circular_orbit(0.089, a, phase);
 
@@ -37,7 +39,6 @@ pub fn trappist_1() -> Template {
             material: Material::Rocky,
             position: Some(pos),
             velocity: vel,
-            spin: 0.0,
         });
     }
 

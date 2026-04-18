@@ -28,7 +28,7 @@
 //! - Barnes & Hut (1986). *Nature* 324, 446–449.
 //! - Dehnen (2014). *Comput. Astrophys. Cosmol.* 1, 1.
 
-use crate::core::body::Body;
+use crate::domain::body::Body;
 use rayon::prelude::*;
 
 use super::kernel::{G, pair_eps2, plummer_acc, plummer_phi};
@@ -46,6 +46,8 @@ use super::tree::{EXACT_THRESHOLD, NO_CHILD, Node, QuadTree};
 /// every step without any carry-over from previous steps.
 pub struct BarnesHutEngine {
     tree: QuadTree,
+    /// N ≤ this → exact O(N²); N > this → Barnes-Hut traversal.
+    exact_threshold: usize,
 }
 
 impl BarnesHutEngine {
@@ -54,9 +56,19 @@ impl BarnesHutEngine {
     /// `max_depth` bounds the quadtree depth; 16 is sufficient for all
     /// practical particle counts.
     pub fn new(max_depth: usize) -> Self {
-        Self {
-            tree: QuadTree::new(max_depth),
-        }
+        Self { tree: QuadTree::new(max_depth), exact_threshold: EXACT_THRESHOLD }
+    }
+
+    /// Set the N threshold below which exact O(N²) evaluation is used.
+    ///
+    /// Range is clamped to [1, 10_000].
+    pub fn set_exact_threshold(&mut self, n: usize) {
+        self.exact_threshold = n.clamp(1, 10_000);
+    }
+
+    /// Current exact-evaluation threshold.
+    pub fn exact_threshold(&self) -> usize {
+        self.exact_threshold
     }
 
     /// Rebuild the quadtree from the current body positions.
@@ -71,8 +83,8 @@ impl BarnesHutEngine {
     /// Fills `acc[i] = (aₓ, aᵧ)` for each body.
     /// Returns `PE = Σᵢ<ⱼ −G mᵢ mⱼ / r_ij` (softened).
     ///
-    /// - N ≤ [`EXACT_THRESHOLD`]: uses exact O(N²) pairwise sum.
-    /// - N > [`EXACT_THRESHOLD`]: uses parallel BH traversal.
+    /// - N ≤ `exact_threshold`: uses exact O(N²) pairwise sum.
+    /// - N > `exact_threshold`: uses parallel BH traversal.
     pub fn evaluate(&self, bodies: &[Body], theta: f64, acc: &mut [(f64, f64)]) -> f64 {
         let n = bodies.len();
         acc.fill((0.0, 0.0));
@@ -81,7 +93,7 @@ impl BarnesHutEngine {
             return 0.0;
         }
 
-        if n <= EXACT_THRESHOLD {
+        if n <= self.exact_threshold {
             return exact_eval(bodies, acc);
         }
 
@@ -148,11 +160,7 @@ impl BarnesHutEngine {
             }
         }
 
-        if weight_sum > 0.0 {
-            (violation_sum / weight_sum).sqrt()
-        } else {
-            0.0
-        }
+        if weight_sum > 0.0 { (violation_sum / weight_sum).sqrt() } else { 0.0 }
     }
 
     fn node_density(&self, node: &Node, x: f64, y: f64, theta: f64) -> f64 {
@@ -366,7 +374,7 @@ fn bh_eval_body(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::body::Body;
+    use crate::domain::body::Body;
 
     fn eval(bodies: &[Body]) -> (Vec<(f64, f64)>, f64) {
         let mut engine = BarnesHutEngine::new(16);
@@ -384,22 +392,8 @@ mod tests {
     #[test]
     fn total_force_on_system_is_zero() {
         let bodies = vec![
-            Body::new(
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                1.0,
-                crate::core::materials::Material::Rocky,
-            ),
-            Body::new(
-                3.0,
-                0.0,
-                0.0,
-                0.0,
-                2.0,
-                crate::core::materials::Material::Rocky,
-            ),
+            Body::new(0.0, 0.0, 0.0, 0.0, 1.0, crate::domain::materials::Material::Rocky),
+            Body::new(3.0, 0.0, 0.0, 0.0, 2.0, crate::domain::materials::Material::Rocky),
         ];
         let (acc, _) = eval(&bodies);
 
@@ -416,22 +410,8 @@ mod tests {
     #[test]
     fn force_direction_is_attractive() {
         let bodies = vec![
-            Body::new(
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                1.0,
-                crate::core::materials::Material::Rocky,
-            ),
-            Body::new(
-                4.0,
-                0.0,
-                0.0,
-                0.0,
-                1.0,
-                crate::core::materials::Material::Rocky,
-            ),
+            Body::new(0.0, 0.0, 0.0, 0.0, 1.0, crate::domain::materials::Material::Rocky),
+            Body::new(4.0, 0.0, 0.0, 0.0, 1.0, crate::domain::materials::Material::Rocky),
         ];
         let (acc, _) = eval(&bodies);
         assert!(acc[0].0 > 0.0, "b0 should accelerate toward b1 (+x)");
@@ -445,30 +425,9 @@ mod tests {
     #[test]
     fn symmetric_configuration_has_zero_net_x_force_on_center() {
         let bodies = vec![
-            Body::new(
-                -5.0,
-                0.0,
-                0.0,
-                0.0,
-                1.0,
-                crate::core::materials::Material::Rocky,
-            ),
-            Body::new(
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                1.0,
-                crate::core::materials::Material::Rocky,
-            ), // center
-            Body::new(
-                5.0,
-                0.0,
-                0.0,
-                0.0,
-                1.0,
-                crate::core::materials::Material::Rocky,
-            ),
+            Body::new(-5.0, 0.0, 0.0, 0.0, 1.0, crate::domain::materials::Material::Rocky),
+            Body::new(0.0, 0.0, 0.0, 0.0, 1.0, crate::domain::materials::Material::Rocky), // center
+            Body::new(5.0, 0.0, 0.0, 0.0, 1.0, crate::domain::materials::Material::Rocky),
         ];
         let (acc, _) = eval(&bodies);
         assert!(acc[1].0.abs() < 1e-12, "net Fx on center = {}", acc[1].0);
@@ -480,22 +439,8 @@ mod tests {
     #[test]
     fn gravitational_potential_is_negative() {
         let bodies = vec![
-            Body::new(
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                1.0,
-                crate::core::materials::Material::Rocky,
-            ),
-            Body::new(
-                2.0,
-                0.0,
-                0.0,
-                0.0,
-                1.0,
-                crate::core::materials::Material::Rocky,
-            ),
+            Body::new(0.0, 0.0, 0.0, 0.0, 1.0, crate::domain::materials::Material::Rocky),
+            Body::new(2.0, 0.0, 0.0, 0.0, 1.0, crate::domain::materials::Material::Rocky),
         ];
         let (_, potential) = eval(&bodies);
         assert!(potential < 0.0, "PE = {potential}");

@@ -1,9 +1,11 @@
 use crate::{
-    core::materials::Material,
+    domain::materials::Material,
     templates::{Template, TemplateBody, UnitSystem},
 };
+use rand::{SeedableRng, RngExt};
+use rand::rngs::SmallRng;
 
-pub fn hd_80606() -> Template {
+pub fn hd_80606(seed: u64) -> Template {
     let mut bodies = Vec::with_capacity(2);
 
     let m_star = 1.0;
@@ -19,7 +21,6 @@ pub fn hd_80606() -> Template {
         material: Material::Star,
         position: Some([0.0, 0.0]),
         velocity: [0.0, 0.0],
-        spin: 0.0,
     });
 
     // ── Planet (placed at periapsis) ───── //
@@ -27,7 +28,8 @@ pub fn hd_80606() -> Template {
 
     let v_peri = (m_star * (1.0 + e) / r_peri).sqrt();
 
-    let phase = rand::random::<f64>() * std::f64::consts::TAU;
+    let mut rng: SmallRng = if seed == 0 { rand::make_rng() } else { SmallRng::seed_from_u64(seed) };
+    let phase = rng.random::<f64>() * std::f64::consts::TAU;
 
     let pos = [r_peri * phase.cos(), r_peri * phase.sin()];
     let vel = [-v_peri * phase.sin(), v_peri * phase.cos()];
@@ -38,7 +40,6 @@ pub fn hd_80606() -> Template {
         material: Material::Gas,
         position: Some(pos),
         velocity: vel,
-        spin: 0.0,
     });
 
     Template {
