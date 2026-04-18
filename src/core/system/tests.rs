@@ -469,6 +469,118 @@ fn pythagorean_position_convergence_y4() {
     );
 }
 
+// ── Deterministic replay ──────────────────────────────────────────────────────
+//
+// Fase 2 gate: given identical ICs and seed, two independent runs on the same
+// platform produce bit-identical body states.  These tests are the CI guard for
+// reproducibility regressions.
+//
+// We use `f64::to_bits()` equality (i.e. NaN-aware bitwise comparison) to catch
+// even single-ULP drift between runs.
+
+fn two_body_deterministic_system() -> System {
+    let bodies = vec![
+        Body::new(-1.0, 0.0, 0.0, -0.5, 1.0, Material::Rocky),
+        Body::new(1.0, 0.0, 0.0, 0.5, 1.0, Material::Rocky),
+    ];
+    let mut sys = System::new(bodies, 0.5, 0.01, 10, 1);
+    sys.set_seed(42);
+    sys
+}
+
+fn assert_bodies_bit_equal(
+    a: &[crate::domain::body::Body],
+    b: &[crate::domain::body::Body],
+    context: &str,
+) {
+    assert_eq!(a.len(), b.len(), "{context}: body count differs");
+    for (i, (ba, bb)) in a.iter().zip(b.iter()).enumerate() {
+        assert_eq!(ba.x.to_bits(),  bb.x.to_bits(),  "{context}: body {i} x differs");
+        assert_eq!(ba.y.to_bits(),  bb.y.to_bits(),  "{context}: body {i} y differs");
+        assert_eq!(ba.vx.to_bits(), bb.vx.to_bits(), "{context}: body {i} vx differs");
+        assert_eq!(ba.vy.to_bits(), bb.vy.to_bits(), "{context}: body {i} vy differs");
+    }
+}
+
+/// Two independent runs from identical ICs must produce bit-identical states.
+#[test]
+fn deterministic_replay_same_ic() {
+    const STEPS: u64 = 500;
+    let mut sys_a = two_body_deterministic_system();
+    let mut sys_b = two_body_deterministic_system();
+    for _ in 0..STEPS {
+        sys_a.step();
+        sys_b.step();
+    }
+    assert_bodies_bit_equal(sys_a.bodies(), sys_b.bodies(), "same-IC replay");
+}
+
+/// Save a snapshot mid-run, restore it into a fresh system, continue running;
+/// the result must be bit-identical to an uninterrupted reference run.
+#[test]
+fn deterministic_replay_via_snapshot() {
+    const STEPS_BEFORE: u64 = 200;
+    const STEPS_AFTER: u64 = 300;
+
+    // Reference: continuous run
+    let mut reference = two_body_deterministic_system();
+    for _ in 0..(STEPS_BEFORE + STEPS_AFTER) {
+        reference.step();
+    }
+
+    // Replayed: snapshot at midpoint, restore, continue
+    let mut replayed = two_body_deterministic_system();
+    for _ in 0..STEPS_BEFORE {
+        replayed.step();
+    }
+    let snap = replayed.to_snapshot();
+    replayed.restore_from_snapshot(&snap);
+    for _ in 0..STEPS_AFTER {
+        replayed.step();
+    }
+
+    assert_bodies_bit_equal(
+        reference.bodies(),
+        replayed.bodies(),
+        "snapshot replay",
+    );
+}
+
+/// Write a snapshot to a temp file and read it back; all header fields and body
+/// records must survive the round-trip without loss or corruption.
+#[test]
+fn snapshot_file_roundtrip() {
+    use crate::io::snapshot::SimSnapshot;
+
+    let mut sys = two_body_deterministic_system();
+    for _ in 0..100 {
+        sys.step();
+    }
+
+    let mut snap = sys.to_snapshot();
+    snap.sim_name = "roundtrip-test".to_owned();
+
+    let dir = std::env::temp_dir();
+    let path = snap.save_to_dir(&dir).expect("snapshot write failed");
+
+    let loaded = SimSnapshot::load_from(&path).expect("snapshot load failed");
+    std::fs::remove_file(&path).ok();
+
+    assert_eq!(loaded.t.to_bits(),  snap.t.to_bits(),  "t");
+    assert_eq!(loaded.steps,        snap.steps,         "steps");
+    assert_eq!(loaded.dt.to_bits(), snap.dt.to_bits(),  "dt");
+    assert_eq!(loaded.seed,         snap.seed,          "seed");
+    assert_eq!(loaded.sim_name,     snap.sim_name,      "sim_name");
+    assert_eq!(loaded.bodies.len(), snap.bodies.len(),  "body count");
+    for (i, (l, s)) in loaded.bodies.iter().zip(snap.bodies.iter()).enumerate() {
+        assert_eq!(l.x.to_bits(),  s.x.to_bits(),  "body {i} x roundtrip");
+        assert_eq!(l.y.to_bits(),  s.y.to_bits(),  "body {i} y roundtrip");
+        assert_eq!(l.vx.to_bits(), s.vx.to_bits(), "body {i} vx roundtrip");
+        assert_eq!(l.vy.to_bits(), s.vy.to_bits(), "body {i} vy roundtrip");
+        assert_eq!(l.mass.to_bits(), s.mass.to_bits(), "body {i} mass roundtrip");
+    }
+}
+
 /// Diagnostic: canonical positions at t = 1, 5, 10 for cross-validation with REBOUND.
 ///
 /// Run with:
