@@ -43,10 +43,11 @@ use crate::core::adaptive::{
     AccelerationStats, DtAdaptationConfig, DtController, DtMode, ThetaController,
 };
 use crate::core::diagnostics::{DiagnosticsComputer, SimulationDiagnostics};
+use crate::core::hooks::HookRegistry;
 use crate::core::metrics::Metrics;
 use crate::domain::body::Body;
 use crate::physics::integrator::{
-    GravityForceModel, Integrator, IntegratorKind, PerturbationForce, ForceModel, make_integrator,
+    ForceModel, GravityForceModel, Integrator, IntegratorKind, PerturbationForce, make_integrator,
 };
 use crate::physics::orbital::OrbitalElements;
 use crate::render::trail_buffer::TrailBuffer;
@@ -147,6 +148,13 @@ pub struct System {
     /// Reproducibility seed. Consumed by preset builders and cluster spawners.
     /// Persisted in snapshots so a run can be replayed exactly.
     pub(crate) seed: u64,
+
+    /// Registered observer/command hooks. Dispatched from [`System::step`].
+    pub(crate) hooks: HookRegistry,
+
+    /// Set by a [`Command::Stop`](crate::core::hooks::Command::Stop) request.
+    /// Headless runners honour this; the GUI may ignore it.
+    pub(crate) stop_requested: bool,
 }
 
 impl System {
@@ -245,6 +253,8 @@ impl System {
             softening_max,
             perturbations: Vec::new(),
             seed: 0,
+            hooks: HookRegistry::new(),
+            stop_requested: false,
         }
     }
 }
