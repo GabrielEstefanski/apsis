@@ -2,14 +2,40 @@
 
 use crate::core::adaptive::{AccelerationStats, DtMode};
 use crate::core::calibration;
-use crate::core::system::helpers::compute_closeness;
+use crate::core::hooks::{
+    CollisionEvent, Command, EscapeEvent, HookContext, HookPhase, HookPhaseKind, HookRegistry,
+};
 use crate::core::system::System;
+use crate::core::system::helpers::compute_closeness;
 use crate::physics::energy::{angular_momentum_z, kinetic_energy, total_energy};
 use crate::physics::integrator::IntegratorContext;
 
 impl System {
     /// Advance the simulation by one time step using the configured integrator.
+    ///
+    /// Hook dispatch order (see [`crate::core::hooks`]):
+    /// 1. `pre_step` — observe pre-integration state, queue commands.
+    /// 2. Apply pre-step commands.
+    /// 3. Integrator advances bodies.
+    /// 4. Detect events (collisions, escapes) on the integrated state.
+    /// 5. Dispatch event hooks and `post_step`, collect commands.
+    /// 6. Optional `heartbeat` tick when `steps % heartbeat_interval == 0`.
+    /// 7. Apply post-step / event commands in insertion order.
     pub fn step(&mut self) {
+        // ── 1. pre_step hooks (observe pre-integration state) ────────────────
+        let pre_cmds = if !self.hooks.is_empty() {
+            let mut hooks = take_hooks(self);
+            let ctx = build_hook_context(self, HookPhaseKind::PreStep);
+            let cmds = hooks.dispatch_pre_step(&ctx);
+            drop(ctx);
+            restore_hooks(self, hooks);
+            cmds
+        } else {
+            Vec::new()
+        };
+        self.apply_commands(pre_cmds);
+
+        // ── 2. Integrate ─────────────────────────────────────────────────────
         let dt = self.current_dt;
         let g_factor = self.g_factor;
 
@@ -18,11 +44,9 @@ impl System {
             g_factor,
             perturbations: &self.perturbations,
         };
-        let result =
-            self.integrator.step(&mut self.bodies, &mut ctx, dt, &mut self.scratch_acc);
+        let result = self.integrator.step(&mut self.bodies, &mut ctx, dt, &mut self.scratch_acc);
         self.last_potential = result.potential_energy;
 
-        let dt = self.current_dt;
         self.steps += 1;
         self.t += dt;
 
@@ -58,6 +82,39 @@ impl System {
         let (r_min, soft_max) = compute_closeness(&self.bodies);
         self.r_min = r_min;
         self.softening_max = soft_max;
+
+        // ── 3. Detect events and dispatch post-step hooks ────────────────────
+        if !self.hooks.is_empty() {
+            let collisions = self.detect_collisions();
+            let escapes = self.detect_escapes();
+
+            let mut hooks = take_hooks(self);
+            let heartbeat_interval = hooks.heartbeat_interval;
+            let fire_heartbeat = heartbeat_interval > 0 && self.steps % heartbeat_interval == 0;
+
+            let ctx = build_hook_context(self, HookPhaseKind::PostStep);
+            let mut cmds = Vec::new();
+
+            let event_ctx = HookContext { phase: HookPhase(HookPhaseKind::Event), ..ctx.clone() };
+            for ev in &collisions {
+                cmds.extend(hooks.dispatch_collision(ev, &event_ctx));
+            }
+            for ev in &escapes {
+                cmds.extend(hooks.dispatch_escape(ev, &event_ctx));
+            }
+            cmds.extend(hooks.dispatch_post_step(&ctx));
+
+            if fire_heartbeat {
+                let hb_ctx = HookContext { phase: HookPhase(HookPhaseKind::Heartbeat), ..ctx };
+                cmds.extend(hooks.dispatch_heartbeat(&hb_ctx));
+            } else {
+                drop(ctx);
+            }
+            drop(event_ctx);
+
+            restore_hooks(self, hooks);
+            self.apply_commands(cmds);
+        }
     }
 
     pub(crate) fn update_energy_tracking(&mut self) {
@@ -94,4 +151,91 @@ impl System {
         let denom = baseline.abs().max(1e-12);
         self.rel_angular_momentum_error = (lz - baseline) / denom;
     }
+
+    /// Event detection stub — collision detection will arrive with the basic
+    /// merge model. Returns empty until a [`CollisionHandler`]-style component
+    /// is wired in.
+    fn detect_collisions(&self) -> Vec<CollisionEvent> {
+        Vec::new()
+    }
+
+    /// Event detection stub — escape detection will arrive with the boundary
+    /// condition component.
+    fn detect_escapes(&self) -> Vec<EscapeEvent> {
+        Vec::new()
+    }
+
+    /// Apply a batch of hook-produced commands in order.
+    ///
+    /// Removals and merges are re-sorted by index (descending) so `swap_remove`
+    /// on earlier indices cannot corrupt later ones. Other command kinds run
+    /// in insertion order.
+    pub(crate) fn apply_commands(&mut self, cmds: Vec<Command>) {
+        if cmds.is_empty() {
+            return;
+        }
+
+        // Split into removal-style and additive commands, preserving order
+        // within each class. Removals are applied last, sorted descending, so
+        // hook-side indices stay valid until we touch them.
+        let mut removals: Vec<usize> = Vec::new();
+        let mut additions: Vec<crate::domain::body::NamedBody> = Vec::new();
+        let mut merges: Vec<(usize, usize, crate::domain::body::Body, Option<String>)> = Vec::new();
+
+        for cmd in cmds {
+            match cmd {
+                Command::RemoveBody { index } => removals.push(index),
+                Command::AddBody(nb) => additions.push(nb),
+                Command::Merge { remove_a, remove_b, merged, merged_name } => {
+                    merges.push((remove_a, remove_b, merged, merged_name));
+                },
+                Command::Stop => self.stop_requested = true,
+            }
+        }
+
+        // Merges: queue both indices for removal and add the merged body.
+        for (a, b, merged, name) in merges {
+            removals.push(a);
+            removals.push(b);
+            additions.push(crate::domain::body::NamedBody { body: merged, name });
+        }
+
+        // Remove in descending, deduplicated order.
+        removals.sort_unstable_by(|a, b| b.cmp(a));
+        removals.dedup();
+        for idx in removals {
+            self.remove_body(idx);
+        }
+
+        if !additions.is_empty() {
+            self.add_named_bodies(additions);
+        }
+    }
+}
+
+// ── Hook borrow helpers ───────────────────────────────────────────────────────
+//
+// `dispatch_*` needs `&mut HookRegistry`, but building `HookContext` needs
+// `&System` (including `&self.bodies`). To avoid aliasing, we temporarily move
+// the registry out of `System`, dispatch, then move it back.
+
+fn build_hook_context(system: &System, phase: HookPhaseKind) -> HookContext<'_> {
+    HookContext {
+        bodies: &system.bodies,
+        names: &system.names,
+        t: system.t,
+        dt: system.current_dt,
+        steps: system.steps,
+        rel_energy_error: system.rel_energy_error,
+        rel_angular_momentum_error: system.rel_angular_momentum_error,
+        phase: HookPhase(phase),
+    }
+}
+
+fn take_hooks(system: &mut System) -> HookRegistry {
+    std::mem::take(&mut system.hooks)
+}
+
+fn restore_hooks(system: &mut System, hooks: HookRegistry) {
+    system.hooks = hooks;
 }

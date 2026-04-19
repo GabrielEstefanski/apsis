@@ -16,6 +16,7 @@
 pub mod adaptive;
 pub mod calibration;
 pub mod diagnostics;
+pub mod hooks;
 pub mod metrics;
 pub mod physics_thread;
 pub mod system;

@@ -6,6 +6,7 @@
 //! - [`wh_guard`]   — Wisdom–Holman suitability guard and fallback behaviour
 //! - [`benchmarks`] — quantitative accuracy: Kepler, figure-8, Pythagorean 3-body
 //! - [`replay`]     — bit-identical determinism and snapshot round-trip
+//! - [`hook_dispatch`] — hook registry fires and commands mutate via step()
 
 use super::System;
 use crate::domain::body::Body;
@@ -575,5 +576,92 @@ mod replay {
             assert_eq!(l.vy.to_bits(),   s.vy.to_bits(),   "body {i} vy roundtrip");
             assert_eq!(l.mass.to_bits(), s.mass.to_bits(), "body {i} mass roundtrip");
         }
+    }
+}
+
+// ── Hook dispatch ─────────────────────────────────────────────────────────────
+//
+// Verifies the observer + command pattern end-to-end: hooks fire from
+// System::step() in the documented phase order, and commands they return
+// mutate state (body removal, stop request) after dispatch.
+
+mod hook_dispatch {
+    use super::*;
+    use crate::core::hooks::{Command, HookContext, SimHook};
+    use crate::physics::integrator::IntegratorKind;
+    use std::sync::{Arc, Mutex};
+
+    #[derive(Default)]
+    struct PhaseRecorder {
+        log: Arc<Mutex<Vec<&'static str>>>,
+    }
+
+    impl SimHook for PhaseRecorder {
+        fn pre_step(&mut self, _ctx: &HookContext<'_>) -> Vec<Command> {
+            self.log.lock().unwrap().push("pre");
+            Vec::new()
+        }
+        fn post_step(&mut self, _ctx: &HookContext<'_>) -> Vec<Command> {
+            self.log.lock().unwrap().push("post");
+            Vec::new()
+        }
+    }
+
+    #[test]
+    fn pre_and_post_step_fire_in_order() {
+        let mut sys = two_body_circular_system(IntegratorKind::VelocityVerlet, 0.01);
+        let log = Arc::new(Mutex::new(Vec::new()));
+        sys.hooks_mut().register(0, Box::new(PhaseRecorder { log: log.clone() }));
+
+        sys.step();
+        sys.step();
+
+        assert_eq!(*log.lock().unwrap(), vec!["pre", "post", "pre", "post"]);
+    }
+
+    struct RemoveFirstOnce {
+        fired: bool,
+    }
+
+    impl SimHook for RemoveFirstOnce {
+        fn post_step(&mut self, _ctx: &HookContext<'_>) -> Vec<Command> {
+            if self.fired {
+                return Vec::new();
+            }
+            self.fired = true;
+            vec![Command::RemoveBody { index: 0 }]
+        }
+    }
+
+    #[test]
+    fn remove_body_command_shrinks_system() {
+        let mut sys = two_body_circular_system(IntegratorKind::VelocityVerlet, 0.01);
+        assert_eq!(sys.bodies().len(), 2);
+
+        sys.hooks_mut().register(0, Box::new(RemoveFirstOnce { fired: false }));
+        sys.step();
+
+        assert_eq!(sys.bodies().len(), 1, "RemoveBody command must drop one body");
+    }
+
+    struct StopAfterOne;
+
+    impl SimHook for StopAfterOne {
+        fn post_step(&mut self, _ctx: &HookContext<'_>) -> Vec<Command> {
+            vec![Command::Stop]
+        }
+    }
+
+    #[test]
+    fn stop_command_sets_stop_requested() {
+        let mut sys = two_body_circular_system(IntegratorKind::VelocityVerlet, 0.01);
+        assert!(!sys.stop_requested());
+
+        sys.hooks_mut().register(0, Box::new(StopAfterOne));
+        sys.step();
+
+        assert!(sys.stop_requested(), "Command::Stop must flip stop_requested");
+        sys.clear_stop_request();
+        assert!(!sys.stop_requested());
     }
 }
