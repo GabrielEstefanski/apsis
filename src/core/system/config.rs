@@ -1,6 +1,7 @@
 //! Getters and setters for all System configuration parameters.
 
 use crate::core::adaptive::DtMode;
+use crate::core::hooks::HookRegistry;
 use crate::core::system::System;
 use crate::domain::body::Body;
 use crate::physics::gravity::BarnesHutEngine;
@@ -26,6 +27,27 @@ impl System {
     /// Number of integration steps completed.
     pub fn steps(&self) -> u64 {
         self.steps
+    }
+
+    /// Immutable access to the hook registry.
+    pub fn hooks(&self) -> &HookRegistry {
+        &self.hooks
+    }
+
+    /// Mutable access to the hook registry — register and configure hooks
+    /// here.
+    pub fn hooks_mut(&mut self) -> &mut HookRegistry {
+        &mut self.hooks
+    }
+
+    /// Whether a hook has requested the main loop to stop.
+    pub fn stop_requested(&self) -> bool {
+        self.stop_requested
+    }
+
+    /// Clear the stop flag (headless runners call this after honouring it).
+    pub fn clear_stop_request(&mut self) {
+        self.stop_requested = false;
     }
 
     /// Shared reference to the GPU-ready trail ring buffer.
