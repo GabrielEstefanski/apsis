@@ -55,7 +55,7 @@ impl PanelTab {
             Self::Templates => "Templates",
             Self::View => "Display",
             Self::Camera => "Camera",
-            Self::Config => "Advanced",
+            Self::Config => "Physics",
         }
     }
 

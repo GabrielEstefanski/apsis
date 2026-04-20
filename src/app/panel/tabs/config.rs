@@ -2,7 +2,6 @@ use crate::app::config::PhysicsConfig;
 use crate::app::theme::secondary_btn;
 use crate::app::theme::{ACCENT, BORDER, DANGER, SUCCESS, TEXT_DIM, TEXT_PRI, TEXT_SEC};
 use crate::app::ui::SimulationApp;
-use crate::physics::integrator::IntegratorKind;
 use eframe::egui::{self, Align, Color32, Layout, RichText, Stroke};
 
 // ── Layout constants ──────────────────────────────────────────────────────────
@@ -65,21 +64,18 @@ impl SimulationApp {
     /// gravity scaling, integration algorithm and time step, trail sampling,
     /// and a one-click reset to factory defaults.
     pub(super) fn panel_tab_config(&mut self, ui: &mut egui::Ui) {
-        ui.add_space(4.0);
-
-        // ── DIAGNOSTICS (collapsible) ─────────────────────────────────────────
-
-        egui::CollapsingHeader::new(
-            egui::RichText::new("DIAGNOSTICS").size(9.5).color(TEXT_DIM).strong(),
-        )
-        .default_open(true)
-        .show(ui, |ui| {
-            ui.add_space(2.0);
-            self.panel_diagnostics_detail(ui);
-            ui.add_space(4.0);
-        });
-
-        ui.add_space(4.0);
+        ui.add_space(2.0);
+        ui.label(
+            RichText::new("Physics")
+                .size(13.0)
+                .color(TEXT_PRI)
+                .strong(),
+        );
+        ui.label(
+            RichText::new("Force model, gravity & reproducibility — affects results.")
+                .size(10.0)
+                .color(TEXT_DIM),
+        );
 
         // ── FORCE ACCURACY ────────────────────────────────────────────────────
 
@@ -270,189 +266,6 @@ impl SimulationApp {
             self.system.set_seed(seed);
         }
 
-        // ── INTEGRATION ───────────────────────────────────────────────────────
-
-        section(ui, "INTEGRATION");
-
-        let integ_tip = "Integration algorithm.\n\
-            Velocity Verlet (2nd): standard leapfrog, 2 force evals/step.\n\
-            Yoshida 4th: Forest–Ruth composition, 3 evals/step but\n\
-            allows 5–10× larger Δt for equal energy conservation.\n\
-            Wisdom–Holman (2nd): exact Keplerian drift + perturbation kicks;\n\
-            optimal for nearly-Keplerian systems (star + planets).";
-
-        param_row(ui, "algorithm", integ_tip, LBL_W, |ui| {
-            egui::ComboBox::from_id_salt("integrator_sel")
-                .selected_text(
-                    RichText::new(self.physics_cfg.integrator.label()).size(10.0).color(TEXT_PRI),
-                )
-                .width(SL_W)
-                .show_ui(ui, |ui| {
-                    for variant in IntegratorKind::ALL {
-                        let r = ui.selectable_value(
-                            &mut self.physics_cfg.integrator,
-                            variant,
-                            variant.label(),
-                        );
-                        if r.clicked() {
-                            self.system.set_integrator(variant);
-                        }
-                    }
-                });
-        });
-
-        ui.label(
-            RichText::new(format!(
-                "  O({}) · {}F/step — {}",
-                self.physics_cfg.integrator.order(),
-                self.physics_cfg.integrator.force_evals_per_step(),
-                self.physics_cfg.integrator.description(),
-            ))
-            .size(9.0)
-            .color(TEXT_DIM),
-        );
-
-        // Wisdom–Holman applicability warning.
-        if self.physics_cfg.integrator == IntegratorKind::WisdomHolman {
-            egui::Frame::NONE
-                .fill(Color32::from_rgba_unmultiplied(ACCENT.r(), ACCENT.g(), ACCENT.b(), 18))
-                .stroke(Stroke::new(0.5, ACCENT.gamma_multiply(0.4)))
-                .corner_radius(3.0)
-                .inner_margin(egui::Margin::symmetric(6, 3))
-                .show(ui, |ui| {
-                    ui.set_width(ui.available_width());
-                    ui.add(
-                        egui::Label::new(
-                            RichText::new(
-                                "bodies[0] must be the dominant central mass. \
-                             Accuracy degrades near planet–planet close encounters.",
-                            )
-                            .size(9.0)
-                            .color(ACCENT),
-                        )
-                        .wrap(),
-                    );
-                });
-        }
-
-        ui.add_space(4.0);
-
-        let dt_tip = "Fixed time step Δt.\n\
-            Smaller Δt → better energy conservation, slower simulation.\n\
-            Yoshida-4 can use 3–5× larger Δt than VV for same dE/E₀.";
-
-        param_row(ui, "Δt", dt_tip, LBL_W, |ui| {
-            let mut dt = self.system.dt();
-            let speed = (dt * 0.05).max(1e-7);
-            let r = ui.add_sized(
-                egui::vec2(DV_W, 18.0),
-                egui::DragValue::new(&mut dt).speed(speed).range(1e-7_f64..=10.0).max_decimals(7),
-            );
-            if r.changed() {
-                self.system.set_dt(dt);
-            }
-        });
-
-        // Recommended Δt hint — Physics-justified suggestion derived from the
-        // Power et al. (2003) acceleration criterion and Aarseth jerk criterion.
-        // Clicking "apply" sets dt directly; the run stays fully symplectic.
-        {
-            let current_dt = self.system.dt();
-            let rec = self.system.metrics().recommended_dt;
-
-            if let Some(rec) = rec {
-                // Ratio > 1 means the user's dt is larger (coarser) than recommended.
-                let ratio = current_dt / rec;
-                let (status_color, status_label) = if ratio <= 2.0 {
-                    (SUCCESS, "ok")
-                } else if ratio <= 10.0 {
-                    (ACCENT, "coarse")
-                } else {
-                    (DANGER, "too large")
-                };
-
-                ui.horizontal(|ui| {
-                    ui.add_space(4.0);
-                    ui.label(
-                        RichText::new(format!("suggested  {:.2e}", rec))
-                            .size(9.0)
-                            .color(TEXT_DIM),
-                    );
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui
-                            .add_sized(
-                                egui::vec2(42.0, 14.0),
-                                egui::Button::new(RichText::new("apply").size(9.0)),
-                            )
-                            .on_hover_text(
-                                "Set Δt to the recommended value (Power et al. 2003 + Aarseth criterion).\n\
-                                 Keeps DtMode::Fixed — integration remains fully symplectic.",
-                            )
-                            .clicked()
-                        {
-                            self.system.set_dt(rec);
-                        }
-                        ui.add_space(4.0);
-                        ui.label(
-                            RichText::new(status_label)
-                                .size(9.0)
-                                .color(status_color)
-                                .strong(),
-                        );
-                    });
-                });
-            } else {
-                // Reserve height so layout is stable before first step.
-                ui.add_space(16.0);
-            }
-        }
-
-        let spf_tip = "Physics steps computed per rendered frame.\n\
-            Increase to speed up simulated time without changing Δt.\n\
-            Also controllable with the speed slider in the playbar.";
-
-        param_row(ui, "steps / frame", spf_tip, LBL_W, |ui| {
-            ui.add_sized(
-                egui::vec2(DV_W, 18.0),
-                egui::DragValue::new(&mut self.steps_per_frame).speed(1).range(1..=10_000u32),
-            );
-        });
-
-        // ── TRAILS ────────────────────────────────────────────────────────────
-
-        section(ui, "TRAILS");
-
-        let te_tip = "Trail sampling: record one trail point every N frames.\n\
-            1 = max density  |  Higher = sparser, longer-lived trails\n\
-            Useful at high steps/frame to prevent trail aliasing.";
-
-        let mut trail_every = self.trail_recorder.interval_multiplier();
-        let changed = param_row(ui, "sample every", te_tip, LBL_W, |ui| {
-            ui.add_sized(
-                egui::vec2(DV_W, 18.0),
-                egui::DragValue::new(&mut trail_every).speed(1).range(1..=256usize),
-            )
-            .changed()
-        });
-        if changed {
-            self.trail_recorder.set_interval_multiplier(trail_every);
-        }
-
-        let mr_tip = "Minimum mass ratio (body / dominant body) for a trail to be shown.\n\
-            Raise to hide more bodies (e.g. 1e-4 hides asteroid-mass objects).\n\
-            Lower to show trails for smaller bodies (0 = all bodies).";
-
-        param_row(ui, "min mass ratio", mr_tip, LBL_W, |ui| {
-            ui.add_sized(
-                egui::vec2(DV_W, 18.0),
-                egui::DragValue::new(&mut self.trail_min_mass_ratio)
-                    .speed(1e-8)
-                    .range(0.0_f64..=1.0)
-                    .custom_formatter(|v, _| format!("{v:.1e}"))
-                    .custom_parser(|s| s.parse::<f64>().ok()),
-            )
-        });
-
         // ── RESET ─────────────────────────────────────────────────────────────
 
         ui.add_space(10.0);
@@ -463,8 +276,8 @@ impl SimulationApp {
             self.system.set_theta(defaults.theta);
             self.system.set_softening_scale(defaults.softening_scale);
             self.system.set_g_factor(defaults.g_factor);
-            self.trail_recorder.set_interval_multiplier(defaults.trail_every);
             self.physics_cfg = defaults;
         }
     }
+
 }
