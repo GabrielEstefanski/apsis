@@ -1,45 +1,32 @@
 use crate::app::theme::{ACCENT, BORDER, DANGER, SUCCESS, TEXT_DIM, TEXT_PRI, TEXT_SEC};
 use crate::app::ui::SimulationApp;
 use eframe::egui::{self, Color32, RichText, Stroke};
-
-// ── Layout constants ──────────────────────────────────────────────────────────
-
-const LW: f32 = 34.0; // label column width
-const VW: f32 = 74.0; // value column width
+use std::f64::consts::PI;
 
 // ── Drift severity ────────────────────────────────────────────────────────────
 
-/// Classification of numerical drift, based on the *peak* value seen so far.
-/// Only ever moves toward worse severity mid-run; resets on scenario load.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-enum DriftSeverity {
-    Excellent,  // |peak| < 1e-9
-    Good,       // |peak| < 1e-6
-    Acceptable, // |peak| < 1e-3
-    Warning,    // |peak| < 1e-1
-    Critical,   // |peak| >= 1e-1
+pub(in crate::app::panel) enum DriftSeverity {
+    Excellent,
+    Good,
+    Acceptable,
+    Warning,
+    Critical,
 }
 
 impl DriftSeverity {
-    fn from_peak(peak: f64) -> Self {
+    pub(in crate::app::panel) fn from_peak(peak: f64) -> Self {
         let p = peak.abs();
-        if p < 1e-9 {
-            Self::Excellent
-        } else if p < 1e-6 {
-            Self::Good
-        } else if p < 1e-3 {
-            Self::Acceptable
-        } else if p < 1e-1 {
-            Self::Warning
-        } else {
-            Self::Critical
-        }
+        if p < 1e-9 { Self::Excellent }
+        else if p < 1e-6 { Self::Good }
+        else if p < 1e-3 { Self::Acceptable }
+        else if p < 1e-1 { Self::Warning }
+        else { Self::Critical }
     }
 
-    fn color(self) -> Color32 {
+    pub(in crate::app::panel) fn color(self) -> Color32 {
         match self {
-            Self::Excellent => SUCCESS,
-            Self::Good => SUCCESS,
+            Self::Excellent | Self::Good => SUCCESS,
             Self::Acceptable => TEXT_DIM,
             Self::Warning => ACCENT,
             Self::Critical => DANGER,
@@ -48,15 +35,12 @@ impl DriftSeverity {
 
     fn dot(self) -> &'static str {
         match self {
-            Self::Excellent => "●",
-            Self::Good => "●",
-            Self::Acceptable => "●",
-            Self::Warning => "▲",
-            Self::Critical => "▲",
+            Self::Excellent | Self::Good | Self::Acceptable => "●",
+            Self::Warning | Self::Critical => "▲",
         }
     }
 
-    fn label(self) -> &'static str {
+    pub(in crate::app::panel) fn label(self) -> &'static str {
         match self {
             Self::Excellent => "excellent",
             Self::Good => "good",
@@ -66,7 +50,6 @@ impl DriftSeverity {
         }
     }
 
-    /// One-liner hint shown only at Warning/Critical.
     fn hint(self) -> Option<&'static str> {
         match self {
             Self::Warning => Some("reduce dt or switch to Yoshida 4th-order"),
@@ -76,224 +59,182 @@ impl DriftSeverity {
     }
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// ── Shared helper ─────────────────────────────────────────────────────────────
 
-fn lbl(ui: &mut egui::Ui, text: &str) {
-    ui.add_sized(
-        egui::vec2(LW, 0.0),
-        egui::Label::new(RichText::new(text).size(10.5).color(TEXT_SEC)),
-    );
+fn kv(ui: &mut egui::Ui, label: &str, value: &str, col: Color32) {
+    ui.horizontal(|ui| {
+        ui.add(egui::Label::new(RichText::new(label).size(10.0).color(TEXT_SEC)).truncate());
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.add(
+                egui::Label::new(RichText::new(value).monospace().size(10.5).color(col))
+                    .truncate(),
+            );
+        });
+    });
 }
 
-fn val(ui: &mut egui::Ui, text: &str, color: Color32, size: f32) {
-    ui.add_sized(
-        egui::vec2(VW, 0.0),
-        egui::Label::new(RichText::new(text).monospace().size(size).color(color)).truncate(),
-    );
-}
-
-fn sci(v: f64) -> String {
-    format!("{:+.2e}", v)
-}
+fn sci(v: f64) -> String { format!("{:+.2e}", v) }
 
 fn fmt_e(v: f64) -> String {
     let a = v.abs();
-    if a == 0.0 {
-        return "0.0000".into();
-    }
+    if a == 0.0 { return "0.0000".into(); }
     if a < 1e-4 || a >= 1e5 { format!("{:+.4e}", v) } else { format!("{:+.4}", v) }
 }
 
-// ── Draw ──────────────────────────────────────────────────────────────────────
+fn instant_color(v: f64) -> Color32 {
+    let a = v.abs();
+    if a < 1e-8 { SUCCESS }
+    else if a < 1e-5 { TEXT_DIM }
+    else if a < 1e-3 { ACCENT }
+    else { DANGER }
+}
+
+// ── Compact status strip (shown at top of every panel tab) ────────────────────
 
 impl SimulationApp {
+    /// Minimal 3-row summary: stability + time + step count.
+    /// Full diagnostics live in the Config tab (see `panel_diagnostics_detail`).
     pub(super) fn panel_metrics_compact(&self, ui: &mut egui::Ui) {
         let m = self.system.metrics();
-        let tl = &self.physics_cfg.time_label;
-        let dl = &self.physics_cfg.dist_label;
-
         let e_sev = DriftSeverity::from_peak(self.energy_drift_peak);
         let lz_sev = DriftSeverity::from_peak(self.lz_drift_peak);
+        let worst = e_sev.max(lz_sev);
+        let col = worst.color();
 
-        // Color for current instantaneous values (based on current, not peak)
-        let instant_color = |v: f64| -> Color32 {
-            let a = v.abs();
-            if a < 1e-8 {
-                SUCCESS
-            } else if a < 1e-5 {
-                TEXT_DIM
-            } else if a < 1e-3 {
-                ACCENT
-            } else {
-                DANGER
-            }
-        };
-
-        // ── Conserved quantities ──────────────────────────────────────────────
-        egui::Grid::new("metrics_main").num_columns(4).spacing([4.0, 3.0]).show(ui, |ui| {
-            // Row: E | dE/E₀ (instantaneous, colored by current value)
-            lbl(ui, "E");
-            val(ui, &fmt_e(m.total_energy), TEXT_PRI, 11.0);
-            lbl(ui, "dE/E₀");
-            val(ui, &sci(m.rel_energy_error), instant_color(m.rel_energy_error), 11.0);
-            ui.end_row();
-
-            // Row: Lz | dLz/Lz₀
-            let lz_trivial = m.angular_momentum_z.abs() < 1e-10;
-            let (lz_val_str, lz_err_str, lz_col) = if lz_trivial {
-                (fmt_e(m.angular_momentum_z), "—".into(), TEXT_DIM)
-            } else {
-                (
-                    fmt_e(m.angular_momentum_z),
-                    sci(m.rel_angular_momentum_error),
-                    instant_color(m.rel_angular_momentum_error),
-                )
-            };
-            lbl(ui, "Lz");
-            val(ui, &lz_val_str, TEXT_PRI, 11.0);
-            lbl(ui, "dLz/Lz₀");
-            val(ui, &lz_err_str, lz_col, 11.0);
-            ui.end_row();
-
-            // Row: K | U
-            lbl(ui, "K");
-            val(ui, &fmt_e(m.kinetic), TEXT_DIM, 10.5);
-            lbl(ui, "U");
-            val(ui, &fmt_e(m.potential), TEXT_DIM, 10.5);
-            ui.end_row();
-
-            // Row: t | steps
-            lbl(ui, &format!("t [{tl}]"));
-            val(ui, &format!("{:.4e}", m.t), TEXT_PRI, 11.0);
-            lbl(ui, "steps");
-            val(ui, &format!("{}", m.steps), TEXT_DIM, 10.5);
-            ui.end_row();
-
-            // Row: dt | θ
-            lbl(ui, "dt");
-            val(ui, &format!("{:.2e}", m.dt), TEXT_SEC, 10.5);
-            lbl(ui, "θ");
-            val(ui, &format!("{:.3}", m.theta), TEXT_SEC, 10.5);
-            ui.end_row();
-
-            // Row: rec. dt (only when a physics-justified suggestion exists)
-            if let Some(rec) = m.recommended_dt {
-                let ratio = m.dt / rec;
-                let color = if ratio <= 2.0 {
-                    TEXT_DIM
-                } else if ratio <= 10.0 {
-                    ACCENT
-                } else {
-                    DANGER
-                };
-                lbl(ui, "rec. dt");
-                val(ui, &format!("{:.2e}", rec), color, 10.5);
-                // Intentionally leave the two right-side columns blank
-                // so the row still occupies exactly two columns.
-                lbl(ui, "");
-                val(ui, "", TEXT_DIM, 10.5);
-                ui.end_row();
-            }
+        // Row 1: stability indicator
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(worst.dot()).size(9.0).color(col));
+            ui.label(RichText::new("stability").size(10.0).color(TEXT_DIM));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.label(RichText::new(worst.label()).size(10.0).color(col).strong());
+            });
         });
 
-        // ── Integrator ────────────────────────────────────────────────────────
-        ui.add_space(2.0);
+        // Row 2: sim time + years
+        let t = m.t;
+        let yr = t / (2.0 * PI);
+        let yr_str = if yr.abs() < 0.01 { format!("{:.2e} yr", yr) }
+                     else { format!("{:.2} yr", yr) };
         ui.horizontal(|ui| {
-            ui.label(RichText::new("integr.").size(10.5).color(TEXT_SEC));
-            ui.add_space(2.0);
-            ui.add(
-                egui::Label::new(
-                    RichText::new(m.integrator_kind.label()).size(10.5).color(TEXT_DIM),
-                )
-                .truncate(),
+            ui.label(
+                RichText::new(format!("t  {:.4e}", t))
+                    .monospace().size(10.0).color(TEXT_PRI),
+            );
+            ui.label(RichText::new("·").size(9.0).color(TEXT_DIM));
+            ui.label(
+                RichText::new(yr_str).monospace().size(10.0).color(TEXT_DIM),
             );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.label(
-                    RichText::new(format!("O({})", m.integrator_kind.order()))
-                        .monospace()
-                        .size(10.0)
-                        .color(ACCENT),
+                    RichText::new(format!("{} steps", m.steps))
+                        .monospace().size(9.5).color(TEXT_DIM),
                 );
             });
         });
 
-        // ── Secondary diagnostics ─────────────────────────────────────────────
-        ui.add_space(1.0);
-        egui::Grid::new("metrics_diag").num_columns(4).spacing([4.0, 2.0]).show(ui, |ui| {
-            lbl(ui, "vmax");
-            val(ui, &format!("{:.3e} {dl}/t", m.max_vel), TEXT_DIM, 9.5);
-            lbl(ui, "amax");
-            val(ui, &format!("{:.3e}", m.max_acc), TEXT_DIM, 9.5);
-            ui.end_row();
-        });
-
-        // ── Stability status — always rendered, fixed layout ──────────────────
-        ui.add_space(4.0);
-        ui.add(egui::Separator::default().spacing(2.0));
-        ui.add_space(3.0);
-
-        // Worst severity between energy and angular momentum
-        let worst = e_sev.max(lz_sev);
-        let sev_col = worst.color();
-
-        // Status line (always present — no layout shift)
-        ui.horizontal(|ui| {
-            ui.label(RichText::new(worst.dot()).size(9.0).color(sev_col));
-            ui.label(RichText::new("stability").size(9.5).color(TEXT_DIM));
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.label(RichText::new(worst.label()).size(9.5).color(sev_col).strong());
-            });
-        });
-
-        // Peak row (always present — shows running maximum seen this run)
-        if m.steps > 10 {
+        // Row 3: peak drift (only after warm-up, only if non-trivial)
+        if m.steps > 10 && self.energy_drift_peak > 0.0 {
             ui.horizontal(|ui| {
-                ui.label(RichText::new("peak dE/E₀").size(9.0).color(TEXT_DIM));
+                ui.label(RichText::new("peak ΔE/E₀").size(9.0).color(TEXT_DIM));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let peak_str = if self.energy_drift_peak == 0.0 {
-                        "—".into()
-                    } else {
-                        format!("{:.2e}", self.energy_drift_peak)
-                    };
-                    ui.label(RichText::new(peak_str).monospace().size(9.0).color(e_sev.color()));
+                    ui.label(
+                        RichText::new(format!("{:.2e}", self.energy_drift_peak))
+                            .monospace().size(9.0).color(e_sev.color()),
+                    );
                 });
             });
-
-            // Lz peak (only if system has non-trivial angular momentum)
-            if self.lz_drift_peak > 0.0 {
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new("peak dLz/Lz₀").size(9.0).color(TEXT_DIM));
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.label(
-                            RichText::new(format!("{:.2e}", self.lz_drift_peak))
-                                .monospace()
-                                .size(9.0)
-                                .color(lz_sev.color()),
-                        );
-                    });
-                });
-            }
-        } else {
-            // Placeholder height while warming up — prevents layout jump
+        } else if m.steps <= 10 {
             ui.label(RichText::new("warming up…").size(9.0).color(TEXT_DIM).italics());
         }
 
-        // Actionable hint — only for Warning/Critical, fixed-height placeholder otherwise
-        ui.add_space(2.0);
+        // Actionable hint for Warning/Critical
         if let Some(hint) = worst.hint() {
+            ui.add_space(2.0);
             egui::Frame::NONE
                 .fill(Color32::from_rgba_unmultiplied(DANGER.r(), DANGER.g(), DANGER.b(), 18))
-                .stroke(Stroke::new(0.5, sev_col.gamma_multiply(0.4)))
+                .stroke(Stroke::new(0.5, col.gamma_multiply(0.4)))
                 .corner_radius(3.0)
                 .inner_margin(egui::Margin::symmetric(6, 3))
                 .show(ui, |ui| {
                     ui.set_width(ui.available_width());
-                    ui.add(egui::Label::new(RichText::new(hint).size(9.0).color(sev_col)).wrap());
+                    ui.add(egui::Label::new(RichText::new(hint).size(9.0).color(col)).wrap());
                 });
-        } else {
-            // Reserve the same vertical space so the panel below doesn't shift
-            // when the hint appears or disappears.
-            ui.add_space(18.0);
+        }
+
+        let _ = TEXT_SEC;
+        let _ = BORDER;
+    }
+
+    /// Full diagnostics table — called from the Config tab.
+    pub(in crate::app::panel) fn panel_diagnostics_detail(&self, ui: &mut egui::Ui) {
+        let m = self.system.metrics();
+        let e_sev = DriftSeverity::from_peak(self.energy_drift_peak);
+        let lz_sev = DriftSeverity::from_peak(self.lz_drift_peak);
+        let worst = e_sev.max(lz_sev);
+
+        // Conservation
+        kv(ui, "E", &fmt_e(m.total_energy), TEXT_PRI);
+        kv(ui, "ΔE / E₀", &sci(m.rel_energy_error), instant_color(m.rel_energy_error));
+        let lz_triv = m.angular_momentum_z.abs() < 1e-10;
+        let lz_err_str = if lz_triv { "—".to_owned() } else { sci(m.rel_angular_momentum_error) };
+        let lz_err_col = if lz_triv { TEXT_DIM } else { instant_color(m.rel_angular_momentum_error) };
+        kv(ui, "Lz", &fmt_e(m.angular_momentum_z), TEXT_PRI);
+        kv(ui, "ΔLz / Lz₀", &lz_err_str, lz_err_col);
+
+        ui.add_space(3.0);
+        ui.add(egui::Separator::default().spacing(2.0));
+        ui.add_space(2.0);
+
+        // Energy breakdown
+        kv(ui, "K (kinetic)", &fmt_e(m.kinetic), TEXT_DIM);
+        kv(ui, "U (potential)", &fmt_e(m.potential), TEXT_DIM);
+
+        ui.add_space(3.0);
+        ui.add(egui::Separator::default().spacing(2.0));
+        ui.add_space(2.0);
+
+        // Solver diagnostics
+        kv(ui, "dt", &format!("{:.3e}", m.dt), TEXT_DIM);
+        kv(ui, "θ (opening)", &format!("{:.3}", m.theta), TEXT_DIM);
+        kv(ui, "steps", &format!("{}", m.steps), TEXT_DIM);
+        kv(ui, "vmax", &format!("{:.3e}", m.max_vel), TEXT_DIM);
+        kv(ui, "amax", &format!("{:.3e}", m.max_acc), TEXT_DIM);
+
+        if let Some(rec) = m.recommended_dt {
+            let ratio = m.dt / rec;
+            let col = if ratio <= 2.0 { TEXT_DIM } else if ratio <= 10.0 { ACCENT } else { DANGER };
+            kv(ui, "suggested dt", &format!("{:.3e}", rec), col);
+        }
+
+        ui.add_space(3.0);
+        ui.add(egui::Separator::default().spacing(2.0));
+        ui.add_space(2.0);
+
+        // Stability summary
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("stability").size(10.0).color(TEXT_DIM));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.label(
+                    RichText::new(worst.label()).size(10.0).color(worst.color()).strong(),
+                );
+                ui.label(RichText::new(worst.dot()).size(9.0).color(worst.color()));
+            });
+        });
+        if self.energy_drift_peak > 0.0 {
+            kv(
+                ui,
+                "peak ΔE/E₀",
+                &format!("{:.2e}", self.energy_drift_peak),
+                e_sev.color(),
+            );
+        }
+        if self.lz_drift_peak > 0.0 {
+            kv(
+                ui,
+                "peak ΔLz/Lz₀",
+                &format!("{:.2e}", self.lz_drift_peak),
+                lz_sev.color(),
+            );
         }
     }
 }

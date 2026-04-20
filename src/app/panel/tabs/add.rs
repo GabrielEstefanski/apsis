@@ -22,26 +22,39 @@ fn material_grid(ui: &mut egui::Ui, selected: &mut Material) -> bool {
                 let is_sel = *selected == mat;
                 let [r, g, b] = mat.props().base_color;
                 let dot_col = Color32::from_rgb(r, g, b);
-
-                let fill = if is_sel { ACCENT_DIM } else { Color32::TRANSPARENT };
+                let text_col = if is_sel { TEXT_PRI } else { TEXT_SEC };
+                let fill = if is_sel { ACCENT_DIM } else { Color32::from_rgb(20, 20, 26) };
                 let stroke_col = if is_sel { ACCENT } else { BORDER };
 
-                let btn = ui.add(
-                    egui::Button::new(
-                        egui::RichText::new(mat.display_name()).size(9.5).color(if is_sel {
-                            TEXT_PRI
-                        } else {
-                            TEXT_SEC
-                        }),
-                    )
-                    .fill(fill)
-                    .stroke(Stroke::new(0.5, stroke_col))
-                    .min_size(egui::vec2(0.0, 20.0)),
+                // Inline colored dot + name via LayoutJob — no post-render painting needed
+                let mut job = egui::text::LayoutJob::default();
+                job.append(
+                    "● ",
+                    0.0,
+                    egui::TextFormat {
+                        font_id: egui::FontId::proportional(9.0),
+                        color: dot_col,
+                        valign: egui::Align::Center,
+                        ..Default::default()
+                    },
+                );
+                job.append(
+                    mat.display_name(),
+                    0.0,
+                    egui::TextFormat {
+                        font_id: egui::FontId::proportional(9.5),
+                        color: text_col,
+                        valign: egui::Align::Center,
+                        ..Default::default()
+                    },
                 );
 
-                // Draw colored dot inside the button (left side)
-                let dot_c = egui::pos2(btn.rect.left() + 6.0, btn.rect.center().y);
-                ui.painter().circle_filled(dot_c, 3.5, dot_col);
+                let btn = ui.add(
+                    egui::Button::new(job)
+                        .fill(fill)
+                        .stroke(Stroke::new(0.5, stroke_col))
+                        .min_size(egui::vec2(0.0, 20.0)),
+                );
 
                 if btn.clicked() && !is_sel {
                     *selected = mat;
@@ -52,7 +65,6 @@ fn material_grid(ui: &mut egui::Ui, selected: &mut Material) -> bool {
                     ui.end_row();
                 }
             }
-            // End any incomplete row
             if Material::ALL.len() % cols != 0 {
                 ui.end_row();
             }

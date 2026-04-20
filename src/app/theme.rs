@@ -59,7 +59,8 @@ pub fn apply_visuals(ctx: &egui::Context) {
     vis.faint_bg_color = Color32::from_rgb(14, 14, 18);
     vis.extreme_bg_color = Color32::from_rgb(7, 7, 10);
     vis.widgets.noninteractive.bg_fill = Color32::from_rgb(16, 16, 20);
-    vis.widgets.noninteractive.fg_stroke = Stroke::new(0.5, BORDER);
+    // fg_stroke drives hint text, labels, and separators — keep it dim but visible
+    vis.widgets.noninteractive.fg_stroke = Stroke::new(0.5, TEXT_DIM);
     vis.widgets.inactive.bg_fill = Color32::from_rgb(18, 18, 23);
     vis.widgets.inactive.fg_stroke = Stroke::new(1.0, TEXT_SEC);
     vis.widgets.hovered.bg_fill = Color32::from_rgb(30, 30, 40);

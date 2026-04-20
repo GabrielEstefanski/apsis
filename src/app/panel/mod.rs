@@ -1,52 +1,86 @@
+//! Zone orchestration for the main UI.
+//!
+//! Layout (see `project_ui_redesign.md` in memory for the full spec):
+//!
+//! ```text
+//! ┌ top bar (session) ──────────────────────────────────────────────┐
+//! ├──┬──────────────┬──────────────────────────────┬────────────────┤
+//! │🔍│              │                              │                │
+//! │➕│  contextual  │         canvas (wgpu)        │   inspector    │
+//! │★ │  panel       │                              │   (auto-show)  │
+//! │👁│  (280 px)    │                              │   (320 px)     │
+//! │⎆ │              │                              │                │
+//! │⚙ │              │                              │                │
+//! ├──┴──────────────┴──────────────────────────────┴────────────────┤
+//! │ playbar (play/pause · dt · SPF · integrator · reset)            │
+//! └─────────────────────────────────────────────────────────────────┘
+//!   48 px   280 px                                   320 px
+//! ```
+//!
+//! Panel registration order matters in egui: each panel carves space out of
+//! the remaining rect. Top → bottom → left-most → next-left → right →
+//! central. Keep this order stable so the canvas always occupies the
+//! residual rectangle.
+
 mod inspector;
 mod metrics;
+mod playbar;
 mod save_modal;
 mod settings_modal;
 mod shortcuts_modal;
-mod tab_bar;
 mod tabs;
 mod toolbar;
 
+use crate::app::theme::{BORDER, PANEL_BG};
 use crate::app::ui::SimulationApp;
-use eframe::egui;
+use eframe::egui::{self, Stroke};
+
+const CONTEXTUAL_MIN: f32 = 240.0;
+const CONTEXTUAL_DEFAULT: f32 = 300.0;
+const INSPECTOR_WIDTH: f32 = 320.0;
 
 impl SimulationApp {
-    // ── TOOLBAR ────────────────────────────────────────────────────────────
+    // ── Top bar (session) ──────────────────────────────────────────────────
     pub(super) fn draw_toolbar(&mut self, ctx: &egui::Context) {
         egui::Panel::top("toolbar")
             .frame(
                 egui::Frame::NONE
-                    .fill(crate::app::theme::PANEL_BG)
-                    .inner_margin(egui::Margin::symmetric(12, 5)),
+                    .fill(PANEL_BG)
+                    .inner_margin(egui::Margin::symmetric(14, 10))
+                    .stroke(Stroke::new(0.5, BORDER)),
             )
             .show(ctx, |ui| self.toolbar_content(ui));
     }
 
-    // ── LEFT PANEL ─────────────────────────────────────────────────────────
+    // ── Contextual panel (driven by tool rail selection) ───────────────────
     pub(super) fn draw_panel(&mut self, ctx: &egui::Context) {
-        egui::Panel::left("controls")
+        egui::Panel::left("contextual")
             .frame(
                 egui::Frame::NONE
-                    .fill(crate::app::theme::PANEL_BG)
-                    .inner_margin(egui::Margin::symmetric(12, 10)),
+                    .fill(PANEL_BG)
+                    .inner_margin(egui::Margin::symmetric(14, 12))
+                    .stroke(Stroke::new(0.5, BORDER)),
             )
-            .default_size(272.0)
-            .min_size(200.0)
+            .default_size(CONTEXTUAL_DEFAULT)
+            .min_size(CONTEXTUAL_MIN)
             .resizable(true)
             .show(ctx, |ui| {
+                // Stability pill sits OUTSIDE the scroll area so it's pinned
+                // at the top of every tab — always visible regardless of tab
+                // content or scroll position.
                 self.panel_metrics_compact(ui);
-                self.panel_tab_bar(ui);
-
+                ui.add_space(6.0);
+                ui.separator();
                 ui.add_space(4.0);
 
-                egui::ScrollArea::vertical().show(ui, |ui| {
+                egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
                     ui.set_width(ui.available_width());
                     self.panel_tab_dispatch(ui);
                 });
             });
     }
 
-    // ── RIGHT PANEL ────────────────────────────────────────────────────────
+    // ── Inspector (right, auto-show when a body is selected) ───────────────
     pub(super) fn draw_inspector(&mut self, ctx: &egui::Context) {
         let idx = match self.selected_body {
             Some(i) => i,
@@ -63,18 +97,23 @@ impl SimulationApp {
         egui::Panel::right("inspector")
             .frame(
                 egui::Frame::NONE
-                    .fill(crate::app::theme::PANEL_BG)
-                    .inner_margin(egui::Margin::symmetric(14, 14)),
+                    .fill(PANEL_BG)
+                    .inner_margin(egui::Margin::symmetric(16, 14))
+                    .stroke(Stroke::new(0.5, BORDER)),
             )
-            .min_size(200.0)
-            .max_size(200.0)
+            .default_size(INSPECTOR_WIDTH)
+            .min_size(INSPECTOR_WIDTH)
+            .max_size(INSPECTOR_WIDTH)
+            .resizable(false)
             .show(ctx, |ui| {
-                ui.set_width(172.0);
-                self.inspector_content(ui, idx);
+                egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    self.inspector_content(ui, idx);
+                });
             });
     }
 
-    // ── FIT VIEW ───────────────────────────────────────────────────────────
+    // ── Fit view (shared by Camera tool and F shortcut) ────────────────────
     pub(in crate::app) fn fit_to_view(&mut self) {
         let bodies = self.system.bodies();
 
