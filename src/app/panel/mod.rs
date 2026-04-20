@@ -65,14 +65,6 @@ impl SimulationApp {
             .min_size(CONTEXTUAL_MIN)
             .resizable(true)
             .show(ctx, |ui| {
-                // Stability pill sits OUTSIDE the scroll area so it's pinned
-                // at the top of every tab — always visible regardless of tab
-                // content or scroll position.
-                self.panel_metrics_compact(ui);
-                ui.add_space(6.0);
-                ui.separator();
-                ui.add_space(4.0);
-
                 egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
                     ui.set_width(ui.available_width());
                     self.panel_tab_dispatch(ui);

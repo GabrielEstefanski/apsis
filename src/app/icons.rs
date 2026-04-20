@@ -53,3 +53,4 @@ pub const RADIO_OFF: &str = reg::CIRCLE;
 
 pub const FIT_VIEW: &str = reg::FRAME_CORNERS;
 pub const TARGET: &str = reg::TARGET;
+pub const SEARCH: &str = reg::MAGNIFYING_GLASS;

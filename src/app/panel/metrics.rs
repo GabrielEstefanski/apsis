@@ -33,7 +33,7 @@ impl DriftSeverity {
         }
     }
 
-    fn dot(self) -> &'static str {
+    pub(in crate::app::panel) fn dot(self) -> &'static str {
         match self {
             Self::Excellent | Self::Good | Self::Acceptable => "●",
             Self::Warning | Self::Critical => "▲",
