@@ -67,10 +67,12 @@ fn is_degenerate_orbit(
     if (el.e - 1.0).abs() < DEGEN_ECC_WINDOW {
         return true;
     }
-    if !el.a.is_finite() || el.a <= 0.0 {
-        return false; // hyperbolic / invalid — sample_orbit returns empty anyway
+    if !el.a.is_finite() {
+        return true; // parabolic (a = ∞) — sample_orbit returns empty
     }
-    let r_peri = el.a * (1.0 - el.e);
+    // Elliptical: a > 0, r_peri = a(1−e). Hyperbolic: a < 0 by convention,
+    // r_peri = |a|(e−1). Both collapse to a*(1−e) with the right sign.
+    let r_peri = if el.a > 0.0 { el.a * (1.0 - el.e) } else { el.a.abs() * (el.e - 1.0) };
     r_peri < primary.physical_radius
 }
 
