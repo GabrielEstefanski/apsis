@@ -1,6 +1,7 @@
 use bytemuck::{Pod, Zeroable};
 use std::mem::size_of;
 
+use crate::render::trail::TrailStyle;
 use crate::render::trail_buffer::TrailBuffer;
 
 #[repr(C)]
@@ -15,7 +16,12 @@ pub struct TrailState {
     pub trail_width: f32,
     pub decay_k: f32,
     pub tail_desaturate: f32,
-    pub _pad: [f32; 2],
+    pub base_alpha: f32,
+    pub feather: f32,
+    pub core_boost: f32,
+    // Pad to 64 bytes so the struct size is a multiple of 16 as required
+    // for WGSL uniform address space.
+    pub _pad: [f32; 3],
 }
 
 pub struct TrailRenderer {
@@ -171,9 +177,7 @@ impl TrailRenderer {
         visibility: Option<&[bool]>,
         center: [f32; 2],
         scale: f32,
-        trail_width: f32,
-        decay_k: f32,         // novo
-        tail_desaturate: f32, // novo
+        style: &TrailStyle,
     ) {
         let n_bodies = trail.n_bodies();
         let cap = trail.capacity();
@@ -262,10 +266,13 @@ impl TrailRenderer {
             cap,
             center,
             scale,
-            trail_width,
-            decay_k,
-            tail_desaturate,
-            _pad: [0.0; 2],
+            trail_width: style.width,
+            decay_k: style.decay_k,
+            tail_desaturate: style.tail_desaturate,
+            base_alpha: style.base_alpha,
+            feather: style.feather,
+            core_boost: style.core_boost,
+            _pad: [0.0; 3],
         };
 
         queue.write_buffer(&self.state_buf, 0, bytemuck::bytes_of(&state));
@@ -310,14 +317,19 @@ struct TrailState {
     trail_width: f32,
     decay_k: f32,
     tail_desaturate: f32,
-    _pad: vec2<f32>,
+    base_alpha: f32,
+    feather: f32,
+    core_boost: f32,
+    _pad0: f32,
+    _pad1: f32,
+    _pad2: f32,
 };
 
 @group(1) @binding(0) var<storage, read> positions: array<vec2<f32>>;
 @group(1) @binding(1) var<storage, read> colors: array<vec4<f32>>;
 @group(1) @binding(2) var<uniform> state: TrailState;
 
-// ── Utilitários ────────────────────────────────────────────────────────────────
+// ── Utils ─────────────────────────────────────────────────────────────────────
 
 fn to_ndc(p: vec2<f32>) -> vec4<f32> {
     let local = p - screen.viewport_min;
@@ -326,30 +338,20 @@ fn to_ndc(p: vec2<f32>) -> vec4<f32> {
     return vec4<f32>(x, y, 0.0, 1.0);
 }
 
-// Converte RGB → luminância (BT.709)
 fn luminance(rgb: vec3<f32>) -> f32 {
     return dot(rgb, vec3<f32>(0.2126, 0.7152, 0.0722));
 }
 
-// Desatura parcialmente uma cor: t=0 → original, t=1 → tons de cinza
 fn desaturate(rgb: vec3<f32>, t: f32) -> vec3<f32> {
     let lum = luminance(rgb);
     return mix(rgb, vec3<f32>(lum), t);
 }
 
-// Shift de temperatura: age=0 (cauda) → frio/escuro, age=1 (ponta) → quente/brilhante
-// Simula emissão física como Universe Sandbox
 fn temperature_tint(rgb: vec3<f32>, age: f32) -> vec3<f32> {
-    // Ponta (age≈1): ligeiramente mais quente → boost no vermelho/verde, reduz azul
-    // Cauda (age≈0): esfria e desatura
-    let warm  = vec3<f32>(1.12, 1.05, 0.82);  // tint quente
-    let cold  = vec3<f32>(0.72, 0.78, 0.92);  // tint frio/azulado
-    let tint  = mix(cold, warm, age);
-
-    // Boost de saturação/brilho na ponta
+    let warm = vec3<f32>(1.12, 1.05, 0.82);
+    let cold = vec3<f32>(0.72, 0.78, 0.92);
+    let tint = mix(cold, warm, age);
     let boosted = rgb * tint;
-
-    // Desaturação progressiva na cauda
     let desat_amount = (1.0 - age) * state.tail_desaturate;
     return desaturate(boosted, desat_amount);
 }
@@ -357,6 +359,12 @@ fn temperature_tint(rgb: vec3<f32>, age: f32) -> vec3<f32> {
 struct VSOut {
     @builtin(position) pos: vec4<f32>,
     @location(0)       color: vec4<f32>,
+    // Signed transverse coordinate in [-1, 1] across the quad's width.
+    // Used by the fragment shader to analytically feather the edge.
+    @location(1)       transverse: f32,
+    // Age passed so the fragment can modulate feather per-segment (cauda
+    // wants gentler falloff so it dissolves instead of cutting off).
+    @location(2)       age: f32,
 };
 
 @vertex
@@ -376,11 +384,12 @@ fn vs_trail(
     let p0 = positions[idx0];
     let p1 = positions[idx1];
 
-    // Descarta segmentos inválidos (NaN ≠ NaN)
     if any(p0 != p0) || any(p1 != p1) {
         var out: VSOut;
-        out.pos   = vec4<f32>(0.0);
-        out.color = vec4<f32>(0.0);
+        out.pos        = vec4<f32>(0.0);
+        out.color      = vec4<f32>(0.0);
+        out.transverse = 0.0;
+        out.age        = 0.0;
         return out;
     }
 
@@ -392,18 +401,19 @@ fn vs_trail(
     let tangent = dir / len;
     let normal  = vec2<f32>(-tangent.y, tangent.x);
 
-    // ── Idade normalizada [0 = cauda/mais antiga → 1 = ponta/mais recente] ──
     let oldest_seg = state.cap - state.trail_len;
     let raw_age    = f32(i32(seg) - i32(oldest_seg))
                    / f32(max(state.trail_len, 2u) - 1u);
     let age = clamp(raw_age, 0.0, 1.0);
 
-    // ── Largura variável: estreita na cauda, larga na ponta ──────────────────
-    // Curva pow dá crescimento suave e visualmente convincente
-    let width_factor = pow(age, 0.55);                       // 0→0 … 1→1
+    let width_factor = pow(age, 0.55);
     let half_width   = state.trail_width * width_factor;
 
-    // ── Quad vertices ────────────────────────────────────────────────────────
+    // Expand the quad outward so the SDF feather has room on both sides
+    // without being clipped by the hard quad boundary.
+    let expand = 1.0 + state.feather;
+    let extruded = half_width * expand;
+
     var uv = array<vec2<f32>, 6>(
         vec2<f32>(0.0, -1.0),
         vec2<f32>(1.0, -1.0),
@@ -414,38 +424,50 @@ fn vs_trail(
     );
     let corner = uv[tri];
     let pos = screen_p0
-            + tangent * (len     * corner.x)
-            + normal  * (half_width * corner.y);
+            + tangent * (len      * corner.x)
+            + normal  * (extruded * corner.y);
 
-    // ── Alpha com decaimento exponencial (estilo simulador físico) ───────────
-    //
-    // exp(-k * (1 - age)):
-    //   age=1 (ponta)  → exp(0)   = 1.0  (opaco)
-    //   age=0 (cauda)  → exp(-k)  ≈ 0.0  (transparente)
-    //
-    // k=5 → cauda some suavemente; k=8 → corte mais agressivo
-    // Fade-in curto na cauda para não ter corte duro quando o buffer está cheio
-    let decay    = exp(-state.decay_k * (1.0 - age));
-    let fade_in  = smoothstep(0.0, 0.04, age);   // apaga os ~4% mais antigos
-    let alpha    = colors[body].a * decay * fade_in;
+    let decay   = exp(-state.decay_k * (1.0 - age));
+    let fade_in = smoothstep(0.0, 0.04, age);
+    let alpha   = colors[body].a * decay * fade_in * state.base_alpha;
 
-    // ── Cor com temperatura e desaturação na cauda ───────────────────────────
-    let base_rgb  = colors[body].rgb;
-    let tinted    = temperature_tint(base_rgb, age);
+    let base_rgb = colors[body].rgb;
+    let tinted   = temperature_tint(base_rgb, age);
 
-    // Clareia ligeiramente a ponta (simula core quente)
-    let core_boost = mix(1.0, 1.25, smoothstep(0.82, 1.0, age));
-    let final_rgb  = clamp(tinted * core_boost, vec3<f32>(0.0), vec3<f32>(1.5));
+    let boost_t  = smoothstep(0.82, 1.0, age);
+    let final_rgb = clamp(
+        tinted * mix(1.0, state.core_boost, boost_t),
+        vec3<f32>(0.0),
+        vec3<f32>(1.5),
+    );
 
     var out: VSOut;
-    out.pos   = to_ndc(pos);
-    out.color = vec4<f32>(final_rgb, alpha);
+    out.pos        = to_ndc(pos);
+    out.color      = vec4<f32>(final_rgb, alpha);
+    // Scale transverse by the expansion so the inner region |v| ≤ 1/expand
+    // is the hard core and the outer shell is the feather.
+    out.transverse = corner.y * expand;
+    out.age        = age;
     return out;
 }
 
 @fragment
 fn fs_trail(in: VSOut) -> @location(0) vec4<f32> {
-    if in.color.a <= 0.004 { discard; }
-    return in.color;
+    // Analytical SDF feather on the transverse axis. The hard core ends at
+    // |v| = 1 - feather; outside that the alpha falls smoothly to 0 at |v|=1.
+    // This is the professional fix for "hard" trail edges — no multi-sample
+    // AA required, runs at geometry rate.
+    let v        = abs(in.transverse);
+    let edge_in  = max(1.0 - state.feather, 0.0);
+    let edge_out = 1.0;
+    let shape    = 1.0 - smoothstep(edge_in, edge_out, v);
+
+    let alpha = in.color.a * shape;
+    if alpha <= 0.003 { discard; }
+
+    // Premultiplied-style output keeps colour intensity stable as the
+    // feather fades alpha — avoids the desaturated-edge artefact of
+    // straight-alpha blending with soft edges.
+    return vec4<f32>(in.color.rgb * shape, alpha);
 }
 "#;
