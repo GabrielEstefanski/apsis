@@ -1,6 +1,7 @@
 pub mod callback_trait;
 pub mod color;
 pub mod grid_renderer;
+pub mod orbit_overlay;
 pub mod trail;
 pub mod trail_buffer;
 pub mod trail_renderer;
