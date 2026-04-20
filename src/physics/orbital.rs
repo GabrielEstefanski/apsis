@@ -72,6 +72,15 @@ impl OrbitType {
 ///
 /// All quantities are in simulation units. `a`, `T`, and `ω` are only
 /// physically meaningful for bound (elliptical) orbits.
+///
+/// # 3D readiness
+///
+/// The struct carries `inclination` and `lon_ascending_node` even though
+/// the simulation is currently 2D. In 2D both are exactly zero and the
+/// perifocal → world rotation collapses to a single rotation by `ω`. When
+/// the engine moves to 3D, [`compute_elements`] will populate them from
+/// the angular-momentum vector and the ascending-node geometry; every
+/// consumer of [`sample_orbit`] keeps working unchanged.
 #[derive(Debug, Clone, Copy)]
 pub struct OrbitalElements {
     /// Index of the dominant primary body this orbit is computed relative to.
@@ -97,6 +106,12 @@ pub struct OrbitalElements {
     /// Argument of periapsis ω ∈ [−π, π] (radians).
     /// Undefined when `e < 1e-6` (circular); returns 0.
     pub omega: f64,
+
+    /// Inclination i ∈ [0, π] (radians). Always `0` in 2D.
+    pub inclination: f64,
+
+    /// Longitude of the ascending node Ω ∈ [−π, π] (radians). Always `0` in 2D.
+    pub lon_ascending_node: f64,
 
     /// Orbit classification derived from `energy`.
     pub orbit_type: OrbitType,
@@ -126,6 +141,78 @@ impl OrbitalElements {
             self.omega.to_degrees(),
             self.orbit_type.label(),
         )
+    }
+
+    /// Samples the predicted Keplerian orbit in **world coordinates**.
+    ///
+    /// Returns `steps + 1` points so the polyline closes exactly
+    /// (the first and last entry are identical).
+    ///
+    /// # Parametrisation
+    ///
+    /// Uses uniform eccentric anomaly `E ∈ [0, 2π]`:
+    ///
+    /// ```text
+    /// x_pf = a (cos E − e)
+    /// y_pf = a √(1 − e²) sin E
+    /// z_pf = 0
+    /// ```
+    ///
+    /// This avoids the periastro-clustering that uniform true-anomaly
+    /// sampling produces, giving a visually balanced polyline for any
+    /// eccentricity up to ~0.95.
+    ///
+    /// # Frame transform
+    ///
+    /// Perifocal → world via `R₃(Ω) · R₁(i) · R₃(ω)`, then translated by
+    /// the primary's position (the ellipse is centred on the **focus**,
+    /// not the geometric centre). In 2D (i = 0, Ω = 0) this collapses to
+    /// a rotation by `ω` alone.
+    ///
+    /// # Return value
+    ///
+    /// * `Vec<[f64; 3]>` in world coordinates, z ≡ 0 in 2D.
+    /// * Empty vector for non-elliptical orbits (hyperbolic branch lives
+    ///   in a later lot) or when `steps < 2`.
+    pub fn sample_orbit(&self, primary_pos: [f64; 3], steps: usize) -> Vec<[f64; 3]> {
+        if !matches!(self.orbit_type, OrbitType::Elliptical) {
+            return Vec::new();
+        }
+        if steps < 2 || !self.a.is_finite() || self.a <= 0.0 {
+            return Vec::new();
+        }
+
+        let a = self.a;
+        let e = self.e.clamp(0.0, 0.999);
+        let b = a * (1.0 - e * e).sqrt();
+
+        // Composite rotation R₃(Ω) · R₁(i) · R₃(ω) applied to a perifocal
+        // point (x_pf, y_pf, 0). Only the first two columns matter because
+        // z_pf = 0; we pre-compute those as six scalars.
+        let (sw, cw) = self.omega.sin_cos();
+        let (si, ci) = self.inclination.sin_cos();
+        let (so, co) = self.lon_ascending_node.sin_cos();
+
+        let r11 = co * cw - so * sw * ci;
+        let r12 = -co * sw - so * cw * ci;
+        let r21 = so * cw + co * sw * ci;
+        let r22 = -so * sw + co * cw * ci;
+        let r31 = sw * si;
+        let r32 = cw * si;
+
+        let mut out = Vec::with_capacity(steps + 1);
+        for k in 0..=steps {
+            let ek = TAU * (k as f64) / (steps as f64);
+            let (s_ek, c_ek) = ek.sin_cos();
+            let x_pf = a * (c_ek - e);
+            let y_pf = b * s_ek;
+            out.push([
+                r11 * x_pf + r12 * y_pf + primary_pos[0],
+                r21 * x_pf + r22 * y_pf + primary_pos[1],
+                r31 * x_pf + r32 * y_pf + primary_pos[2],
+            ]);
+        }
+        out
     }
 }
 
@@ -219,7 +306,18 @@ pub fn compute_elements(
         (a, f64::INFINITY, OrbitType::Hyperbolic)
     };
 
-    Some(OrbitalElements { primary_idx, a, e, period, h, energy, omega, orbit_type })
+    Some(OrbitalElements {
+        primary_idx,
+        a,
+        e,
+        period,
+        h,
+        energy,
+        omega,
+        inclination: 0.0,
+        lon_ascending_node: 0.0,
+        orbit_type,
+    })
 }
 
 // ── Batch computation ─────────────────────────────────────────────────────────
@@ -539,6 +637,207 @@ mod tests {
     // ── 9. Conservação — vis-viva ─────────────────────────────────────────────
     //
     // v² = GM(2/r − 1/a) em qualquer ponto da órbita
+
+    // ── 10. sample_orbit — geometry ───────────────────────────────────────────
+
+    #[test]
+    fn sample_orbit_closes_the_loop() {
+        let (p, s) = circular_orbit(10.0, 1e6);
+        let el = elements(p, s);
+        let pts = el.sample_orbit([0.0, 0.0, 0.0], 64);
+        assert_eq!(pts.len(), 65, "should return steps+1 points");
+        let first = pts.first().unwrap();
+        let last = pts.last().unwrap();
+        for k in 0..3 {
+            assert!(
+                (first[k] - last[k]).abs() < 1e-10,
+                "loop must close exactly on axis {k}: first={:?}, last={:?}",
+                first,
+                last,
+            );
+        }
+    }
+
+    #[test]
+    fn sample_orbit_circular_all_points_equidistant_from_focus() {
+        let r = 10.0;
+        let (p, s) = circular_orbit(r, 1e6);
+        let el = elements(p, s);
+        // Primary at origin in this fixture.
+        let pts = el.sample_orbit([0.0, 0.0, 0.0], 128);
+        for pt in &pts {
+            let d = (pt[0] * pt[0] + pt[1] * pt[1] + pt[2] * pt[2]).sqrt();
+            let err = (d - r).abs() / r;
+            assert!(err < 1e-6, "distance {d} should equal {r}");
+        }
+    }
+
+    #[test]
+    fn sample_orbit_ellipse_extremes_match_r_peri_r_apo() {
+        // e = 0.5, r_peri = 10 → a = 20, r_apo = 30
+        let e_target = 0.5_f64;
+        let r_peri = 10.0_f64;
+        let m = 1e6_f64;
+        let gm = G * m;
+        let v_peri = (gm * (1.0 + e_target) / r_peri).sqrt();
+        let primary = body(0.0, 0.0, 0.0, 0.0, m);
+        let satellite = body(r_peri, 0.0, 0.0, v_peri, 1e-10);
+        let el = elements(primary, satellite);
+        let pts = el.sample_orbit([0.0, 0.0, 0.0], 256);
+        let dists: Vec<f64> = pts
+            .iter()
+            .map(|p| (p[0] * p[0] + p[1] * p[1]).sqrt())
+            .collect();
+        let r_min = dists.iter().cloned().fold(f64::INFINITY, f64::min);
+        let r_max = dists.iter().cloned().fold(0.0_f64, f64::max);
+        let r_apo_expected = r_peri * (1.0 + e_target) / (1.0 - e_target); // 30
+        assert!(
+            (r_min - r_peri).abs() / r_peri < 1e-4,
+            "r_min = {r_min}, expected {r_peri}",
+        );
+        assert!(
+            (r_max - r_apo_expected).abs() / r_apo_expected < 1e-4,
+            "r_max = {r_max}, expected {r_apo_expected}",
+        );
+    }
+
+    #[test]
+    fn sample_orbit_is_focus_centred_not_geometry_centred() {
+        // For e > 0, the primary (focus) is offset from the geometric centre
+        // by a·e. If we (incorrectly) centred on the geometric centre, the
+        // focus-distance extremes would become (a − a·e) and (a + a·e) only
+        // when measured from the geometric centre — not from the focus.
+        //
+        // Direct test: with primary at origin, the closest sampled point
+        // must sit at distance a(1-e) from the origin, NOT at distance a.
+        let e_target = 0.5_f64;
+        let r_peri = 10.0_f64;
+        let m = 1e6_f64;
+        let gm = G * m;
+        let v_peri = (gm * (1.0 + e_target) / r_peri).sqrt();
+        let primary = body(0.0, 0.0, 0.0, 0.0, m);
+        let satellite = body(r_peri, 0.0, 0.0, v_peri, 1e-10);
+        let el = elements(primary, satellite);
+        let pts = el.sample_orbit([0.0, 0.0, 0.0], 128);
+        let r_min = pts
+            .iter()
+            .map(|p| (p[0] * p[0] + p[1] * p[1]).sqrt())
+            .fold(f64::INFINITY, f64::min);
+        let a = el.a; // 20
+        // Focus-centred: r_min = a(1-e) = 10.
+        // Geometry-centred: r_min would be a(1-e) relative to geometric
+        // centre, but geometric centre is at focus + a·e on major axis,
+        // giving r_min from origin = a(1-e) + a·e = a = 20.
+        // So a passing test at r_peri = 10 rules out the geometric-centre bug.
+        assert!(
+            (r_min - r_peri).abs() / r_peri < 1e-4,
+            "r_min = {r_min}, should equal r_peri = {r_peri} (focus-centred), \
+             would be {a} if geometry-centred",
+        );
+    }
+
+    #[test]
+    fn sample_orbit_translates_with_primary() {
+        let r = 10.0;
+        let (p, s) = circular_orbit(r, 1e6);
+        let el = elements(p, s);
+        let shift = [42.5_f64, -17.25, 0.0];
+        let a = el.sample_orbit([0.0, 0.0, 0.0], 32);
+        let b = el.sample_orbit(shift, 32);
+        assert_eq!(a.len(), b.len());
+        for (pa, pb) in a.iter().zip(b.iter()) {
+            for k in 0..3 {
+                let expected = pa[k] + shift[k];
+                assert!(
+                    (pb[k] - expected).abs() < 1e-9,
+                    "axis {k}: got {}, expected {expected}",
+                    pb[k],
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn sample_orbit_hyperbolic_returns_empty_for_now() {
+        let r = 10.0;
+        let m = 1e6;
+        let v_escape = (2.0 * G * m / r).sqrt();
+        let primary = body(0.0, 0.0, 0.0, 0.0, m);
+        let satellite = body(r, 0.0, 0.0, v_escape * 1.5, 1e-10);
+        let el = elements(primary, satellite);
+        let pts = el.sample_orbit([0.0, 0.0, 0.0], 64);
+        assert!(
+            pts.is_empty(),
+            "hyperbolic sampling should be empty in Lote 1; got {} points",
+            pts.len(),
+        );
+    }
+
+    #[test]
+    fn sample_orbit_rejects_too_few_steps() {
+        let (p, s) = circular_orbit(10.0, 1e6);
+        let el = elements(p, s);
+        assert!(el.sample_orbit([0.0, 0.0, 0.0], 0).is_empty());
+        assert!(el.sample_orbit([0.0, 0.0, 0.0], 1).is_empty());
+    }
+
+    #[test]
+    fn sample_orbit_periastro_at_omega_zero_lies_on_positive_x() {
+        // ω = 0: periastro in the +x direction from the focus.
+        let e_target = 0.5_f64;
+        let r_peri = 10.0_f64;
+        let m = 1e6_f64;
+        let gm = G * m;
+        let v_peri = (gm * (1.0 + e_target) / r_peri).sqrt();
+        let primary = body(0.0, 0.0, 0.0, 0.0, m);
+        let satellite = body(r_peri, 0.0, 0.0, v_peri, 1e-10);
+        let el = elements(primary, satellite);
+        let pts = el.sample_orbit([0.0, 0.0, 0.0], 64);
+        // E = 0 is the first sample → periastro.
+        let peri = pts[0];
+        assert!((peri[0] - r_peri).abs() < 1e-6, "peri.x = {}", peri[0]);
+        assert!(peri[1].abs() < 1e-6, "peri.y = {}", peri[1]);
+        assert!(peri[2].abs() < 1e-12, "peri.z = {}", peri[2]);
+    }
+
+    #[test]
+    fn sample_orbit_rotates_with_omega() {
+        // Rotate the fixture by 90°: periastro must land on +y.
+        let e_target = 0.5_f64;
+        let r_peri = 10.0_f64;
+        let m = 1e6_f64;
+        let gm = G * m;
+        let v_peri = (gm * (1.0 + e_target) / r_peri).sqrt();
+        let primary = body(0.0, 0.0, 0.0, 0.0, m);
+        let satellite = body(0.0, r_peri, -v_peri, 0.0, 1e-10);
+        let el = elements(primary, satellite);
+        let pts = el.sample_orbit([0.0, 0.0, 0.0], 64);
+        let peri = pts[0];
+        assert!(peri[0].abs() < 1e-6, "peri.x = {}", peri[0]);
+        assert!((peri[1] - r_peri).abs() < 1e-6, "peri.y = {}", peri[1]);
+    }
+
+    #[test]
+    fn sample_orbit_inclination_pi_over_2_puts_orbit_in_xz_plane() {
+        // Build a circular 2D orbit, then force i = π/2 and re-sample.
+        // With Ω = 0, ω = 0, rotating by i about the line of nodes (x-axis)
+        // sends y → z. Result: every sampled point must have y ≈ 0.
+        let (p, s) = circular_orbit(10.0, 1e6);
+        let mut el = elements(p, s);
+        el.inclination = PI / 2.0;
+        el.lon_ascending_node = 0.0;
+        el.omega = 0.0;
+        let pts = el.sample_orbit([0.0, 0.0, 0.0], 64);
+        for pt in &pts {
+            assert!(
+                pt[1].abs() < 1e-6,
+                "y = {} should be 0 for orbit in xz-plane",
+                pt[1],
+            );
+        }
+    }
+
+    // ── 11. vis-viva at apoapsis (pre-existing) ───────────────────────────────
 
     #[test]
     fn vis_viva_holds_at_apoapsis() {
