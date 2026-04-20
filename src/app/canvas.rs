@@ -34,6 +34,46 @@ const FOLLOW_RATE: f32 = 48.0;
 /// speeds (where a single publish can advance the body across the viewport).
 const FOLLOW_SNAP_PX: f32 = 120.0;
 
+/// Eccentricity window around 1.0 within which an orbit is considered
+/// numerically degenerate (near-parabolic). Chosen deliberately tight so
+/// high-eccentricity cometary orbits (e ≈ 0.95 – 0.99) remain visible —
+/// those are exactly the orbits worth looking at.
+const DEGEN_ECC_WINDOW: f64 = 0.005;
+
+// ── Orbit overlay filter helpers ──────────────────────────────────────────────
+
+/// Maps a hierarchy level to an index into the user's per-level toggle
+/// array. Levels 0..=2 map directly; level 3 and deeper fold into slot 3
+/// ("L3+") so the UI has a finite, fixed set of toggles.
+fn level_is_visible(level: u8, toggles: &[bool; 4]) -> bool {
+    let slot = (level as usize).min(3);
+    toggles[slot]
+}
+
+/// Returns `true` when the orbit is *geometrically* degenerate enough to
+/// hide even though `sample_orbit` would still draw it. Two cases:
+///
+/// * Near-parabolic (|1 − e| < DEGEN_ECC_WINDOW). The curve is numerically
+///   unstable and visually indistinguishable from a straight line at
+///   typical zoom levels.
+/// * Periapsis inside the primary's physical radius — the body would
+///   intersect its own primary. Physically impossible as a sustained
+///   orbit; usually indicates a glitched state that should not be
+///   advertised as a prediction.
+fn is_degenerate_orbit(
+    el: &crate::physics::orbital::OrbitalElements,
+    primary: &crate::domain::body::Body,
+) -> bool {
+    if (el.e - 1.0).abs() < DEGEN_ECC_WINDOW {
+        return true;
+    }
+    if !el.a.is_finite() || el.a <= 0.0 {
+        return false; // hyperbolic / invalid — sample_orbit returns empty anyway
+    }
+    let r_peri = el.a * (1.0 - el.e);
+    r_peri < primary.physical_radius
+}
+
 impl SimulationApp {
     pub(super) fn draw_canvas(&mut self, ui: &mut egui::Ui) {
         let rect = ui.max_rect();
@@ -211,25 +251,124 @@ impl SimulationApp {
                 backend.draw_circle(*sp, r, rgb);
             }
 
-            // Predicted Keplerian orbit for the selected body (Lote 2).
-            // Pure visual annotation — never feeds back into physics.
-            if let Some(idx) = self.selected_body {
-                if idx < bodies.len() {
-                    if let Some(primary_idx) = dominant_primary(bodies, idx) {
-                        let g_factor = self.system.g_factor();
-                        if let Some(el) = compute_elements(bodies, idx, primary_idx, g_factor) {
-                            let primary = &bodies[primary_idx];
-                            let primary_pos = [primary.x, primary.y, 0.0];
-                            let sampled = el.sample_orbit(primary_pos, 128);
-                            let scale = self.scale;
-                            let cx = center_after_pan.x;
-                            let cy = center_after_pan.y;
-                            draw_orbit_polyline(
-                                &mut backend,
-                                &sampled,
-                                |p| [cx + p[0] as f32 * scale, cy + p[1] as f32 * scale],
-                                &OrbitOverlayStyle::selected_default(),
-                            );
+            // Predicted Keplerian orbits — pure visual annotation, never
+            // feeds back into physics. Filter pipeline (Lote 3.2):
+            //
+            //   1. Hierarchy gate: primary known + level visible
+            //   2. Degeneracy gate: reject near-parabolic and periapsis
+            //      inside the primary's body radius
+            //   3. Influence ranking: log(mass) × viewport-proximity
+            //   4. Top-N truncation
+            //
+            // Background pass draws the survivors with faint alpha; a
+            // final foreground pass paints the selected body on top.
+            {
+                let g_factor = self.system.g_factor();
+                let scale = self.scale;
+                let cx = center_after_pan.x;
+                let cy = center_after_pan.y;
+                let project =
+                    |p: [f64; 3]| [cx + p[0] as f32 * scale, cy + p[1] as f32 * scale];
+
+                self.orbit_hierarchy.tick(bodies, g_factor);
+
+                if self.show_orbit_ellipses {
+                    let bg_style = OrbitOverlayStyle::background_default();
+                    let vp_center = rect.center();
+                    let vp_half_diag =
+                        (rect.width().powi(2) + rect.height().powi(2)).sqrt() * 0.5;
+
+                    // Collect (idx, primary_idx, elements, influence) for
+                    // every body that survives the filter pipeline.
+                    let mut candidates: Vec<(usize, usize, crate::physics::orbital::OrbitalElements, f32)> =
+                        Vec::with_capacity(bodies.len().min(self.orbit_top_n * 2));
+
+                    for i in 0..bodies.len() {
+                        // Selected body is always drawn in the foreground
+                        // pass — skip here to avoid double-draw.
+                        if Some(i) == self.selected_body {
+                            continue;
+                        }
+                        // Hierarchy must know i's primary; Free bodies
+                        // have no elliptical orbit to draw.
+                        let Some(level) = self.orbit_hierarchy.level(i) else {
+                            continue;
+                        };
+                        if !level_is_visible(level, &self.orbit_visible_levels) {
+                            continue;
+                        }
+                        let Some(primary_idx) = self.orbit_hierarchy.primary(i) else {
+                            continue;
+                        };
+                        let Some(el) = compute_elements(bodies, i, primary_idx, g_factor)
+                        else {
+                            continue;
+                        };
+                        if self.orbit_hide_degenerate
+                            && is_degenerate_orbit(&el, &bodies[primary_idx])
+                        {
+                            continue;
+                        }
+
+                        let b = &bodies[i];
+                        let sp_x = cx + b.x as f32 * scale;
+                        let sp_y = cy + b.y as f32 * scale;
+                        let dx = sp_x - vp_center.x;
+                        let dy = sp_y - vp_center.y;
+                        let d_norm = (dx * dx + dy * dy).sqrt() / vp_half_diag.max(1.0);
+                        // Bodies far beyond the viewport contribute nothing.
+                        if d_norm > 2.0 {
+                            continue;
+                        }
+                        let viewport_weight = 1.0 / (1.0 + d_norm * d_norm);
+                        let mass_factor = (1.0_f32 + b.mass as f32).ln().max(0.0);
+                        let influence = mass_factor * viewport_weight;
+
+                        candidates.push((i, primary_idx, el, influence));
+                    }
+
+                    // Top-N by influence — partial_sort would be nicer
+                    // but N is small and draws are the real cost.
+                    candidates.sort_by(|a, b| {
+                        b.3.partial_cmp(&a.3).unwrap_or(std::cmp::Ordering::Equal)
+                    });
+                    if candidates.len() > self.orbit_top_n {
+                        candidates.truncate(self.orbit_top_n);
+                    }
+
+                    for (_i, primary_idx, el, _infl) in &candidates {
+                        let primary = &bodies[*primary_idx];
+                        let primary_pos = [primary.x, primary.y, 0.0];
+                        let sampled = el.sample_orbit(primary_pos, 64);
+                        draw_orbit_polyline(&mut backend, &sampled, project, &bg_style);
+                    }
+                }
+
+                if let Some(idx) = self.selected_body {
+                    if idx < bodies.len() {
+                        // Foreground overlay uses the hierarchy's primary
+                        // when available; otherwise falls back to the raw
+                        // dominant-primary heuristic so the first click on
+                        // a body still shows its orbit before the
+                        // hierarchy has ticked for this topology.
+                        let primary = self
+                            .orbit_hierarchy
+                            .primary(idx)
+                            .or_else(|| dominant_primary(bodies, idx));
+                        if let Some(primary_idx) = primary {
+                            if let Some(el) =
+                                compute_elements(bodies, idx, primary_idx, g_factor)
+                            {
+                                let primary = &bodies[primary_idx];
+                                let primary_pos = [primary.x, primary.y, 0.0];
+                                let sampled = el.sample_orbit(primary_pos, 128);
+                                draw_orbit_polyline(
+                                    &mut backend,
+                                    &sampled,
+                                    project,
+                                    &OrbitOverlayStyle::selected_default(),
+                                );
+                            }
                         }
                     }
                 }

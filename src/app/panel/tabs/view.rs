@@ -101,8 +101,53 @@ impl SimulationApp {
             ui,
             &mut self.show_orbit_ellipses,
             "Orbit ellipses",
-            "Keplerian fit of each body's trajectory",
+            "Keplerian fit around each body's primary. Filters below\n\
+             decide which bodies qualify.",
         );
+        if self.show_orbit_ellipses {
+            ui.indent("orbit_opts", |ui| {
+                // Level filter — L0 = root primaries, L1 = planetary,
+                // L2 = satellites, L3+ folds deeper sub-satellites.
+                let lv_tip = "Hierarchy levels to show.\n\
+                    L0 = root primaries (stars / anchors)\n\
+                    L1 = planetary (orbits a root)\n\
+                    L2 = satellites (orbits an L1)\n\
+                    L3+ = sub-satellites and deeper.";
+                kv_row(ui, "levels", lv_tip, |ui| {
+                    let labels = ["L0", "L1", "L2", "L3+"];
+                    for i in 0..4 {
+                        ui.add(egui::Checkbox::new(
+                            &mut self.orbit_visible_levels[i],
+                            labels[i],
+                        ));
+                    }
+                });
+
+                let top_tip = "Maximum number of background orbits drawn\n\
+                    per frame. Candidates are ranked by log-mass weighted\n\
+                    by viewport proximity — so the bodies the user is\n\
+                    looking at tend to survive even when smaller.";
+                kv_drag(ui, "max shown", top_tip, |ui| {
+                    ui.add(
+                        egui::DragValue::new(&mut self.orbit_top_n)
+                            .speed(1)
+                            .range(1..=512usize),
+                    );
+                });
+
+                let deg_tip = "Hide numerically fragile orbits:\n\
+                    * near-parabolic (|1 − e| < 0.005), and\n\
+                    * periapsis inside the primary's body radius.\n\
+                    High-eccentricity comets (e = 0.95 – 0.99) stay\n\
+                    visible.";
+                toggle_row(
+                    ui,
+                    &mut self.orbit_hide_degenerate,
+                    "hide degenerate",
+                    deg_tip,
+                );
+            });
+        }
         toggle_row(
             ui,
             &mut self.show_belts,
@@ -331,6 +376,26 @@ fn kv_drag<R>(
             add(ui)
         })
         .inner
+    })
+    .inner
+}
+
+/// Label on the left, arbitrary content on the right (full remaining width).
+/// Used when the right side hosts several widgets (e.g. a row of checkboxes)
+/// that would not fit in `kv_drag`'s reserved `DV_W` slot.
+fn kv_row<R>(
+    ui: &mut egui::Ui,
+    label: &str,
+    tip: &str,
+    add: impl FnOnce(&mut egui::Ui) -> R,
+) -> R {
+    ui.horizontal(|ui| {
+        ui.add_sized(
+            egui::vec2(LBL_W, 18.0),
+            egui::Label::new(RichText::new(label).size(10.0).color(TEXT_SEC)),
+        )
+        .on_hover_text(tip);
+        add(ui)
     })
     .inner
 }
