@@ -46,6 +46,16 @@ fn main() {
     let app = SimulationApp::new(system);
 
     let native_options = eframe::NativeOptions::default();
-    eframe::run_native("Gravity Simulator", native_options, Box::new(|_| Ok(Box::new(app))))
-        .unwrap();
+    eframe::run_native(
+        "Gravity Simulator",
+        native_options,
+        Box::new(|cc| {
+            let mut fonts = egui::FontDefinitions::default();
+            egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
+            egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Fill);
+            cc.egui_ctx.set_fonts(fonts);
+            Ok(Box::new(app))
+        }),
+    )
+    .unwrap();
 }

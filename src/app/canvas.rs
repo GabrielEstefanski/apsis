@@ -404,8 +404,6 @@ impl SimulationApp {
             ctx.request_repaint();
         }
 
-        // ── Playbar ───────────────────────────────────────────────────────────
-        self.draw_playbar(ctx, rect, time);
     }
 
     // ── Overlay ───────────────────────────────────────────────────────────────
@@ -581,135 +579,6 @@ impl SimulationApp {
 
     // ── Hit-test ──────────────────────────────────────────────────────────────
 
-    // ── Playbar ───────────────────────────────────────────────────────────────
-
-    fn draw_playbar(&mut self, ctx: &egui::Context, canvas_rect: egui::Rect, time: f32) {
-        use crate::app::theme::{ACCENT, ACCENT_DIM, SUCCESS, TEXT_DIM, TEXT_SEC};
-
-        let bar_w = 400.0_f32;
-        let bar_h = 44.0_f32;
-        let anchor =
-            egui::pos2(canvas_rect.center().x - bar_w * 0.5, canvas_rect.max.y - bar_h - 16.0);
-
-        egui::Area::new(egui::Id::new("playbar"))
-            .fixed_pos(anchor)
-            .order(egui::Order::Foreground)
-            .show(ctx, |ui| {
-                egui::Frame::NONE
-                    .fill(egui::Color32::from_rgba_unmultiplied(14, 14, 20, 220))
-                    .stroke(egui::Stroke::new(
-                        1.0,
-                        egui::Color32::from_rgba_unmultiplied(50, 50, 70, 180),
-                    ))
-                    .corner_radius(10.0)
-                    .inner_margin(egui::Margin::symmetric(12, 0))
-                    .show(ui, |ui| {
-                        ui.set_width(bar_w - 24.0);
-                        ui.set_height(bar_h);
-
-                        ui.horizontal_centered(|ui| {
-                            ui.spacing_mut().item_spacing.x = 5.0;
-
-                            // ── Simulation time ───────────────────────────────
-                            let m = self.system.metrics();
-                            let t_str = fmt_sim_time(m.t);
-                            ui.label(
-                                egui::RichText::new(t_str).monospace().size(10.5).color(TEXT_SEC),
-                            );
-
-                            ui.add(egui::Separator::default().vertical().spacing(4.0));
-
-                            // ── Play / Pause ──────────────────────────────────
-                            let (icon, icon_col) =
-                                if self.paused { ("▶", SUCCESS) } else { ("⏸", ACCENT) };
-
-                            // Pulsing glow ring when running
-                            let btn_pos = ui.next_widget_position() + egui::vec2(18.0, 18.0);
-                            if !self.paused {
-                                let pulse = ((time * 2.0).sin() * 0.5 + 0.5) * 0.35 + 0.1;
-                                ui.painter().circle_stroke(
-                                    btn_pos,
-                                    22.0,
-                                    egui::Stroke::new(
-                                        1.5,
-                                        egui::Color32::from_rgba_unmultiplied(
-                                            ACCENT.r(),
-                                            ACCENT.g(),
-                                            ACCENT.b(),
-                                            (pulse * 180.0) as u8,
-                                        ),
-                                    ),
-                                );
-                            }
-
-                            let play_btn = ui
-                                .add(
-                                    egui::Button::new(
-                                        egui::RichText::new(icon).size(18.0).color(icon_col),
-                                    )
-                                    .fill(if self.paused {
-                                        ACCENT_DIM
-                                    } else {
-                                        egui::Color32::from_rgba_unmultiplied(30, 50, 35, 180)
-                                    })
-                                    .stroke(egui::Stroke::new(1.0, icon_col.gamma_multiply(0.5)))
-                                    .min_size(egui::vec2(36.0, 36.0)),
-                                )
-                                .on_hover_text(if self.paused {
-                                    "Play (Space)"
-                                } else {
-                                    "Pause (Space)"
-                                });
-                            if play_btn.clicked() {
-                                self.paused = !self.paused;
-                            }
-
-                            ui.add(egui::Separator::default().vertical().spacing(4.0));
-
-                            // ── Speed slider (logarithmic steps/frame) ────────
-                            // Label shows current multiplier; slider gives fine control.
-                            let spf_col = if self.steps_per_frame > 1 { ACCENT } else { TEXT_DIM };
-                            ui.label(
-                                egui::RichText::new(format!("×{}", self.steps_per_frame))
-                                    .monospace()
-                                    .size(10.0)
-                                    .color(spf_col),
-                            );
-
-                            let mut spf_f = self.steps_per_frame as f32;
-                            let slider_r = ui.add_sized(
-                                [110.0, 20.0],
-                                egui::Slider::new(&mut spf_f, 1.0..=10000.0)
-                                    .logarithmic(true)
-                                    .show_value(false),
-                            );
-                            if slider_r.changed() {
-                                self.steps_per_frame = spf_f.round().max(1.0) as u32;
-                            }
-
-                            ui.add(egui::Separator::default().vertical().spacing(4.0));
-
-                            // ── dt ────────────────────────────────────────────
-                            ui.label(egui::RichText::new("dt").size(9.5).color(TEXT_DIM));
-                            let mut dt = self.system.dt();
-                            let dt_speed = (dt * 0.05).max(1e-7);
-                            let dt_r = ui
-                                .add(
-                                    egui::DragValue::new(&mut dt)
-                                        .speed(dt_speed)
-                                        .range(1e-7_f64..=10.0)
-                                        .max_decimals(6)
-                                        .min_decimals(1),
-                                )
-                                .on_hover_text("Integration timestep — smaller = more accurate");
-                            if dt_r.changed() {
-                                self.system.set_dt(dt);
-                            }
-                        });
-                    });
-            });
-    }
-
     fn find_body_at(
         &self,
         cursor: Pos2,
@@ -740,22 +609,6 @@ impl SimulationApp {
     }
 }
 
-// ── Sim-time formatter ────────────────────────────────────────────────────────
-
-/// Compact display of simulated time: uses natural units when small, sci notation when large.
-fn fmt_sim_time(t: f64) -> String {
-    if t == 0.0 {
-        return "t=0".into();
-    }
-    let a = t.abs();
-    if a < 1e-3 {
-        format!("t={:+.2e}", t)
-    } else if a < 1_000.0 {
-        format!("t={:.4}", t)
-    } else {
-        format!("t={:.3e}", t)
-    }
-}
 
 // ── Spinner helpers ───────────────────────────────────────────────────────────
 

@@ -1,135 +1,100 @@
-use crate::app::theme::{ACCENT, BORDER, DANGER, SUCCESS, TEXT_DIM, TEXT_PRI, TEXT_SEC};
-use crate::app::ui::{SemanticScaleMode, SimulationApp};
+//! Top bar — brand, hamburger menu, tool tabs, scene identity, session actions.
+//!
+//! Design rule: no parameter controls here. Everything that changes sim
+//! behaviour belongs to the contextual panel or the bottom playbar.
+//!
+//! Layout zones (left → right):
+//!   [brand] [☰] [tool tabs] ............ [actions | scene | rec | utils]
+//!
+//! The left cluster carries navigation (what panel is active) and global
+//! actions (behind the hamburger). The right cluster carries session state
+//! (scene name, body count) and its immediate actions (Clear / Save / Load).
+//! Vertical rhythm is 24px for every interactive element.
+
+use crate::app::icons;
+use crate::app::theme::{
+    ACCENT, ACCENT_DIM, BORDER, DANGER, PANEL_BG, SUCCESS, TEXT_DIM, TEXT_PRI, TEXT_SEC,
+};
+use crate::app::ui::{PanelTab, SimulationApp};
 use eframe::egui::{self, Color32, RichText, Stroke};
 
-// Frame-counter for the rec dot pulse (toolbar has no `time` param)
-// We borrow ctx.input time instead.
+const BTN_H: f32 = 24.0;
+const BTN_BG: Color32 = Color32::from_rgb(20, 20, 26);
 
 impl SimulationApp {
     pub(super) fn toolbar_content(&mut self, ui: &mut egui::Ui) {
         let time = ui.ctx().input(|i| i.time as f32);
 
         ui.horizontal(|ui| {
-            ui.label(RichText::new("GRAVITY SIM").size(11.0).color(TEXT_PRI).strong());
+            ui.spacing_mut().item_spacing.x = 6.0;
 
-            // ── Simulation name (editable inline) ───────────────────────────── //
-            ui.separator();
-            let name_display =
-                if self.sim_name.is_empty() { "Unnamed".to_owned() } else { self.sim_name.clone() };
-            let name_resp = ui.add(
-                egui::TextEdit::singleline(&mut self.sim_name)
-                    .desired_width(120.0)
-                    .hint_text(name_display)
-                    .font(egui::FontId::proportional(10.0)),
-            );
-            if name_resp.hovered() {
-                name_resp.on_hover_text("Simulation name — used in save files and recordings");
-            }
-
-            ui.separator();
-
-            // ── Camera / view controls ──────────────────────────────── //
-            ui.label(RichText::new("zoom").size(10.0).color(TEXT_SEC));
-            let zoom_speed = self.scale * 0.01;
-            ui.add(
-                egui::DragValue::new(&mut self.scale)
-                    .speed(zoom_speed)
-                    .range(0.001..=50_000.0_f32)
-                    .max_decimals(2),
+            // ── Zone 1: Brand ─────────────────────────────────────────────── //
+            let (logo_rect, _) =
+                ui.allocate_exact_size(egui::vec2(16.0, 16.0), egui::Sense::hover());
+            ui.painter().circle_filled(logo_rect.center(), 6.5, ACCENT);
+            ui.painter().circle_stroke(
+                logo_rect.center(),
+                6.5,
+                Stroke::new(1.0, Color32::from_rgba_unmultiplied(255, 244, 200, 70)),
             );
 
-            ui.label(RichText::new("body sz").size(10.0).color(TEXT_SEC));
-            ui.add(
-                egui::DragValue::new(&mut self.body_size_boost)
-                    .speed(0.5)
-                    .range(1.0..=500.0_f32)
-                    .max_decimals(1),
-            )
-            .on_hover_text("Visual size multiplier for bodies (does not affect physics)");
+            ui.label(
+                RichText::new("Gravity Sim")
+                    .size(13.0)
+                    .color(TEXT_PRI)
+                    .strong(),
+            );
+            ui.label(
+                RichText::new("v0.4.2")
+                    .size(9.5)
+                    .color(TEXT_DIM)
+                    .monospace(),
+            );
 
-            ui.label(RichText::new("scale mode").size(10.0).color(TEXT_SEC));
-            egui::ComboBox::from_id_salt("semantic_scale_mode")
-                .selected_text(self.semantic_scale_mode.label())
-                .width(96.0)
-                .show_ui(ui, |ui| {
-                    ui.selectable_value(
-                        &mut self.semantic_scale_mode,
-                        SemanticScaleMode::Physical,
-                        SemanticScaleMode::Physical.label(),
-                    );
-                    ui.selectable_value(
-                        &mut self.semantic_scale_mode,
-                        SemanticScaleMode::Comparative,
-                        SemanticScaleMode::Comparative.label(),
-                    );
-                    ui.selectable_value(
-                        &mut self.semantic_scale_mode,
-                        SemanticScaleMode::Illustrative,
-                        SemanticScaleMode::Illustrative.label(),
-                    );
-                });
+            ui.add_space(4.0);
+            ui.add(egui::Separator::default().vertical().spacing(6.0));
 
-            ui.separator();
+            // ── Zone 2: Hamburger (global actions) ────────────────────────── //
+            self.menu_hamburger(ui);
 
-            // ── Display toggles ─────────────────────────────────────── //
-            toggle(ui, &mut self.show_grid, "grid");
-            toggle(ui, &mut self.show_trails, "trails");
-            if self.show_trails {
-                ui.add(
-                    egui::DragValue::new(&mut self.trail_width)
-                        .speed(0.1)
-                        .range(0.5_f32..=20.0)
-                        .max_decimals(1)
-                        .prefix("w:"),
-                )
-                .on_hover_text("Trail ribbon width in pixels");
+            ui.add(egui::Separator::default().vertical().spacing(6.0));
+
+            // ── Zone 3: Tool tabs ─────────────────────────────────────────── //
+            ui.spacing_mut().item_spacing.x = 2.0;
+            for tab in PanelTab::ALL {
+                self.tool_tab_btn(ui, tab);
             }
-            toggle(ui, &mut self.show_orbit_ellipses, "orbits");
-            toggle(ui, &mut self.show_vectors, "vel");
-            toggle(ui, &mut self.show_force_vectors, "force");
-            toggle(ui, &mut self.show_belts, "structure");
 
-            ui.separator();
+            // Sidebar collapse toggle — last tab-adjacent control.
+            ui.add_space(2.0);
+            let (chevron, tip) = if self.sidebar_collapsed {
+                (icons::SIDEBAR_OPEN, "Show sidebar  [B]")
+            } else {
+                (icons::SIDEBAR_CLOSE, "Hide sidebar  [B]")
+            };
+            if tb_icon_btn(ui, chevron, tip).clicked() {
+                self.sidebar_collapsed = !self.sidebar_collapsed;
+            }
 
-            // ── Right-side actions ──────────────────────────────────── //
+            // ── Right side (RTL) — UNCHANGED ──────────────────────────────── //
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                // Body count
-                let n = self.system.bodies().len();
-                ui.label(RichText::new(format!("{n} bodies")).size(10.0).color(TEXT_DIM));
-                ui.separator();
+                ui.spacing_mut().item_spacing.x = 6.0;
 
-                // ⚙ Settings
-                if ui
-                    .add(
-                        egui::Button::new(RichText::new("⚙").size(13.0).color(TEXT_DIM))
-                            .fill(Color32::TRANSPARENT)
-                            .stroke(Stroke::new(0.5, BORDER))
-                            .min_size(egui::vec2(24.0, 20.0)),
-                    )
-                    .on_hover_text("Settings — unit labels, recording")
-                    .clicked()
-                {
+                if tb_icon_btn(ui, icons::SETTINGS, "Settings").clicked() {
                     self.show_settings_modal = !self.show_settings_modal;
                 }
-
-                // ? Shortcuts
-                if ui
-                    .add(
-                        egui::Button::new(RichText::new("?").size(11.0).color(TEXT_DIM))
-                            .fill(Color32::TRANSPARENT)
-                            .stroke(Stroke::new(0.5, BORDER))
-                            .min_size(egui::vec2(22.0, 20.0)),
-                    )
-                    .on_hover_text("Keyboard shortcuts (H)")
-                    .clicked()
-                {
+                if tb_icon_btn(ui, icons::HELP, "Keyboard shortcuts (H)").clicked() {
                     self.show_shortcuts_modal = !self.show_shortcuts_modal;
                 }
 
-                // ● Record dot
+                ui.add(egui::Separator::default().vertical().spacing(6.0));
+
                 let is_rec = self.recorder.is_some();
-                let pulse_alpha =
-                    if is_rec { (((time * 2.5).sin() * 0.4 + 0.6) * 255.0) as u8 } else { 100 };
+                let pulse_alpha = if is_rec {
+                    (((time * 2.5).sin() * 0.4 + 0.6) * 255.0) as u8
+                } else {
+                    80
+                };
                 let rec_col = Color32::from_rgba_unmultiplied(
                     DANGER.r(),
                     DANGER.g(),
@@ -138,22 +103,23 @@ impl SimulationApp {
                 );
                 let rec_btn = ui
                     .add(
-                        egui::Button::new(RichText::new("●").size(13.0).color(rec_col))
-                            .fill(if is_rec {
-                                Color32::from_rgba_unmultiplied(50, 10, 10, 80)
-                            } else {
-                                Color32::TRANSPARENT
-                            })
+                        egui::Button::new(RichText::new(icons::RECORD).size(13.0).color(rec_col))
+                            .fill(BTN_BG)
                             .stroke(Stroke::new(
                                 0.5,
-                                if is_rec { DANGER.gamma_multiply(0.5) } else { BORDER },
+                                if is_rec {
+                                    DANGER.gamma_multiply(0.55)
+                                } else {
+                                    BORDER
+                                },
                             ))
-                            .min_size(egui::vec2(24.0, 20.0)),
+                            .min_size(egui::vec2(26.0, BTN_H))
+                            .corner_radius(4.0),
                     )
                     .on_hover_text(if is_rec {
-                        "Recording — click to stop"
+                        "Recording CSV — click to stop"
                     } else {
-                        "Start recording (open Settings)"
+                        "Start CSV recording (Export menu)"
                     });
                 if rec_btn.clicked() {
                     if is_rec {
@@ -165,45 +131,24 @@ impl SimulationApp {
                     }
                 }
 
-                ui.separator();
+                ui.add(egui::Separator::default().vertical().spacing(6.0));
 
-                // Saves
-                if ui
-                    .add(
-                        egui::Button::new(RichText::new("Saves").size(10.0).color(ACCENT))
-                            .fill(Color32::TRANSPARENT)
-                            .stroke(Stroke::new(0.5, ACCENT))
-                            .min_size(egui::vec2(48.0, 20.0)),
-                    )
-                    .on_hover_text("Browse and load saved states")
-                    .clicked()
-                {
+                if tb_action_btn(ui, icons::LOAD, "Load", ACCENT, "Browse saved states").clicked() {
                     self.open_save_modal();
                 }
-
-                if ui
-                    .add(
-                        egui::Button::new(RichText::new("Save").size(10.0).color(SUCCESS))
-                            .fill(Color32::TRANSPARENT)
-                            .stroke(Stroke::new(0.5, SUCCESS))
-                            .min_size(egui::vec2(40.0, 20.0)),
-                    )
-                    .on_hover_text("Quick-save current state")
+                if tb_action_btn(ui, icons::SAVE, "Save", SUCCESS, "Quick-save current state")
                     .clicked()
                 {
                     let _ = self.do_save();
                 }
-
-                ui.separator();
-
-                if ui
-                    .add(
-                        egui::Button::new(RichText::new("Clear").size(10.0).color(DANGER))
-                            .fill(Color32::TRANSPARENT)
-                            .stroke(Stroke::new(0.5, DANGER))
-                            .min_size(egui::vec2(46.0, 20.0)),
-                    )
-                    .clicked()
+                if tb_action_btn(
+                    ui,
+                    icons::CLEAR,
+                    "Clear",
+                    DANGER,
+                    "Remove all bodies and reset simulation",
+                )
+                .clicked()
                 {
                     self.system.load_bodies(vec![]);
                     self.paused = true;
@@ -211,46 +156,257 @@ impl SimulationApp {
                     self.sim_name = String::new();
                 }
 
-                if ui
-                    .add(
-                        egui::Button::new(RichText::new("Zero COM").size(10.0).color(TEXT_SEC))
-                            .fill(Color32::TRANSPARENT)
-                            .stroke(Stroke::new(0.5, BORDER))
-                            .min_size(egui::vec2(60.0, 20.0)),
-                    )
-                    .on_hover_text("Zero centre-of-mass velocity")
-                    .clicked()
-                {
-                    self.system.zero_com_velocity();
-                }
+                ui.add(egui::Separator::default().vertical().spacing(6.0));
 
-                if ui
-                    .add(
-                        egui::Button::new(RichText::new("Fit view").size(10.0).color(TEXT_SEC))
-                            .fill(Color32::TRANSPARENT)
-                            .stroke(Stroke::new(0.5, BORDER))
-                            .min_size(egui::vec2(52.0, 20.0)),
-                    )
-                    .clicked()
-                {
-                    self.fit_to_view();
-                }
+                let n = self.system.bodies().len();
+                ui.label(
+                    RichText::new(format!("• {n} bodies"))
+                        .size(10.5)
+                        .monospace()
+                        .color(TEXT_DIM),
+                );
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.sim_name)
+                        .desired_width(150.0)
+                        .hint_text("Unnamed")
+                        .font(egui::FontId::proportional(12.0))
+                        .text_color(TEXT_PRI),
+                );
+                ui.label(
+                    RichText::new("scene:")
+                        .size(10.5)
+                        .color(TEXT_DIM),
+                );
             });
+        });
+
+        let _ = TEXT_SEC; // suppress unused warning
+        let _ = PANEL_BG;
+    }
+
+    // ── Tool tab button ──────────────────────────────────────────────────── //
+
+    fn tool_tab_btn(&mut self, ui: &mut egui::Ui, tab: PanelTab) {
+        // "Active" means both currently selected AND sidebar visible.
+        // When sidebar is collapsed, no tab appears visually active — keeps
+        // the collapsed state unambiguous.
+        let is_active = self.panel_tab == tab && !self.sidebar_collapsed;
+        let (icon, label) = (tool_icon(tab, is_active), tab.label());
+
+        let fill = if is_active { ACCENT_DIM } else { BTN_BG };
+        let stroke_col = if is_active {
+            ACCENT.gamma_multiply(0.6)
+        } else {
+            BORDER
+        };
+        let text_col = if is_active { TEXT_PRI } else { TEXT_DIM };
+
+        let text = RichText::new(format!("{icon}  {label}"))
+            .size(11.0)
+            .color(text_col);
+
+        let hover = if is_active {
+            format!("{}  [{}]   ·   click again to hide sidebar", label, tab_shortcut(tab))
+        } else if self.sidebar_collapsed {
+            format!("{}  [{}]   ·   opens sidebar", label, tab_shortcut(tab))
+        } else {
+            format!("{}  [{}]", label, tab_shortcut(tab))
+        };
+
+        let resp = ui
+            .add(
+                egui::Button::new(text)
+                    .fill(fill)
+                    .stroke(Stroke::new(if is_active { 1.0 } else { 0.5 }, stroke_col))
+                    .min_size(egui::vec2(0.0, BTN_H))
+                    .corner_radius(4.0),
+            )
+            .on_hover_text(hover);
+
+        if resp.clicked() {
+            // Click rules:
+            //   sidebar hidden            → open sidebar + switch to tab
+            //   sidebar visible, other tab → switch tab
+            //   sidebar visible, same tab → hide sidebar (toggle)
+            if self.sidebar_collapsed {
+                self.sidebar_collapsed = false;
+                self.panel_tab = tab;
+            } else if self.panel_tab == tab {
+                self.sidebar_collapsed = true;
+            } else {
+                self.panel_tab = tab;
+            }
+        }
+    }
+
+    // ── Hamburger: single entry point for all global actions ────────────── //
+
+    fn menu_hamburger(&mut self, ui: &mut egui::Ui) {
+        let trigger = RichText::new(icons::MENU).size(14.0).color(TEXT_SEC);
+
+        ui.menu_button(trigger, |ui| {
+            ui.set_min_width(190.0);
+
+            // File
+            ui.label(RichText::new("FILE").size(9.0).color(TEXT_DIM));
+            if ui
+                .add(egui::Button::new("Save").shortcut_text("Ctrl+S"))
+                .clicked()
+            {
+                let _ = self.do_save();
+                ui.close_menu();
+            }
+            if ui.button("Load…").clicked() {
+                self.open_save_modal();
+                ui.close_menu();
+            }
+            if ui.button("Clear all bodies").clicked() {
+                self.system.load_bodies(vec![]);
+                self.paused = true;
+                self.reset_drift_peaks();
+                self.sim_name = String::new();
+                ui.close_menu();
+            }
+
+            ui.separator();
+
+            // Edit
+            ui.label(RichText::new("EDIT").size(9.0).color(TEXT_DIM));
+            if ui
+                .add(egui::Button::new("Undo").shortcut_text("Ctrl+Z"))
+                .clicked()
+            {
+                self.perform_undo();
+                ui.close_menu();
+            }
+
+            ui.separator();
+
+            // Simulation
+            ui.label(RichText::new("SIMULATION").size(9.0).color(TEXT_DIM));
+            let play_lbl = if self.paused { "Play" } else { "Pause" };
+            if ui
+                .add(egui::Button::new(play_lbl).shortcut_text("Space"))
+                .clicked()
+            {
+                self.paused = !self.paused;
+                ui.close_menu();
+            }
+            if ui
+                .add(egui::Button::new("Step one frame").shortcut_text("→"))
+                .clicked()
+            {
+                self.paused = false;
+                self.step_pending = true;
+                ui.close_menu();
+            }
+            if ui
+                .add(egui::Button::new("Fit to view").shortcut_text("F"))
+                .clicked()
+            {
+                self.fit_to_view();
+                ui.close_menu();
+            }
+            if ui.button("Reset drift peaks").clicked() {
+                self.reset_drift_peaks();
+                ui.close_menu();
+            }
+
+            ui.separator();
+
+            // Export
+            ui.label(RichText::new("EXPORT").size(9.0).color(TEXT_DIM));
+            let is_rec = self.recorder.is_some();
+            let lbl = if is_rec {
+                "Stop recording CSV"
+            } else {
+                "Record CSV…"
+            };
+            if ui.button(lbl).clicked() {
+                if is_rec {
+                    if let Some(mut rec) = self.recorder.take() {
+                        let _ = rec.flush();
+                    }
+                } else {
+                    self.show_settings_modal = true;
+                }
+                ui.close_menu();
+            }
+
+            ui.separator();
+
+            // Help
+            ui.label(RichText::new("HELP").size(9.0).color(TEXT_DIM));
+            if ui
+                .add(egui::Button::new("Keyboard shortcuts").shortcut_text("H"))
+                .clicked()
+            {
+                self.show_shortcuts_modal = !self.show_shortcuts_modal;
+                ui.close_menu();
+            }
+            if ui.button("Settings").clicked() {
+                self.show_settings_modal = !self.show_settings_modal;
+                ui.close_menu();
+            }
         });
     }
 }
 
-fn toggle(ui: &mut egui::Ui, value: &mut bool, label: &str) {
-    let col = if *value { TEXT_PRI } else { TEXT_SEC };
-    if ui
-        .add(
-            egui::Button::new(RichText::new(label).size(10.5).color(col))
-                .fill(Color32::TRANSPARENT)
-                .stroke(Stroke::new(0.5, if *value { BORDER } else { Color32::TRANSPARENT }))
-                .min_size(egui::vec2(0.0, 20.0)),
-        )
-        .clicked()
-    {
-        *value = !*value;
+fn tool_icon(tab: PanelTab, active: bool) -> &'static str {
+    match (tab, active) {
+        (PanelTab::Overview, false) => icons::TOOL_OVERVIEW,
+        (PanelTab::Overview, true) => icons::TOOL_OVERVIEW_ON,
+        (PanelTab::Add, false) => icons::TOOL_ADD,
+        (PanelTab::Add, true) => icons::TOOL_ADD_ON,
+        (PanelTab::Templates, false) => icons::TOOL_TEMPLATES,
+        (PanelTab::Templates, true) => icons::TOOL_TEMPLATES_ON,
+        (PanelTab::View, false) => icons::TOOL_VIEW,
+        (PanelTab::View, true) => icons::TOOL_VIEW_ON,
+        (PanelTab::Camera, false) => icons::TOOL_CAMERA,
+        (PanelTab::Camera, true) => icons::TOOL_CAMERA_ON,
+        (PanelTab::Config, false) => icons::TOOL_CONFIG,
+        (PanelTab::Config, true) => icons::TOOL_CONFIG_ON,
     }
+}
+
+fn tab_shortcut(tab: PanelTab) -> &'static str {
+    match tab {
+        PanelTab::Overview => "1",
+        PanelTab::Add => "2",
+        PanelTab::Templates => "3",
+        PanelTab::View => "4",
+        PanelTab::Camera => "5",
+        PanelTab::Config => "6",
+    }
+}
+
+fn tb_icon_btn(ui: &mut egui::Ui, icon: &str, hover: &str) -> egui::Response {
+    ui.add(
+        egui::Button::new(RichText::new(icon).size(14.0).color(TEXT_DIM))
+            .fill(BTN_BG)
+            .stroke(Stroke::new(0.5, BORDER))
+            .min_size(egui::vec2(26.0, BTN_H))
+            .corner_radius(4.0),
+    )
+    .on_hover_text(hover)
+}
+
+fn tb_action_btn(
+    ui: &mut egui::Ui,
+    icon: &str,
+    label: &str,
+    col: Color32,
+    hover: &str,
+) -> egui::Response {
+    let text = RichText::new(format!("{icon}  {label}"))
+        .size(11.0)
+        .color(col);
+    ui.add(
+        egui::Button::new(text)
+            .fill(BTN_BG)
+            .stroke(Stroke::new(0.5, BORDER))
+            .min_size(egui::vec2(66.0, BTN_H))
+            .corner_radius(4.0),
+    )
+    .on_hover_text(hover)
 }

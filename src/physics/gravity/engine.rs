@@ -376,6 +376,8 @@ mod tests {
     use super::*;
     use crate::domain::body::Body;
 
+    use approx::assert_relative_eq;
+
     fn eval(bodies: &[Body]) -> (Vec<(f64, f64)>, f64) {
         let mut engine = BarnesHutEngine::new(16);
         engine.build(bodies);
@@ -384,65 +386,96 @@ mod tests {
         (acc, potential)
     }
 
-    // ── Newton's 3rd law ────────────────────────────────────────────────── //
+    fn body(x: f64, y: f64, m: f64) -> Body {
+        Body::new(x, y, 0.0, 0.0, m, crate::domain::materials::Material::Rocky)
+    }
 
-    /// Σᵢ mᵢ aᵢ = 0 — the total force on an isolated system is zero.
-    /// This is a consequence of Newton's 3rd law: every action has an equal
-    /// and opposite reaction, so internal forces sum to zero.
+    // ── Newton's 3rd law ───────────────────────────────────────────── //
+
     #[test]
     fn total_force_on_system_is_zero() {
-        let bodies = vec![
-            Body::new(0.0, 0.0, 0.0, 0.0, 1.0, crate::domain::materials::Material::Rocky),
-            Body::new(3.0, 0.0, 0.0, 0.0, 2.0, crate::domain::materials::Material::Rocky),
-        ];
+        let bodies = vec![body(0.0, 0.0, 1.0), body(3.0, 0.0, 2.0)];
+
         let (acc, _) = eval(&bodies);
 
         let fx: f64 = acc.iter().zip(&bodies).map(|(a, b)| b.mass * a.0).sum();
         let fy: f64 = acc.iter().zip(&bodies).map(|(a, b)| b.mass * a.1).sum();
 
-        assert!(fx.abs() < 1e-12, "net Fx = {fx}");
-        assert!(fy.abs() < 1e-12, "net Fy = {fy}");
+        assert_relative_eq!(fx, 0.0, epsilon = 1e-12);
+        assert_relative_eq!(fy, 0.0, epsilon = 1e-12);
     }
 
-    // ── Force direction ─────────────────────────────────────────────────── //
+    // ── Force direction ───────────────────────────────────────────── //
 
-    /// Gravity is attractive: each body accelerates toward the other.
     #[test]
     fn force_direction_is_attractive() {
-        let bodies = vec![
-            Body::new(0.0, 0.0, 0.0, 0.0, 1.0, crate::domain::materials::Material::Rocky),
-            Body::new(4.0, 0.0, 0.0, 0.0, 1.0, crate::domain::materials::Material::Rocky),
-        ];
+        let bodies = vec![body(0.0, 0.0, 1.0), body(4.0, 0.0, 1.0)];
+
         let (acc, _) = eval(&bodies);
-        assert!(acc[0].0 > 0.0, "b0 should accelerate toward b1 (+x)");
-        assert!(acc[1].0 < 0.0, "b1 should accelerate toward b0 (−x)");
+
+        assert!(acc[0].0 > 0.0);
+        assert!(acc[1].0 < 0.0);
     }
 
-    // ── Superposition ───────────────────────────────────────────────────── //
+    // ── Superposition ───────────────────────────────────────────── //
 
-    /// A body at the midpoint between two equal masses has zero net x-force:
-    /// the forces from left and right cancel exactly (superposition principle).
     #[test]
     fn symmetric_configuration_has_zero_net_x_force_on_center() {
-        let bodies = vec![
-            Body::new(-5.0, 0.0, 0.0, 0.0, 1.0, crate::domain::materials::Material::Rocky),
-            Body::new(0.0, 0.0, 0.0, 0.0, 1.0, crate::domain::materials::Material::Rocky), // center
-            Body::new(5.0, 0.0, 0.0, 0.0, 1.0, crate::domain::materials::Material::Rocky),
-        ];
+        let bodies = vec![body(-5.0, 0.0, 1.0), body(0.0, 0.0, 1.0), body(5.0, 0.0, 1.0)];
+
         let (acc, _) = eval(&bodies);
-        assert!(acc[1].0.abs() < 1e-12, "net Fx on center = {}", acc[1].0);
+
+        assert_relative_eq!(acc[1].0, 0.0, epsilon = 1e-12);
     }
 
-    // ── Potential sign ──────────────────────────────────────────────────── //
+    // ── Potential sign ───────────────────────────────────────────── //
 
-    /// PE = Σᵢ<ⱼ −G mᵢ mⱼ / r_ij < 0 for any configuration of positive masses.
     #[test]
     fn gravitational_potential_is_negative() {
-        let bodies = vec![
-            Body::new(0.0, 0.0, 0.0, 0.0, 1.0, crate::domain::materials::Material::Rocky),
-            Body::new(2.0, 0.0, 0.0, 0.0, 1.0, crate::domain::materials::Material::Rocky),
-        ];
+        let bodies = vec![body(0.0, 0.0, 1.0), body(2.0, 0.0, 1.0)];
+
         let (_, potential) = eval(&bodies);
-        assert!(potential < 0.0, "PE = {potential}");
+
+        assert!(potential < 0.0);
+    }
+
+    // ── Barnes-Hut vs Exact ─────────────────────────────────────── //
+
+    #[test]
+    fn barnes_hut_matches_exact_with_small_error() {
+        fn rel_err(a: f64, b: f64) -> f64 {
+            (a - b).abs() / b.abs().max(1e-12)
+        }
+
+        let bodies = vec![
+            body(-2.0, 0.0, 1.0),
+            body(2.0, 0.0, 1.0),
+            body(0.0, 3.0, 2.0),
+            body(0.0, -3.0, 2.0),
+        ];
+
+        // Exato
+        let mut engine_exact = BarnesHutEngine::new(16);
+        engine_exact.set_exact_threshold(usize::MAX);
+        engine_exact.build(&bodies);
+
+        let mut acc_exact = vec![(0.0, 0.0); bodies.len()];
+        engine_exact.evaluate(&bodies, 0.5, &mut acc_exact);
+
+        // BH
+        let mut engine_bh = BarnesHutEngine::new(16);
+        engine_bh.set_exact_threshold(1);
+        engine_bh.build(&bodies);
+
+        let mut acc_bh = vec![(0.0, 0.0); bodies.len()];
+        engine_bh.evaluate(&bodies, 0.5, &mut acc_bh);
+
+        for i in 0..bodies.len() {
+            let ex = acc_exact[i];
+            let bh = acc_bh[i];
+
+            assert!(rel_err(bh.0, ex.0) < 1e-2);
+            assert!(rel_err(bh.1, ex.1) < 1e-2);
+        }
     }
 }

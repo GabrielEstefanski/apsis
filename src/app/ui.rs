@@ -39,9 +39,34 @@ pub enum SpawnTab {
 
 #[derive(PartialEq, Clone, Copy)]
 pub enum PanelTab {
+    Overview,
     Add,
     Templates,
+    View,
+    Camera,
     Config,
+}
+
+impl PanelTab {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Overview => "Overview",
+            Self::Add => "Add Body",
+            Self::Templates => "Templates",
+            Self::View => "Display",
+            Self::Camera => "Camera",
+            Self::Config => "Advanced",
+        }
+    }
+
+    pub const ALL: [PanelTab; 6] = [
+        PanelTab::Overview,
+        PanelTab::Add,
+        PanelTab::Templates,
+        PanelTab::View,
+        PanelTab::Camera,
+        PanelTab::Config,
+    ];
 }
 
 #[derive(PartialEq, Clone, Copy)]
@@ -241,12 +266,23 @@ pub struct SimulationApp {
     // ── Settings modal ────────────────────────────────────────────────────────
     pub(super) show_settings_modal: bool,
 
+    // ── Sidebar visibility ───────────────────────────────────────────────────
+    /// When `true`, the left contextual panel is hidden and the canvas
+    /// expands to fill its space. Toggled by the toolbar button, `B`, or
+    /// clicking the active tool tab again.
+    pub(super) sidebar_collapsed: bool,
+
     // ── Drift tracking ────────────────────────────────────────────────────────
     /// Running maximum of |dE/E₀| seen since the last simulation reset.
     /// Never decreases mid-run; reset to 0 on load / clear / snapshot restore.
     pub(super) energy_drift_peak: f64,
     /// Running maximum of |dLz/Lz₀| (only tracked when |Lz₀| is non-trivial).
     pub(super) lz_drift_peak: f64,
+
+    // ── Single-step ───────────────────────────────────────────────────────────
+    /// When `true`, the simulation was unpaused for exactly one frame.
+    /// `draw_frame` re-pauses on the next tick after physics has run.
+    pub(super) step_pending: bool,
 
     // ── Simulation identity ───────────────────────────────────────────────────
     /// User-assigned name for the current simulation. Empty until the user names it.
@@ -304,7 +340,7 @@ impl SimulationApp {
             drag_start_world: None,
             selection_form: None,
             physics_cfg,
-            panel_tab: PanelTab::Add,
+            panel_tab: PanelTab::Overview,
             show_force_vectors: false,
             render_hints: Vec::new(),
             body_angles: Vec::new(),
@@ -342,6 +378,8 @@ impl SimulationApp {
             save_modal_error: None,
             pending_load: None,
 
+            step_pending: false,
+            sidebar_collapsed: false,
             undo_stack: Vec::new(),
             show_shortcuts_modal: false,
             show_settings_modal: false,
@@ -363,6 +401,12 @@ impl SimulationApp {
 
         // ── Sync latest physics state into local cache ────────────────────────
         self.system.sync();
+
+        // ── Single-step: re-pause after one frame of physics ─────────────────
+        if self.step_pending {
+            self.step_pending = false;
+            self.paused = true;
+        }
 
         // ── Pending fit-to-view (after async template/snapshot load) ──────────
         if self.pending_fit && !self.system.bodies().is_empty() && !self.system.is_loading() {
@@ -418,12 +462,13 @@ impl SimulationApp {
         }
 
         // ── Global keyboard shortcuts ─────────────────────────────────────────
-        let (ctrl_z, space, key_f, key_h) = ctx.input_mut(|i| {
+        let (ctrl_z, space, key_f, key_h, key_b) = ctx.input_mut(|i| {
             (
                 i.consume_key(egui::Modifiers::CTRL, egui::Key::Z),
                 i.consume_key(egui::Modifiers::NONE, egui::Key::Space),
                 i.consume_key(egui::Modifiers::NONE, egui::Key::F),
                 i.consume_key(egui::Modifiers::NONE, egui::Key::H),
+                i.consume_key(egui::Modifiers::NONE, egui::Key::B),
             )
         });
         if ctrl_z {
@@ -438,10 +483,20 @@ impl SimulationApp {
         if key_h {
             self.show_shortcuts_modal = !self.show_shortcuts_modal;
         }
+        if key_b {
+            self.sidebar_collapsed = !self.sidebar_collapsed;
+        }
 
+        // Registration order carves space: top → bottom → left rail → left
+        // panel → right inspector → central canvas. See `panel/mod.rs` for the
+        // layout diagram.
         self.draw_toolbar(&ctx);
-        self.draw_panel(&ctx);
+        self.draw_playbar(&ctx);
+        if !self.sidebar_collapsed {
+            self.draw_panel(&ctx);
+        }
         self.draw_inspector(&ctx);
+
         self.draw_save_modal(&ctx);
         self.draw_shortcuts_modal(&ctx);
         self.draw_settings_modal(&ctx);
@@ -450,6 +505,11 @@ impl SimulationApp {
         egui::CentralPanel::default().frame(egui::Frame::NONE.fill(BG)).show(&ctx, |ui| {
             self.draw_canvas(ui);
         });
+
+        // Re-apply paused state after UI rendering — button clicks this frame
+        // (play/pause, step) may have changed self.paused after the early sync.
+        self.system.set_paused(self.paused);
+        self.system.set_steps_per_frame(self.steps_per_frame);
 
         if !self.paused {
             // Running: repaint every frame to keep the canvas live.
