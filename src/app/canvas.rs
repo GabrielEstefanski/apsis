@@ -1,6 +1,8 @@
 use crate::app::render_params::{RenderParams, compute_render_radius};
 use crate::app::ui::{SelectionForm, SemanticScaleMode, SimulationApp, UndoRecord};
+use crate::physics::orbital::{compute_elements, dominant_primary};
 use crate::render::CallbackFn;
+use crate::render::orbit_overlay::{OrbitOverlayStyle, draw_orbit_polyline};
 use crate::render::wgpu_backend::LightSource;
 use crate::templates::instantiate_at;
 use eframe::egui::{self, Color32, FontId, Pos2, Stroke};
@@ -207,6 +209,30 @@ impl SimulationApp {
                 let r = compute_render_radius(b.physical_radius, render_params);
 
                 backend.draw_circle(*sp, r, rgb);
+            }
+
+            // Predicted Keplerian orbit for the selected body (Lote 2).
+            // Pure visual annotation — never feeds back into physics.
+            if let Some(idx) = self.selected_body {
+                if idx < bodies.len() {
+                    if let Some(primary_idx) = dominant_primary(bodies, idx) {
+                        let g_factor = self.system.g_factor();
+                        if let Some(el) = compute_elements(bodies, idx, primary_idx, g_factor) {
+                            let primary = &bodies[primary_idx];
+                            let primary_pos = [primary.x, primary.y, 0.0];
+                            let sampled = el.sample_orbit(primary_pos, 128);
+                            let scale = self.scale;
+                            let cx = center_after_pan.x;
+                            let cy = center_after_pan.y;
+                            draw_orbit_polyline(
+                                &mut backend,
+                                &sampled,
+                                |p| [cx + p[0] as f32 * scale, cy + p[1] as f32 * scale],
+                                &OrbitOverlayStyle::selected_default(),
+                            );
+                        }
+                    }
+                }
             }
 
             backend.set_lighting_params(0.55, 0.7);
