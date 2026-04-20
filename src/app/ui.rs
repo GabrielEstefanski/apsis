@@ -198,6 +198,8 @@ pub struct SimulationApp {
     /// Visual preset for trails; combined with `trail_width` to produce the
     /// concrete [`crate::render::TrailStyle`] pushed to the backend.
     pub(super) trail_style_preset: crate::render::TrailStylePreset,
+    /// Render-side trail recorder. Owns the ring buffer and sampling policy.
+    pub(super) trail_recorder: crate::render::TrailRecorder,
     /// Minimum body-mass / dominant-mass ratio required to show a trail.
     /// Bodies below this threshold have their trail alpha zeroed out.
     /// Default 1e-6 suppresses asteroid-mass bodies automatically.
@@ -315,7 +317,6 @@ impl SimulationApp {
         physics_cfg.integrator = system.integrator_kind();
         physics_cfg.theta = system.theta();
         physics_cfg.softening_scale = system.softening_scale();
-        physics_cfg.trail_every = system.trail_every();
 
         let physics = spawn_physics(system, true /* start paused */);
 
@@ -361,6 +362,7 @@ impl SimulationApp {
             show_belts: false,
             trail_width: 1.5,
             trail_style_preset: crate::render::TrailStylePreset::UniverseSandbox,
+            trail_recorder: crate::render::TrailRecorder::new(),
             trail_min_mass_ratio: 1e-7,
             place_material: Material::Rocky,
             trail: None,
@@ -570,7 +572,8 @@ impl SimulationApp {
         snap.sim_name = self.sim_name.clone();
         snap.seed = self.sim_seed;
         // Capture trail for visual continuity on reload.
-        snap.trail = Some(self.system.clone_trail_buf().to_snapshot());
+        snap.trail = Some(self.trail_recorder.to_snapshot());
+        snap.trail_every = self.trail_recorder.interval_multiplier();
         let dir = std::path::Path::new(&self.save_dir);
         match snap.save_to_dir(dir) {
             Ok(p) => {

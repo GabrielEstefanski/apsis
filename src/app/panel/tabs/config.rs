@@ -426,7 +426,7 @@ impl SimulationApp {
             1 = max density  |  Higher = sparser, longer-lived trails\n\
             Useful at high steps/frame to prevent trail aliasing.";
 
-        let mut trail_every = self.system.trail_every();
+        let mut trail_every = self.trail_recorder.interval_multiplier();
         let changed = param_row(ui, "sample every", te_tip, LBL_W, |ui| {
             ui.add_sized(
                 egui::vec2(DV_W, 18.0),
@@ -435,8 +435,7 @@ impl SimulationApp {
             .changed()
         });
         if changed {
-            self.physics_cfg.trail_every = trail_every;
-            self.system.set_trail_every(trail_every);
+            self.trail_recorder.set_interval_multiplier(trail_every);
         }
 
         let mr_tip = "Minimum mass ratio (body / dominant body) for a trail to be shown.\n\
@@ -464,7 +463,7 @@ impl SimulationApp {
             self.system.set_theta(defaults.theta);
             self.system.set_softening_scale(defaults.softening_scale);
             self.system.set_g_factor(defaults.g_factor);
-            self.system.set_trail_every(defaults.trail_every);
+            self.trail_recorder.set_interval_multiplier(defaults.trail_every);
             self.physics_cfg = defaults;
         }
     }
