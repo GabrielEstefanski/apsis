@@ -23,7 +23,14 @@ const RING_GAP: f32 = 5.0;
 
 /// Camera pan animation: fraction of remaining distance applied each frame.
 const CAM_LERP: f32 = 0.16;
-const FOLLOW_LERP: f32 = 0.32;
+/// Follow-mode exponential smoothing rate (1/s). Higher = tighter tracking.
+/// At 60 fps, `alpha = 1 - exp(-dt * FOLLOW_RATE) ≈ 0.55` — responsive without
+/// feeling jolty on the first-click transition.
+const FOLLOW_RATE: f32 = 48.0;
+/// If the body has moved farther than this many pixels between frames, snap
+/// the camera instead of lerping. Prevents losing fast bodies at high sim
+/// speeds (where a single publish can advance the body across the viewport).
+const FOLLOW_SNAP_PX: f32 = 120.0;
 
 impl SimulationApp {
     pub(super) fn draw_canvas(&mut self, ui: &mut egui::Ui) {
@@ -49,26 +56,6 @@ impl SimulationApp {
             } else {
                 self.offset += delta * CAM_LERP;
                 ctx.request_repaint();
-            }
-        }
-
-        if self.follow_selected_body {
-            if let Some(idx) = self.selected_body {
-                if let Some(body) = self.system.bodies().get(idx) {
-                    let target =
-                        egui::vec2(-body.x as f32 * self.scale, -body.y as f32 * self.scale);
-                    let delta = target - self.offset;
-                    if delta.length_sq() > 0.0001 {
-                        self.offset += delta * FOLLOW_LERP;
-                        ctx.request_repaint();
-                    }
-                } else {
-                    self.follow_selected_body = false;
-                    self.selected_body = None;
-                    self.selection_form = None;
-                }
-            } else {
-                self.follow_selected_body = false;
             }
         }
 
@@ -123,6 +110,34 @@ impl SimulationApp {
             }
         }
 
+        // ── Body-follow tracking ──────────────────────────────────────────────
+        // Applied AFTER zoom and pan so neither can drag the followed body off
+        // centre. Uses frame-rate-independent exponential smoothing and snaps
+        // to the target when the body outran the lerp in a single frame.
+        if self.follow_selected_body {
+            if let Some(idx) = self.selected_body {
+                if let Some(body) = self.system.bodies().get(idx) {
+                    let target =
+                        egui::vec2(-body.x as f32 * self.scale, -body.y as f32 * self.scale);
+                    let delta = target - self.offset;
+                    let alpha = 1.0 - (-dt * FOLLOW_RATE).exp();
+                    if delta.length_sq() >= FOLLOW_SNAP_PX * FOLLOW_SNAP_PX {
+                        // Body moved further than we can smoothly catch — snap.
+                        self.offset = target;
+                    } else if delta.length_sq() > 0.01 {
+                        self.offset += delta * alpha;
+                    }
+                    ctx.request_repaint();
+                } else {
+                    self.follow_selected_body = false;
+                    self.selected_body = None;
+                    self.selection_form = None;
+                }
+            } else {
+                self.follow_selected_body = false;
+            }
+        }
+
         // ── Render params ─────────────────────────────────────────────────────
         let render_params = RenderParams {
             world_scale: self.scale,
@@ -148,6 +163,15 @@ impl SimulationApp {
         } else if hover_pos.map_or(false, |p| rect.contains(p)) {
             ctx.set_cursor_icon(egui::CursorIcon::Grab);
         }
+
+        // ── Data-driven colour pipeline (SPLASH / yt-style) ───────────────────
+        // Resolve the active ColorView once per frame, producing one RGB
+        // triple per body. `None` means "use material colours" — bodies and
+        // trails both fall back to Body::color downstream.
+        let body_colors_override: Option<Vec<[u8; 3]>> = {
+            let sel_clone = self.color_view.clone();
+            sel_clone.and_then(|sel| self.evaluate_color_view(&sel))
+        };
 
         // ── GPU body rendering ────────────────────────────────────────────────
         {
@@ -175,11 +199,14 @@ impl SimulationApp {
                 }
             }
 
-            for (sp, b) in &screen_positions {
-                let [cr, cg, cb] = b.color;
+            for (i, (sp, b)) in screen_positions.iter().enumerate() {
+                let rgb = match body_colors_override.as_ref() {
+                    Some(colors) => colors[i],
+                    None => b.color,
+                };
                 let r = compute_render_radius(b.physical_radius, render_params);
 
-                backend.draw_circle(*sp, r, [cr, cg, cb]);
+                backend.draw_circle(*sp, r, rgb);
             }
 
             backend.set_lighting_params(0.55, 0.7);
@@ -187,14 +214,17 @@ impl SimulationApp {
             backend.scale = self.scale;
             backend.trail_style = self.trail_style_preset.style(self.trail_width);
 
-            // Tick the trail recorder: detects topology changes, updates colours,
-            // and decides whether to push a new sample this frame.
+            // Apply any COM shift the physics thread accumulated, then drain
+            // the per-step trail samples it produced and push them into the
+            // ring buffer. Sampling decisions happen on the physics thread;
+            // this side is a pure consumer.
             let (shift_x, shift_y) = self.system.take_pending_com_shift();
             self.trail_recorder.apply_com_shift(shift_x, shift_y);
-            self.trail_recorder.tick(
+            let samples = self.system.take_trail_samples();
+            self.trail_recorder.ingest_with_colors(
+                samples,
                 self.system.bodies(),
-                self.system.t(),
-                self.steps_per_frame,
+                body_colors_override.as_deref(),
             );
 
             if self.show_trails {
@@ -624,6 +654,40 @@ impl SimulationApp {
         }
 
         None
+    }
+
+    /// Resolve the active [`ColorViewSelection`] against current state.
+    ///
+    /// Returns `None` when the selection is invalid (unknown ID) or the
+    /// body list is empty. Caches the resolved data range in
+    /// `self.color_view_range` so the colour-bar UI can render without
+    /// re-evaluating the field.
+    fn evaluate_color_view(
+        &mut self,
+        sel: &crate::render::color::ColorViewSelection,
+    ) -> Option<Vec<[u8; 3]>> {
+        use crate::render::color;
+
+        let bodies = self.system.bodies();
+        if bodies.is_empty() {
+            self.color_view_range = None;
+            return None;
+        }
+
+        let field = self.field_registry.get(&sel.field_id)?;
+        let normalizer = self.normalizer_registry.get(&sel.normalizer_id)?;
+        let colormap = self.colormap_registry.get(&sel.colormap_id)?;
+
+        let ctx = crate::domain::field::FieldContext {
+            bodies,
+            accelerations: self.system.accelerations(),
+            t: self.system.t(),
+            g_factor: self.system.g_factor(),
+        };
+
+        let out = color::compute(field, normalizer, colormap, sel.range, &ctx);
+        self.color_view_range = Some(out.resolved_range);
+        Some(out.colors)
     }
 }
 

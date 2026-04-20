@@ -134,6 +134,7 @@ impl SimulationApp {
                             self.sim_name = snap.sim_name.clone();
                             // Restore trail recorder from snapshot.
                             self.trail_recorder.set_interval_multiplier(snap.trail_every.max(1));
+                            self.system.set_trail_sampler(self.trail_recorder.sampler_kind());
                             if let Some(trail_snap) = &snap.trail {
                                 self.trail_recorder.restore_from_snapshot(
                                     trail_snap,

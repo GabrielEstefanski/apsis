@@ -25,5 +25,5 @@ pub mod sampler;
 pub mod style;
 
 pub use recorder::TrailRecorder;
-pub use sampler::{AdaptiveSampler, SampleDecision, TimeSampler, TrailSampler};
+pub use sampler::{ArcLengthSampler, StepSampler, TrailSampler, TrailSamplerKind};
 pub use style::{TrailStyle, TrailStylePreset};

@@ -1,4 +1,5 @@
 pub mod callback_trait;
+pub mod color;
 pub mod grid_renderer;
 pub mod trail;
 pub mod trail_buffer;

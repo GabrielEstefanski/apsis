@@ -309,6 +309,20 @@ pub struct SimulationApp {
     /// Reproducibility seed for the current simulation.
     /// Generated fresh when a new simulation starts, preserved when loading a save.
     pub(super) sim_seed: u64,
+
+    // ── Data-driven colour pipeline (SPLASH / yt-style) ──────────────────────
+    /// Scalar fields available for body colouring (velocity, mass, …).
+    pub(super) field_registry: crate::domain::field::FieldRegistry,
+    /// Colour ramps available (viridis, inferno, plasma, cool_warm, grayscale).
+    pub(super) colormap_registry: crate::render::color::ColormapRegistry,
+    /// Normalizers available (linear, log).
+    pub(super) normalizer_registry: crate::render::color::NormalizerRegistry,
+    /// Active colour view. `None` falls back to material-based body colours,
+    /// which is the default — data-driven colouring is opt-in.
+    pub(super) color_view: Option<crate::render::color::ColorViewSelection>,
+    /// Last resolved data range from the active colour view. Cached so the
+    /// colour bar and numeric readouts can render without re-evaluating.
+    pub(super) color_view_range: Option<(f64, f64)>,
 }
 
 impl SimulationApp {
@@ -416,6 +430,12 @@ impl SimulationApp {
             show_name_prompt: false,
             pending_name_input: String::new(),
             sim_seed: SimSnapshot::new_seed(),
+
+            field_registry: crate::domain::field::FieldRegistry::standard(),
+            colormap_registry: crate::render::color::ColormapRegistry::standard(),
+            normalizer_registry: crate::render::color::NormalizerRegistry::standard(),
+            color_view: None,
+            color_view_range: None,
         }
     }
 
