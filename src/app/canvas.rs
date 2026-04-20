@@ -395,6 +395,12 @@ impl SimulationApp {
             },
         ));
 
+        // ── Grid labels (AU ticks, on top of GPU grid, below body overlay) ───
+        {
+            let backend = self.backend.lock().unwrap();
+            backend.draw_labels_overlay(ui, rect, &self.physics_cfg.dist_label);
+        }
+
         // ── Overlay: rings + labels (on top of GPU layer) ─────────────────────
         self.draw_overlay(ui, center_after_pan, time);
 

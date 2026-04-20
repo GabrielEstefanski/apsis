@@ -76,8 +76,12 @@ impl SimulationApp {
     pub(super) fn draw_inspector(&mut self, ctx: &egui::Context) {
         let idx = match self.selected_body {
             Some(i) => i,
-            None => return,
+            None => {
+                self.system.set_orbital_elements_needed(false);
+                return;
+            },
         };
+        self.system.set_orbital_elements_needed(true);
 
         if idx >= self.system.bodies().len() {
             self.selected_body = None;
