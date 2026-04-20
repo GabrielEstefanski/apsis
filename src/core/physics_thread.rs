@@ -32,6 +32,7 @@ use crate::core::metrics::Metrics;
 use crate::io::snapshot::SimSnapshot;
 use crate::core::system::System;
 use crate::render::trail_buffer::TrailBuffer;
+use crate::render::trail::{AdaptiveSampler, SampleDecision, TrailSampler};
 use crate::physics::integrator::IntegratorKind;
 use crate::physics::orbital::OrbitalElements;
 
@@ -426,8 +427,11 @@ fn physics_loop(
     let mut steps_per_frame = 1u32;
     let mut needs_full_publish = false;
 
-    let mut trail_time_acc: f64 = 0.0;
-    let sample_interval: f64 = 0.01;
+    // Trail sampling policy: Phase 1 uses an adaptive time-based sampler that
+    // caps samples-per-frame so high steps-per-frame cannot saturate the
+    // ring buffer with overlapping columns. Strategy is pluggable via
+    // `TrailSampler`; Phase 2 will move ownership to a render-side recorder.
+    let mut trail_sampler = AdaptiveSampler::new(0.01, 64);
 
     let full_interval = Duration::from_millis(16);
     let mut last_full = Instant::now().checked_sub(full_interval).unwrap_or_else(Instant::now);
@@ -556,12 +560,10 @@ fn physics_loop(
                 steps_since_check += 1;
 
                 let dt = system.metrics().dt;
-                trail_time_acc += dt;
                 rate_sim_acc += dt;
 
-                if trail_time_acc >= sample_interval {
+                if trail_sampler.decide(dt, steps_per_frame) == SampleDecision::Record {
                     system.push_trail();
-                    trail_time_acc -= sample_interval;
                 }
 
                 if steps_since_check >= POS_CHECK_STEPS {
@@ -597,6 +599,10 @@ fn physics_loop(
                     }
                 }
             }
+
+            // Reset per-frame sample counter so the cap is enforced per
+            // rendered frame (one iteration of this outer loop ≈ one frame).
+            trail_sampler.tick_frame();
 
             // Update sim-rate measurement every 500 ms.
             let wall_elapsed = rate_wall.elapsed();
