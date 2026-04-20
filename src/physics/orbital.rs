@@ -145,46 +145,50 @@ impl OrbitalElements {
 
     /// Samples the predicted Keplerian orbit in **world coordinates**.
     ///
-    /// Returns `steps + 1` points so the polyline closes exactly
-    /// (the first and last entry are identical).
+    /// Returns `steps + 1` points.
     ///
     /// # Parametrisation
     ///
-    /// Uses uniform eccentric anomaly `E ∈ [0, 2π]`:
+    /// **Elliptical** — uniform eccentric anomaly `E ∈ [0, 2π]`:
     ///
     /// ```text
     /// x_pf = a (cos E − e)
     /// y_pf = a √(1 − e²) sin E
-    /// z_pf = 0
     /// ```
     ///
-    /// This avoids the periastro-clustering that uniform true-anomaly
-    /// sampling produces, giving a visually balanced polyline for any
-    /// eccentricity up to ~0.95.
+    /// The polyline **closes exactly** (first = last) and avoids
+    /// periastro-clustering for any eccentricity up to ~0.95.
+    ///
+    /// **Hyperbolic** — uniform hyperbolic anomaly `H ∈ [−H_max, +H_max]`:
+    ///
+    /// ```text
+    /// x_pf = |a| (e − cosh H)
+    /// y_pf = |a| √(e² − 1) sinh H
+    /// ```
+    ///
+    /// At `H = 0` the sample lies on the periapsis `(|a|(e−1), 0)`. The
+    /// polyline is **open** — it traces one branch of the hyperbola
+    /// clipped at `|H| ≤ H_max` (see [`Self::H_MAX_HYPER`]), since the
+    /// true branch extends to infinity along the asymptotes.
+    ///
+    /// **Parabolic** — no finite semi-major axis; returns empty.
     ///
     /// # Frame transform
     ///
     /// Perifocal → world via `R₃(Ω) · R₁(i) · R₃(ω)`, then translated by
-    /// the primary's position (the ellipse is centred on the **focus**,
+    /// the primary's position (the conic is centred on the **focus**,
     /// not the geometric centre). In 2D (i = 0, Ω = 0) this collapses to
     /// a rotation by `ω` alone.
     ///
     /// # Return value
     ///
     /// * `Vec<[f64; 3]>` in world coordinates, z ≡ 0 in 2D.
-    /// * Empty vector for non-elliptical orbits (hyperbolic branch lives
-    ///   in a later lot) or when `steps < 2`.
+    /// * Empty vector for parabolic orbits, degenerate geometry, or
+    ///   `steps < 2`.
     pub fn sample_orbit(&self, primary_pos: [f64; 3], steps: usize) -> Vec<[f64; 3]> {
-        if !matches!(self.orbit_type, OrbitType::Elliptical) {
+        if steps < 2 {
             return Vec::new();
         }
-        if steps < 2 || !self.a.is_finite() || self.a <= 0.0 {
-            return Vec::new();
-        }
-
-        let a = self.a;
-        let e = self.e.clamp(0.0, 0.999);
-        let b = a * (1.0 - e * e).sqrt();
 
         // Composite rotation R₃(Ω) · R₁(i) · R₃(ω) applied to a perifocal
         // point (x_pf, y_pf, 0). Only the first two columns matter because
@@ -200,20 +204,66 @@ impl OrbitalElements {
         let r31 = sw * si;
         let r32 = cw * si;
 
-        let mut out = Vec::with_capacity(steps + 1);
-        for k in 0..=steps {
-            let ek = TAU * (k as f64) / (steps as f64);
-            let (s_ek, c_ek) = ek.sin_cos();
-            let x_pf = a * (c_ek - e);
-            let y_pf = b * s_ek;
-            out.push([
+        let project = |x_pf: f64, y_pf: f64| -> [f64; 3] {
+            [
                 r11 * x_pf + r12 * y_pf + primary_pos[0],
                 r21 * x_pf + r22 * y_pf + primary_pos[1],
                 r31 * x_pf + r32 * y_pf + primary_pos[2],
-            ]);
+            ]
+        };
+
+        match self.orbit_type {
+            OrbitType::Elliptical => {
+                if !self.a.is_finite() || self.a <= 0.0 {
+                    return Vec::new();
+                }
+                let a = self.a;
+                let e = self.e.clamp(0.0, 0.999);
+                let b = a * (1.0 - e * e).sqrt();
+
+                let mut out = Vec::with_capacity(steps + 1);
+                for k in 0..=steps {
+                    let ek = TAU * (k as f64) / (steps as f64);
+                    let (s_ek, c_ek) = ek.sin_cos();
+                    let x_pf = a * (c_ek - e);
+                    let y_pf = b * s_ek;
+                    out.push(project(x_pf, y_pf));
+                }
+                out
+            },
+            OrbitType::Hyperbolic => {
+                if !self.a.is_finite() || self.e <= 1.0 {
+                    return Vec::new();
+                }
+                // Hyperbolic: a < 0 by the codebase convention
+                // (compute_elements uses a = -GM/(2ε) with ε > 0).
+                let a_h = self.a.abs();
+                let e = self.e;
+                let b_h = a_h * (e * e - 1.0).sqrt();
+                let h_max = Self::H_MAX_HYPER;
+
+                let mut out = Vec::with_capacity(steps + 1);
+                for k in 0..=steps {
+                    // H uniformly spans [-h_max, +h_max].
+                    let t = (k as f64) / (steps as f64); // 0..=1
+                    let h = -h_max + 2.0 * h_max * t;
+                    let ch = h.cosh();
+                    let sh = h.sinh();
+                    let x_pf = a_h * (e - ch); // H=0 → a_h(e−1) = r_peri
+                    let y_pf = b_h * sh;
+                    out.push(project(x_pf, y_pf));
+                }
+                out
+            },
+            OrbitType::Parabolic => Vec::new(),
         }
-        out
     }
+
+    /// Hyperbolic anomaly clip used by [`Self::sample_orbit`]. At `H = 3`
+    /// the sampled arm reaches ≈ 10×e periapsis distances (`cosh 3 ≈ 10`),
+    /// which covers the interesting part of a flyby for any `e > 1` while
+    /// staying well short of the asymptotes (ν_∞ = arccos(−1/e)).
+    pub const H_MAX_HYPER: f64 = 3.0;
 }
 
 // ── Primary selection ─────────────────────────────────────────────────────────
@@ -757,20 +807,129 @@ mod tests {
         }
     }
 
+    // ── Hyperbolic sampling ───────────────────────────────────────────────────
+
+    /// Builds a canonical hyperbolic flyby: body passing periapsis on +x,
+    /// moving +y at speed v > v_escape. Returns (primary, satellite).
+    fn hyperbolic_flyby(r_peri: f64, v_multiplier: f64, primary_mass: f64) -> (Body, Body) {
+        let gm = G * primary_mass;
+        let v_peri = v_multiplier * (2.0 * gm / r_peri).sqrt();
+        let primary = body(0.0, 0.0, 0.0, 0.0, primary_mass);
+        let satellite = body(r_peri, 0.0, 0.0, v_peri, 1e-10);
+        (primary, satellite)
+    }
+
     #[test]
-    fn sample_orbit_hyperbolic_returns_empty_for_now() {
-        let r = 10.0;
-        let m = 1e6;
-        let v_escape = (2.0 * G * m / r).sqrt();
-        let primary = body(0.0, 0.0, 0.0, 0.0, m);
-        let satellite = body(r, 0.0, 0.0, v_escape * 1.5, 1e-10);
-        let el = elements(primary, satellite);
+    fn sample_orbit_hyperbolic_returns_open_polyline() {
+        let (p, s) = hyperbolic_flyby(10.0, 1.5, 1e6);
+        let el = elements(p, s);
+        assert_eq!(el.orbit_type, OrbitType::Hyperbolic);
         let pts = el.sample_orbit([0.0, 0.0, 0.0], 64);
-        assert!(
-            pts.is_empty(),
-            "hyperbolic sampling should be empty in Lote 1; got {} points",
-            pts.len(),
-        );
+        assert_eq!(pts.len(), 65, "should return steps+1 points");
+        // Open polyline — first and last are NOT equal.
+        let first = pts.first().unwrap();
+        let last = pts.last().unwrap();
+        let sep = ((first[0] - last[0]).powi(2) + (first[1] - last[1]).powi(2)).sqrt();
+        assert!(sep > 1.0, "hyperbolic polyline must not close (got sep = {sep})");
+    }
+
+    #[test]
+    fn sample_orbit_hyperbolic_middle_point_is_at_periapsis() {
+        let r_peri = 10.0;
+        let m = 1e6;
+        let (p, s) = hyperbolic_flyby(r_peri, 1.5, m);
+        let el = elements(p, s);
+        // H = 0 at k = steps/2. Use even steps so the midpoint exists.
+        let steps = 64usize;
+        let pts = el.sample_orbit([0.0, 0.0, 0.0], steps);
+        let mid = pts[steps / 2];
+        let d = (mid[0] * mid[0] + mid[1] * mid[1]).sqrt();
+        let err = (d - r_peri).abs() / r_peri;
+        assert!(err < 1e-6, "midpoint distance = {d}, expected r_peri = {r_peri}");
+        // And the point lies on +x (ω = 0 for this fixture).
+        assert!(mid[0] > 0.0, "periapsis should have +x sign, got {}", mid[0]);
+        assert!(mid[1].abs() < 1e-6, "periapsis should have y ≈ 0, got {}", mid[1]);
+    }
+
+    #[test]
+    fn sample_orbit_hyperbolic_distance_grows_monotonically_from_midpoint() {
+        // Because r = |a|(e cosh H − 1), distance to focus strictly
+        // increases as |H| increases from 0.
+        let (p, s) = hyperbolic_flyby(10.0, 1.5, 1e6);
+        let el = elements(p, s);
+        let steps = 64usize;
+        let pts = el.sample_orbit([0.0, 0.0, 0.0], steps);
+        let mid = steps / 2;
+        let dist = |k: usize| (pts[k][0].powi(2) + pts[k][1].powi(2)).sqrt();
+        // Backward half: dist(0) > dist(1) > … > dist(mid)
+        for k in 0..mid {
+            assert!(
+                dist(k) > dist(k + 1),
+                "backward monotonicity broken at k={k}: {} vs {}",
+                dist(k),
+                dist(k + 1),
+            );
+        }
+        // Forward half: dist(mid) < dist(mid+1) < …
+        for k in mid..steps {
+            assert!(
+                dist(k) < dist(k + 1),
+                "forward monotonicity broken at k={k}: {} vs {}",
+                dist(k),
+                dist(k + 1),
+            );
+        }
+    }
+
+    #[test]
+    fn sample_orbit_hyperbolic_respects_omega_rotation() {
+        // Rotate the fixture 90°: periapsis lands on +y, not +x.
+        let r_peri = 10.0;
+        let m = 1e6;
+        let gm = G * m;
+        let v_peri = 1.5 * (2.0 * gm / r_peri).sqrt();
+        let primary = body(0.0, 0.0, 0.0, 0.0, m);
+        // Position (0, r_peri), velocity (-v_peri, 0) → CCW, periapsis on +y.
+        let satellite = body(0.0, r_peri, -v_peri, 0.0, 1e-10);
+        let el = elements(primary, satellite);
+        let steps = 64usize;
+        let pts = el.sample_orbit([0.0, 0.0, 0.0], steps);
+        let mid = pts[steps / 2];
+        assert!(mid[0].abs() < 1e-6, "rotated peri.x should be 0, got {}", mid[0]);
+        assert!((mid[1] - r_peri).abs() < 1e-6, "rotated peri.y = {}", mid[1]);
+    }
+
+    #[test]
+    fn sample_orbit_hyperbolic_translates_with_primary() {
+        let (p, s) = hyperbolic_flyby(10.0, 1.5, 1e6);
+        let el = elements(p, s);
+        let shift = [42.5_f64, -17.25, 0.0];
+        let a = el.sample_orbit([0.0, 0.0, 0.0], 32);
+        let b = el.sample_orbit(shift, 32);
+        assert_eq!(a.len(), b.len());
+        for (pa, pb) in a.iter().zip(b.iter()) {
+            for k in 0..3 {
+                let expected = pa[k] + shift[k];
+                assert!(
+                    (pb[k] - expected).abs() < 1e-9,
+                    "axis {k}: got {}, expected {expected}",
+                    pb[k],
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn sample_orbit_parabolic_returns_empty() {
+        // Near-parabolic: v ≈ v_escape puts energy near zero; type may
+        // round to Elliptical or Parabolic depending on ULP. Force the
+        // type explicitly on a computed element to test the branch.
+        let (p, s) = hyperbolic_flyby(10.0, 1.5, 1e6);
+        let mut el = elements(p, s);
+        el.orbit_type = OrbitType::Parabolic;
+        el.a = f64::INFINITY;
+        let pts = el.sample_orbit([0.0, 0.0, 0.0], 64);
+        assert!(pts.is_empty(), "parabolic must not sample");
     }
 
     #[test]
