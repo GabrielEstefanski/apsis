@@ -235,9 +235,9 @@ pub struct WgpuBackend {
     pub center: [f32; 2],
     pub scale: f32,
     pub show_grid: bool,
-    pub trail_width: f32,
-    pub trail_decay_k: f32,
-    pub trail_tail_desaturate: f32,
+    /// Visual style for trail rendering. Injected as a value object so
+    /// presets swap atomically. See [`crate::render::TrailStylePreset`].
+    pub trail_style: crate::render::TrailStyle,
 }
 
 impl WgpuBackend {
@@ -256,9 +256,7 @@ impl WgpuBackend {
             center: [0.0, 0.0],
             scale: 1.0,
             show_grid: true,
-            trail_width: 1.5,
-            trail_decay_k: 6.0,
-            trail_tail_desaturate: 0.5,
+            trail_style: crate::render::TrailStylePreset::UniverseSandbox.style(1.5),
         }
     }
 
@@ -431,9 +429,7 @@ impl WgpuBackend {
                 self.trail_visibility.as_deref(),
                 center,
                 scale,
-                self.trail_width,
-                self.trail_decay_k,
-                self.trail_tail_desaturate,
+                &self.trail_style,
             );
             trail_renderer.draw(pass, &gpu.bind_group_screen);
         }

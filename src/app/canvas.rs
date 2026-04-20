@@ -185,7 +185,7 @@ impl SimulationApp {
             backend.set_lighting_params(0.55, 0.7);
             backend.center = [center_after_pan.x, center_after_pan.y];
             backend.scale = self.scale;
-            backend.trail_width = self.trail_width;
+            backend.trail_style = self.trail_style_preset.style(self.trail_width);
             backend.trail_buffer = if self.show_trails {
                 let bodies = self.system.bodies();
                 let dom_mass = bodies.iter().map(|b| b.mass).fold(0.0_f64, f64::max);

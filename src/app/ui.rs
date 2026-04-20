@@ -195,6 +195,9 @@ pub struct SimulationApp {
     pub(super) render_hints: Vec<BodyRenderHints>,
     pub(super) show_belts: bool,
     pub(super) trail_width: f32,
+    /// Visual preset for trails; combined with `trail_width` to produce the
+    /// concrete [`crate::render::TrailStyle`] pushed to the backend.
+    pub(super) trail_style_preset: crate::render::TrailStylePreset,
     /// Minimum body-mass / dominant-mass ratio required to show a trail.
     /// Bodies below this threshold have their trail alpha zeroed out.
     /// Default 1e-6 suppresses asteroid-mass bodies automatically.
@@ -357,6 +360,7 @@ impl SimulationApp {
             template_drag: None,
             show_belts: false,
             trail_width: 1.5,
+            trail_style_preset: crate::render::TrailStylePreset::UniverseSandbox,
             trail_min_mass_ratio: 1e-7,
             place_material: Material::Rocky,
             trail: None,
