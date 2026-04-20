@@ -46,6 +46,16 @@ impl OrbitOverlayStyle {
     pub const fn selected_default() -> Self {
         Self { color: [140, 210, 255, 160], width_px: 1.0 }
     }
+
+    /// Default for the *all-bodies* overlay: same hue, fainter alpha.
+    ///
+    /// Used when the user enables "Orbit ellipses" globally and every
+    /// bound body draws its own predicted track. The lower alpha lets
+    /// many overlapping orbits coexist without overwhelming the scene
+    /// or drowning out the brighter selected-body overlay on top.
+    pub const fn background_default() -> Self {
+        Self { color: [140, 210, 255, 60], width_px: 0.8 }
+    }
 }
 
 impl Default for OrbitOverlayStyle {
@@ -92,5 +102,18 @@ mod tests {
         let b = OrbitOverlayStyle::selected_default();
         assert_eq!(a.color, b.color);
         assert_eq!(a.width_px, b.width_px);
+    }
+
+    #[test]
+    fn background_is_fainter_than_selected() {
+        // Invariant: the global "all bodies" overlay must not outshine
+        // the focused selected-body overlay, otherwise the user loses
+        // the annotation they're actively looking at.
+        let sel = OrbitOverlayStyle::selected_default();
+        let bg = OrbitOverlayStyle::background_default();
+        assert!(bg.color[3] < sel.color[3], "background alpha must be lower");
+        assert!(bg.width_px <= sel.width_px, "background width must not exceed selected");
+        // Same hue family — only alpha/width differ.
+        assert_eq!(bg.color[0..3], sel.color[0..3]);
     }
 }

@@ -165,6 +165,20 @@ pub struct SimulationApp {
     pub(super) form_error: Option<String>,
     pub(super) show_trails: bool,
     pub(super) show_orbit_ellipses: bool,
+    /// Per-level visibility for the global orbit overlay. Indexed 0..=3
+    /// where 3 also covers all deeper sub-satellite levels.
+    pub(super) orbit_visible_levels: [bool; 4],
+    /// Cap on the number of global orbit overlays drawn per frame.
+    /// Candidates are ranked by an influence score combining log-mass and
+    /// viewport proximity; only the top-N survive.
+    pub(super) orbit_top_n: usize,
+    /// When `true`, orbits whose geometry is numerically fragile are
+    /// suppressed: near-parabolic (|1 − e| < 0.005) and orbits whose
+    /// periapsis lies inside the primary's physical radius.
+    pub(super) orbit_hide_degenerate: bool,
+    /// Frame-coherent gravitational hierarchy used by the orbit overlay
+    /// filter pipeline. Not persisted — rebuilt from live state each tick.
+    pub(super) orbit_hierarchy: crate::physics::orbit_hierarchy::OrbitHierarchy,
     pub(super) show_grid: bool,
     pub(super) show_vectors: bool,
     pub(super) steps_per_frame: u32,
@@ -345,6 +359,10 @@ impl SimulationApp {
             form_error: None,
             show_trails: true,
             show_orbit_ellipses: false,
+            orbit_visible_levels: [true, true, true, false],
+            orbit_top_n: 24,
+            orbit_hide_degenerate: true,
+            orbit_hierarchy: crate::physics::orbit_hierarchy::OrbitHierarchy::new(),
             show_grid: true,
             show_vectors: false,
             steps_per_frame: 1,
