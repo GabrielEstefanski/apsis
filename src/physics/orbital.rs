@@ -264,6 +264,71 @@ impl OrbitalElements {
     /// which covers the interesting part of a flyby for any `e > 1` while
     /// staying well short of the asymptotes (ν_∞ = arccos(−1/e)).
     pub const H_MAX_HYPER: f64 = 3.0;
+
+    /// Periapsis position in **world coordinates**.
+    ///
+    /// Returns `None` for degenerate / unresolvable geometry:
+    /// * parabolic (`a = ∞`) — the parabola has a periapsis but the
+    ///   element set here does not encode it separately;
+    /// * non-finite semi-major axis;
+    /// * eccentricity ≥ 1 with `a ≥ 0` (malformed element).
+    pub fn periapsis_world(&self, primary_pos: [f64; 3]) -> Option<[f64; 3]> {
+        if !self.a.is_finite() {
+            return None;
+        }
+        // r_peri handles both sign conventions: ellipse (a > 0) → a(1−e),
+        // hyperbola (a < 0) → |a|(e−1). Both reduce to |a(1−e)|.
+        let r_peri = match self.orbit_type {
+            OrbitType::Elliptical => self.a * (1.0 - self.e),
+            OrbitType::Hyperbolic => self.a.abs() * (self.e - 1.0),
+            OrbitType::Parabolic => return None,
+        };
+        if !r_peri.is_finite() || r_peri <= 0.0 {
+            return None;
+        }
+        // Perifocal periapsis: (r_peri, 0, 0), then rotate by (Ω, i, ω).
+        Some(self.rotate_perifocal([r_peri, 0.0, 0.0], primary_pos))
+    }
+
+    /// Apoapsis position in **world coordinates**.
+    ///
+    /// Returns `None` for unbound orbits (hyperbolic has no apoapsis; the
+    /// body escapes to infinity) and for parabolic / degenerate cases.
+    pub fn apoapsis_world(&self, primary_pos: [f64; 3]) -> Option<[f64; 3]> {
+        if !matches!(self.orbit_type, OrbitType::Elliptical) {
+            return None;
+        }
+        if !self.a.is_finite() || self.a <= 0.0 {
+            return None;
+        }
+        // Apoapsis in perifocal: x = −a(1+e), y = 0 (opposite side of focus
+        // from periapsis).
+        let x_pf = -self.a * (1.0 + self.e);
+        Some(self.rotate_perifocal([x_pf, 0.0, 0.0], primary_pos))
+    }
+
+    /// Apply the perifocal → world rotation `R₃(Ω)·R₁(i)·R₃(ω)` and
+    /// translate by `primary_pos`. Shared by apsis accessors so they stay
+    /// in sync with [`Self::sample_orbit`].
+    fn rotate_perifocal(&self, pf: [f64; 3], primary_pos: [f64; 3]) -> [f64; 3] {
+        let (sw, cw) = self.omega.sin_cos();
+        let (si, ci) = self.inclination.sin_cos();
+        let (so, co) = self.lon_ascending_node.sin_cos();
+
+        let r11 = co * cw - so * sw * ci;
+        let r12 = -co * sw - so * cw * ci;
+        let r21 = so * cw + co * sw * ci;
+        let r22 = -so * sw + co * cw * ci;
+        let r31 = sw * si;
+        let r32 = cw * si;
+
+        // z_pf ≡ 0 for all perifocal apsis points.
+        [
+            r11 * pf[0] + r12 * pf[1] + primary_pos[0],
+            r21 * pf[0] + r22 * pf[1] + primary_pos[1],
+            r31 * pf[0] + r32 * pf[1] + primary_pos[2],
+        ]
+    }
 }
 
 // ── Primary selection ─────────────────────────────────────────────────────────
@@ -917,6 +982,89 @@ mod tests {
                 );
             }
         }
+    }
+
+    // ── Apsis accessors ────────────────────────────────────────────────────────
+
+    #[test]
+    fn periapsis_world_ellipse_lies_on_plus_x() {
+        let e_target = 0.5_f64;
+        let r_peri = 10.0_f64;
+        let m = 1e6_f64;
+        let gm = G * m;
+        let v_peri = (gm * (1.0 + e_target) / r_peri).sqrt();
+        let primary = body(0.0, 0.0, 0.0, 0.0, m);
+        let satellite = body(r_peri, 0.0, 0.0, v_peri, 1e-10);
+        let el = elements(primary, satellite);
+        let p = el.periapsis_world([0.0, 0.0, 0.0]).unwrap();
+        assert!((p[0] - r_peri).abs() < 1e-6, "peri.x = {}, expected {r_peri}", p[0]);
+        assert!(p[1].abs() < 1e-6, "peri.y = {}", p[1]);
+    }
+
+    #[test]
+    fn apoapsis_world_ellipse_matches_r_apo_on_minus_x() {
+        // e = 0.5, r_peri = 10 → a = 20, r_apo = 30 on −x side of focus.
+        let e_target = 0.5_f64;
+        let r_peri = 10.0_f64;
+        let m = 1e6_f64;
+        let gm = G * m;
+        let v_peri = (gm * (1.0 + e_target) / r_peri).sqrt();
+        let primary = body(0.0, 0.0, 0.0, 0.0, m);
+        let satellite = body(r_peri, 0.0, 0.0, v_peri, 1e-10);
+        let el = elements(primary, satellite);
+        let r_apo = r_peri * (1.0 + e_target) / (1.0 - e_target); // = 30
+        let p = el.apoapsis_world([0.0, 0.0, 0.0]).unwrap();
+        assert!((p[0] + r_apo).abs() < 1e-6, "apo.x = {}, expected {}", p[0], -r_apo);
+        assert!(p[1].abs() < 1e-6, "apo.y = {}", p[1]);
+    }
+
+    #[test]
+    fn periapsis_world_hyperbola_matches_r_peri() {
+        let (p, s) = hyperbolic_flyby(10.0, 1.5, 1e6);
+        let el = elements(p, s);
+        let pt = el.periapsis_world([0.0, 0.0, 0.0]).unwrap();
+        let d = (pt[0] * pt[0] + pt[1] * pt[1]).sqrt();
+        assert!((d - 10.0).abs() < 1e-6, "hyper peri distance = {d}");
+        assert!(pt[0] > 0.0, "hyper peri should sit on +x");
+    }
+
+    #[test]
+    fn apoapsis_world_is_none_for_hyperbola() {
+        let (p, s) = hyperbolic_flyby(10.0, 1.5, 1e6);
+        let el = elements(p, s);
+        assert!(el.apoapsis_world([0.0, 0.0, 0.0]).is_none());
+    }
+
+    #[test]
+    fn apsides_translate_with_primary_position() {
+        let (p, s) = circular_orbit(10.0, 1e6);
+        let el = elements(p, s);
+        let shift = [3.0_f64, -4.0, 0.0];
+        let peri_a = el.periapsis_world([0.0, 0.0, 0.0]).unwrap();
+        let peri_b = el.periapsis_world(shift).unwrap();
+        for k in 0..3 {
+            assert!((peri_b[k] - peri_a[k] - shift[k]).abs() < 1e-9);
+        }
+    }
+
+    #[test]
+    fn apsides_respect_omega_rotation() {
+        // Periastro rotated 90° onto +y; apoapsis onto −y.
+        let e_target = 0.5_f64;
+        let r_peri = 10.0_f64;
+        let m = 1e6_f64;
+        let gm = G * m;
+        let v_peri = (gm * (1.0 + e_target) / r_peri).sqrt();
+        let primary = body(0.0, 0.0, 0.0, 0.0, m);
+        let satellite = body(0.0, r_peri, -v_peri, 0.0, 1e-10);
+        let el = elements(primary, satellite);
+        let peri = el.periapsis_world([0.0, 0.0, 0.0]).unwrap();
+        assert!(peri[0].abs() < 1e-6);
+        assert!((peri[1] - r_peri).abs() < 1e-6);
+        let apo = el.apoapsis_world([0.0, 0.0, 0.0]).unwrap();
+        let r_apo = r_peri * (1.0 + e_target) / (1.0 - e_target);
+        assert!(apo[0].abs() < 1e-6);
+        assert!((apo[1] + r_apo).abs() < 1e-6);
     }
 
     #[test]
