@@ -20,8 +20,10 @@
 //! [`crate::render::trail_buffer::TrailBuffer`] into this module and move
 //! all sampling off the physics thread.
 
+pub mod recorder;
 pub mod sampler;
 pub mod style;
 
+pub use recorder::TrailRecorder;
 pub use sampler::{AdaptiveSampler, SampleDecision, TimeSampler, TrailSampler};
 pub use style::{TrailStyle, TrailStylePreset};

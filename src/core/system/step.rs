@@ -75,7 +75,8 @@ impl System {
         if self.steps % 97 == 0 {
             if let Some((dx, dy)) = calibration::com_offset(&self.bodies, self.total_mass) {
                 calibration::apply_body_shift(&mut self.bodies, dx, dy);
-                self.trail_buf.translate(-dx as f32, -dy as f32);
+                self.pending_com_shift.0 += -dx as f32;
+                self.pending_com_shift.1 += -dy as f32;
             }
         }
 

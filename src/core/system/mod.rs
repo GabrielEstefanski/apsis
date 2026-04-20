@@ -50,16 +50,11 @@ use crate::physics::integrator::{
     ForceModel, GravityForceModel, Integrator, IntegratorKind, PerturbationForce, make_integrator,
 };
 use crate::physics::orbital::OrbitalElements;
-use crate::render::trail_buffer::TrailBuffer;
 
 /// Central simulation state for an N-body gravitational system.
 pub struct System {
     /// Bodies participating in the simulation.
     pub(crate) bodies: Vec<Body>,
-
-    /// GPU-ready ring buffer of trail positions and colours.
-    pub(crate) trail_buf: TrailBuffer,
-    pub(crate) trail_every: usize,
 
     /// Total mass of the system (used for COM recentering).
     pub(crate) total_mass: f64,
@@ -155,6 +150,12 @@ pub struct System {
     /// Set by a [`Command::Stop`](crate::core::hooks::Command::Stop) request.
     /// Headless runners honour this; the GUI may ignore it.
     pub(crate) stop_requested: bool,
+
+    /// Accumulated world-space COM translation since the last call to
+    /// [`take_com_shift`](System::take_com_shift). The render-side
+    /// [`TrailRecorder`](crate::render::TrailRecorder) reads and clears this
+    /// each frame to keep trail positions aligned with the shifted bodies.
+    pub(crate) pending_com_shift: (f32, f32),
 }
 
 impl System {
@@ -188,17 +189,8 @@ impl System {
         bodies: Vec<Body>,
         force_model: Box<dyn ForceModel>,
         dt: f64,
-        trail_every: usize,
+        _trail_every: usize,
     ) -> Self {
-        use crate::render::trail_buffer::adaptive_capacity;
-
-        let n = bodies.len();
-        let trail_n = helpers::trail_body_count(&bodies);
-        let cap = adaptive_capacity(trail_n.max(1));
-
-        let mut trail_buf = TrailBuffer::new_with_capacity(n, cap);
-        trail_buf.update_colors(&bodies);
-
         let total_mass = bodies.iter().map(|b| b.mass).sum();
         let names = {
             let mut acc: Vec<String> = Vec::with_capacity(bodies.len());
@@ -213,8 +205,6 @@ impl System {
 
         Self {
             bodies,
-            trail_buf,
-            trail_every: trail_every.max(1),
             total_mass,
             last_kinetic: 0.0,
             last_potential: 0.0,
@@ -255,6 +245,7 @@ impl System {
             seed: 0,
             hooks: HookRegistry::new(),
             stop_requested: false,
+            pending_com_shift: (0.0, 0.0),
         }
     }
 }

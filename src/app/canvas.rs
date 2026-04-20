@@ -186,7 +186,18 @@ impl SimulationApp {
             backend.center = [center_after_pan.x, center_after_pan.y];
             backend.scale = self.scale;
             backend.trail_style = self.trail_style_preset.style(self.trail_width);
-            backend.trail_buffer = if self.show_trails {
+
+            // Tick the trail recorder: detects topology changes, updates colours,
+            // and decides whether to push a new sample this frame.
+            let (shift_x, shift_y) = self.system.take_pending_com_shift();
+            self.trail_recorder.apply_com_shift(shift_x, shift_y);
+            self.trail_recorder.tick(
+                self.system.bodies(),
+                self.system.t(),
+                self.steps_per_frame,
+            );
+
+            if self.show_trails {
                 let bodies = self.system.bodies();
                 let dom_mass = bodies.iter().map(|b| b.mass).fold(0.0_f64, f64::max);
                 backend.trail_visibility = Some(
@@ -195,10 +206,11 @@ impl SimulationApp {
                         .map(|b| dom_mass == 0.0 || b.mass / dom_mass >= self.trail_min_mass_ratio)
                         .collect(),
                 );
-                Some(self.system.clone_trail_buf())
+                backend.trail_buffer =
+                    Some(std::sync::Arc::new(self.trail_recorder.buffer().clone()));
             } else {
                 backend.trail_visibility = None;
-                None
+                backend.trail_buffer = None;
             };
         }
 
