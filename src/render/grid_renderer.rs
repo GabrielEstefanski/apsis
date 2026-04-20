@@ -1,5 +1,6 @@
 use bytemuck::{Pod, Zeroable};
 use std::mem::size_of;
+use egui;
 
 // ── Uniform ───────────────────────────────────────────────────────────────────
 
@@ -117,14 +118,15 @@ impl GridRenderer {
     ///
     /// `rect` must be the egui [`Rect`] that matches the wgpu viewport so
     /// that pixel coordinates are consistent between the two renderers.
-    #[cfg(feature = "egui")]
+    /// `unit` is the distance unit label shown on x-axis tick labels (e.g. "AU").
+    /// Pass an empty string for dimensionless worlds.
     pub fn draw_labels(
         &self,
         ui: &egui::Ui,
         center: [f32; 2],
         scale: f32,
-        screen: [f32; 2],
         rect: egui::Rect,
+        unit: &str,
     ) {
         let painter = ui.painter_at(rect);
         let font = egui::FontId::monospace(10.0);
@@ -132,7 +134,7 @@ impl GridRenderer {
 
         let step = nice_number(60.0 / scale) * 5.0;
 
-        // ── X-axis labels (placed just below the x-axis, clamped to viewport) ──
+        // ── X-axis labels: numeric + unit suffix ─────────────────────────────
         let y_label = center[1].clamp(rect.min.y + 16.0, rect.max.y - 16.0);
         let x_world_min = (rect.min.x - center[0]) / scale;
         let x_world_max = (rect.max.x - center[0]) / scale;
@@ -144,18 +146,18 @@ impl GridRenderer {
             let wx = ix as f32 * step;
             if wx.abs() < step * 0.1 {
                 continue;
-            } // suppress origin
+            }
             let sx = center[0] + wx * scale;
             painter.text(
                 egui::pos2(sx, y_label + 4.0),
                 egui::Align2::CENTER_TOP,
-                format_coord(wx),
+                format_coord_unit(wx, unit),
                 font.clone(),
                 color,
             );
         }
 
-        // ── Y-axis labels (placed just left of the y-axis, clamped to viewport) ──
+        // ── Y-axis labels: numeric only (unit shown on x-axis to avoid clutter)
         let x_label = center[0].clamp(rect.min.x + 36.0, rect.max.x - 8.0);
         let y_world_min = (rect.min.y - center[1]) / scale;
         let y_world_max = (rect.max.y - center[1]) / scale;
@@ -167,7 +169,7 @@ impl GridRenderer {
             let wy = iy as f32 * step;
             if wy.abs() < step * 0.1 {
                 continue;
-            } // suppress origin
+            }
             let sy = center[1] + wy * scale;
             painter.text(
                 egui::pos2(x_label - 4.0, sy),
@@ -178,7 +180,7 @@ impl GridRenderer {
             );
         }
 
-        // ── Origin label ──────────────────────────────────────────────────────
+        // ── Origin ────────────────────────────────────────────────────────────
         painter.text(
             egui::pos2(
                 center[0].clamp(rect.min.x + 20.0, rect.max.x - 8.0) - 4.0,
@@ -189,6 +191,17 @@ impl GridRenderer {
             font,
             color,
         );
+
+        // ── Unit badge (bottom-right corner) when a named unit is in use ─────
+        if !unit.is_empty() {
+            painter.text(
+                rect.right_bottom() + egui::vec2(-10.0, -10.0),
+                egui::Align2::RIGHT_BOTTOM,
+                unit,
+                egui::FontId::monospace(9.0),
+                egui::Color32::from_rgba_unmultiplied(140, 140, 180, 110),
+            );
+        }
     }
 }
 
@@ -218,6 +231,11 @@ fn format_coord(v: f32) -> String {
         return format!("{}", v.round() as i32);
     }
     format!("{v:.2}")
+}
+
+fn format_coord_unit(v: f32, unit: &str) -> String {
+    let n = format_coord(v);
+    if unit.is_empty() { n } else { format!("{n} {unit}") }
 }
 
 /// Round `raw` up to the nearest "nice" number: 1, 2, 5, 10, 20, 50, …

@@ -51,6 +51,9 @@ pub struct RenderState {
     pub softening_scale: f64,
     pub trail_every: usize,
     pub seed: u64,
+    /// Simulation time units advanced per wall-second (rolling 500 ms window).
+    /// Zero until the first measurement completes.
+    pub sim_rate: f64,
 }
 
 // ── Commands ──────────────────────────────────────────────────────────────────
@@ -96,6 +99,9 @@ pub struct PhysicsHandle {
     /// Set to `true` by the physics thread while processing a heavy command
     /// (load/restore). The UI reads this to show the loading overlay.
     loading: Arc<AtomicBool>,
+    /// Controls whether orbital elements are updated at 60 Hz (true) or 0.5 Hz
+    /// (false). Set to true only while the inspector panel is visible.
+    orbital_elements_needed: Arc<AtomicBool>,
 
     // ── Local cache (updated by sync()) ──────────────────────────────────
     bodies: Vec<Body>,
@@ -104,6 +110,7 @@ pub struct PhysicsHandle {
     orbital_elements: Vec<Option<OrbitalElements>>,
     softening_scale: f64,
     trail_every: usize,
+    sim_rate: f64,
     /// Last successfully cloned trail buffer.
     ///
     /// `clone_trail_buf` tries a fresh `try_lock` first; if the physics thread
@@ -128,8 +135,19 @@ impl PhysicsHandle {
             self.orbital_elements = rs.orbital_elements.clone();
             self.softening_scale = rs.softening_scale;
             self.trail_every = rs.trail_every;
+            self.sim_rate = rs.sim_rate;
             self.cached_trail_buf = rs.trail_buf.clone();
         }
+    }
+
+    pub fn sim_rate(&self) -> f64 {
+        self.sim_rate
+    }
+
+    /// Tell the physics thread whether it should compute orbital elements at
+    /// full frame rate (true, inspector open) or at 0.5 Hz (false, inspector closed).
+    pub fn set_orbital_elements_needed(&self, needed: bool) {
+        self.orbital_elements_needed.store(needed, Ordering::Relaxed);
     }
 
     /// Clone the trail buffer for the current frame.
@@ -331,27 +349,32 @@ pub fn spawn(mut system: System, paused: bool) -> PhysicsHandle {
         softening_scale: system.softening_scale(),
         trail_every: system.trail_every(),
         seed: system.seed(),
+        sim_rate: 0.0,
     };
 
     let render = Arc::new(Mutex::new(initial.clone()));
     let render_thr = render.clone();
     let loading = Arc::new(AtomicBool::new(false));
     let loading_thr = loading.clone();
+    let orbital_needed = Arc::new(AtomicBool::new(true));
+    let orbital_needed_thr = orbital_needed.clone();
 
     let thread = thread::spawn(move || {
-        physics_loop(system, cmd_rx, render_thr, loading_thr, paused);
+        physics_loop(system, cmd_rx, render_thr, loading_thr, paused, orbital_needed_thr);
     });
 
     PhysicsHandle {
         cmd_tx,
         render,
         loading,
+        orbital_elements_needed: orbital_needed,
         bodies: initial.bodies,
         names: initial.names,
         metrics: initial.metrics,
         orbital_elements: initial.orbital_elements,
         softening_scale: initial.softening_scale,
         trail_every: initial.trail_every,
+        sim_rate: 0.0,
         cached_trail_buf: initial.trail_buf,
         _thread: thread,
     }
@@ -397,6 +420,7 @@ fn physics_loop(
     render: Arc<Mutex<RenderState>>,
     loading: Arc<AtomicBool>,
     initial_paused: bool,
+    orbital_needed: Arc<AtomicBool>,
 ) {
     let mut paused = initial_paused;
     let mut steps_per_frame = 1u32;
@@ -407,9 +431,20 @@ fn physics_loop(
 
     let full_interval = Duration::from_millis(16);
     let mut last_full = Instant::now().checked_sub(full_interval).unwrap_or_else(Instant::now);
+    // Orbital elements are O(N²) — update at full rate only when inspector is open.
+    let orbital_fast = Duration::from_millis(16);
+    let orbital_slow = Duration::from_secs(2);
+    let mut last_orbital = Instant::now()
+        .checked_sub(orbital_slow)
+        .unwrap_or_else(Instant::now);
 
     let pos_interval = Duration::from_millis(8);
     let mut last_pos = Instant::now();
+
+    // Sim-rate measurement (rolling 500 ms window).
+    let mut rate_wall = Instant::now();
+    let mut rate_sim_acc = 0.0_f64;
+    let mut current_sim_rate = 0.0_f64;
 
     const POS_CHECK_STEPS: u32 = 8;
     let min_batch_period = Duration::from_micros(100);
@@ -520,11 +555,12 @@ fn physics_loop(
                 system.step();
                 steps_since_check += 1;
 
-                trail_time_acc += system.metrics().dt;
+                let dt = system.metrics().dt;
+                trail_time_acc += dt;
+                rate_sim_acc += dt;
 
                 if trail_time_acc >= sample_interval {
                     system.push_trail();
-
                     trail_time_acc -= sample_interval;
                 }
 
@@ -534,10 +570,19 @@ fn physics_loop(
                     let now = Instant::now();
 
                     if now.duration_since(last_full) >= full_interval {
-                        system.update_orbital_elements();
+                        let orb_interval = if orbital_needed.load(Ordering::Relaxed) {
+                            orbital_fast
+                        } else {
+                            orbital_slow
+                        };
+                        if now.duration_since(last_orbital) >= orb_interval {
+                            system.update_orbital_elements();
+                            last_orbital = now;
+                        }
 
                         if let Ok(mut rs) = render.try_lock() {
                             publish_full(&system, &mut rs);
+                            rs.sim_rate = current_sim_rate;
                         }
 
                         last_full = now;
@@ -552,16 +597,33 @@ fn physics_loop(
                     }
                 }
             }
+
+            // Update sim-rate measurement every 500 ms.
+            let wall_elapsed = rate_wall.elapsed();
+            if wall_elapsed >= Duration::from_millis(500) {
+                current_sim_rate = rate_sim_acc / wall_elapsed.as_secs_f64();
+                rate_sim_acc = 0.0;
+                rate_wall = Instant::now();
+            }
         }
 
         // ── Post-batch full publish ────────────────────────────────
         let now = Instant::now();
 
         if needs_full_publish || (!paused && now.duration_since(last_full) >= full_interval) {
-            system.update_orbital_elements();
+            let orb_interval = if orbital_needed.load(Ordering::Relaxed) {
+                orbital_fast
+            } else {
+                orbital_slow
+            };
+            if now.duration_since(last_orbital) >= orb_interval {
+                system.update_orbital_elements();
+                last_orbital = now;
+            }
 
             if let Ok(mut rs) = render.try_lock() {
                 publish_full(&system, &mut rs);
+                rs.sim_rate = current_sim_rate;
             }
 
             last_full = now;

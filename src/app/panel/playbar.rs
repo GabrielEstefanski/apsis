@@ -84,7 +84,7 @@ impl SimulationApp {
                     if ui
                         .add_sized(
                             [80.0, 14.0],
-                            egui::Slider::new(&mut spf_f, 1.0..=10_000.0)
+                            egui::Slider::new(&mut spf_f, 1.0..=1_000_000.0)
                                 .logarithmic(true)
                                 .show_value(false),
                         )
@@ -94,12 +94,30 @@ impl SimulationApp {
                     }
                     let spf_col = if self.steps_per_frame > 1 { ACCENT } else { TEXT_DIM };
                     ui.label(
-                        RichText::new(format!("×{}", self.steps_per_frame))
+                        RichText::new(fmt_spf(self.steps_per_frame))
                             .monospace()
                             .size(10.0)
                             .color(spf_col),
                     )
-                    .on_hover_text("Physics steps rendered per frame");
+                    .on_hover_text("Physics steps computed per rendered frame");
+
+                    vsep(ui);
+
+                    // ── Sim throughput ────────────────────────────────────────
+                    let sim_rate = self.system.sim_rate();
+                    if sim_rate > 0.0 {
+                        let yr_per_s = sim_rate / (2.0 * PI);
+                        ui.label(
+                            RichText::new(fmt_rate(yr_per_s))
+                                .monospace()
+                                .size(9.5)
+                                .color(TEXT_DIM),
+                        )
+                        .on_hover_text(format!(
+                            "Simulation throughput\n{:.3e} sim·units/s · {:.3e} yr/s",
+                            sim_rate, yr_per_s
+                        ));
+                    }
 
                     // ── Right: stability badge ────────────────────────────────
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -223,6 +241,30 @@ impl SimulationApp {
 
 fn vsep(ui: &mut egui::Ui) {
     ui.add(egui::Separator::default().vertical().spacing(2.0));
+}
+
+fn fmt_spf(spf: u32) -> String {
+    if spf < 1_000 {
+        format!("×{spf}")
+    } else if spf < 1_000_000 {
+        format!("×{:.0}k", spf as f64 / 1_000.0)
+    } else {
+        format!("×{:.1}M", spf as f64 / 1_000_000.0)
+    }
+}
+
+fn fmt_rate(yr_per_s: f64) -> String {
+    if yr_per_s < 1.0 / 365.25 {
+        format!("{:.1} h/s", yr_per_s * 365.25 * 24.0)
+    } else if yr_per_s < 1.0 {
+        format!("{:.1} d/s", yr_per_s * 365.25)
+    } else if yr_per_s < 1_000.0 {
+        format!("{:.1} yr/s", yr_per_s)
+    } else if yr_per_s < 1_000_000.0 {
+        format!("{:.1} kyr/s", yr_per_s / 1_000.0)
+    } else {
+        format!("{:.1} Myr/s", yr_per_s / 1_000_000.0)
+    }
 }
 
 fn fmt_sci(v: f64, sig: usize) -> String {
