@@ -203,6 +203,38 @@ impl TrailBuffer {
         self.sample_count += 1;
     }
 
+    /// Records a pre-extracted column of world-space positions.
+    ///
+    /// Equivalent to [`push`](Self::push) but accepts raw `[x, y]` pairs,
+    /// allowing the physics thread to hand off just the positions it sampled
+    /// without cloning full [`Body`] structs.
+    pub fn push_column(&mut self, positions: &[[f32; 2]]) {
+        debug_assert_eq!(positions.len(), self.n_bodies as usize);
+
+        let col = self.head as usize;
+        let n = self.n_bodies as usize;
+        let base = col * n;
+
+        self.positions[base..base + n].copy_from_slice(positions);
+
+        self.pos_dirty = match &mut self.pos_dirty {
+            PositionsDirty::Full => PositionsDirty::Full,
+            PositionsDirty::Columns(v) if v.len() >= INCREMENTAL_LIMIT => PositionsDirty::Full,
+            PositionsDirty::Columns(v) => {
+                v.push(self.head);
+                return self.advance_head();
+            },
+            PositionsDirty::Clean => {
+                let mut v = Vec::with_capacity(INCREMENTAL_LIMIT);
+                v.push(self.head);
+                PositionsDirty::Columns(v)
+            },
+        };
+
+        self.advance_head();
+        self.sample_count += 1;
+    }
+
     /// Applies a rigid translation to **all** stored positions.
     ///
     /// Called during COM recentering.  NaN slots (unwritten) are left as NaN.
@@ -232,6 +264,29 @@ impl TrailBuffer {
                 b.color[1] as f32 / 255.0,
                 b.color[2] as f32 / 255.0,
                 1.0,
+            ];
+        }
+        self.colors_dirty = true;
+    }
+
+    /// Overrides the colours directly from an RGB slice.
+    ///
+    /// Used by the data-driven colour pipeline when a
+    /// [`ColorView`](crate::render::color::ColorViewSelection) is active —
+    /// the caller has already produced `[u8; 3]` per body by composing
+    /// `field × normalizer × colormap`, so trails and bodies share exactly
+    /// the same colours that frame. Preserves the current alpha channel so
+    /// trail visibility (set via [`apply_visibility`](Self::apply_visibility))
+    /// survives a colour override.
+    pub fn set_colors_rgb(&mut self, rgb: &[[u8; 3]]) {
+        debug_assert_eq!(rgb.len(), self.n_bodies as usize);
+        for (i, c) in rgb.iter().enumerate() {
+            let alpha = self.colors[i][3];
+            self.colors[i] = [
+                c[0] as f32 / 255.0,
+                c[1] as f32 / 255.0,
+                c[2] as f32 / 255.0,
+                alpha,
             ];
         }
         self.colors_dirty = true;
