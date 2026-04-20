@@ -3,6 +3,10 @@ use eframe::egui::{Color32, Pos2, RichText, Stroke};
 
 pub const BG: Color32 = Color32::from_rgb(7, 7, 9);
 pub const PANEL_BG: Color32 = Color32::from_rgb(11, 11, 14);
+/// Raised strip (toolbar segments, spawn mode bar) — one step above `PANEL_BG`.
+pub const SURFACE_STRIP: Color32 = Color32::from_rgb(12, 12, 16);
+/// Card / hero panels in the sidebar.
+pub const SURFACE_CARD: Color32 = Color32::from_rgb(16, 16, 22);
 pub const BORDER: Color32 = Color32::from_rgb(28, 28, 36);
 pub const ACCENT: Color32 = Color32::from_rgb(200, 200, 210);
 pub const ACCENT_DIM: Color32 = Color32::from_rgb(36, 36, 48);

@@ -1,20 +1,16 @@
-//! Bottom playbar — compact transport + temporal readouts.
+//! Bottom playbar — transport controls + key simulation readouts.
 //!
-//! Groups (left → right):
-//!   [▶ ⏭ ⟲]  |  T value · yr  |  DT  |  SPEED [slider] ×N  |  INTEGRATOR  |  Δ ENERGY  |  [trails]
+//! Layout (left → right):
+//!   [▶ ⏭ ⟲]  |  T · yr  |  DT  |  SPEED [slider] ×N  |  ···  |  ● stability
 
 use crate::app::icons;
-use crate::app::theme::{
-    ACCENT, ACCENT_DIM, BORDER, DANGER, PANEL_BG, SUCCESS, TEXT_DIM, TEXT_PRI, TEXT_SEC,
-};
+use crate::app::panel::metrics::DriftSeverity;
+use crate::app::theme::{ACCENT, ACCENT_DIM, BORDER, PANEL_BG, SUCCESS, TEXT_DIM, TEXT_PRI, TEXT_SEC};
 use crate::app::ui::SimulationApp;
-use crate::physics::integrator::IntegratorKind;
 use eframe::egui::{self, Color32, RichText, Stroke};
 use std::f64::consts::PI;
 
-pub const PLAYBAR_HEIGHT: f32 = 40.0;
-
-const WARN: Color32 = Color32::from_rgb(210, 160, 50);
+pub const PLAYBAR_HEIGHT: f32 = 36.0;
 
 impl SimulationApp {
     pub(in crate::app) fn draw_playbar(&mut self, ctx: &egui::Context) {
@@ -42,20 +38,19 @@ impl SimulationApp {
 
                     vsep(ui);
 
-                    // ── Time ─────────────────────────────────────────────────
+                    // ── Time readout ─────────────────────────────────────────
                     let t = self.system.t();
+                    let yr = t / (2.0 * PI);
+                    ui.label(RichText::new("T").size(8.5).color(TEXT_DIM).strong());
                     ui.label(
-                        RichText::new("T").size(8.5).color(TEXT_DIM).strong(),
-                    );
-                    ui.label(
-                        RichText::new(fmt_sci_signed(t, 5))
-                            .size(10.5)
+                        RichText::new(fmt_sci(t, 4))
+                            .size(10.0)
                             .monospace()
                             .color(TEXT_SEC),
                     );
-                    ui.label(RichText::new("·").size(10.0).color(TEXT_DIM));
+                    ui.label(RichText::new("·").size(9.0).color(TEXT_DIM));
                     ui.label(
-                        RichText::new(fmt_years(t))
+                        RichText::new(fmt_years(yr))
                             .size(10.0)
                             .monospace()
                             .color(TEXT_DIM),
@@ -63,7 +58,7 @@ impl SimulationApp {
 
                     vsep(ui);
 
-                    // ── dt ───────────────────────────────────────────────────
+                    // ── DT ───────────────────────────────────────────────────
                     ui.label(RichText::new("DT").size(8.5).color(TEXT_DIM).strong());
                     let mut dt = self.system.dt();
                     let dt_speed = (dt * 0.05).max(1e-7);
@@ -75,9 +70,7 @@ impl SimulationApp {
                                 .max_decimals(6)
                                 .min_decimals(1),
                         )
-                        .on_hover_text(
-                            "Integration timestep.\nSmaller = more accurate but slower.",
-                        )
+                        .on_hover_text("Integration timestep — smaller = more accurate but slower")
                         .changed()
                     {
                         self.system.set_dt(dt);
@@ -90,7 +83,7 @@ impl SimulationApp {
                     let mut spf_f = self.steps_per_frame as f32;
                     if ui
                         .add_sized(
-                            [90.0, 14.0],
+                            [80.0, 14.0],
                             egui::Slider::new(&mut spf_f, 1.0..=10_000.0)
                                 .logarithmic(true)
                                 .show_value(false),
@@ -106,72 +99,40 @@ impl SimulationApp {
                             .size(10.0)
                             .color(spf_col),
                     )
-                    .on_hover_text("Sub-steps rendered per frame");
+                    .on_hover_text("Physics steps rendered per frame");
 
-                    vsep(ui);
-
-                    // ── Integrator ────────────────────────────────────────────
-                    ui.label(
-                        RichText::new("INTEGRATOR").size(8.5).color(TEXT_DIM).strong(),
-                    );
-                    let current = self.system.integrator_kind();
-                    egui::ComboBox::from_id_salt("playbar_integrator")
-                        .selected_text(
-                            RichText::new(short_label(current))
-                                .size(10.5)
-                                .color(TEXT_PRI),
-                        )
-                        .width(140.0)
-                        .show_ui(ui, |ui| {
-                            for kind in IntegratorKind::ALL {
-                                let r = ui.selectable_label(current == kind, kind.label());
-                                if r.clicked() && current != kind {
-                                    self.system.set_integrator(kind);
-                                    self.physics_cfg.integrator = kind;
-                                }
-                                r.on_hover_text(kind.description());
-                            }
-                        });
-
-                    vsep(ui);
-
-                    // ── Δ Energy ──────────────────────────────────────────────
-                    let m = self.system.metrics();
-                    let de = m.rel_energy_error;
-                    ui.label(
-                        RichText::new("Δ ENERGY").size(8.5).color(TEXT_DIM).strong(),
-                    );
-                    ui.label(
-                        RichText::new(fmt_sci_signed(de, 3))
-                            .size(10.5)
-                            .monospace()
-                            .color(energy_color(de)),
-                    )
-                    .on_hover_text(format!(
-                        "Relative energy drift: ΔE / E₀\nPeak this run: {:.2e}",
-                        self.energy_drift_peak
-                    ));
-
-                    // ── Right: trails toggle ──────────────────────────────────
+                    // ── Right: stability badge ────────────────────────────────
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let col = if self.show_trails { ACCENT } else { TEXT_DIM };
-                        if ui
-                            .add(
-                                egui::Button::new(
-                                    RichText::new(format!("{} TRAILS", icons::RESET))
-                                        .size(9.5)
-                                        .color(col),
-                                )
-                                .fill(Color32::TRANSPARENT)
-                                .stroke(Stroke::new(0.5, col.gamma_multiply(0.45)))
-                                .min_size(egui::vec2(72.0, 22.0))
-                                .corner_radius(3.0),
+                        ui.spacing_mut().item_spacing.x = 6.0;
+
+                        let m = self.system.metrics();
+                        let e_sev = DriftSeverity::from_peak(self.energy_drift_peak);
+                        let lz_sev = DriftSeverity::from_peak(self.lz_drift_peak);
+                        let worst = e_sev.max(lz_sev);
+                        let col = worst.color();
+
+                        let (dot, label) = if m.steps <= 10 {
+                            ("○", "warming up")
+                        } else {
+                            (worst.dot(), worst.label())
+                        };
+
+                        let hint = format!(
+                            "Numerical stability\n\nPeak ΔE/E₀  = {:.2e}\nPeak ΔLz/Lz₀ = {:.2e}\n\n\
+                             Excellent < 1×10⁻⁹  |  Good < 1×10⁻⁶  |  Acceptable < 1×10⁻³",
+                            self.energy_drift_peak, self.lz_drift_peak
+                        );
+
+                        ui.add(
+                            egui::Button::new(
+                                RichText::new(format!("{dot}  {label}")).size(9.5).color(col),
                             )
-                            .on_hover_text("Toggle trail visibility")
-                            .clicked()
-                        {
-                            self.show_trails = !self.show_trails;
-                        }
+                            .fill(Color32::TRANSPARENT)
+                            .stroke(Stroke::new(0.5, col.gamma_multiply(0.35)))
+                            .min_size(egui::vec2(96.0, 22.0))
+                            .corner_radius(3.0),
+                        )
+                        .on_hover_text(hint);
                     });
                 });
             });
@@ -214,7 +175,7 @@ impl SimulationApp {
                     .min_size(egui::vec2(28.0, 28.0))
                     .corner_radius(5.0),
             )
-            .on_hover_text(if self.paused { "Play (Space)" } else { "Pause (Space)" })
+            .on_hover_text(if self.paused { "Play  [Space]" } else { "Pause  [Space]" })
             .clicked()
         {
             self.paused = !self.paused;
@@ -250,7 +211,7 @@ impl SimulationApp {
                     .min_size(egui::vec2(24.0, 24.0))
                     .corner_radius(3.0),
             )
-            .on_hover_text("Reset energy/angular-momentum drift peaks")
+            .on_hover_text("Reset drift peak counters")
             .clicked()
         {
             self.reset_drift_peaks();
@@ -264,16 +225,7 @@ fn vsep(ui: &mut egui::Ui) {
     ui.add(egui::Separator::default().vertical().spacing(2.0));
 }
 
-fn short_label(k: IntegratorKind) -> &'static str {
-    match k {
-        IntegratorKind::VelocityVerlet => "Velocity Verlet",
-        IntegratorKind::Yoshida4 => "Yoshida 4",
-        IntegratorKind::WisdomHolman => "Wisdom–Holman",
-    }
-}
-
-/// Format a float as `±M.MMMxxx×10^N` with sign prefix.
-fn fmt_sci_signed(v: f64, sig: usize) -> String {
+fn fmt_sci(v: f64, sig: usize) -> String {
     if v == 0.0 || v.abs() < f64::MIN_POSITIVE {
         return "+0".into();
     }
@@ -282,50 +234,15 @@ fn fmt_sci_signed(v: f64, sig: usize) -> String {
     let exp = a.log10().floor() as i32;
     let mantissa = a / 10f64.powi(exp);
     let prec = sig.saturating_sub(1);
-    format!("{sign}{:.prec$}×10{}", mantissa, superscript(exp), prec = prec)
+    format!("{sign}{:.prec$}e{exp}", mantissa, prec = prec)
 }
 
-fn superscript(n: i32) -> String {
-    n.to_string()
-        .chars()
-        .map(|c| match c {
-            '-' => '⁻',
-            '0' => '⁰',
-            '1' => '¹',
-            '2' => '²',
-            '3' => '³',
-            '4' => '⁴',
-            '5' => '⁵',
-            '6' => '⁶',
-            '7' => '⁷',
-            '8' => '⁸',
-            '9' => '⁹',
-            other => other,
-        })
-        .collect()
-}
-
-/// Convert sim-time to years (`t / 2π` convention used in natural-unit sims).
-fn fmt_years(t: f64) -> String {
-    let yr = t / (2.0 * PI);
+fn fmt_years(yr: f64) -> String {
     if yr.abs() < 0.01 {
         format!("{:.2e} yr", yr)
     } else if yr.abs() < 10_000.0 {
         format!("{:.2} yr", yr)
     } else {
         format!("{:.2e} yr", yr)
-    }
-}
-
-fn energy_color(de: f64) -> Color32 {
-    let a = de.abs();
-    if a < 1e-6 {
-        SUCCESS
-    } else if a < 1e-3 {
-        Color32::from_rgb(120, 200, 140)
-    } else if a < 0.1 {
-        WARN
-    } else {
-        DANGER
     }
 }

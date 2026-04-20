@@ -13,9 +13,59 @@ impl SimulationApp {
             let [cr, cg, cb] = body.color;
             let col = egui::Color32::from_rgb(cr, cg, cb);
             let (dot_rect, _) =
-                ui.allocate_exact_size(egui::vec2(12.0, 12.0), egui::Sense::hover());
-            ui.painter().circle_filled(dot_rect.center(), 5.0, col);
-            ui.label(RichText::new(format!("body #{}", idx)).size(12.0).color(TEXT_PRI).strong());
+                ui.allocate_exact_size(egui::vec2(14.0, 14.0), egui::Sense::hover());
+            ui.painter().circle_filled(dot_rect.center(), 6.0, col);
+
+            let raw_name = self.system.name(idx);
+            let display_name = if raw_name.is_empty() {
+                format!("body #{idx}")
+            } else {
+                raw_name.to_owned()
+            };
+            ui.label(RichText::new(display_name).size(12.5).color(TEXT_PRI).strong());
+        });
+
+        // ── Camera shortcuts ─────────────────────────────────────────────── //
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            let follow_col = if self.follow_selected_body { ACCENT } else { TEXT_DIM };
+            let follow_label = if self.follow_selected_body { "Following" } else { "Follow" };
+            if ui
+                .add(
+                    egui::Button::new(
+                        RichText::new(format!("⊙ {follow_label}")).size(9.5).color(follow_col),
+                    )
+                    .fill(egui::Color32::TRANSPARENT)
+                    .stroke(egui::Stroke::new(
+                        0.5,
+                        if self.follow_selected_body {
+                            ACCENT.gamma_multiply(0.5)
+                        } else {
+                            crate::app::theme::BORDER
+                        },
+                    ))
+                    .min_size(egui::vec2(72.0, 20.0))
+                    .corner_radius(3.0),
+                )
+                .on_hover_text("Lock camera to this body")
+                .clicked()
+            {
+                self.follow_selected_body = !self.follow_selected_body;
+            }
+
+            if ui
+                .add(
+                    egui::Button::new(RichText::new("⊕ Fit").size(9.5).color(TEXT_DIM))
+                        .fill(egui::Color32::TRANSPARENT)
+                        .stroke(egui::Stroke::new(0.5, crate::app::theme::BORDER))
+                        .min_size(egui::vec2(44.0, 20.0))
+                        .corner_radius(3.0),
+                )
+                .on_hover_text("Zoom to fit this body")
+                .clicked()
+            {
+                self.fit_to_view();
+            }
         });
 
         ui.add_space(10.0);
