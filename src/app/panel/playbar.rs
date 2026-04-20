@@ -7,6 +7,7 @@ use crate::app::icons;
 use crate::app::panel::metrics::DriftSeverity;
 use crate::app::theme::{ACCENT, ACCENT_DIM, BORDER, PANEL_BG, SUCCESS, TEXT_DIM, TEXT_PRI, TEXT_SEC};
 use crate::app::ui::SimulationApp;
+use crate::physics::integrator::IntegratorKind;
 use eframe::egui::{self, Color32, RichText, Stroke};
 use std::f64::consts::PI;
 
@@ -100,6 +101,36 @@ impl SimulationApp {
                             .color(spf_col),
                     )
                     .on_hover_text("Physics steps computed per rendered frame");
+
+                    vsep(ui);
+
+                    // ── Integrator ────────────────────────────────────────────
+                    ui.label(RichText::new("ALGO").size(8.5).color(TEXT_DIM).strong());
+                    let current = self.physics_cfg.integrator;
+                    let current_short = integrator_short_label(current);
+                    egui::ComboBox::from_id_salt("playbar_integrator")
+                        .selected_text(
+                            RichText::new(current_short).size(10.0).color(TEXT_PRI),
+                        )
+                        .width(90.0)
+                        .show_ui(ui, |ui| {
+                            for variant in IntegratorKind::ALL {
+                                let r = ui.selectable_value(
+                                    &mut self.physics_cfg.integrator,
+                                    variant,
+                                    RichText::new(variant.label()).size(10.0),
+                                )
+                                .on_hover_text(format!(
+                                    "O({}) · {}F/step\n{}",
+                                    variant.order(),
+                                    variant.force_evals_per_step(),
+                                    variant.description(),
+                                ));
+                                if r.clicked() {
+                                    self.system.set_integrator(variant);
+                                }
+                            }
+                        });
 
                     vsep(ui);
 
@@ -241,6 +272,14 @@ impl SimulationApp {
 
 fn vsep(ui: &mut egui::Ui) {
     ui.add(egui::Separator::default().vertical().spacing(2.0));
+}
+
+fn integrator_short_label(k: IntegratorKind) -> &'static str {
+    match k {
+        IntegratorKind::VelocityVerlet => "Verlet",
+        IntegratorKind::Yoshida4 => "Yoshida-4",
+        IntegratorKind::WisdomHolman => "W–H",
+    }
 }
 
 fn fmt_spf(spf: u32) -> String {

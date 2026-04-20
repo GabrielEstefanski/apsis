@@ -17,7 +17,9 @@
 
 use crate::app::icons;
 use crate::app::panel::metrics::DriftSeverity;
-use crate::app::theme::{ACCENT, BORDER, SURFACE_CARD, TEXT_DIM, TEXT_PRI, TEXT_SEC, section};
+use crate::app::theme::{
+    ACCENT, BORDER, DANGER, SUCCESS, SURFACE_CARD, TEXT_DIM, TEXT_PRI, TEXT_SEC, section,
+};
 use crate::app::ui::{PanelTab, SelectionForm, SimulationApp};
 use eframe::egui::text::{LayoutJob, TextFormat};
 use eframe::egui::{self, Align, Color32, FontId, RichText, Stroke};
@@ -83,6 +85,61 @@ impl SimulationApp {
         kv(ui, "K (kinetic)", &sci(m.kinetic));
         kv(ui, "U (potential)", &sci(m.potential));
         kv(ui, "Lz", &sci(m.angular_momentum_z));
+        kv_col(
+            ui,
+            "ΔE / E₀",
+            &format!("{:+.2e}", m.rel_energy_error),
+            instant_color(m.rel_energy_error),
+        );
+        let lz_triv = m.angular_momentum_z.abs() < 1e-10;
+        if !lz_triv {
+            kv_col(
+                ui,
+                "ΔLz / Lz₀",
+                &format!("{:+.2e}", m.rel_angular_momentum_error),
+                instant_color(m.rel_angular_momentum_error),
+            );
+        }
+
+        // ── Solver ─────────────────────────────────────────────────────────── //
+        section(ui, "SOLVER");
+        kv(ui, "dt", &format!("{:.3e}", m.dt));
+        kv(ui, "θ (opening)", &format!("{:.3}", m.theta));
+        kv(ui, "steps", &format!("{}", m.steps));
+        kv(ui, "vmax", &format!("{:.3e}", m.max_vel));
+        kv(ui, "amax", &format!("{:.3e}", m.max_acc));
+        if let Some(rec) = m.recommended_dt {
+            let ratio = m.dt / rec;
+            let col = if ratio <= 2.0 {
+                TEXT_DIM
+            } else if ratio <= 10.0 {
+                ACCENT
+            } else {
+                DANGER
+            };
+            kv_col(ui, "suggested dt", &format!("{:.3e}", rec), col);
+        }
+
+        // ── Stability (peak drift since reset) ──────────────────────────────── //
+        if m.steps > 10 && (self.energy_drift_peak > 0.0 || self.lz_drift_peak > 0.0) {
+            section(ui, "STABILITY");
+            if self.energy_drift_peak > 0.0 {
+                kv_col(
+                    ui,
+                    "peak ΔE/E₀",
+                    &format!("{:.2e}", self.energy_drift_peak),
+                    DriftSeverity::from_peak(self.energy_drift_peak).color(),
+                );
+            }
+            if self.lz_drift_peak > 0.0 {
+                kv_col(
+                    ui,
+                    "peak ΔLz/Lz₀",
+                    &format!("{:.2e}", self.lz_drift_peak),
+                    DriftSeverity::from_peak(self.lz_drift_peak).color(),
+                );
+            }
+        }
 
         // ── Bodies list with search ────────────────────────────────────────── //
         section(ui, "BODIES");
@@ -310,12 +367,29 @@ fn quick_start_card(
 // ── Helpers ──────────────────────────────────────────────────────────────── //
 
 fn kv(ui: &mut egui::Ui, label: &str, value: &str) {
+    kv_col(ui, label, value, TEXT_PRI);
+}
+
+fn kv_col(ui: &mut egui::Ui, label: &str, value: &str, col: Color32) {
     ui.horizontal(|ui| {
         ui.label(RichText::new(label).size(10.0).color(TEXT_SEC));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.label(RichText::new(value).monospace().size(10.5).color(TEXT_PRI));
+            ui.label(RichText::new(value).monospace().size(10.5).color(col));
         });
     });
+}
+
+fn instant_color(v: f64) -> Color32 {
+    let a = v.abs();
+    if a < 1e-8 {
+        SUCCESS
+    } else if a < 1e-5 {
+        TEXT_DIM
+    } else if a < 1e-3 {
+        ACCENT
+    } else {
+        DANGER
+    }
 }
 
 fn body_row(
