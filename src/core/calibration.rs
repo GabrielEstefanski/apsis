@@ -13,11 +13,6 @@ use std::collections::VecDeque;
 
 // ── Tuning constants ────────────────────────────────────────────────────────── //
 
-/// Softening length as a fraction of the mean inter-particle spacing, for a
-/// unit-mean-mass body.  1 % keeps the force accurate to ≈ 0.01 % at the
-/// typical separation while still preventing singularities.
-pub const SOFTENING_ETA: f64 = 0.01;
-
 /// Removes center-of-mass velocity.
 ///
 /// Transforms the system into its rest frame.

@@ -5,4 +5,5 @@
 //! Nothing here depends on runtime state, the physics thread, or persistence.
 
 pub mod body;
+pub mod field;
 pub mod materials;

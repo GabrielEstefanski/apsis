@@ -33,6 +33,7 @@ use crate::io::snapshot::SimSnapshot;
 use crate::core::system::System;
 use crate::physics::integrator::IntegratorKind;
 use crate::physics::orbital::OrbitalElements;
+use crate::render::trail::{TrailSampler, TrailSamplerKind};
 
 // ── Render state ──────────────────────────────────────────────────────────────
 
@@ -56,6 +57,16 @@ pub struct RenderState {
     /// reads and clears this each tick to keep trail positions aligned with
     /// the shifted body coordinate system.
     pub pending_com_shift: (f32, f32),
+    /// Body-position columns sampled this tick by the trail sampler, in the
+    /// order they were produced. Each entry has length `bodies.len()`. The
+    /// UI thread drains this vector every sync and feeds it to the
+    /// [`TrailRecorder`](crate::render::TrailRecorder).
+    pub trail_samples: Vec<Vec<[f32; 2]>>,
+    /// Gravitational accelerations from the last completed physics step,
+    /// published so the render-side
+    /// [`AccelerationMagnitudeField`](crate::domain::field::acceleration::AccelerationMagnitudeField)
+    /// can paint bodies by |a| without needing to recompute forces.
+    pub accelerations: Vec<(f64, f64)>,
 }
 
 // ── Commands ──────────────────────────────────────────────────────────────────
@@ -86,6 +97,9 @@ pub enum PhysicsCmd {
     RestoreSnapshot(SimSnapshot),
     SetDtMode(DtMode),
     SetAdaptiveTheta(bool),
+    /// Swap the trail-sampler strategy. Anchors (if any) are discarded; the
+    /// next step restores them and records an initial sample.
+    SetTrailSampler(TrailSamplerKind),
     Shutdown,
 }
 
@@ -111,9 +125,13 @@ pub struct PhysicsHandle {
     orbital_elements: Vec<Option<OrbitalElements>>,
     softening_scale: f64,
     sim_rate: f64,
+    accelerations: Vec<(f64, f64)>,
     /// Pending COM shift published by the physics thread this frame.
     /// Consumed by TrailRecorder on the UI thread.
     pending_com_shift: (f32, f32),
+    /// Trail samples published by the physics thread this frame. Drained by
+    /// the UI thread on [`sync`] and fed to the [`TrailRecorder`].
+    pending_trail_samples: Vec<Vec<[f32; 2]>>,
 
     _thread: thread::JoinHandle<()>,
 }
@@ -132,10 +150,14 @@ impl PhysicsHandle {
             self.orbital_elements = rs.orbital_elements.clone();
             self.softening_scale = rs.softening_scale;
             self.sim_rate = rs.sim_rate;
+            self.accelerations.clone_from(&rs.accelerations);
             // Drain the COM shift so the physics thread can start fresh.
             let shift = rs.pending_com_shift;
             rs.pending_com_shift = (0.0, 0.0);
             self.pending_com_shift = shift;
+            // Drain accumulated trail samples (move; avoids allocation).
+            self.pending_trail_samples
+                .extend(rs.trail_samples.drain(..));
         }
     }
 
@@ -144,6 +166,15 @@ impl PhysicsHandle {
     /// Forwarded to [`crate::render::TrailRecorder::apply_com_shift`] each frame.
     pub fn take_pending_com_shift(&mut self) -> (f32, f32) {
         std::mem::replace(&mut self.pending_com_shift, (0.0, 0.0))
+    }
+
+    /// Drains the trail samples accumulated since the last call.
+    ///
+    /// Each returned column is a `Vec<[f32; 2]>` of length `bodies.len()`
+    /// produced by the physics-thread's sampler. Consumed by
+    /// [`TrailRecorder::ingest`](crate::render::TrailRecorder::ingest).
+    pub fn take_trail_samples(&mut self) -> Vec<Vec<[f32; 2]>> {
+        std::mem::take(&mut self.pending_trail_samples)
     }
 
     pub fn sim_rate(&self) -> f64 {
@@ -181,6 +212,10 @@ impl PhysicsHandle {
     }
     pub fn orbital_elements(&self) -> &[Option<OrbitalElements>] {
         &self.orbital_elements
+    }
+    /// Accelerations from the last completed physics step (one per body).
+    pub fn accelerations(&self) -> &[(f64, f64)] {
+        &self.accelerations
     }
     pub fn t(&self) -> f64 {
         self.metrics.t
@@ -280,6 +315,10 @@ impl PhysicsHandle {
     pub fn set_adaptive_theta(&self, enabled: bool) {
         self.send(PhysicsCmd::SetAdaptiveTheta(enabled));
     }
+    /// Install a new trail sampler. Takes effect on the next physics step.
+    pub fn set_trail_sampler(&self, kind: TrailSamplerKind) {
+        self.send(PhysicsCmd::SetTrailSampler(kind));
+    }
     pub fn restore_from_snapshot(&self, snap: &SimSnapshot) {
         self.loading.store(true, Ordering::Relaxed);
         self.send(PhysicsCmd::RestoreSnapshot(snap.clone()));
@@ -336,6 +375,8 @@ pub fn spawn(mut system: System, paused: bool) -> PhysicsHandle {
         seed: system.seed(),
         sim_rate: 0.0,
         pending_com_shift: (0.0, 0.0),
+        trail_samples: Vec::new(),
+        accelerations: system.last_accelerations().to_vec(),
     };
 
     let render = Arc::new(Mutex::new(initial.clone()));
@@ -360,7 +401,9 @@ pub fn spawn(mut system: System, paused: bool) -> PhysicsHandle {
         orbital_elements: initial.orbital_elements,
         softening_scale: initial.softening_scale,
         sim_rate: 0.0,
+        accelerations: initial.accelerations.clone(),
         pending_com_shift: (0.0, 0.0),
+        pending_trail_samples: Vec::new(),
         _thread: thread,
     }
 }
@@ -384,15 +427,146 @@ fn publish_positions(system: &System, rs: &mut RenderState) {
 }
 
 /// Full publish: positions + names + orbital elements + config.
-fn publish_full(system: &mut System, rs: &mut RenderState, com_shift_acc: (f32, f32)) {
+fn publish_full(
+    system: &mut System,
+    rs: &mut RenderState,
+    com_shift_acc: (f32, f32),
+    trail_samples: &mut Vec<Vec<[f32; 2]>>,
+) {
     publish_positions(system, rs);
     rs.names = system.names().to_vec();
     rs.orbital_elements = system.orbital_elements().to_vec();
     rs.softening_scale = system.softening_scale();
     rs.seed = system.seed();
+    let src_acc = system.last_accelerations();
+    if rs.accelerations.len() == src_acc.len() {
+        rs.accelerations.copy_from_slice(src_acc);
+    } else {
+        rs.accelerations = src_acc.to_vec();
+    }
     // Accumulate COM shift; the UI thread drains it on sync().
     rs.pending_com_shift.0 += com_shift_acc.0;
     rs.pending_com_shift.1 += com_shift_acc.1;
+    // Hand off accumulated trail samples — move, don't copy.
+    rs.trail_samples.extend(trail_samples.drain(..));
+}
+
+// ── Command dispatch ──────────────────────────────────────────────────────────
+
+/// Effect of applying a single [`PhysicsCmd`]. Returned by [`apply_cmd`] so the
+/// caller can exit the thread cleanly on shutdown.
+enum CmdEffect {
+    Continue,
+    Shutdown,
+}
+
+/// Applies one command to the physics-thread state. Extracted so the physics
+/// loop can drain the command channel from multiple points: once at the top
+/// of each batch (for responsiveness while paused), and again mid-batch (so
+/// `SetPaused`, `RemoveBody`, `Shutdown` etc. aren't blocked behind a large
+/// `steps_per_frame` batch).
+fn apply_cmd(
+    cmd: PhysicsCmd,
+    system: &mut System,
+    paused: &mut bool,
+    steps_per_frame: &mut u32,
+    needs_full_publish: &mut bool,
+    trail_sampler: &mut Box<dyn TrailSampler>,
+    loading: &Arc<AtomicBool>,
+) -> CmdEffect {
+    match cmd {
+        PhysicsCmd::Shutdown => return CmdEffect::Shutdown,
+        PhysicsCmd::SetPaused(p) => *paused = p,
+        PhysicsCmd::SetStepsPerFrame(s) => *steps_per_frame = s.max(1),
+        PhysicsCmd::SetDt(dt) => {
+            system.set_dt(dt);
+            *needs_full_publish = true;
+        },
+        PhysicsCmd::SetExactThreshold(n) => {
+            system.set_exact_threshold(n);
+            *needs_full_publish = true;
+        },
+        PhysicsCmd::SetSeed(s) => {
+            system.set_seed(s);
+            *needs_full_publish = true;
+        },
+        PhysicsCmd::SetTheta(theta) => {
+            system.set_theta(theta);
+            *needs_full_publish = true;
+        },
+        PhysicsCmd::SetSofteningScale(s) => {
+            system.set_softening_scale(s);
+            *needs_full_publish = true;
+        },
+        PhysicsCmd::SetGFactor(g) => {
+            system.set_g_factor(g);
+            *needs_full_publish = true;
+        },
+        PhysicsCmd::SetIntegrator(i) => {
+            system.set_integrator(i);
+            *needs_full_publish = true;
+        },
+        PhysicsCmd::AddBody(b) => {
+            system.add_body(b);
+            *needs_full_publish = true;
+        },
+        PhysicsCmd::AddNamedBody(named_body) => {
+            system.add_named_body(named_body);
+            *needs_full_publish = true;
+        },
+        PhysicsCmd::AddBodies(bodies) => {
+            loading.store(true, Ordering::Relaxed);
+            system.add_bodies(bodies);
+            loading.store(false, Ordering::Relaxed);
+            *needs_full_publish = true;
+        },
+        PhysicsCmd::AddNamedBodies(bodies) => {
+            loading.store(true, Ordering::Relaxed);
+            system.add_named_bodies(bodies);
+            loading.store(false, Ordering::Relaxed);
+            *needs_full_publish = true;
+        },
+        PhysicsCmd::RemoveBody(idx) => {
+            system.remove_body(idx);
+            *needs_full_publish = true;
+        },
+        PhysicsCmd::UpdateBody(idx, b) => {
+            system.update_body(idx, b);
+            *needs_full_publish = true;
+        },
+        PhysicsCmd::SetName(idx, name) => {
+            system.set_name(idx, name);
+            *needs_full_publish = true;
+        },
+        PhysicsCmd::LoadBodies(bodies) => {
+            loading.store(true, Ordering::Relaxed);
+            system.load_bodies(bodies);
+            loading.store(false, Ordering::Relaxed);
+            *needs_full_publish = true;
+        },
+        PhysicsCmd::ZeroComVelocity => {
+            system.zero_com_velocity();
+            *needs_full_publish = true;
+        },
+        PhysicsCmd::SetDtMode(mode) => {
+            system.set_dt_mode(mode);
+            *needs_full_publish = true;
+        },
+        PhysicsCmd::SetAdaptiveTheta(enabled) => {
+            system.set_adaptive_theta(enabled);
+            *needs_full_publish = true;
+        },
+        PhysicsCmd::SetTrailSampler(kind) => {
+            *trail_sampler = kind.build();
+        },
+        PhysicsCmd::RestoreSnapshot(snap) => {
+            loading.store(true, Ordering::Relaxed);
+            system.restore_from_snapshot(&snap);
+            loading.store(false, Ordering::Relaxed);
+            *needs_full_publish = true;
+        },
+    }
+    CmdEffect::Continue
 }
 
 // ── Physics loop ──────────────────────────────────────────────────────────────
@@ -412,6 +586,19 @@ fn physics_loop(
     // Accumulated COM shift across the current step batch. Published to
     // RenderState once per frame; consumed by TrailRecorder on the UI thread.
     let mut com_shift_acc: (f32, f32) = (0.0, 0.0);
+
+    // Trail sampler: decides — per physics step — whether to enqueue a
+    // trail sample for the UI. Default is arc-length based (see
+    // [`TrailSamplerKind::default`]). Swapped via PhysicsCmd::SetTrailSampler.
+    let mut trail_sampler: Box<dyn TrailSampler> = TrailSamplerKind::default().build();
+    // Samples accumulated since the last publish_full; swapped into the
+    // RenderState when that happens. Each column has length `bodies.len()`.
+    let mut trail_samples_pending: Vec<Vec<[f32; 2]>> = Vec::new();
+    // Safety cap: limit how many samples can accumulate between publishes
+    // so a runaway frame cannot produce an unbounded backlog. Sized to
+    // cover ~6 full orbits at the default arc-length density (314/orbit),
+    // which is well above what the trail ring buffer displays anyway.
+    const TRAIL_SAMPLES_PER_BATCH_MAX: usize = 2048;
 
     let full_interval = Duration::from_millis(16);
     let mut last_full = Instant::now().checked_sub(full_interval).unwrap_or_else(Instant::now);
@@ -437,102 +624,30 @@ fn physics_loop(
         let batch_start = Instant::now();
 
         while let Ok(cmd) = cmd_rx.try_recv() {
-            match cmd {
-                PhysicsCmd::Shutdown => return,
-                PhysicsCmd::SetPaused(p) => paused = p,
-                PhysicsCmd::SetStepsPerFrame(s) => steps_per_frame = s.max(1),
-                PhysicsCmd::SetDt(dt) => {
-                    system.set_dt(dt);
-                    needs_full_publish = true;
-                },
-                PhysicsCmd::SetExactThreshold(n) => {
-                    system.set_exact_threshold(n);
-                    needs_full_publish = true;
-                },
-                PhysicsCmd::SetSeed(s) => {
-                    system.set_seed(s);
-                    needs_full_publish = true;
-                },
-                PhysicsCmd::SetTheta(theta) => {
-                    system.set_theta(theta);
-                    needs_full_publish = true;
-                },
-                PhysicsCmd::SetSofteningScale(s) => {
-                    system.set_softening_scale(s);
-                    needs_full_publish = true;
-                },
-                PhysicsCmd::SetGFactor(g) => {
-                    system.set_g_factor(g);
-                    needs_full_publish = true;
-                },
-                PhysicsCmd::SetIntegrator(i) => {
-                    system.set_integrator(i);
-                    needs_full_publish = true;
-                },
-                PhysicsCmd::AddBody(b) => {
-                    system.add_body(b);
-                    needs_full_publish = true;
-                },
-                PhysicsCmd::AddNamedBody(named_body) => {
-                    system.add_named_body(named_body);
-                    needs_full_publish = true;
-                },
-                PhysicsCmd::AddBodies(bodies) => {
-                    loading.store(true, Ordering::Relaxed);
-                    system.add_bodies(bodies);
-                    loading.store(false, Ordering::Relaxed);
-                    needs_full_publish = true;
-                },
-                PhysicsCmd::AddNamedBodies(bodies) => {
-                    loading.store(true, Ordering::Relaxed);
-                    system.add_named_bodies(bodies);
-                    loading.store(false, Ordering::Relaxed);
-                    needs_full_publish = true;
-                },
-                PhysicsCmd::RemoveBody(idx) => {
-                    system.remove_body(idx);
-                    needs_full_publish = true;
-                },
-                PhysicsCmd::UpdateBody(idx, b) => {
-                    system.update_body(idx, b);
-                    needs_full_publish = true;
-                },
-                PhysicsCmd::SetName(idx, name) => {
-                    system.set_name(idx, name);
-                    needs_full_publish = true;
-                },
-                PhysicsCmd::LoadBodies(bodies) => {
-                    loading.store(true, Ordering::Relaxed);
-                    system.load_bodies(bodies);
-                    loading.store(false, Ordering::Relaxed);
-                    needs_full_publish = true;
-                },
-                PhysicsCmd::ZeroComVelocity => {
-                    system.zero_com_velocity();
-                    needs_full_publish = true;
-                },
-                PhysicsCmd::SetDtMode(mode) => {
-                    system.set_dt_mode(mode);
-                    needs_full_publish = true;
-                },
-                PhysicsCmd::SetAdaptiveTheta(enabled) => {
-                    system.set_adaptive_theta(enabled);
-                    needs_full_publish = true;
-                },
-                PhysicsCmd::RestoreSnapshot(snap) => {
-                    loading.store(true, Ordering::Relaxed);
-                    system.restore_from_snapshot(&snap);
-                    loading.store(false, Ordering::Relaxed);
-                    needs_full_publish = true;
-                },
+            if matches!(
+                apply_cmd(
+                    cmd,
+                    &mut system,
+                    &mut paused,
+                    &mut steps_per_frame,
+                    &mut needs_full_publish,
+                    &mut trail_sampler,
+                    &loading,
+                ),
+                CmdEffect::Shutdown
+            ) {
+                return;
             }
         }
 
         if !paused {
             let mut steps_since_check = 0u32;
+            let mut i = 0u32;
+            let mut shutdown = false;
 
-            for _ in 0..steps_per_frame {
+            while i < steps_per_frame {
                 system.step();
+                i += 1;
                 steps_since_check += 1;
 
                 let dt = system.metrics().dt;
@@ -542,6 +657,20 @@ fn physics_loop(
                 let (sx, sy) = system.take_com_shift();
                 com_shift_acc.0 += sx;
                 com_shift_acc.1 += sy;
+
+                // Arc-length / step-count sampling at physics-step granularity.
+                // Capture position columns into a local queue; publish_full
+                // hands them off to the UI thread in one move.
+                if trail_samples_pending.len() < TRAIL_SAMPLES_PER_BATCH_MAX
+                    && trail_sampler.should_sample(system.bodies())
+                {
+                    let col: Vec<[f32; 2]> = system
+                        .bodies()
+                        .iter()
+                        .map(|b| [b.x as f32, b.y as f32])
+                        .collect();
+                    trail_samples_pending.push(col);
+                }
 
                 if steps_since_check >= POS_CHECK_STEPS {
                     steps_since_check = 0;
@@ -560,7 +689,12 @@ fn physics_loop(
                         }
 
                         if let Ok(mut rs) = render.try_lock() {
-                            publish_full(&mut system, &mut rs, com_shift_acc);
+                            publish_full(
+                                &mut system,
+                                &mut rs,
+                                com_shift_acc,
+                                &mut trail_samples_pending,
+                            );
                             rs.sim_rate = current_sim_rate;
                         }
                         com_shift_acc = (0.0, 0.0);
@@ -575,7 +709,37 @@ fn physics_loop(
                             publish_positions(&system, &mut rs);
                         }
                     }
+
+                    // Mid-batch command drain: pause/remove/shutdown etc.
+                    // must not wait for large `steps_per_frame` batches to
+                    // finish. Break out of the inner loop if the UI paused
+                    // us or asked us to shut down.
+                    let was_paused = paused;
+                    while let Ok(cmd) = cmd_rx.try_recv() {
+                        if matches!(
+                            apply_cmd(
+                                cmd,
+                                &mut system,
+                                &mut paused,
+                                &mut steps_per_frame,
+                                &mut needs_full_publish,
+                                &mut trail_sampler,
+                                &loading,
+                            ),
+                            CmdEffect::Shutdown
+                        ) {
+                            shutdown = true;
+                            break;
+                        }
+                    }
+                    if shutdown || (paused && !was_paused) {
+                        break;
+                    }
                 }
+            }
+
+            if shutdown {
+                return;
             }
 
             // Update sim-rate measurement every 500 ms.
@@ -602,7 +766,12 @@ fn physics_loop(
             }
 
             if let Ok(mut rs) = render.try_lock() {
-                publish_full(&mut system, &mut rs, com_shift_acc);
+                publish_full(
+                    &mut system,
+                    &mut rs,
+                    com_shift_acc,
+                    &mut trail_samples_pending,
+                );
                 rs.sim_rate = current_sim_rate;
             }
             com_shift_acc = (0.0, 0.0);
