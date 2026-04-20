@@ -23,7 +23,13 @@ const BINDINGS: &[(&str, &[Binding])] = &[
             Binding { keys: "Drag", description: "Pan camera" },
         ],
     ),
-    ("HELP", &[Binding { keys: "H", description: "Toggle this shortcuts guide" }]),
+    (
+        "INTERFACE",
+        &[
+            Binding { keys: "B", description: "Toggle sidebar" },
+            Binding { keys: "H", description: "Toggle this shortcuts guide" },
+        ],
+    ),
 ];
 
 impl SimulationApp {

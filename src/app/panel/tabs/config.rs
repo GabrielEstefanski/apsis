@@ -67,6 +67,20 @@ impl SimulationApp {
     pub(super) fn panel_tab_config(&mut self, ui: &mut egui::Ui) {
         ui.add_space(4.0);
 
+        // ── DIAGNOSTICS (collapsible) ─────────────────────────────────────────
+
+        egui::CollapsingHeader::new(
+            egui::RichText::new("DIAGNOSTICS").size(9.5).color(TEXT_DIM).strong(),
+        )
+        .default_open(true)
+        .show(ui, |ui| {
+            ui.add_space(2.0);
+            self.panel_diagnostics_detail(ui);
+            ui.add_space(4.0);
+        });
+
+        ui.add_space(4.0);
+
         // ── FORCE ACCURACY ────────────────────────────────────────────────────
 
         section(ui, "FORCE ACCURACY");

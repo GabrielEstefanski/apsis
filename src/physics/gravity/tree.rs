@@ -307,52 +307,97 @@ mod tests {
     use super::*;
     use crate::domain::body::Body;
 
+    use approx::assert_relative_eq;
+    use proptest::prelude::*;
+
     fn make_tree() -> QuadTree {
         QuadTree::new(16)
     }
 
-    /// After build, root COM must equal the mass-weighted average of all bodies:
-    /// r_com = Σ mᵢ rᵢ / M.
+    fn body(x: f64, y: f64, m: f64) -> Body {
+        Body::new(x, y, 0.0, 0.0, m, crate::domain::materials::Material::Rocky)
+    }
+
+    /// After build, root COM must equal the mass-weighted average:
+    /// r_com = Σ mᵢ rᵢ / M
     #[test]
     fn root_com_equals_mass_weighted_average() {
-        let bodies = vec![
-            Body::new(0.0, 0.0, 0.0, 0.0, 1.0, crate::domain::materials::Material::Rocky),
-            Body::new(4.0, 0.0, 0.0, 0.0, 3.0, crate::domain::materials::Material::Rocky),
-        ];
-        // COM_x = (1·0 + 3·4) / 4 = 3.0
+        let bodies = vec![body(0.0, 0.0, 1.0), body(4.0, 0.0, 3.0)];
+
         let mut tree = make_tree();
         tree.build(&bodies);
 
         let root = &tree.nodes[0];
-        assert!((root.mass - 4.0).abs() < 1e-12);
-        assert!((root.com_x - 3.0).abs() < 1e-12);
-        assert!(root.com_y.abs() < 1e-12);
+
+        assert_relative_eq!(root.mass, 4.0, epsilon = 1e-12);
+        assert_relative_eq!(root.com_x, 3.0, epsilon = 1e-12);
+        assert_relative_eq!(root.com_y, 0.0, epsilon = 1e-12);
     }
 
-    /// `body_count` in the root must equal N after build — no body lost.
+    /// Root must contain all bodies
     #[test]
     fn root_body_count_equals_n() {
-        let bodies: Vec<Body> = (0..10)
-            .map(|i| {
-                Body::new(i as f64, 0.0, 0.0, 0.0, 1.0, crate::domain::materials::Material::Rocky)
-            })
-            .collect();
+        let bodies: Vec<Body> = (0..10).map(|i| body(i as f64, 0.0, 1.0)).collect();
+
         let mut tree = make_tree();
         tree.build(&bodies);
+
         assert_eq!(tree.nodes[0].body_count, 10);
     }
 
-    /// A single body produces a root that is already a leaf (no subdivision).
+    /// Single body => no subdivision
     #[test]
     fn single_body_root_is_leaf_with_no_children() {
-        let bodies =
-            vec![Body::new(1.0, 2.0, 0.0, 0.0, 5.0, crate::domain::materials::Material::Rocky)];
+        let bodies = vec![body(1.0, 2.0, 5.0)];
+
         let mut tree = make_tree();
         tree.build(&bodies);
 
         let root = &tree.nodes[0];
+
         assert!(root.is_leaf());
         assert_eq!(root.body_len, 1);
         assert_eq!(root.body_count, 1);
+    }
+
+    /// Edge case: multiple bodies at same position
+    #[test]
+    fn bodies_same_position() {
+        let bodies = vec![body(0.0, 0.0, 1.0), body(0.0, 0.0, 2.0)];
+
+        let mut tree = make_tree();
+        tree.build(&bodies);
+
+        let root = &tree.nodes[0];
+
+        assert_eq!(root.body_count, 2);
+        assert_relative_eq!(root.com_x, 0.0, epsilon = 1e-12);
+        assert_relative_eq!(root.com_y, 0.0, epsilon = 1e-12);
+    }
+
+    proptest! {
+        #[test]
+        fn total_mass_is_preserved(
+            xs in prop::collection::vec(-100.0..100.0, 1..50),
+            ys in prop::collection::vec(-100.0..100.0, 1..50),
+            masses in prop::collection::vec(0.1..10.0, 1..50)
+        ) {
+            let len = xs.len().min(ys.len()).min(masses.len());
+
+            let bodies: Vec<Body> = (0..len)
+                .map(|i| body(xs[i], ys[i], masses[i]))
+                .collect();
+
+            let expected_mass: f64 = bodies.iter().map(|b| b.mass).sum();
+
+            let mut tree = make_tree();
+            tree.build(&bodies);
+
+            let root = &tree.nodes[0];
+
+            prop_assert!(
+                (root.mass - expected_mass).abs() < 1e-6
+            );
+        }
     }
 }
