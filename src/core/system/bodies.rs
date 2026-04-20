@@ -4,11 +4,9 @@ use crate::core::calibration;
 use crate::core::diagnostics::{DiagnosticsComputer, SimulationDiagnostics};
 use crate::core::system::helpers::{
     auto_name, compute_closeness, l_sun, mass_to_solar, radius_to_solar, resolved_name,
-    trail_body_count,
 };
 use crate::core::system::System;
 use crate::domain::body::{Body, NamedBody};
-use crate::render::trail_buffer::adaptive_capacity;
 
 impl System {
     /// Adds a new body to the simulation.
@@ -26,12 +24,6 @@ impl System {
         self.names.push(auto_name(body.material, &self.names));
         body.update_luminosity(mass_to_solar(), radius_to_solar(), l_sun());
         self.bodies.push(body);
-
-        let n = self.bodies.len();
-        let cap = adaptive_capacity(trail_body_count(&self.bodies).max(1));
-        self.trail_buf.reset(n, cap);
-        self.trail_buf.update_colors(&self.bodies);
-
         self.initial_energy = None;
     }
 
@@ -57,10 +49,6 @@ impl System {
             self.bodies.push(body);
         }
 
-        let n = self.bodies.len();
-        let cap = adaptive_capacity(trail_body_count(&self.bodies).max(1));
-        self.trail_buf.reset(n, cap);
-        self.trail_buf.update_colors(&self.bodies);
         self.initial_energy = None;
     }
 
@@ -80,10 +68,6 @@ impl System {
             self.bodies.push(body);
         }
 
-        let n = self.bodies.len();
-        let cap = adaptive_capacity(trail_body_count(&self.bodies).max(1));
-        self.trail_buf.reset(n, cap);
-        self.trail_buf.update_colors(&self.bodies);
         self.initial_energy = None;
     }
 
@@ -98,11 +82,6 @@ impl System {
             if index < self.names.len() {
                 self.names.swap_remove(index);
             }
-
-            let n = self.bodies.len();
-            let cap = adaptive_capacity(trail_body_count(&self.bodies).max(1));
-            self.trail_buf.reset(n, cap);
-            self.trail_buf.update_colors(&self.bodies);
 
             self.initial_energy = None;
             self.rel_energy_error = 0.0;
@@ -127,8 +106,6 @@ impl System {
                 self.initial_energy = None;
                 self.rel_energy_error = 0.0;
             }
-
-            self.trail_buf.update_colors(&self.bodies);
         }
     }
 
@@ -149,11 +126,6 @@ impl System {
             self.names.push(auto_name(b.material, &self.names));
             self.bodies.push(b);
         }
-
-        let n = self.bodies.len();
-        let cap = adaptive_capacity(trail_body_count(&self.bodies).max(1));
-        self.trail_buf.reset(n, cap);
-        self.trail_buf.update_colors(&self.bodies);
 
         self.initial_energy = None;
         self.rel_energy_error = 0.0;
@@ -183,7 +155,10 @@ impl System {
     pub fn recenter_com(&mut self) {
         if let Some((dx, dy)) = calibration::com_offset(&self.bodies, self.total_mass) {
             calibration::apply_body_shift(&mut self.bodies, dx, dy);
-            self.trail_buf.translate(-dx as f32, -dy as f32);
+            // Notify the render-side TrailRecorder of the shift so it can
+            // keep stored trail positions aligned with the new body coordinates.
+            self.pending_com_shift.0 += -dx as f32;
+            self.pending_com_shift.1 += -dy as f32;
         }
     }
 

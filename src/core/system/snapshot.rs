@@ -1,10 +1,9 @@
 //! Save/load via [`SimSnapshot`].
 
-use crate::core::system::helpers::{auto_name, compute_closeness, trail_body_count};
+use crate::core::system::helpers::{auto_name, compute_closeness};
 use crate::core::system::System;
 use crate::domain::body::Body;
 use crate::physics::integrator::make_integrator;
-use crate::render::trail_buffer::adaptive_capacity;
 
 impl System {
     /// Capture the minimal state required for deterministic reproduction.
@@ -19,7 +18,8 @@ impl System {
             softening_scale: self.softening_scale,
             g_factor: self.g_factor,
             integrator_kind: self.integrator.kind(),
-            trail_every: self.trail_every,
+            // trail_every is now owned by TrailRecorder; persisted at app level.
+            trail_every: 1,
             sim_name: String::new(),
             seed: self.seed,
             trail: None,
@@ -50,18 +50,10 @@ impl System {
         self.bodies = bodies;
         self.total_mass = self.bodies.iter().map(|b| b.mass).sum();
         self.scratch_acc.clear();
-
-        let cap = adaptive_capacity(trail_body_count(&self.bodies).max(1));
-        self.trail_buf.reset(n, cap);
-        self.trail_buf.update_colors(&self.bodies);
-        if let Some(trail_snap) = &snap.trail {
-            if trail_snap.n_bodies == n as u32
-                && trail_snap.positions.len()
-                    == (trail_snap.n_bodies * trail_snap.capacity) as usize
-            {
-                self.trail_buf.restore_from_snapshot(trail_snap);
-            }
-        }
+        // Trail buffer is now owned by the render-side TrailRecorder.
+        // The physics snapshot carries TrailSnapshot for the app to forward
+        // to TrailRecorder.restore_from_snapshot() after this call.
+        let _ = n;
 
         self.t = snap.t;
         self.steps = snap.steps;
@@ -71,8 +63,7 @@ impl System {
         self.softening_scale = snap.softening_scale;
         self.g_factor = snap.g_factor;
         self.integrator = make_integrator(snap.integrator_kind);
-        self.trail_every = snap.trail_every.max(1);
-
+        // trail_every is now managed by TrailRecorder at app level.
         self.seed = snap.seed;
         self.initial_energy = None;
         self.initial_angular_momentum = None;

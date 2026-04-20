@@ -6,6 +6,6 @@ pub mod trail_renderer;
 pub mod wgpu_backend;
 
 pub use callback_trait::CallbackFn;
-pub use trail::{TrailStyle, TrailStylePreset};
+pub use trail::{TrailRecorder, TrailStyle, TrailStylePreset};
 pub use trail_renderer::TrailRenderer;
 pub use wgpu_backend::WgpuBackend;

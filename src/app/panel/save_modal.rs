@@ -131,8 +131,17 @@ impl SimulationApp {
                             self.physics_cfg.theta           = snap.theta;
                             self.physics_cfg.softening_scale = snap.softening_scale;
                             self.physics_cfg.g_factor        = snap.g_factor;
-                            self.physics_cfg.trail_every     = snap.trail_every;
                             self.sim_name = snap.sim_name.clone();
+                            // Restore trail recorder from snapshot.
+                            self.trail_recorder.set_interval_multiplier(snap.trail_every.max(1));
+                            if let Some(trail_snap) = &snap.trail {
+                                self.trail_recorder.restore_from_snapshot(
+                                    trail_snap,
+                                    self.system.bodies(),
+                                );
+                            } else {
+                                self.trail_recorder.clear();
+                            }
                             // Restore seed (0 = old save without seed → generate fresh)
                             self.sim_seed = if snap.seed != 0 { snap.seed } else { crate::io::snapshot::SimSnapshot::new_seed() };
                             self.paused = true;

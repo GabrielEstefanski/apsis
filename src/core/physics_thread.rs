@@ -31,8 +31,6 @@ use crate::domain::body::{Body, NamedBody};
 use crate::core::metrics::Metrics;
 use crate::io::snapshot::SimSnapshot;
 use crate::core::system::System;
-use crate::render::trail_buffer::TrailBuffer;
-use crate::render::trail::{AdaptiveSampler, SampleDecision, TrailSampler};
 use crate::physics::integrator::IntegratorKind;
 use crate::physics::orbital::OrbitalElements;
 
@@ -46,15 +44,18 @@ use crate::physics::orbital::OrbitalElements;
 pub struct RenderState {
     pub bodies: Vec<Body>,
     pub names: Vec<String>,
-    pub trail_buf: Arc<TrailBuffer>,
     pub metrics: Metrics,
     pub orbital_elements: Vec<Option<OrbitalElements>>,
     pub softening_scale: f64,
-    pub trail_every: usize,
     pub seed: u64,
     /// Simulation time units advanced per wall-second (rolling 500 ms window).
     /// Zero until the first measurement completes.
     pub sim_rate: f64,
+    /// Accumulated world-space COM translation (render units) since the last
+    /// frame. The render-side [`TrailRecorder`](crate::render::TrailRecorder)
+    /// reads and clears this each tick to keep trail positions aligned with
+    /// the shifted body coordinate system.
+    pub pending_com_shift: (f32, f32),
 }
 
 // ── Commands ──────────────────────────────────────────────────────────────────
@@ -73,7 +74,6 @@ pub enum PhysicsCmd {
     SetSofteningScale(f64),
     SetGFactor(f64),
     SetIntegrator(IntegratorKind),
-    SetTrailEvery(usize),
     AddBody(Body),
     AddNamedBody(NamedBody),
     AddBodies(Vec<Body>),
@@ -110,14 +110,10 @@ pub struct PhysicsHandle {
     metrics: Metrics,
     orbital_elements: Vec<Option<OrbitalElements>>,
     softening_scale: f64,
-    trail_every: usize,
     sim_rate: f64,
-    /// Last successfully cloned trail buffer.
-    ///
-    /// `clone_trail_buf` tries a fresh `try_lock` first; if the physics thread
-    /// currently holds the mutex it falls back here instead of returning an
-    /// empty buffer (which caused per-frame trail flicker).
-    cached_trail_buf: Arc<TrailBuffer>,
+    /// Pending COM shift published by the physics thread this frame.
+    /// Consumed by TrailRecorder on the UI thread.
+    pending_com_shift: (f32, f32),
 
     _thread: thread::JoinHandle<()>,
 }
@@ -129,16 +125,25 @@ impl PhysicsHandle {
     /// Non-blocking: if the physics thread currently holds the lock the cached
     /// values from the previous frame are kept.
     pub fn sync(&mut self) {
-        if let Ok(rs) = self.render.try_lock() {
+        if let Ok(mut rs) = self.render.try_lock() {
             self.bodies = rs.bodies.clone();
             self.names = rs.names.clone();
             self.metrics = rs.metrics;
             self.orbital_elements = rs.orbital_elements.clone();
             self.softening_scale = rs.softening_scale;
-            self.trail_every = rs.trail_every;
             self.sim_rate = rs.sim_rate;
-            self.cached_trail_buf = rs.trail_buf.clone();
+            // Drain the COM shift so the physics thread can start fresh.
+            let shift = rs.pending_com_shift;
+            rs.pending_com_shift = (0.0, 0.0);
+            self.pending_com_shift = shift;
         }
+    }
+
+    /// Returns and resets the accumulated COM shift since the last sync.
+    ///
+    /// Forwarded to [`crate::render::TrailRecorder::apply_com_shift`] each frame.
+    pub fn take_pending_com_shift(&mut self) -> (f32, f32) {
+        std::mem::replace(&mut self.pending_com_shift, (0.0, 0.0))
     }
 
     pub fn sim_rate(&self) -> f64 {
@@ -149,19 +154,6 @@ impl PhysicsHandle {
     /// full frame rate (true, inspector open) or at 0.5 Hz (false, inspector closed).
     pub fn set_orbital_elements_needed(&self, needed: bool) {
         self.orbital_elements_needed.store(needed, Ordering::Relaxed);
-    }
-
-    /// Clone the trail buffer for the current frame.
-    ///
-    /// Tries a fresh `try_lock` for the lowest-latency snapshot.  If the
-    /// physics thread currently holds the mutex, returns the cached copy from
-    /// the last successful [`sync`] instead of an empty buffer — this
-    /// eliminates the per-frame trail flicker that occurred on lock contention.
-    pub fn clone_trail_buf(&self) -> Arc<TrailBuffer> {
-        self.render
-            .try_lock()
-            .map(|rs| rs.trail_buf.clone())
-            .unwrap_or_else(|_| self.cached_trail_buf.clone())
     }
 
     // ── Read methods — same signatures as System ──────────────────────────
@@ -211,9 +203,6 @@ impl PhysicsHandle {
     pub fn g_factor(&self) -> f64 {
         self.metrics.g_factor
     }
-    pub fn trail_every(&self) -> usize {
-        self.trail_every
-    }
 
     // ── Write methods — tunnel through command channel ────────────────────
 
@@ -251,9 +240,6 @@ impl PhysicsHandle {
     }
     pub fn set_integrator(&self, kind: IntegratorKind) {
         self.send(PhysicsCmd::SetIntegrator(kind));
-    }
-    pub fn set_trail_every(&self, n: usize) {
-        self.send(PhysicsCmd::SetTrailEvery(n));
     }
     pub fn add_body(&self, body: Body) {
         self.send(PhysicsCmd::AddBody(body));
@@ -320,7 +306,7 @@ impl PhysicsHandle {
             softening_scale: self.softening_scale,
             g_factor: m.g_factor,
             integrator_kind: m.integrator_kind,
-            trail_every: self.trail_every,
+            trail_every: 1, // trail_every now owned by TrailRecorder; app sets on snapshot
             sim_name: String::new(), // set by caller
             seed: 0,                 // set by caller
             trail: None,             // set by caller
@@ -344,13 +330,12 @@ pub fn spawn(mut system: System, paused: bool) -> PhysicsHandle {
     let initial = RenderState {
         bodies: system.bodies().to_vec(),
         names: system.names().to_vec(),
-        trail_buf: Arc::new(system.trail_buf().clone()),
         metrics: system.metrics(),
         orbital_elements: system.orbital_elements().to_vec(),
         softening_scale: system.softening_scale(),
-        trail_every: system.trail_every(),
         seed: system.seed(),
         sim_rate: 0.0,
+        pending_com_shift: (0.0, 0.0),
     };
 
     let render = Arc::new(Mutex::new(initial.clone()));
@@ -374,9 +359,8 @@ pub fn spawn(mut system: System, paused: bool) -> PhysicsHandle {
         metrics: initial.metrics,
         orbital_elements: initial.orbital_elements,
         softening_scale: initial.softening_scale,
-        trail_every: initial.trail_every,
         sim_rate: 0.0,
-        cached_trail_buf: initial.trail_buf,
+        pending_com_shift: (0.0, 0.0),
         _thread: thread,
     }
 }
@@ -399,18 +383,16 @@ fn publish_positions(system: &System, rs: &mut RenderState) {
     rs.metrics = system.metrics();
 }
 
-/// Full publish: positions + trail buffer + names + orbital elements + config.
-///
-/// Trail buffer clone (~2 MB for large N) makes this expensive; call at most
-/// at ~60 Hz.
-fn publish_full(system: &System, rs: &mut RenderState) {
+/// Full publish: positions + names + orbital elements + config.
+fn publish_full(system: &mut System, rs: &mut RenderState, com_shift_acc: (f32, f32)) {
     publish_positions(system, rs);
     rs.names = system.names().to_vec();
-    rs.trail_buf = Arc::new(system.trail_buf().clone());
     rs.orbital_elements = system.orbital_elements().to_vec();
     rs.softening_scale = system.softening_scale();
-    rs.trail_every = system.trail_every();
     rs.seed = system.seed();
+    // Accumulate COM shift; the UI thread drains it on sync().
+    rs.pending_com_shift.0 += com_shift_acc.0;
+    rs.pending_com_shift.1 += com_shift_acc.1;
 }
 
 // ── Physics loop ──────────────────────────────────────────────────────────────
@@ -427,11 +409,9 @@ fn physics_loop(
     let mut steps_per_frame = 1u32;
     let mut needs_full_publish = false;
 
-    // Trail sampling policy: Phase 1 uses an adaptive time-based sampler that
-    // caps samples-per-frame so high steps-per-frame cannot saturate the
-    // ring buffer with overlapping columns. Strategy is pluggable via
-    // `TrailSampler`; Phase 2 will move ownership to a render-side recorder.
-    let mut trail_sampler = AdaptiveSampler::new(0.01, 64);
+    // Accumulated COM shift across the current step batch. Published to
+    // RenderState once per frame; consumed by TrailRecorder on the UI thread.
+    let mut com_shift_acc: (f32, f32) = (0.0, 0.0);
 
     let full_interval = Duration::from_millis(16);
     let mut last_full = Instant::now().checked_sub(full_interval).unwrap_or_else(Instant::now);
@@ -487,10 +467,6 @@ fn physics_loop(
                 },
                 PhysicsCmd::SetIntegrator(i) => {
                     system.set_integrator(i);
-                    needs_full_publish = true;
-                },
-                PhysicsCmd::SetTrailEvery(n) => {
-                    system.set_trail_every(n);
                     needs_full_publish = true;
                 },
                 PhysicsCmd::AddBody(b) => {
@@ -562,9 +538,10 @@ fn physics_loop(
                 let dt = system.metrics().dt;
                 rate_sim_acc += dt;
 
-                if trail_sampler.decide(dt, steps_per_frame) == SampleDecision::Record {
-                    system.push_trail();
-                }
+                // Drain any COM shift the integrator applied this step.
+                let (sx, sy) = system.take_com_shift();
+                com_shift_acc.0 += sx;
+                com_shift_acc.1 += sy;
 
                 if steps_since_check >= POS_CHECK_STEPS {
                     steps_since_check = 0;
@@ -583,9 +560,10 @@ fn physics_loop(
                         }
 
                         if let Ok(mut rs) = render.try_lock() {
-                            publish_full(&system, &mut rs);
+                            publish_full(&mut system, &mut rs, com_shift_acc);
                             rs.sim_rate = current_sim_rate;
                         }
+                        com_shift_acc = (0.0, 0.0);
 
                         last_full = now;
                         last_pos = now;
@@ -599,10 +577,6 @@ fn physics_loop(
                     }
                 }
             }
-
-            // Reset per-frame sample counter so the cap is enforced per
-            // rendered frame (one iteration of this outer loop ≈ one frame).
-            trail_sampler.tick_frame();
 
             // Update sim-rate measurement every 500 ms.
             let wall_elapsed = rate_wall.elapsed();
@@ -628,9 +602,10 @@ fn physics_loop(
             }
 
             if let Ok(mut rs) = render.try_lock() {
-                publish_full(&system, &mut rs);
+                publish_full(&mut system, &mut rs, com_shift_acc);
                 rs.sim_rate = current_sim_rate;
             }
+            com_shift_acc = (0.0, 0.0);
 
             last_full = now;
             last_pos = now;

@@ -6,7 +6,6 @@ use crate::core::system::System;
 use crate::domain::body::Body;
 use crate::physics::gravity::BarnesHutEngine;
 use crate::physics::integrator::{ForceModel, Integrator, IntegratorKind, make_integrator};
-use crate::render::trail_buffer::TrailBuffer;
 
 impl System {
     /// Immutable slice of all bodies in the simulation.
@@ -48,18 +47,6 @@ impl System {
     /// Clear the stop flag (headless runners call this after honouring it).
     pub fn clear_stop_request(&mut self) {
         self.stop_requested = false;
-    }
-
-    /// Shared reference to the GPU-ready trail ring buffer.
-    pub fn trail_buf(&self) -> &TrailBuffer {
-        &self.trail_buf
-    }
-
-    /// Mutable reference to the trail ring buffer.
-    ///
-    /// Required by the trail renderer to drain dirty flags each frame.
-    pub fn trail_buf_mut(&mut self) -> &mut TrailBuffer {
-        &mut self.trail_buf
     }
 
     /// Total mass of the system.
@@ -218,20 +205,14 @@ impl System {
         }
     }
 
-    // ── Trails ────────────────────────────────────────────────────────────────
+    // ── COM shift for TrailRecorder ───────────────────────────────────────────
 
-    pub fn trail_every(&self) -> usize {
-        self.trail_every
-    }
-
-    pub fn set_trail_every(&mut self, n: usize) {
-        self.trail_every = n.max(1);
-    }
-
-    /// Record current body positions into the trail ring buffer.
+    /// Takes (and clears) the accumulated COM translation since the last call.
     ///
-    /// Call once per rendered frame, not per physics step.
-    pub fn push_trail(&mut self) {
-        self.trail_buf.push(&self.bodies);
+    /// The physics-side COM recentering shifts all body positions; the
+    /// render-side [`TrailRecorder`](crate::render::TrailRecorder) must apply
+    /// the same shift to stored trail positions to keep them aligned.
+    pub fn take_com_shift(&mut self) -> (f32, f32) {
+        std::mem::replace(&mut self.pending_com_shift, (0.0, 0.0))
     }
 }
