@@ -2,7 +2,9 @@ use crate::app::render_params::{RenderParams, compute_render_radius};
 use crate::app::ui::{SelectionForm, SemanticScaleMode, SimulationApp, UndoRecord};
 use crate::physics::orbital::{compute_elements, dominant_primary};
 use crate::render::CallbackFn;
-use crate::render::orbit_overlay::{OrbitOverlayStyle, draw_orbit_polyline};
+use crate::render::orbit_overlay::{
+    OrbitOverlayStyle, draw_orbit_apsides, draw_orbit_polyline,
+};
 use crate::render::wgpu_backend::LightSource;
 use crate::templates::instantiate_at;
 use eframe::egui::{self, Color32, FontId, Pos2, Stroke};
@@ -352,6 +354,7 @@ impl SimulationApp {
                         let primary_pos = [primary.x, primary.y, 0.0];
                         let sampled = el.sample_orbit(primary_pos, 64);
                         draw_orbit_polyline(&mut backend, &sampled, project, &bg_style);
+                        draw_orbit_apsides(&mut backend, el, primary_pos, project, &bg_style);
                     }
                 }
 
@@ -380,6 +383,7 @@ impl SimulationApp {
                         let primary_pos = [primary_b.x, primary_b.y, 0.0];
                         let sampled = el.sample_orbit(primary_pos, 96);
                         draw_orbit_polyline(&mut backend, &sampled, project, &fg_style);
+                        draw_orbit_apsides(&mut backend, &el, primary_pos, project, &fg_style);
                     }
                 }
 
@@ -401,11 +405,12 @@ impl SimulationApp {
                                 let primary = &bodies[primary_idx];
                                 let primary_pos = [primary.x, primary.y, 0.0];
                                 let sampled = el.sample_orbit(primary_pos, 128);
+                                let style = OrbitOverlayStyle::selected_default();
                                 draw_orbit_polyline(
-                                    &mut backend,
-                                    &sampled,
-                                    project,
-                                    &OrbitOverlayStyle::selected_default(),
+                                    &mut backend, &sampled, project, &style,
+                                );
+                                draw_orbit_apsides(
+                                    &mut backend, &el, primary_pos, project, &style,
                                 );
                             }
                         }

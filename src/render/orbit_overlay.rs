@@ -24,6 +24,7 @@
 //! the z-axis; a later 3D camera will project (x, y, z) through a view
 //! matrix. Nothing else in the overlay changes.
 
+use crate::physics::orbital::OrbitalElements;
 use crate::render::wgpu_backend::WgpuBackend;
 
 /// Visual style for one predicted-orbit polyline.
@@ -73,6 +74,42 @@ impl Default for OrbitOverlayStyle {
 ///   a future 3D mode applies its camera view matrix.
 ///
 /// No-op when fewer than two points are supplied.
+/// Draws the periapsis and (when defined) apoapsis markers for one orbit.
+///
+/// Periapsis is rendered as a small filled disk, apoapsis as a hollow
+/// ring — both in the same hue as `style` so they read as annotations
+/// attached to the polyline, not independent objects. Hyperbolic and
+/// parabolic orbits have no apoapsis; only the periapsis marker is
+/// emitted for them.
+///
+/// Marker sizes scale with `style.width_px` so the background overlay's
+/// markers stay subordinate to the selected-orbit overlay's — same
+/// visual hierarchy the polylines already follow.
+pub fn draw_orbit_apsides<F>(
+    backend: &mut WgpuBackend,
+    el: &OrbitalElements,
+    primary_pos: [f64; 3],
+    mut world_to_screen: F,
+    style: &OrbitOverlayStyle,
+) where
+    F: FnMut([f64; 3]) -> [f32; 2],
+{
+    // Periapsis: small filled disk. `draw_circle_stroke` with
+    // width = 2·radius yields inner = 0, i.e. a solid disk.
+    let r_peri_px = (style.width_px * 2.0).max(1.5);
+    if let Some(peri_world) = el.periapsis_world(primary_pos) {
+        let p = world_to_screen(peri_world);
+        backend.draw_circle_stroke(p, r_peri_px, r_peri_px * 2.0, style.color);
+    }
+    // Apoapsis: hollow ring, slightly larger than periapsis so the two
+    // read as distinct even when the orbit is nearly edge-on.
+    let r_apo_px = (style.width_px * 2.5).max(2.0);
+    if let Some(apo_world) = el.apoapsis_world(primary_pos) {
+        let p = world_to_screen(apo_world);
+        backend.draw_circle_stroke(p, r_apo_px, 1.2_f32.max(style.width_px), style.color);
+    }
+}
+
 pub fn draw_orbit_polyline<F>(
     backend: &mut WgpuBackend,
     points: &[[f64; 3]],
