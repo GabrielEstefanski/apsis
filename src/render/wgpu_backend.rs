@@ -2,6 +2,7 @@ use std::mem::size_of;
 use std::sync::Arc;
 
 use bytemuck::{Pod, Zeroable};
+use egui;
 
 use crate::render::TrailRenderer;
 use crate::render::grid_renderer::GridRenderer;
@@ -265,6 +266,19 @@ impl WgpuBackend {
         self.circles.clear();
         self.lines.clear();
         self.light_sources.clear();
+    }
+
+    /// Draw grid coordinate labels using egui on top of the GPU grid.
+    ///
+    /// Call this after the GPU paint callback, passing the same `rect` used for
+    /// the wgpu viewport. `unit` is appended to x-axis tick labels (e.g. "AU").
+    pub fn draw_labels_overlay(&self, ui: &egui::Ui, rect: egui::Rect, unit: &str) {
+        if !self.show_grid {
+            return;
+        }
+        if let Some(grid) = &self.grid {
+            grid.draw_labels(ui, self.center, self.scale, rect, unit);
+        }
     }
 
     // ── Lighting API ──────────────────────────────────────────────────────────
