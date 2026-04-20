@@ -284,6 +284,16 @@ pub struct SimulationApp {
     /// `draw_frame` re-pauses on the next tick after physics has run.
     pub(super) step_pending: bool,
 
+    // ── Overview search ───────────────────────────────────────────────────────
+    pub(super) overview_search: String,
+
+    // ── Templates modal ───────────────────────────────────────────────────────
+    pub(super) show_templates_modal: bool,
+    pub(super) templates_search: String,
+    /// Pre-computed (description, body_count) for every TEMPLATES entry.
+    /// Built once at startup so the modal never rebuilds templates per frame.
+    pub(super) templates_meta: Vec<(&'static str, usize)>,
+
     // ── Simulation identity ───────────────────────────────────────────────────
     /// User-assigned name for the current simulation. Empty until the user names it.
     pub(super) sim_name: String,
@@ -386,6 +396,15 @@ impl SimulationApp {
 
             energy_drift_peak: 0.0,
             lz_drift_peak: 0.0,
+
+            overview_search: String::new(),
+
+            show_templates_modal: false,
+            templates_search: String::new(),
+            templates_meta: crate::templates::TEMPLATES
+                .iter()
+                .map(|e| { let t = (e.build)(0); (t.description, t.body_count()) })
+                .collect(),
 
             sim_name: String::new(),
             show_name_prompt: false,
@@ -500,6 +519,7 @@ impl SimulationApp {
         self.draw_save_modal(&ctx);
         self.draw_shortcuts_modal(&ctx);
         self.draw_settings_modal(&ctx);
+        self.draw_templates_modal(&ctx);
         self.draw_name_prompt(&ctx);
 
         egui::CentralPanel::default().frame(egui::Frame::NONE.fill(BG)).show(&ctx, |ui| {

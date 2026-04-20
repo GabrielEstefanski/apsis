@@ -1,21 +1,27 @@
 use crate::app::theme::primary_btn;
 use crate::app::theme::{
-    ACCENT, ACCENT_DIM, BORDER, DANGER, SUCCESS, TEXT_DIM, TEXT_PRI, TEXT_SEC,
+    ACCENT, ACCENT_DIM, BORDER, DANGER, SUCCESS, SURFACE_STRIP, TEXT_DIM, TEXT_PRI, TEXT_SEC,
 };
 use crate::app::ui::{BodyForm, SimulationApp, SpawnTab, UndoRecord};
 use crate::domain::body::{Body, radius_from_density_mass};
 use crate::domain::materials::{Material, density};
 use crate::physics::gravity::G;
-use eframe::egui::{self, Color32, RichText, Stroke};
+use eframe::egui::{self, Color32, Frame, Margin, RichText, Stroke};
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-/// 3-column material picker grid. Returns `true` if the selection changed.
+/// Fixed-cell material picker grid. Returns `true` if the selection changed.
 fn material_grid(ui: &mut egui::Ui, selected: &mut Material) -> bool {
     let mut changed = false;
-    let cols = 3;
+    let cols = 2;
+    let spacing_x = 6.0;
+    let cell_w = ((ui.available_width() - spacing_x) / cols as f32).max(96.0);
+    let cell_h = 24.0;
 
-    egui::Grid::new(ui.id().with("mat_grid")).num_columns(cols).spacing([4.0, 4.0]).show(
+    egui::Grid::new(ui.id().with("mat_grid"))
+        .num_columns(cols)
+        .spacing([spacing_x, 4.0])
+        .show(
         ui,
         |ui| {
             for (i, &mat) in Material::ALL.iter().enumerate() {
@@ -49,11 +55,13 @@ fn material_grid(ui: &mut egui::Ui, selected: &mut Material) -> bool {
                     },
                 );
 
-                let btn = ui.add(
+                let btn = ui.add_sized(
+                    egui::vec2(cell_w, cell_h),
                     egui::Button::new(job)
                         .fill(fill)
                         .stroke(Stroke::new(0.5, stroke_col))
-                        .min_size(egui::vec2(0.0, 20.0)),
+                        .min_size(egui::vec2(cell_w, cell_h))
+                        .corner_radius(4.0),
                 );
 
                 if btn.clicked() && !is_sel {
@@ -70,6 +78,39 @@ fn material_grid(ui: &mut egui::Ui, selected: &mut Material) -> bool {
             }
         },
     );
+
+    ui.add_space(5.0);
+    let mat = *selected;
+    let nominal_density = density(mat, mat.default_mass());
+    Frame::NONE
+        .fill(SURFACE_STRIP)
+        .stroke(Stroke::new(0.5, BORDER))
+        .corner_radius(6.0)
+        .inner_margin(Margin::symmetric(8, 6))
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                let [r, g, b] = mat.props().base_color;
+                ui.label(
+                    RichText::new("●")
+                        .size(11.0)
+                        .color(Color32::from_rgb(r, g, b)),
+                );
+                ui.label(
+                    RichText::new(mat.display_name())
+                        .size(10.5)
+                        .color(TEXT_PRI)
+                        .strong(),
+                );
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(
+                        RichText::new(format!("ρ₀ {:.3e}", nominal_density))
+                            .size(9.0)
+                            .monospace()
+                            .color(TEXT_DIM),
+                    );
+                });
+            });
+        });
 
     changed
 }
@@ -105,6 +146,12 @@ fn sub_section(ui: &mut egui::Ui, label: &str) {
 impl SimulationApp {
     pub(super) fn panel_tab_add(&mut self, ui: &mut egui::Ui) {
         ui.add_space(4.0);
+        ui.label(
+            RichText::new("Pick a spawn mode, configure mass and material, then place on the canvas.")
+                .size(10.5)
+                .color(TEXT_SEC),
+        );
+        ui.add_space(8.0);
         self.spawn_sub_tab_bar(ui);
         ui.add_space(6.0);
         match self.spawn_tab {
@@ -115,32 +162,44 @@ impl SimulationApp {
     }
 
     fn spawn_sub_tab_bar(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
-            let cur = self.spawn_tab;
-            let tab_btn = |ui: &mut egui::Ui, tab: SpawnTab, label: &str| -> bool {
-                let active = cur == tab;
-                ui.add(
-                    egui::Button::new(RichText::new(label).size(10.5).color(if active {
-                        TEXT_PRI
-                    } else {
-                        TEXT_SEC
-                    }))
-                    .fill(if active { ACCENT_DIM } else { Color32::TRANSPARENT })
-                    .stroke(Stroke::new(0.5, if active { ACCENT } else { BORDER }))
-                    .min_size(egui::vec2(70.0, 22.0)),
-                )
-                .clicked()
-            };
-            if tab_btn(ui, SpawnTab::Single, "Single") {
-                self.spawn_tab = SpawnTab::Single;
-            }
-            if tab_btn(ui, SpawnTab::Ring, "Ring") {
-                self.spawn_tab = SpawnTab::Ring;
-            }
-            if tab_btn(ui, SpawnTab::Cluster, "Cluster") {
-                self.spawn_tab = SpawnTab::Cluster;
-            }
-        });
+        Frame::NONE
+            .fill(SURFACE_STRIP)
+            .stroke(Stroke::new(0.5, BORDER))
+            .corner_radius(6.0)
+            .inner_margin(Margin::symmetric(4, 3))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 1.0;
+                    let cur = self.spawn_tab;
+                    let tab_btn = |ui: &mut egui::Ui, tab: SpawnTab, label: &str| -> bool {
+                        let active = cur == tab;
+                        ui.add(
+                            egui::Button::new(RichText::new(label).size(10.5).color(if active {
+                                TEXT_PRI
+                            } else {
+                                TEXT_SEC
+                            }))
+                            .fill(if active { ACCENT_DIM } else { Color32::from_rgb(20, 20, 26) })
+                            .stroke(Stroke::new(
+                                0.5,
+                                if active { ACCENT.gamma_multiply(0.65) } else { BORDER },
+                            ))
+                            .min_size(egui::vec2(72.0, 24.0))
+                            .corner_radius(4.0),
+                        )
+                        .clicked()
+                    };
+                    if tab_btn(ui, SpawnTab::Single, "Single") {
+                        self.spawn_tab = SpawnTab::Single;
+                    }
+                    if tab_btn(ui, SpawnTab::Ring, "Ring") {
+                        self.spawn_tab = SpawnTab::Ring;
+                    }
+                    if tab_btn(ui, SpawnTab::Cluster, "Cluster") {
+                        self.spawn_tab = SpawnTab::Cluster;
+                    }
+                });
+            });
     }
 
     // ── Single ────────────────────────────────────────────────────────────────
@@ -199,9 +258,9 @@ impl SimulationApp {
         let (btn_label, btn_col, btn_fill, btn_stroke) = if self.place_mode {
             (
                 "● placing — click canvas",
-                SUCCESS,
-                Color32::from_rgba_unmultiplied(40, 100, 60, 40),
-                Stroke::new(1.0, SUCCESS),
+                TEXT_PRI,
+                ACCENT_DIM,
+                Stroke::new(1.0, ACCENT.gamma_multiply(0.55)),
             )
         } else {
             ("○ click canvas to place", TEXT_SEC, Color32::TRANSPARENT, Stroke::new(0.5, BORDER))
@@ -239,7 +298,7 @@ impl SimulationApp {
                     let lw = 22.0_f32;
                     let vw = ui.available_width() / 2.0 - lw - 10.0;
 
-                    let mut text_field = |ui: &mut egui::Ui, lbl: &str, val: &mut String| {
+                    let text_field = |ui: &mut egui::Ui, lbl: &str, val: &mut String| {
                         ui.add_sized(
                             egui::vec2(lw, 18.0),
                             egui::Label::new(RichText::new(lbl).size(10.0).color(TEXT_SEC)),
