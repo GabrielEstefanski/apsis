@@ -66,6 +66,35 @@ impl SimulationApp {
             {
                 self.fit_to_view();
             }
+
+            let pinned = self.pinned_orbits.contains(&idx);
+            let pin_col = if pinned { ACCENT } else { TEXT_DIM };
+            let pin_label = if pinned { "Pinned" } else { "Pin" };
+            if ui
+                .add(
+                    egui::Button::new(
+                        RichText::new(format!("⚲ {pin_label}")).size(9.5).color(pin_col),
+                    )
+                    .fill(egui::Color32::TRANSPARENT)
+                    .stroke(egui::Stroke::new(
+                        0.5,
+                        if pinned { ACCENT.gamma_multiply(0.5) } else { crate::app::theme::BORDER },
+                    ))
+                    .min_size(egui::vec2(56.0, 20.0))
+                    .corner_radius(3.0),
+                )
+                .on_hover_text(
+                    "Keep this body's orbit visible regardless of the\n\
+                     global orbit filters (levels, top-N, degeneracy).",
+                )
+                .clicked()
+            {
+                if pinned {
+                    self.pinned_orbits.remove(&idx);
+                } else {
+                    self.pinned_orbits.insert(idx);
+                }
+            }
         });
 
         ui.add_space(10.0);
@@ -263,8 +292,10 @@ impl SimulationApp {
         if delete {
             let body = self.system.bodies()[idx];
             let name = self.system.name(idx).to_owned();
+            let old_last = self.system.bodies().len().saturating_sub(1);
             self.push_undo(UndoRecord::RemovedBody { body, name });
             self.system.remove_body(idx);
+            self.pins_after_swap_remove(idx, old_last);
             self.selected_body = None;
             self.follow_selected_body = false;
             self.selection_form = None;

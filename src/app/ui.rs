@@ -9,6 +9,7 @@ use crate::io::recorder::SimRecorder;
 use crate::io::snapshot::{SaveEntry, SimSnapshot, list_saves};
 use crate::render::{TrailRenderer, WgpuBackend};
 use crate::templates::{Template, UnitSystem};
+use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 
 // ── Undo ──────────────────────────────────────────────────────────────────────
@@ -179,6 +180,11 @@ pub struct SimulationApp {
     /// Frame-coherent gravitational hierarchy used by the orbit overlay
     /// filter pipeline. Not persisted — rebuilt from live state each tick.
     pub(super) orbit_hierarchy: crate::physics::orbit_hierarchy::OrbitHierarchy,
+    /// Bodies whose orbits are drawn unconditionally (bypass level, top-N
+    /// and degeneracy filters). Pins are stored by body index; the canvas
+    /// prunes out-of-range entries each frame so collision-merges don't
+    /// leave dangling pins.
+    pub(super) pinned_orbits: HashSet<usize>,
     pub(super) show_grid: bool,
     pub(super) show_vectors: bool,
     pub(super) steps_per_frame: u32,
@@ -363,6 +369,7 @@ impl SimulationApp {
             orbit_top_n: 24,
             orbit_hide_degenerate: true,
             orbit_hierarchy: crate::physics::orbit_hierarchy::OrbitHierarchy::new(),
+            pinned_orbits: HashSet::new(),
             show_grid: true,
             show_vectors: false,
             steps_per_frame: 1,
@@ -695,6 +702,16 @@ impl SimulationApp {
 
     // ── Undo ──────────────────────────────────────────────────────────────────
 
+    /// Remap `pinned_orbits` after a `swap_remove` at `removed_idx`. The body
+    /// previously at `old_last` (the pre-removal last index) now sits at
+    /// `removed_idx`; update the pin set to follow that move.
+    pub(super) fn pins_after_swap_remove(&mut self, removed_idx: usize, old_last: usize) {
+        self.pinned_orbits.remove(&removed_idx);
+        if old_last != removed_idx && self.pinned_orbits.remove(&old_last) {
+            self.pinned_orbits.insert(removed_idx);
+        }
+    }
+
     /// Push a record onto the undo stack. Drops the oldest entry if the stack
     /// exceeds `UNDO_LIMIT`.
     pub(super) fn push_undo(&mut self, record: UndoRecord) {
@@ -721,6 +738,10 @@ impl SimulationApp {
                     for i in (total.saturating_sub(n)..total).rev() {
                         self.system.remove_body(i);
                     }
+                    // Appended bodies cannot be pinned (pin requires selection), but
+                    // be defensive: drop any pin that lands out of range after undo.
+                    let new_len = self.system.bodies().len();
+                    self.pinned_orbits.retain(|&i| i < new_len);
                     // If the selected body was one of the removed ones, clear selection.
                     if let Some(sel) = self.selected_body {
                         if sel >= total.saturating_sub(n) {

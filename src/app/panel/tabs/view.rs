@@ -14,7 +14,7 @@
 //! separation hard prevents the "grab-bag tab" that the old Config panel
 //! grew into.
 
-use crate::app::theme::{ACCENT_DIM, BORDER, TEXT_DIM, TEXT_PRI, TEXT_SEC, section};
+use crate::app::theme::{ACCENT, ACCENT_DIM, BORDER, TEXT_DIM, TEXT_PRI, TEXT_SEC, section};
 use crate::app::ui::SimulationApp;
 use eframe::egui::{self, Color32, RichText, Stroke};
 
@@ -146,6 +146,47 @@ impl SimulationApp {
                     "hide degenerate",
                     deg_tip,
                 );
+            });
+        }
+        // Pinned-orbits badge. Rendered outside the orbit-ellipses guard
+        // because pins survive the global toggle — users should still be
+        // able to clear them even after turning off the overlay.
+        if !self.pinned_orbits.is_empty() {
+            ui.indent("pinned_orbits", |ui| {
+                ui.horizontal(|ui| {
+                    ui.add_sized(
+                        egui::vec2(LBL_W, 18.0),
+                        egui::Label::new(RichText::new("pinned").size(10.0).color(TEXT_SEC)),
+                    )
+                    .on_hover_text(
+                        "Bodies whose orbit is drawn unconditionally,\n\
+                         bypassing all filters. Pin/unpin per body from\n\
+                         the Inspector panel.",
+                    );
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui
+                            .add(
+                                egui::Button::new(
+                                    RichText::new("clear").size(10.0).color(TEXT_DIM),
+                                )
+                                .fill(Color32::TRANSPARENT)
+                                .stroke(Stroke::new(0.5, BORDER))
+                                .min_size(egui::vec2(44.0, 18.0))
+                                .corner_radius(3.0),
+                            )
+                            .on_hover_text("Remove all pins")
+                            .clicked()
+                        {
+                            self.pinned_orbits.clear();
+                        }
+                        ui.label(
+                            RichText::new(format!("{}", self.pinned_orbits.len()))
+                                .size(10.0)
+                                .color(ACCENT)
+                                .strong(),
+                        );
+                    });
+                });
             });
         }
         toggle_row(
