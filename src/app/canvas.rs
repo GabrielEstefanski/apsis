@@ -272,6 +272,11 @@ impl SimulationApp {
 
                 self.orbit_hierarchy.tick(bodies, g_factor);
 
+                // Prune stale pins (e.g. after a collision-merge swap_remove
+                // on the sim thread invalidated the index).
+                let n_bodies = bodies.len();
+                self.pinned_orbits.retain(|&i| i < n_bodies);
+
                 if self.show_orbit_ellipses {
                     let bg_style = OrbitOverlayStyle::background_default();
                     let vp_center = rect.center();
@@ -284,9 +289,13 @@ impl SimulationApp {
                         Vec::with_capacity(bodies.len().min(self.orbit_top_n * 2));
 
                     for i in 0..bodies.len() {
-                        // Selected body is always drawn in the foreground
-                        // pass — skip here to avoid double-draw.
+                        // Selected + pinned bodies draw in a dedicated
+                        // foreground pass — skip here to avoid double-draw
+                        // and to exempt them from all filter gates.
                         if Some(i) == self.selected_body {
+                            continue;
+                        }
+                        if self.pinned_orbits.contains(&i) {
                             continue;
                         }
                         // Hierarchy must know i's primary; Free bodies
@@ -341,6 +350,34 @@ impl SimulationApp {
                         let primary_pos = [primary.x, primary.y, 0.0];
                         let sampled = el.sample_orbit(primary_pos, 64);
                         draw_orbit_polyline(&mut backend, &sampled, project, &bg_style);
+                    }
+                }
+
+                // Pinned orbits — drawn unconditionally in the foreground
+                // (selected_default style). Intentionally placed outside the
+                // `show_orbit_ellipses` guard so a pin is a user commitment
+                // that overrides the global toggle too.
+                if !self.pinned_orbits.is_empty() {
+                    let fg_style = OrbitOverlayStyle::selected_default();
+                    for &i in self.pinned_orbits.iter() {
+                        if Some(i) == self.selected_body {
+                            continue; // selected pass draws it
+                        }
+                        let primary = self
+                            .orbit_hierarchy
+                            .primary(i)
+                            .or_else(|| dominant_primary(bodies, i));
+                        let Some(primary_idx) = primary else {
+                            continue;
+                        };
+                        let Some(el) = compute_elements(bodies, i, primary_idx, g_factor)
+                        else {
+                            continue;
+                        };
+                        let primary_b = &bodies[primary_idx];
+                        let primary_pos = [primary_b.x, primary_b.y, 0.0];
+                        let sampled = el.sample_orbit(primary_pos, 96);
+                        draw_orbit_polyline(&mut backend, &sampled, project, &fg_style);
                     }
                 }
 
