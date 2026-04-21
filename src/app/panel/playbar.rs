@@ -132,6 +132,22 @@ impl SimulationApp {
                             }
                         });
 
+                    // IAS15 hint: its speed advantage only shows when the dt
+                    // budget is large enough for the adaptive step to open up.
+                    if self.physics_cfg.integrator == IntegratorKind::Ias15 {
+                        ui.label(
+                            RichText::new("↑dt for speed")
+                                .size(8.5)
+                                .color(ACCENT_DIM),
+                        )
+                        .on_hover_text(
+                            "IAS15 adapts its internal step size automatically.\n\
+                             Use a 10–100× larger dt than Verlet/Yoshida for the\n\
+                             same accuracy — the budget loop handles exact timing.\n\
+                             At equal dt, IAS15 does ~7× more force evaluations.",
+                        );
+                    }
+
                     vsep(ui);
 
                     // ── Sim throughput ────────────────────────────────────────

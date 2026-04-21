@@ -126,10 +126,11 @@ const DT_MIN: f64 = 1e-12;
 /// too-small. 0.9 matches REBOUND.
 const DT_SAFETY: f64 = 0.9;
 
-/// Hard ceilings on Δt growth / shrink per attempt. Prevents a single
-/// quiet step from ballooning Δt and then mis-predicting the next one.
-const DT_GROWTH_CAP: f64 = 4.0;
-const DT_SHRINK_CAP: f64 = 0.25;
+/// Conservative growth factor used only as a fallback when the error
+/// estimate is zero (exact machine-precision step). In all other cases
+/// the error formula drives dt_next directly — no growth cap is applied,
+/// matching REBOUND's controller exactly.
+const DT_ZERO_ERR_GROWTH: f64 = 2.0;
 
 /// Cap on predictor-corrector Picard iterations per attempt. In well-
 /// behaved regimes 2–3 suffice; 12 is a safety net against pathological
@@ -173,6 +174,11 @@ pub struct Ias15 {
     /// `dt` on first use; thereafter driven by the error controller.
     dt_next: f64,
 
+    /// The `dt_try` that was accepted on the most recent internal attempt.
+    /// Used as `dt_prev` in `warmstart_b` so the q = dt_try/dt_prev ratio
+    /// is correct. Zero means "no accepted step yet" — warm-start is skipped.
+    dt_last_accepted: f64,
+
     /// `true` until the first completed step — skips the warm-start
     /// extrapolation of `b` (since `e` is zero anyway).
     first_step: bool,
@@ -195,6 +201,7 @@ impl Ias15 {
             csx: Vec::new(),
             csv: Vec::new(),
             dt_next: 0.0,
+            dt_last_accepted: 0.0,
             first_step: true,
         }
     }
@@ -216,6 +223,7 @@ impl Ias15 {
             self.csb = vec![[(0.0, 0.0); 7]; n];
             self.csx = vec![(0.0, 0.0); n];
             self.csv = vec![(0.0, 0.0); n];
+            self.dt_last_accepted = 0.0;
             self.first_step = true;
         }
     }
@@ -329,10 +337,11 @@ impl Ias15 {
         loop {
             let snapshot = Attempt::snapshot(bodies, self);
 
-            // Warm-start: extrapolate `b` from the previous step's `e`
-            // to the new `dt_try`. Skipped on the very first step.
-            if !self.first_step {
-                self.warmstart_b(dt_try, snapshot_dt(&snapshot, dt_try));
+            // Warm-start: extrapolate `b` from the previous accepted step's
+            // dt to the current `dt_try`. Skipped until we have one accepted
+            // step recorded (dt_last_accepted > 0).
+            if self.dt_last_accepted > 0.0 {
+                self.warmstart_b(dt_try, self.dt_last_accepted);
             }
             self.recompute_g_from_b();
 
@@ -359,8 +368,9 @@ impl Ias15 {
                 || !converged && dt_try <= DT_MIN;
 
             if !accept {
-                // Reject: rewind everything, shrink `dt_try`, retry.
-                let new_dt = (dt_optimal.max(dt_try * DT_SHRINK_CAP)).max(DT_MIN);
+                // Reject: rewind everything and retry at the error-optimal dt.
+                // No relative floor — severe encounters need severe shrinking.
+                let new_dt = dt_optimal.max(DT_MIN);
                 snapshot.restore(bodies, self);
                 dt_try = new_dt;
                 continue;
@@ -376,13 +386,21 @@ impl Ias15 {
             let pe = scale_acc_and_pe(acc, ctx.g_factor, raw_pe);
             apply_perturbations(bodies, acc, ctx.perturbations);
 
-            // Record `e` for warm-start of the next attempt, and
-            // propose the next `dt_try` bounded by the growth cap.
+            // Record `e` for warm-start of the next attempt.
+            // dt_next is driven purely by the error formula — no relative
+            // growth/shrink caps. This matches REBOUND's controller and
+            // lets dt_next recover quickly after close encounters without
+            // being slowed by an artificial ceiling tied to dt_try.
+            //
+            // Note: when the scheduler's budget is small (e.g. real-time
+            // display at dt=0.001) and the scene is smooth (Solar System),
+            // dt_next converges to ~budget × (ε/err)^(1/7). To fully
+            // exploit IAS15's adaptive stepping, use a larger scheduler dt
+            // (typically 10–100× VV/Y4) — the budget loop handles exact
+            // time consumption either way.
             self.update_warmstart_record();
-            self.dt_next = dt_optimal
-                .min(dt_try * DT_GROWTH_CAP)
-                .max(dt_try * DT_SHRINK_CAP)
-                .max(DT_MIN);
+            self.dt_last_accepted = dt_try;
+            self.dt_next = dt_optimal.max(DT_MIN);
 
             return (dt_try, pe);
         }
@@ -555,7 +573,9 @@ impl Ias15 {
     /// scaling as dt⁷ (since b₆ already multiplies u⁷).
     fn optimal_dt(&self, dt_current: f64, err: f64) -> f64 {
         if err <= 0.0 {
-            return dt_current * DT_GROWTH_CAP;
+            // Zero error means the step was exact to machine precision.
+            // Grow conservatively rather than to infinity.
+            return dt_current * DT_ZERO_ERR_GROWTH;
         }
         let ratio = (self.epsilon / err).powf(1.0 / 7.0);
         dt_current * DT_SAFETY * ratio
@@ -726,15 +746,6 @@ fn restore_xv(bodies: &mut [Body], x: &[(f64, f64)], v: &[(f64, f64)]) {
         b.vx = v[i].0;
         b.vy = v[i].1;
     }
-}
-
-/// Placeholder: attempts to recover the dt that produced `snapshot`'s
-/// `b`-coefficients. We don't track it explicitly — the `e` array
-/// carries enough information, but we need the previous `dt` to scale
-/// it correctly. Approximation: reuse the caller's `dt_try`, which is
-/// exactly correct on steady-state steps and bounded-error otherwise.
-fn snapshot_dt(_snapshot: &Attempt, dt_try: f64) -> f64 {
-    dt_try
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────
