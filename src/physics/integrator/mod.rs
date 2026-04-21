@@ -4,9 +4,10 @@
 //!
 //! | Struct | Order | Force evals/step | Notes |
 //! |--------|-------|-----------------|-------|
-//! | [`VelocityVerlet`]  | 2nd | 2 (amortised 1) | Standard leapfrog KDK |
-//! | [`Yoshida4`]        | 4th | 4               | Forest–Ruth / Yoshida (1990) |
-//! | [`WisdomHolman`]    | 2nd | 1               | Keplerian + perturbation split |
+//! | [`VelocityVerlet`]  | 2nd  | 2 (amortised 1) | Standard leapfrog KDK |
+//! | [`Yoshida4`]        | 4th  | 4               | Forest–Ruth / Yoshida (1990) |
+//! | [`WisdomHolman`]    | 2nd  | 1               | Keplerian + perturbation split |
+//! | [`Ias15`]           | 15th | ~14 (adaptive)  | Gauss-Radau, Rein & Spiegel (2015) — **default** |
 //!
 //! # Architecture
 //!
@@ -27,17 +28,20 @@
 //! - [`force_model`]   — [`ForceModel`] trait + [`GravityForceModel`] wrapper.
 //! - [`helpers`]       — shared `evaluate`, `scale_acc_and_pe`, perturbation helpers.
 //! - [`traits`]        — [`Integrator`] trait, [`IntegratorContext`], [`StepResult`], [`IntegratorKind`].
-//! - [`velocity_verlet`], [`yoshida4`], [`wisdom_holman`] — integrator implementations.
+//! - [`velocity_verlet`], [`yoshida4`], [`wisdom_holman`], [`ias15`] — integrator implementations.
 //!
 //! # References
 //! - Verlet (1967). *Phys. Rev.* 159, 98.
 //! - Forest & Ruth (1990). *Nucl. Instrum. Methods Phys. Res.* A 290, 395–400.
 //! - Yoshida (1990). *Phys. Lett. A* 150, 262–268.
 //! - Wisdom & Holman (1991). *Astron. J.* 102, 1528–1538.
+//! - Everhart (1985). *Dyn. Comets* 115, 185–202 (original RADAU15).
+//! - Rein & Spiegel (2015). *MNRAS* 446, 1424–1437 (IAS15).
 
 pub mod coefficients;
 pub mod force_model;
 pub mod helpers;
+pub mod ias15;
 pub mod kepler;
 pub mod perturbation;
 pub mod primitives;
@@ -51,6 +55,7 @@ pub mod yoshida4;
 pub use coefficients::{Y4_C, Y4_D, Y4_W0, Y4_W1};
 pub use force_model::{ForceModel, GravityForceModel};
 pub use helpers::{apply_perturbations, evaluate, scale_acc_and_pe};
+pub use ias15::Ias15;
 pub use kepler::kepler_step;
 pub use perturbation::PerturbationForce;
 pub use primitives::{drift, kick};
@@ -67,5 +72,6 @@ pub fn make_integrator(kind: IntegratorKind) -> Box<dyn Integrator> {
         IntegratorKind::VelocityVerlet => Box::new(VelocityVerlet),
         IntegratorKind::Yoshida4 => Box::new(Yoshida4),
         IntegratorKind::WisdomHolman => Box::new(WisdomHolman::new()),
+        IntegratorKind::Ias15 => Box::new(Ias15::new()),
     }
 }

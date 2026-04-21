@@ -79,28 +79,37 @@ impl SimulationApp {
 
                     vsep(ui);
 
-                    // ── Speed (steps-per-frame) ───────────────────────────────
+                    // ── Speed (sim-rate target) ───────────────────────────────
                     ui.label(RichText::new("SPEED").size(8.5).color(TEXT_DIM).strong());
-                    let mut spf_f = self.steps_per_frame as f32;
+                    // Slider operates in yr/s; convert to/from internal units (2π = 1 yr).
+                    let tau = std::f64::consts::TAU;
+                    let mut speed_yr = self.sim_rate_target / tau;
                     if ui
                         .add_sized(
                             [80.0, 14.0],
-                            egui::Slider::new(&mut spf_f, 1.0..=1_000_000.0)
+                            egui::Slider::new(&mut speed_yr, 0.01_f64..=100_000.0_f64)
                                 .logarithmic(true)
                                 .show_value(false),
                         )
                         .changed()
                     {
-                        self.steps_per_frame = spf_f.round().max(1.0) as u32;
+                        self.sim_rate_target = speed_yr.max(0.01) * tau;
                     }
-                    let spf_col = if self.steps_per_frame > 1 { ACCENT } else { TEXT_DIM };
+                    let sim_rate = self.system.sim_rate();
+                    let actual_yr = sim_rate / tau;
+                    let shortfall = sim_rate > 0.0 && actual_yr < speed_yr * 0.8;
+                    let speed_col = if shortfall { TEXT_DIM } else { ACCENT };
                     ui.label(
-                        RichText::new(fmt_spf(self.steps_per_frame))
+                        RichText::new(fmt_speed(speed_yr))
                             .monospace()
                             .size(10.0)
-                            .color(spf_col),
+                            .color(speed_col),
                     )
-                    .on_hover_text("Physics steps computed per rendered frame");
+                    .on_hover_text(
+                        "Target simulation speed (yr/s).\n\
+                         The physics thread advances this many simulated years per real second.\n\
+                         If the sim can't keep up, the label dims and actual speed is shown below.",
+                    );
 
                     vsep(ui);
 
@@ -240,10 +249,7 @@ impl SimulationApp {
                     .min_size(egui::vec2(24.0, 24.0))
                     .corner_radius(3.0),
             )
-            .on_hover_text(format!(
-                "Step — advance {} physics step(s) then pause",
-                self.steps_per_frame
-            ))
+            .on_hover_text("Step — advance one physics batch then pause")
             .clicked()
         {
             self.paused = false;
@@ -279,16 +285,21 @@ fn integrator_short_label(k: IntegratorKind) -> &'static str {
         IntegratorKind::VelocityVerlet => "Verlet",
         IntegratorKind::Yoshida4 => "Yoshida-4",
         IntegratorKind::WisdomHolman => "W–H",
+        IntegratorKind::Ias15 => "IAS15",
     }
 }
 
-fn fmt_spf(spf: u32) -> String {
-    if spf < 1_000 {
-        format!("×{spf}")
-    } else if spf < 1_000_000 {
-        format!("×{:.0}k", spf as f64 / 1_000.0)
+fn fmt_speed(yr_per_s: f64) -> String {
+    if yr_per_s < 1.0 / 365.25 {
+        format!("{:.1}d/s", yr_per_s * 365.25)
+    } else if yr_per_s < 1.0 {
+        format!("{:.2}yr/s", yr_per_s)
+    } else if yr_per_s < 1_000.0 {
+        format!("{:.1}yr/s", yr_per_s)
+    } else if yr_per_s < 1_000_000.0 {
+        format!("{:.1}kyr/s", yr_per_s / 1_000.0)
     } else {
-        format!("×{:.1}M", spf as f64 / 1_000_000.0)
+        format!("{:.1}Myr/s", yr_per_s / 1_000_000.0)
     }
 }
 
