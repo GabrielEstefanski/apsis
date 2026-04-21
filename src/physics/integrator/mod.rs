@@ -39,6 +39,7 @@
 //! - Rein & Spiegel (2015). *MNRAS* 446, 1424–1437 (IAS15).
 
 pub mod coefficients;
+pub mod dense;
 pub mod force_model;
 pub mod helpers;
 pub mod ias15;
@@ -53,6 +54,7 @@ pub mod yoshida4;
 // ── Re-exports ────────────────────────────────────────────────────────────────
 
 pub use coefficients::{Y4_C, Y4_D, Y4_W0, Y4_W1};
+pub use dense::{DenseCoeffs, DenseSnapshot};
 pub use force_model::{ForceModel, GravityForceModel};
 pub use helpers::{apply_perturbations, evaluate, scale_acc_and_pe};
 pub use ias15::Ias15;
