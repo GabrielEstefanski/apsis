@@ -38,8 +38,8 @@ use crate::io::snapshot::TrailSnapshot;
 // ── Tuning ────────────────────────────────────────────────────────────────────
 
 /// Maximum number of individually tracked dirty columns before falling back to
-/// a full position upload.  Prevents unbounded `write_buffer` call counts at
-/// high `steps_per_frame`.
+/// a full position upload.  Prevents unbounded `write_buffer` call counts when
+/// the physics batch runs many steps per frame.
 const INCREMENTAL_LIMIT: usize = 8;
 
 // ── Adaptive capacity ─────────────────────────────────────────────────────────
@@ -48,9 +48,8 @@ const INCREMENTAL_LIMIT: usize = 8;
 ///
 /// Larger values give finer temporal resolution (more samples per orbit arc)
 /// at the cost of GPU memory.  The physics thread caps pushes per batch at
-/// `capacity / 128`, so the *simulated-time window* visible in the trail is
-/// always `128 × steps_per_frame × dt` regardless of capacity — capacity
-/// only affects how many distinct position samples exist within that window.
+/// `capacity / 128`; capacity only affects how many distinct position samples
+/// exist within the visible trail window.
 ///
 /// Memory footprint: `n_bodies × capacity × 8 bytes`.
 pub fn adaptive_capacity(n_bodies: usize) -> usize {
