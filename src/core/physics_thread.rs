@@ -618,6 +618,12 @@ fn physics_loop(
     let mut current_sim_rate = 0.0_f64;
 
     const POS_CHECK_STEPS: u32 = 8;
+    // Safety net: never hold the command channel hostage longer than ~2 frames.
+    // Slow integrators (IAS15 on large N) can spend >100 ms per step; without
+    // this cap, SetPaused / RemoveBody commands pile up and the UI freezes.
+    // This is a temporary quickwin — the structural fix (wall-time budget model
+    // replacing steps_per_frame) lives on feat/wall-budget.
+    const MAX_BATCH_WALL_MS: u64 = 33;
     let min_batch_period = Duration::from_micros(100);
 
     loop {
@@ -641,6 +647,7 @@ fn physics_loop(
         }
 
         if !paused {
+            let batch_deadline = batch_start + Duration::from_millis(MAX_BATCH_WALL_MS);
             let mut steps_since_check = 0u32;
             let mut i = 0u32;
             let mut shutdown = false;
@@ -732,7 +739,7 @@ fn physics_loop(
                             break;
                         }
                     }
-                    if shutdown || (paused && !was_paused) {
+                    if shutdown || (paused && !was_paused) || now >= batch_deadline {
                         break;
                     }
                 }
