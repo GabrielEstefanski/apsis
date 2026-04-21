@@ -216,10 +216,14 @@ impl Ias15 {
     /// Override the default tolerance (`1e-9`). Tighter values give
     /// better energy conservation at the cost of proportionally smaller
     /// step sizes.
-    #[allow(dead_code)]
     pub fn with_epsilon(mut self, epsilon: f64) -> Self {
         self.epsilon = epsilon;
         self
+    }
+
+    /// Returns the current error tolerance.
+    pub fn epsilon(&self) -> f64 {
+        self.epsilon
     }
 
     fn ensure_capacity(&mut self, n: usize) {
@@ -329,6 +333,14 @@ impl Integrator for Ias15 {
 
     fn kind(&self) -> IntegratorKind {
         IntegratorKind::Ias15
+    }
+
+    fn set_epsilon(&mut self, eps: f64) {
+        self.epsilon = eps.clamp(1e-15, 1e-3);
+    }
+
+    fn epsilon(&self) -> Option<f64> {
+        Some(self.epsilon)
     }
 }
 

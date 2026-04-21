@@ -191,6 +191,10 @@ pub struct SimulationApp {
     /// Maps directly to `PhysicsCmd::SetSimRateTarget`.
     /// Default: 2π ≈ 1 yr/s in internal units (G=1, AU, solar masses).
     pub(super) sim_rate_target: f64,
+
+    /// IAS15 error tolerance. Forwarded to the physics thread every frame.
+    /// Ignored when a different integrator is active.
+    pub(super) ias15_epsilon: f64,
     pub(super) place_mode: bool,
     pub(super) place_drag_start: Option<egui::Pos2>,
     pub(super) place_mass: f64,
@@ -376,6 +380,7 @@ impl SimulationApp {
             show_grid: true,
             show_vectors: false,
             sim_rate_target: std::f64::consts::TAU,
+            ias15_epsilon: 1e-9,
             place_mode: false,
             place_drag_start: None,
             place_mass: 1.0,
@@ -501,6 +506,7 @@ impl SimulationApp {
         // each batch, so latency is at most one batch period (~100 µs).
         self.system.set_paused(self.paused);
         self.system.set_sim_rate_target(self.sim_rate_target);
+        self.system.set_ias15_epsilon(self.ias15_epsilon);
 
         // Recompute render hints from the freshly-synced body list.
         self.render_hints = compute_render_hints(self.system.bodies());
@@ -609,6 +615,7 @@ impl SimulationApp {
         // (play/pause, step) may have changed self.paused after the early sync.
         self.system.set_paused(self.paused);
         self.system.set_sim_rate_target(self.sim_rate_target);
+        self.system.set_ias15_epsilon(self.ias15_epsilon);
 
         if !self.paused {
             // Running: repaint every frame to keep the canvas live.
