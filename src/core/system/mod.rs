@@ -212,7 +212,13 @@ impl System {
             rel_energy_error: 0.0,
             force_model,
             scratch_acc: Vec::new(),
-            integrator: make_integrator(IntegratorKind::VelocityVerlet),
+            // IAS15 is the default integrator (Rein & Spiegel 2015): 15th-order
+            // adaptive Gauss-Radau, conserves energy to machine precision for
+            // bound orbits, and handles close encounters / high eccentricities
+            // without the artefacts seen in fixed-step symplectic schemes.
+            // Matches REBOUND's default. Callers that need a symplectic method
+            // can still opt into VV / Y4 / WH via `set_integrator`.
+            integrator: make_integrator(IntegratorKind::Ias15),
             orbital_cache: Vec::new(),
             softening_scale: 1.0,
             diagnostics: DiagnosticsComputer::new(),

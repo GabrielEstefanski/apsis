@@ -35,6 +35,7 @@ pub enum IntegratorKind {
     VelocityVerlet,
     Yoshida4,
     WisdomHolman,
+    Ias15,
 }
 
 impl IntegratorKind {
@@ -44,6 +45,7 @@ impl IntegratorKind {
             Self::VelocityVerlet => "Velocity Verlet (2nd)",
             Self::Yoshida4 => "Yoshida 4th-order",
             Self::WisdomHolman => "Wisdom–Holman (2nd, Keplerian)",
+            Self::Ias15 => "IAS15 (15th, adaptive)",
         }
     }
 
@@ -53,15 +55,21 @@ impl IntegratorKind {
             Self::VelocityVerlet => 2,
             Self::Yoshida4 => 4,
             Self::WisdomHolman => 2,
+            Self::Ias15 => 15,
         }
     }
 
     /// Nominal number of force evaluations consumed per full time step.
+    ///
+    /// IAS15 is adaptive: each accepted substep uses ~7 evals with ~2 Picard
+    /// iterations; the quoted number is an amortised average — the true
+    /// count varies per step and is recorded in `Metrics`.
     pub fn force_evals_per_step(self) -> u32 {
         match self {
             Self::VelocityVerlet => 2,
             Self::Yoshida4 => 4,
             Self::WisdomHolman => 1,
+            Self::Ias15 => 14,
         }
     }
 
@@ -84,13 +92,21 @@ impl IntegratorKind {
                  solved analytically; perturbations are stepped numerically. \
                  Designed for hierarchical planetary systems."
             },
+            Self::Ias15 => {
+                "15th-order adaptive Gauss-Radau integrator (Rein & Spiegel \
+                 2015). Non-symplectic but conserves energy to machine \
+                 precision via step-size control; handles close encounters \
+                 and high eccentricities without artefacts. Default choice \
+                 for long-term, publication-quality integration."
+            },
         }
     }
 
     /// All known variants, in the order shown in the UI combo-box.
-    pub const ALL: [IntegratorKind; 3] = [
-        IntegratorKind::VelocityVerlet,
+    pub const ALL: [IntegratorKind; 4] = [
+        IntegratorKind::Ias15,
         IntegratorKind::Yoshida4,
+        IntegratorKind::VelocityVerlet,
         IntegratorKind::WisdomHolman,
     ];
 
@@ -100,6 +116,7 @@ impl IntegratorKind {
             Self::VelocityVerlet => "velocity_verlet",
             Self::Yoshida4 => "yoshida4",
             Self::WisdomHolman => "wisdom_holman",
+            Self::Ias15 => "ias15",
         }
     }
 }
@@ -112,6 +129,7 @@ impl std::str::FromStr for IntegratorKind {
             "velocity_verlet" => Ok(Self::VelocityVerlet),
             "yoshida4" => Ok(Self::Yoshida4),
             "wisdom_holman" => Ok(Self::WisdomHolman),
+            "ias15" => Ok(Self::Ias15),
             _ => Err(format!(
                 "unknown integrator {:?}; valid slugs: {}",
                 s,

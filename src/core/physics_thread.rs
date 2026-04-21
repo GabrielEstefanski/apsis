@@ -78,7 +78,10 @@ pub struct RenderState {
 pub enum PhysicsCmd {
     SetPaused(bool),
     SetDt(f64),
-    SetStepsPerFrame(u32),
+    /// Target sim-time advance per real second (sim units/s).
+    /// The physics thread integrates until `system.t() >= t_target` or the
+    /// hard CPU cap (`MAX_BATCH_WALL_MS`) is exceeded — whichever comes first.
+    SetSimRateTarget(f64),
     SetExactThreshold(usize),
     SetSeed(u64),
     SetTheta(f64),
@@ -249,8 +252,12 @@ impl PhysicsHandle {
     pub fn set_paused(&self, paused: bool) {
         self.send(PhysicsCmd::SetPaused(paused));
     }
-    pub fn set_steps_per_frame(&self, s: u32) {
-        self.send(PhysicsCmd::SetStepsPerFrame(s));
+    /// Set the target sim-time advance per real second (sim units/s).
+    /// Must be positive; values ≤ 0 are ignored.
+    pub fn set_sim_rate_target(&self, rate: f64) {
+        if rate > 0.0 {
+            self.send(PhysicsCmd::SetSimRateTarget(rate));
+        }
     }
     pub fn set_dt(&self, dt: f64) {
         self.send(PhysicsCmd::SetDt(dt));
@@ -331,8 +338,8 @@ impl PhysicsHandle {
     /// At worst the data is one frame stale — completely acceptable for saves.
     ///
     /// (The old blocking-RPC path via `RequestSnapshot` was removed because it
-    /// could time out when the physics thread was mid-batch with high
-    /// `steps_per_frame`, producing an empty snapshot with 0 bodies / 0 steps.)
+    /// could time out when the physics thread was mid-batch, producing an empty
+    /// snapshot with 0 bodies / 0 steps.)
     pub fn to_snapshot(&self) -> SimSnapshot {
         use crate::io::snapshot::BodyRecord;
         let m = self.metrics;
@@ -463,13 +470,12 @@ enum CmdEffect {
 /// Applies one command to the physics-thread state. Extracted so the physics
 /// loop can drain the command channel from multiple points: once at the top
 /// of each batch (for responsiveness while paused), and again mid-batch (so
-/// `SetPaused`, `RemoveBody`, `Shutdown` etc. aren't blocked behind a large
-/// `steps_per_frame` batch).
+/// `SetPaused`, `RemoveBody`, `Shutdown` etc. are not delayed by a long batch).
 fn apply_cmd(
     cmd: PhysicsCmd,
     system: &mut System,
     paused: &mut bool,
-    steps_per_frame: &mut u32,
+    sim_rate_target: &mut f64,
     needs_full_publish: &mut bool,
     trail_sampler: &mut Box<dyn TrailSampler>,
     loading: &Arc<AtomicBool>,
@@ -477,7 +483,7 @@ fn apply_cmd(
     match cmd {
         PhysicsCmd::Shutdown => return CmdEffect::Shutdown,
         PhysicsCmd::SetPaused(p) => *paused = p,
-        PhysicsCmd::SetStepsPerFrame(s) => *steps_per_frame = s.max(1),
+        PhysicsCmd::SetSimRateTarget(rate) => *sim_rate_target = rate.max(1e-9),
         PhysicsCmd::SetDt(dt) => {
             system.set_dt(dt);
             *needs_full_publish = true;
@@ -580,7 +586,9 @@ fn physics_loop(
     orbital_needed: Arc<AtomicBool>,
 ) {
     let mut paused = initial_paused;
-    let mut steps_per_frame = 1u32;
+    // Target sim-time advance per real second (sim units/s).
+    // Default: 2π ≈ 1 yr/s in the internal unit system.
+    let mut sim_rate_target: f64 = std::f64::consts::TAU;
     let mut needs_full_publish = false;
 
     // Accumulated COM shift across the current step batch. Published to
@@ -618,7 +626,11 @@ fn physics_loop(
     let mut current_sim_rate = 0.0_f64;
 
     const POS_CHECK_STEPS: u32 = 8;
+    // Hard CPU cap per batch. The sim-rate target is the primary control;
+    // this cap only fires when physics cannot keep up (large N, tiny dt, high target).
+    const MAX_BATCH_WALL_MS: u64 = 500;
     let min_batch_period = Duration::from_micros(100);
+    let mut prev_batch_start = Instant::now();
 
     loop {
         let batch_start = Instant::now();
@@ -629,7 +641,7 @@ fn physics_loop(
                     cmd,
                     &mut system,
                     &mut paused,
-                    &mut steps_per_frame,
+                    &mut sim_rate_target,
                     &mut needs_full_publish,
                     &mut trail_sampler,
                     &loading,
@@ -641,13 +653,21 @@ fn physics_loop(
         }
 
         if !paused {
+            // Compute the sim-time we want to reach this batch.
+            // wall_delta is clamped to 200 ms to avoid a spiral-of-death on
+            // slow frames: if physics fell behind, we don't try to catch up.
+            let wall_delta = prev_batch_start
+                .elapsed()
+                .min(Duration::from_millis(200))
+                .as_secs_f64();
+            prev_batch_start = batch_start;
+            let t_target = system.t() + sim_rate_target * wall_delta;
+            let hard_deadline = batch_start + Duration::from_millis(MAX_BATCH_WALL_MS);
             let mut steps_since_check = 0u32;
-            let mut i = 0u32;
             let mut shutdown = false;
 
-            while i < steps_per_frame {
+            'batch: loop {
                 system.step();
-                i += 1;
                 steps_since_check += 1;
 
                 let dt = system.metrics().dt;
@@ -710,10 +730,7 @@ fn physics_loop(
                         }
                     }
 
-                    // Mid-batch command drain: pause/remove/shutdown etc.
-                    // must not wait for large `steps_per_frame` batches to
-                    // finish. Break out of the inner loop if the UI paused
-                    // us or asked us to shut down.
+                    // Mid-batch command drain.
                     let was_paused = paused;
                     while let Ok(cmd) = cmd_rx.try_recv() {
                         if matches!(
@@ -721,7 +738,7 @@ fn physics_loop(
                                 cmd,
                                 &mut system,
                                 &mut paused,
-                                &mut steps_per_frame,
+                                &mut sim_rate_target,
                                 &mut needs_full_publish,
                                 &mut trail_sampler,
                                 &loading,
@@ -732,8 +749,12 @@ fn physics_loop(
                             break;
                         }
                     }
-                    if shutdown || (paused && !was_paused) {
-                        break;
+                    if shutdown
+                        || (paused && !was_paused)
+                        || system.t() >= t_target
+                        || now >= hard_deadline
+                    {
+                        break 'batch;
                     }
                 }
             }
