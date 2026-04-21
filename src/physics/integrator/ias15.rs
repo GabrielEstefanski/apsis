@@ -46,6 +46,7 @@
 //! next try. See `Attempt::snapshot` / `Attempt::restore`.
 
 use crate::domain::body::Body;
+use crate::physics::integrator::dense::{DenseSnapshot, predict_ias15};
 use crate::physics::integrator::helpers::{apply_perturbations, evaluate, scale_acc_and_pe};
 use crate::physics::integrator::traits::{
     Integrator, IntegratorContext, IntegratorKind, StepResult,
@@ -182,6 +183,11 @@ pub struct Ias15 {
     /// `true` until the first completed step — skips the warm-start
     /// extrapolation of `b` (since `e` is zero anyway).
     first_step: bool,
+
+    /// Dense-output snapshot from the last accepted sub-step.
+    /// Returned via `StepResult` so the render thread can interpolate
+    /// positions within the sub-step without re-running physics.
+    last_dense: Option<DenseSnapshot>,
 }
 
 impl Default for Ias15 {
@@ -203,6 +209,7 @@ impl Ias15 {
             dt_next: 0.0,
             dt_last_accepted: 0.0,
             first_step: true,
+            last_dense: None,
         }
     }
 
@@ -316,6 +323,7 @@ impl Integrator for Ias15 {
         StepResult {
             potential_energy: last_pe,
             used_fallback: false,
+            step_snapshot: self.last_dense.take(),
         }
     }
 
@@ -378,6 +386,18 @@ impl Ias15 {
 
             // Accept: advance x and v with the converged polynomial
             // (compensated summation) and evaluate PE at end-of-step.
+            //
+            // Capture start-of-attempt kinematics for dense output BEFORE
+            // advancing state — snapshot.x/v hold the pre-attempt positions.
+            self.last_dense = Some(DenseSnapshot {
+                t0: 0.0, // set to system.t() - dt_try by the physics thread
+                dt: dt_try,
+                x0: snapshot.x.clone(),
+                v0: snapshot.v.clone(),
+                a0: a0.clone(),
+                b: self.b.clone(),
+                kind: IntegratorKind::Ias15,
+            });
             self.advance_state(bodies, &a0, dt_try);
 
             // Post-step acceleration for diagnostics + the next
@@ -436,7 +456,7 @@ impl Ias15 {
                 let s = H[stage];
                 // Predict positions at node `s`.
                 for i in 0..n {
-                    let (px, py) = predict_position(
+                    let (px, py) = predict_ias15(
                         x0[i], v0[i], a0[i], &self.b[i], s, dt_try,
                     );
                     bodies[i].x = px;
@@ -694,49 +714,6 @@ fn add_cs(p: &mut f64, csp: &mut f64, inp: f64) {
     let t = *p + y;
     *csp = (t - *p) - y;
     *p = t;
-}
-
-/// Predict position at substep `s` using the current b-coefficients:
-///   x_n = x₀ + v₀·s·dt + (s·dt)² · [a₀/2 + b₀·s/6 + b₁·s²/12 + …]
-fn predict_position(
-    x0: (f64, f64),
-    v0: (f64, f64),
-    a0: (f64, f64),
-    b: &BodyCoeffs,
-    s: f64,
-    dt: f64,
-) -> (f64, f64) {
-    let s2 = s * s;
-    let s3 = s2 * s;
-    let s4 = s3 * s;
-    let s5 = s4 * s;
-    let s6 = s5 * s;
-    let s7 = s6 * s;
-
-    let dt2 = dt * dt;
-
-    let ax = a0.0 * 0.5
-        + b[0].0 * s / 6.0
-        + b[1].0 * s2 / 12.0
-        + b[2].0 * s3 / 20.0
-        + b[3].0 * s4 / 30.0
-        + b[4].0 * s5 / 42.0
-        + b[5].0 * s6 / 56.0
-        + b[6].0 * s7 / 72.0;
-
-    let ay = a0.1 * 0.5
-        + b[0].1 * s / 6.0
-        + b[1].1 * s2 / 12.0
-        + b[2].1 * s3 / 20.0
-        + b[3].1 * s4 / 30.0
-        + b[4].1 * s5 / 42.0
-        + b[5].1 * s6 / 56.0
-        + b[6].1 * s7 / 72.0;
-
-    (
-        x0.0 + v0.0 * s * dt + s2 * dt2 * ax,
-        x0.1 + v0.1 * s * dt + s2 * dt2 * ay,
-    )
 }
 
 fn restore_xv(bodies: &mut [Body], x: &[(f64, f64)], v: &[(f64, f64)]) {

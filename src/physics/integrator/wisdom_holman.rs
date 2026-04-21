@@ -178,6 +178,7 @@ impl Integrator for WisdomHolman {
         StepResult {
             potential_energy: pe,
             used_fallback: false,
+            step_snapshot: None,
         }
     }
 
