@@ -78,7 +78,10 @@ pub struct RenderState {
 pub enum PhysicsCmd {
     SetPaused(bool),
     SetDt(f64),
-    SetStepsPerFrame(u32),
+    /// Milliseconds of wall-clock time to spend on physics per frame.
+    /// Replaces the old `SetStepsPerFrame` — the integrator determines how
+    /// many steps fit in the budget rather than the caller.
+    SetBatchBudgetMs(u32),
     SetExactThreshold(usize),
     SetSeed(u64),
     SetTheta(f64),
@@ -249,8 +252,10 @@ impl PhysicsHandle {
     pub fn set_paused(&self, paused: bool) {
         self.send(PhysicsCmd::SetPaused(paused));
     }
-    pub fn set_steps_per_frame(&self, s: u32) {
-        self.send(PhysicsCmd::SetStepsPerFrame(s));
+    /// Set how many milliseconds of wall-clock time the physics thread may
+    /// spend per frame. Clamped to [1, 200] ms internally.
+    pub fn set_batch_budget_ms(&self, ms: u32) {
+        self.send(PhysicsCmd::SetBatchBudgetMs(ms));
     }
     pub fn set_dt(&self, dt: f64) {
         self.send(PhysicsCmd::SetDt(dt));
@@ -331,8 +336,8 @@ impl PhysicsHandle {
     /// At worst the data is one frame stale — completely acceptable for saves.
     ///
     /// (The old blocking-RPC path via `RequestSnapshot` was removed because it
-    /// could time out when the physics thread was mid-batch with high
-    /// `steps_per_frame`, producing an empty snapshot with 0 bodies / 0 steps.)
+    /// could time out when the physics thread was mid-batch, producing an empty
+    /// snapshot with 0 bodies / 0 steps.)
     pub fn to_snapshot(&self) -> SimSnapshot {
         use crate::io::snapshot::BodyRecord;
         let m = self.metrics;
@@ -463,13 +468,12 @@ enum CmdEffect {
 /// Applies one command to the physics-thread state. Extracted so the physics
 /// loop can drain the command channel from multiple points: once at the top
 /// of each batch (for responsiveness while paused), and again mid-batch (so
-/// `SetPaused`, `RemoveBody`, `Shutdown` etc. aren't blocked behind a large
-/// `steps_per_frame` batch).
+/// `SetPaused`, `RemoveBody`, `Shutdown` etc. are not delayed by a long batch).
 fn apply_cmd(
     cmd: PhysicsCmd,
     system: &mut System,
     paused: &mut bool,
-    steps_per_frame: &mut u32,
+    batch_budget_ms: &mut u32,
     needs_full_publish: &mut bool,
     trail_sampler: &mut Box<dyn TrailSampler>,
     loading: &Arc<AtomicBool>,
@@ -477,7 +481,7 @@ fn apply_cmd(
     match cmd {
         PhysicsCmd::Shutdown => return CmdEffect::Shutdown,
         PhysicsCmd::SetPaused(p) => *paused = p,
-        PhysicsCmd::SetStepsPerFrame(s) => *steps_per_frame = s.max(1),
+        PhysicsCmd::SetBatchBudgetMs(ms) => *batch_budget_ms = ms.clamp(1, 200),
         PhysicsCmd::SetDt(dt) => {
             system.set_dt(dt);
             *needs_full_publish = true;
@@ -580,7 +584,10 @@ fn physics_loop(
     orbital_needed: Arc<AtomicBool>,
 ) {
     let mut paused = initial_paused;
-    let mut steps_per_frame = 1u32;
+    // Wall-clock milliseconds the physics thread may spend per batch.
+    // Default 8 ms: conservative enough for smooth 60 Hz, fast enough to
+    // make small scenes feel alive out of the box.
+    let mut batch_budget_ms = 8u32;
     let mut needs_full_publish = false;
 
     // Accumulated COM shift across the current step batch. Published to
@@ -618,12 +625,10 @@ fn physics_loop(
     let mut current_sim_rate = 0.0_f64;
 
     const POS_CHECK_STEPS: u32 = 8;
-    // Safety net: never hold the command channel hostage longer than ~2 frames.
-    // Slow integrators (IAS15 on large N) can spend >100 ms per step; without
-    // this cap, SetPaused / RemoveBody commands pile up and the UI freezes.
-    // This is a temporary quickwin — the structural fix (wall-time budget model
-    // replacing steps_per_frame) lives on feat/wall-budget.
-    const MAX_BATCH_WALL_MS: u64 = 33;
+    // Absolute hard cap on any single batch, regardless of user budget.
+    // Exists only to protect against pathological values (e.g. u32::MAX sent
+    // via a bug). Normal operation is controlled entirely by batch_budget_ms.
+    const MAX_BATCH_WALL_MS: u64 = 500;
     let min_batch_period = Duration::from_micros(100);
 
     loop {
@@ -635,7 +640,7 @@ fn physics_loop(
                     cmd,
                     &mut system,
                     &mut paused,
-                    &mut steps_per_frame,
+                    &mut batch_budget_ms,
                     &mut needs_full_publish,
                     &mut trail_sampler,
                     &loading,
@@ -647,14 +652,15 @@ fn physics_loop(
         }
 
         if !paused {
-            let batch_deadline = batch_start + Duration::from_millis(MAX_BATCH_WALL_MS);
+            // Budget deadline: run steps until wall-clock budget is consumed.
+            // The hard cap (MAX_BATCH_WALL_MS) guards against pathological values.
+            let budget = Duration::from_millis((batch_budget_ms as u64).min(MAX_BATCH_WALL_MS));
+            let deadline = batch_start + budget;
             let mut steps_since_check = 0u32;
-            let mut i = 0u32;
             let mut shutdown = false;
 
-            while i < steps_per_frame {
+            'batch: loop {
                 system.step();
-                i += 1;
                 steps_since_check += 1;
 
                 let dt = system.metrics().dt;
@@ -717,10 +723,7 @@ fn physics_loop(
                         }
                     }
 
-                    // Mid-batch command drain: pause/remove/shutdown etc.
-                    // must not wait for large `steps_per_frame` batches to
-                    // finish. Break out of the inner loop if the UI paused
-                    // us or asked us to shut down.
+                    // Mid-batch command drain.
                     let was_paused = paused;
                     while let Ok(cmd) = cmd_rx.try_recv() {
                         if matches!(
@@ -728,7 +731,7 @@ fn physics_loop(
                                 cmd,
                                 &mut system,
                                 &mut paused,
-                                &mut steps_per_frame,
+                                &mut batch_budget_ms,
                                 &mut needs_full_publish,
                                 &mut trail_sampler,
                                 &loading,
@@ -739,8 +742,8 @@ fn physics_loop(
                             break;
                         }
                     }
-                    if shutdown || (paused && !was_paused) || now >= batch_deadline {
-                        break;
+                    if shutdown || (paused && !was_paused) || now >= deadline {
+                        break 'batch;
                     }
                 }
             }
