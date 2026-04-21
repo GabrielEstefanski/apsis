@@ -78,10 +78,10 @@ pub struct RenderState {
 pub enum PhysicsCmd {
     SetPaused(bool),
     SetDt(f64),
-    /// Milliseconds of wall-clock time to spend on physics per frame.
-    /// Replaces the old `SetStepsPerFrame` — the integrator determines how
-    /// many steps fit in the budget rather than the caller.
-    SetBatchBudgetMs(u32),
+    /// Target sim-time advance per real second (sim units/s).
+    /// The physics thread integrates until `system.t() >= t_target` or the
+    /// hard CPU cap (`MAX_BATCH_WALL_MS`) is exceeded — whichever comes first.
+    SetSimRateTarget(f64),
     SetExactThreshold(usize),
     SetSeed(u64),
     SetTheta(f64),
@@ -252,10 +252,12 @@ impl PhysicsHandle {
     pub fn set_paused(&self, paused: bool) {
         self.send(PhysicsCmd::SetPaused(paused));
     }
-    /// Set how many milliseconds of wall-clock time the physics thread may
-    /// spend per frame. Clamped to [1, 200] ms internally.
-    pub fn set_batch_budget_ms(&self, ms: u32) {
-        self.send(PhysicsCmd::SetBatchBudgetMs(ms));
+    /// Set the target sim-time advance per real second (sim units/s).
+    /// Must be positive; values ≤ 0 are ignored.
+    pub fn set_sim_rate_target(&self, rate: f64) {
+        if rate > 0.0 {
+            self.send(PhysicsCmd::SetSimRateTarget(rate));
+        }
     }
     pub fn set_dt(&self, dt: f64) {
         self.send(PhysicsCmd::SetDt(dt));
@@ -473,7 +475,7 @@ fn apply_cmd(
     cmd: PhysicsCmd,
     system: &mut System,
     paused: &mut bool,
-    batch_budget_ms: &mut u32,
+    sim_rate_target: &mut f64,
     needs_full_publish: &mut bool,
     trail_sampler: &mut Box<dyn TrailSampler>,
     loading: &Arc<AtomicBool>,
@@ -481,7 +483,7 @@ fn apply_cmd(
     match cmd {
         PhysicsCmd::Shutdown => return CmdEffect::Shutdown,
         PhysicsCmd::SetPaused(p) => *paused = p,
-        PhysicsCmd::SetBatchBudgetMs(ms) => *batch_budget_ms = ms.clamp(1, 200),
+        PhysicsCmd::SetSimRateTarget(rate) => *sim_rate_target = rate.max(1e-9),
         PhysicsCmd::SetDt(dt) => {
             system.set_dt(dt);
             *needs_full_publish = true;
@@ -584,10 +586,9 @@ fn physics_loop(
     orbital_needed: Arc<AtomicBool>,
 ) {
     let mut paused = initial_paused;
-    // Wall-clock milliseconds the physics thread may spend per batch.
-    // Default 8 ms: conservative enough for smooth 60 Hz, fast enough to
-    // make small scenes feel alive out of the box.
-    let mut batch_budget_ms = 8u32;
+    // Target sim-time advance per real second (sim units/s).
+    // Default: 2π ≈ 1 yr/s in the internal unit system.
+    let mut sim_rate_target: f64 = std::f64::consts::TAU;
     let mut needs_full_publish = false;
 
     // Accumulated COM shift across the current step batch. Published to
@@ -625,11 +626,11 @@ fn physics_loop(
     let mut current_sim_rate = 0.0_f64;
 
     const POS_CHECK_STEPS: u32 = 8;
-    // Absolute hard cap on any single batch, regardless of user budget.
-    // Exists only to protect against pathological values (e.g. u32::MAX sent
-    // via a bug). Normal operation is controlled entirely by batch_budget_ms.
+    // Hard CPU cap per batch. The sim-rate target is the primary control;
+    // this cap only fires when physics cannot keep up (large N, tiny dt, high target).
     const MAX_BATCH_WALL_MS: u64 = 500;
     let min_batch_period = Duration::from_micros(100);
+    let mut prev_batch_start = Instant::now();
 
     loop {
         let batch_start = Instant::now();
@@ -640,7 +641,7 @@ fn physics_loop(
                     cmd,
                     &mut system,
                     &mut paused,
-                    &mut batch_budget_ms,
+                    &mut sim_rate_target,
                     &mut needs_full_publish,
                     &mut trail_sampler,
                     &loading,
@@ -652,10 +653,16 @@ fn physics_loop(
         }
 
         if !paused {
-            // Budget deadline: run steps until wall-clock budget is consumed.
-            // The hard cap (MAX_BATCH_WALL_MS) guards against pathological values.
-            let budget = Duration::from_millis((batch_budget_ms as u64).min(MAX_BATCH_WALL_MS));
-            let deadline = batch_start + budget;
+            // Compute the sim-time we want to reach this batch.
+            // wall_delta is clamped to 200 ms to avoid a spiral-of-death on
+            // slow frames: if physics fell behind, we don't try to catch up.
+            let wall_delta = prev_batch_start
+                .elapsed()
+                .min(Duration::from_millis(200))
+                .as_secs_f64();
+            prev_batch_start = batch_start;
+            let t_target = system.t() + sim_rate_target * wall_delta;
+            let hard_deadline = batch_start + Duration::from_millis(MAX_BATCH_WALL_MS);
             let mut steps_since_check = 0u32;
             let mut shutdown = false;
 
@@ -731,7 +738,7 @@ fn physics_loop(
                                 cmd,
                                 &mut system,
                                 &mut paused,
-                                &mut batch_budget_ms,
+                                &mut sim_rate_target,
                                 &mut needs_full_publish,
                                 &mut trail_sampler,
                                 &loading,
@@ -742,7 +749,11 @@ fn physics_loop(
                             break;
                         }
                     }
-                    if shutdown || (paused && !was_paused) || now >= deadline {
+                    if shutdown
+                        || (paused && !was_paused)
+                        || system.t() >= t_target
+                        || now >= hard_deadline
+                    {
                         break 'batch;
                     }
                 }
