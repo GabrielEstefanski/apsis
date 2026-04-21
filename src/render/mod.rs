@@ -1,13 +1,20 @@
 pub mod callback_trait;
 pub mod color;
+pub mod exposure;
 pub mod grid_renderer;
+pub mod hdr;
+pub mod lighting;
+pub mod luminance_reducer;
 pub mod orbit_overlay;
+pub mod tonemap;
 pub mod trail;
 pub mod trail_buffer;
 pub mod trail_renderer;
 pub mod wgpu_backend;
 
 pub use callback_trait::CallbackFn;
+pub use exposure::ExposureState;
+pub use lighting::{LightSpec, SceneLighting};
 pub use trail::{TrailRecorder, TrailStyle, TrailStylePreset};
 pub use trail_renderer::TrailRenderer;
 pub use wgpu_backend::WgpuBackend;

@@ -29,6 +29,7 @@ mod save_modal;
 mod settings_modal;
 mod shortcuts_modal;
 mod tabs;
+mod tool_rail;
 mod toolbar;
 
 use crate::app::theme::{BORDER, PANEL_BG};
