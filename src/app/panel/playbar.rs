@@ -79,28 +79,32 @@ impl SimulationApp {
 
                     vsep(ui);
 
-                    // ── Speed (steps-per-frame) ───────────────────────────────
+                    // ── Speed (wall-time budget) ──────────────────────────────
                     ui.label(RichText::new("SPEED").size(8.5).color(TEXT_DIM).strong());
-                    let mut spf_f = self.steps_per_frame as f32;
+                    let mut budget_f = self.batch_budget_ms as f32;
                     if ui
                         .add_sized(
                             [80.0, 14.0],
-                            egui::Slider::new(&mut spf_f, 1.0..=1_000_000.0)
+                            egui::Slider::new(&mut budget_f, 1.0..=200.0)
                                 .logarithmic(true)
                                 .show_value(false),
                         )
                         .changed()
                     {
-                        self.steps_per_frame = spf_f.round().max(1.0) as u32;
+                        self.batch_budget_ms = (budget_f.round() as u32).clamp(1, 200);
                     }
-                    let spf_col = if self.steps_per_frame > 1 { ACCENT } else { TEXT_DIM };
+                    let budget_col = if self.batch_budget_ms > 8 { ACCENT } else { TEXT_DIM };
                     ui.label(
-                        RichText::new(fmt_spf(self.steps_per_frame))
+                        RichText::new(fmt_budget(self.batch_budget_ms))
                             .monospace()
                             .size(10.0)
-                            .color(spf_col),
+                            .color(budget_col),
                     )
-                    .on_hover_text("Physics steps computed per rendered frame");
+                    .on_hover_text(
+                        "Wall-clock time budget for physics per frame.\n\
+                         Higher = faster simulation, more CPU.\n\
+                         All integrators share the same slider.",
+                    );
 
                     vsep(ui);
 
@@ -131,22 +135,6 @@ impl SimulationApp {
                                 }
                             }
                         });
-
-                    // IAS15 hint: its speed advantage only shows when the dt
-                    // budget is large enough for the adaptive step to open up.
-                    if self.physics_cfg.integrator == IntegratorKind::Ias15 {
-                        ui.label(
-                            RichText::new("↑dt for speed")
-                                .size(8.5)
-                                .color(ACCENT_DIM),
-                        )
-                        .on_hover_text(
-                            "IAS15 adapts its internal step size automatically.\n\
-                             Use a 10–100× larger dt than Verlet/Yoshida for the\n\
-                             same accuracy — the budget loop handles exact timing.\n\
-                             At equal dt, IAS15 does ~7× more force evaluations.",
-                        );
-                    }
 
                     vsep(ui);
 
@@ -256,10 +244,7 @@ impl SimulationApp {
                     .min_size(egui::vec2(24.0, 24.0))
                     .corner_radius(3.0),
             )
-            .on_hover_text(format!(
-                "Step — advance {} physics step(s) then pause",
-                self.steps_per_frame
-            ))
+            .on_hover_text("Step — advance one physics batch then pause")
             .clicked()
         {
             self.paused = false;
@@ -299,14 +284,8 @@ fn integrator_short_label(k: IntegratorKind) -> &'static str {
     }
 }
 
-fn fmt_spf(spf: u32) -> String {
-    if spf < 1_000 {
-        format!("×{spf}")
-    } else if spf < 1_000_000 {
-        format!("×{:.0}k", spf as f64 / 1_000.0)
-    } else {
-        format!("×{:.1}M", spf as f64 / 1_000_000.0)
-    }
+fn fmt_budget(ms: u32) -> String {
+    format!("{ms}ms")
 }
 
 fn fmt_rate(yr_per_s: f64) -> String {
