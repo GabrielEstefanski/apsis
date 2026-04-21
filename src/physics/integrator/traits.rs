@@ -176,6 +176,13 @@ pub struct StepResult {
     /// `true` if the integrator fell back to a different algorithm this step
     /// (e.g. Wisdom–Holman → Yoshida4 when the dominance criterion fails).
     pub used_fallback: bool,
+
+    /// Dense-output snapshot for sub-step interpolation.
+    ///
+    /// IAS15 fills this with the last accepted sub-step's b-coefficients.
+    /// Other integrators leave it `None`; [`System::step`] supplies an
+    /// Order-2 fallback using the pre-step kinematics.
+    pub step_snapshot: Option<super::dense::DenseSnapshot>,
 }
 
 // ── Integrator trait ──────────────────────────────────────────────────────────
