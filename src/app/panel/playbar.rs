@@ -79,31 +79,36 @@ impl SimulationApp {
 
                     vsep(ui);
 
-                    // ── Speed (wall-time budget) ──────────────────────────────
+                    // ── Speed (sim-rate target) ───────────────────────────────
                     ui.label(RichText::new("SPEED").size(8.5).color(TEXT_DIM).strong());
-                    let mut budget_f = self.batch_budget_ms as f32;
+                    // Slider operates in yr/s; convert to/from internal units (2π = 1 yr).
+                    let tau = std::f64::consts::TAU;
+                    let mut speed_yr = self.sim_rate_target / tau;
                     if ui
                         .add_sized(
                             [80.0, 14.0],
-                            egui::Slider::new(&mut budget_f, 1.0..=200.0)
+                            egui::Slider::new(&mut speed_yr, 0.01_f64..=100_000.0_f64)
                                 .logarithmic(true)
                                 .show_value(false),
                         )
                         .changed()
                     {
-                        self.batch_budget_ms = (budget_f.round() as u32).clamp(1, 200);
+                        self.sim_rate_target = speed_yr.max(0.01) * tau;
                     }
-                    let budget_col = if self.batch_budget_ms > 8 { ACCENT } else { TEXT_DIM };
+                    let sim_rate = self.system.sim_rate();
+                    let actual_yr = sim_rate / tau;
+                    let shortfall = sim_rate > 0.0 && actual_yr < speed_yr * 0.8;
+                    let speed_col = if shortfall { TEXT_DIM } else { ACCENT };
                     ui.label(
-                        RichText::new(fmt_budget(self.batch_budget_ms))
+                        RichText::new(fmt_speed(speed_yr))
                             .monospace()
                             .size(10.0)
-                            .color(budget_col),
+                            .color(speed_col),
                     )
                     .on_hover_text(
-                        "Wall-clock time budget for physics per frame.\n\
-                         Higher = faster simulation, more CPU.\n\
-                         All integrators share the same slider.",
+                        "Target simulation speed (yr/s).\n\
+                         The physics thread advances this many simulated years per real second.\n\
+                         If the sim can't keep up, the label dims and actual speed is shown below.",
                     );
 
                     vsep(ui);
@@ -284,8 +289,18 @@ fn integrator_short_label(k: IntegratorKind) -> &'static str {
     }
 }
 
-fn fmt_budget(ms: u32) -> String {
-    format!("{ms}ms")
+fn fmt_speed(yr_per_s: f64) -> String {
+    if yr_per_s < 1.0 / 365.25 {
+        format!("{:.1}d/s", yr_per_s * 365.25)
+    } else if yr_per_s < 1.0 {
+        format!("{:.2}yr/s", yr_per_s)
+    } else if yr_per_s < 1_000.0 {
+        format!("{:.1}yr/s", yr_per_s)
+    } else if yr_per_s < 1_000_000.0 {
+        format!("{:.1}kyr/s", yr_per_s / 1_000.0)
+    } else {
+        format!("{:.1}Myr/s", yr_per_s / 1_000_000.0)
+    }
 }
 
 fn fmt_rate(yr_per_s: f64) -> String {
