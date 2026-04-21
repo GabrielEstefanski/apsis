@@ -67,6 +67,11 @@ pub struct RenderState {
     /// [`AccelerationMagnitudeField`](crate::domain::field::acceleration::AccelerationMagnitudeField)
     /// can paint bodies by |a| without needing to recompute forces.
     pub accelerations: Vec<(f64, f64)>,
+
+    /// Dense-output snapshot from the most recently completed sub-step.
+    /// The render thread uses this to interpolate body positions at any
+    /// `t ∈ [t₀, t₀ + dt]` without re-running physics.
+    pub step_snapshot: Option<crate::physics::integrator::DenseSnapshot>,
 }
 
 // ── Commands ──────────────────────────────────────────────────────────────────
@@ -136,6 +141,14 @@ pub struct PhysicsHandle {
     /// the UI thread on [`sync`] and fed to the [`TrailRecorder`].
     pending_trail_samples: Vec<Vec<[f32; 2]>>,
 
+    /// Latest dense-output snapshot, used by [`advance_render_time`](Self::advance_render_time).
+    step_snapshot: Option<crate::physics::integrator::DenseSnapshot>,
+
+    /// Current render time (absolute sim units). Advanced by
+    /// [`advance_render_time`](Self::advance_render_time) each frame; always
+    /// clamped to the window `[snap.t0, snap.t0 + snap.dt]`.
+    t_render: f64,
+
     _thread: thread::JoinHandle<()>,
 }
 
@@ -161,6 +174,38 @@ impl PhysicsHandle {
             // Drain accumulated trail samples (move; avoids allocation).
             self.pending_trail_samples
                 .extend(rs.trail_samples.drain(..));
+            // Pull latest dense-output snapshot.
+            if rs.step_snapshot.is_some() {
+                self.step_snapshot = rs.step_snapshot.clone();
+            }
+        }
+    }
+
+    /// Advance the render time by `wall_delta` seconds (real wall clock) at the
+    /// given sim-rate target, then overwrite the cached body positions with
+    /// interpolated values from the latest [`DenseSnapshot`].
+    ///
+    /// Call this once per render frame, after [`sync`](Self::sync), while the
+    /// simulation is running (skip when paused to freeze the display).
+    pub fn advance_render_time(&mut self, wall_delta: f64, sim_rate_target: f64) {
+        let snap = match &self.step_snapshot {
+            Some(s) if s.dt > 0.0 && s.n_bodies() == self.bodies.len() => s,
+            _ => return,
+        };
+
+        self.t_render += sim_rate_target * wall_delta;
+        // Clamp to the valid window — don't extrapolate beyond the accepted step.
+        let t0 = snap.t0;
+        let t1 = t0 + snap.dt;
+        self.t_render = self.t_render.clamp(t0, t1);
+
+        let h = (self.t_render - t0) / snap.dt;
+        // Clone snap to release the borrow before mutating bodies.
+        let snap = snap.clone();
+        for (i, body) in self.bodies.iter_mut().enumerate() {
+            let (x, y) = snap.interpolate(i, h);
+            body.x = x;
+            body.y = y;
         }
     }
 
@@ -384,6 +429,7 @@ pub fn spawn(mut system: System, paused: bool) -> PhysicsHandle {
         pending_com_shift: (0.0, 0.0),
         trail_samples: Vec::new(),
         accelerations: system.last_accelerations().to_vec(),
+        step_snapshot: None,
     };
 
     let render = Arc::new(Mutex::new(initial.clone()));
@@ -411,6 +457,8 @@ pub fn spawn(mut system: System, paused: bool) -> PhysicsHandle {
         accelerations: initial.accelerations.clone(),
         pending_com_shift: (0.0, 0.0),
         pending_trail_samples: Vec::new(),
+        step_snapshot: None,
+        t_render: 0.0,
         _thread: thread,
     }
 }
@@ -669,6 +717,15 @@ fn physics_loop(
             'batch: loop {
                 system.step();
                 steps_since_check += 1;
+
+                // Forward the fresh dense-output snapshot to RenderState so the
+                // render thread always has the most recent sub-step to interpolate.
+                // try_lock is non-blocking; missing one snapshot frame is harmless.
+                if system.last_dense_snapshot.is_some() {
+                    if let Ok(mut rs) = render.try_lock() {
+                        rs.step_snapshot = system.last_dense_snapshot.clone();
+                    }
+                }
 
                 let dt = system.metrics().dt;
                 rate_sim_acc += dt;

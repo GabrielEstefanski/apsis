@@ -8,6 +8,7 @@ use crate::core::hooks::{
 use crate::core::system::System;
 use crate::core::system::helpers::compute_closeness;
 use crate::physics::energy::{angular_momentum_z, kinetic_energy, total_energy};
+use crate::physics::integrator::{DenseSnapshot, IntegratorKind};
 use crate::physics::integrator::IntegratorContext;
 
 impl System {
@@ -39,6 +40,26 @@ impl System {
         let dt = self.current_dt;
         let g_factor = self.g_factor;
 
+        // Capture pre-step kinematics for Order-2 dense-output fallback.
+        // `scratch_acc` holds a(t₀) from the previous step's end-of-step force
+        // evaluation, which equals the start-of-this-step acceleration for all
+        // four integrators (VV, Y4, WH each end with a force eval; IAS15 does too).
+        // Skipped on the very first step when scratch_acc is empty.
+        let pre_x0: Vec<(f64, f64)>;
+        let pre_v0: Vec<(f64, f64)>;
+        let pre_a0: Vec<(f64, f64)>;
+        let need_order2 = !self.scratch_acc.is_empty()
+            && self.integrator.kind() != IntegratorKind::Ias15;
+        if need_order2 {
+            pre_x0 = self.bodies.iter().map(|b| (b.x, b.y)).collect();
+            pre_v0 = self.bodies.iter().map(|b| (b.vx, b.vy)).collect();
+            pre_a0 = self.scratch_acc.clone();
+        } else {
+            pre_x0 = Vec::new();
+            pre_v0 = Vec::new();
+            pre_a0 = Vec::new();
+        }
+
         let mut ctx = IntegratorContext {
             force: &mut *self.force_model,
             g_factor,
@@ -49,6 +70,27 @@ impl System {
 
         self.steps += 1;
         self.t += dt;
+
+        // Produce the dense-output snapshot.  t0 = system.t() - snapshot.dt
+        // works for both cases: IAS15 sub-steps use their own dt, Order-2 uses
+        // the full system dt.
+        self.last_dense_snapshot = if let Some(mut snap) = result.step_snapshot {
+            // IAS15 path: snapshot already has x0, v0, a0, b filled.
+            snap.t0 = self.t - snap.dt;
+            Some(snap)
+        } else if need_order2 {
+            Some(DenseSnapshot {
+                t0: self.t - dt,
+                dt,
+                x0: pre_x0,
+                v0: pre_v0,
+                a0: pre_a0,
+                b: Vec::new(),
+                kind: self.integrator.kind(),
+            })
+        } else {
+            None
+        };
 
         self.last_diag = self.diagnostics.compute(&self.scratch_acc, &self.bodies, dt);
 

@@ -47,7 +47,8 @@ use crate::core::hooks::HookRegistry;
 use crate::core::metrics::Metrics;
 use crate::domain::body::Body;
 use crate::physics::integrator::{
-    ForceModel, GravityForceModel, Integrator, IntegratorKind, PerturbationForce, make_integrator,
+    DenseSnapshot, ForceModel, GravityForceModel, Integrator, IntegratorKind, PerturbationForce,
+    make_integrator,
 };
 use crate::physics::orbital::OrbitalElements;
 
@@ -156,6 +157,12 @@ pub struct System {
     /// [`TrailRecorder`](crate::render::TrailRecorder) reads and clears this
     /// each frame to keep trail positions aligned with the shifted bodies.
     pub(crate) pending_com_shift: (f32, f32),
+
+    /// Dense-output snapshot from the most recent integration step.
+    /// Produced each step; consumed by the physics thread and forwarded to
+    /// [`RenderState`](crate::core::physics_thread::RenderState) for
+    /// sub-step position interpolation.
+    pub(crate) last_dense_snapshot: Option<crate::physics::integrator::DenseSnapshot>,
 }
 
 impl System {
@@ -252,6 +259,7 @@ impl System {
             hooks: HookRegistry::new(),
             stop_requested: false,
             pending_com_shift: (0.0, 0.0),
+            last_dense_snapshot: None,
         }
     }
 }
