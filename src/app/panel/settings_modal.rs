@@ -177,7 +177,6 @@ impl SimulationApp {
                         )
                         .clicked()
                     {
-                        // Auto-generate a versioned path when still using the default.
                         if self.record_base_path == "./records/sim_export"
                             || self.record_base_path.is_empty()
                         {
