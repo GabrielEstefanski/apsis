@@ -45,7 +45,7 @@ impl OrbitOverlayStyle {
     /// predicted track reads as an annotation — a hint about where the
     /// body is heading — rather than competing with the body itself.
     pub const fn selected_default() -> Self {
-        Self { color: [140, 210, 255, 160], width_px: 1.0 }
+        Self { color: [140, 210, 255, 205], width_px: 1.2 }
     }
 
     /// Default for the *all-bodies* overlay: same hue, fainter alpha.
@@ -55,7 +55,7 @@ impl OrbitOverlayStyle {
     /// many overlapping orbits coexist without overwhelming the scene
     /// or drowning out the brighter selected-body overlay on top.
     pub const fn background_default() -> Self {
-        Self { color: [140, 210, 255, 60], width_px: 0.8 }
+        Self { color: [140, 210, 255, 95], width_px: 1.0 }
     }
 }
 
@@ -96,17 +96,17 @@ pub fn draw_orbit_apsides<F>(
 {
     // Periapsis: small filled disk. `draw_circle_stroke` with
     // width = 2·radius yields inner = 0, i.e. a solid disk.
-    let r_peri_px = (style.width_px * 2.0).max(1.5);
+    let r_peri_px = (style.width_px * 3.0).max(3.5);
     if let Some(peri_world) = el.periapsis_world(primary_pos) {
         let p = world_to_screen(peri_world);
         backend.draw_circle_stroke(p, r_peri_px, r_peri_px * 2.0, style.color);
     }
     // Apoapsis: hollow ring, slightly larger than periapsis so the two
     // read as distinct even when the orbit is nearly edge-on.
-    let r_apo_px = (style.width_px * 2.5).max(2.0);
+    let r_apo_px = (style.width_px * 3.8).max(4.5);
     if let Some(apo_world) = el.apoapsis_world(primary_pos) {
         let p = world_to_screen(apo_world);
-        backend.draw_circle_stroke(p, r_apo_px, 1.2_f32.max(style.width_px), style.color);
+        backend.draw_circle_stroke(p, r_apo_px, 1.5_f32.max(style.width_px), style.color);
     }
 }
 

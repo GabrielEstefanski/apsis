@@ -1,21 +1,22 @@
-//! Top bar — brand, navigation, scene identity, session actions.
+//! Top bar — brand, scene identity, session actions.
 //!
 //! Three logical zones (left → center → right):
-//!   [brand │ ☰ │ nav tabs │ ◀]   [scene name · N bodies]   [Load Save Clear │ Rec │ Help Sett]
+//!   [brand │ ☰]   [scene name · N bodies]   [Load Save Clear │ Rec │ Help Sett]
 //!
 //! The center zone fills remaining space between the two fixed zones,
 //! giving the scene name a prominent, publication-style position.
+//!
+//! Tool selection lives in [`crate::app::panel::tool_rail`] (vertical
+//! rail on the left); this bar is session-only.
 
 use crate::app::icons;
-use crate::app::theme::{ACCENT, ACCENT_DIM, BORDER, DANGER, SURFACE_STRIP, TEXT_DIM, TEXT_PRI, TEXT_SEC};
-use crate::app::ui::{PanelTab, SimulationApp};
+use crate::app::theme::{ACCENT, BORDER, DANGER, TEXT_DIM, TEXT_PRI, TEXT_SEC};
+use crate::app::ui::SimulationApp;
 use eframe::egui::containers::menu::MenuButton;
-use eframe::egui::{self, Color32, Frame, Margin, RichText, Stroke};
+use eframe::egui::{self, Color32, RichText, Stroke};
 
-/// Full toolbar height. Drives all icon and tab heights.
+/// Full toolbar height. Drives icon button heights.
 const TOOLBAR_ROW_H: f32 = 28.0;
-/// Inner height of tab buttons (toolbar minus vertical margin on each side).
-const TAB_INNER_H: f32 = TOOLBAR_ROW_H - 8.0;
 const BTN_BG: Color32 = Color32::from_rgb(20, 20, 26);
 /// Approximate pixel width kept for the right action zone.
 /// Update if buttons are added/removed from that zone.
@@ -48,33 +49,8 @@ impl SimulationApp {
             ui.add_space(2.0);
             vsep(ui);
 
-            // ── Menu + tab strip ───────────────────────────────────────── //
+            // ── Menu ────────────────────────────────────────────────────── //
             self.menu_hamburger(ui);
-            vsep(ui);
-
-            Frame::NONE
-                .fill(SURFACE_STRIP)
-                .inner_margin(Margin::symmetric(3, 3))
-                .stroke(Stroke::new(0.5, BORDER))
-                .corner_radius(5.0)
-                .show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing.x = 1.0;
-                        for tab in PanelTab::ALL {
-                            self.tool_tab_btn(ui, tab);
-                        }
-                    });
-                });
-
-            ui.add_space(2.0);
-            let (chevron, tip) = if self.sidebar_collapsed {
-                (icons::SIDEBAR_OPEN, "Show sidebar  [B]")
-            } else {
-                (icons::SIDEBAR_CLOSE, "Hide sidebar  [B]")
-            };
-            if tb_icon_btn(ui, chevron, tip).clicked() {
-                self.sidebar_collapsed = !self.sidebar_collapsed;
-            }
 
             // ── Center: scene identity ─────────────────────────────────── //
             let n = self.system.bodies().len();
@@ -185,48 +161,6 @@ impl SimulationApp {
         });
     }
 
-    // ── Tool tab button ──────────────────────────────────────────────────── //
-
-    fn tool_tab_btn(&mut self, ui: &mut egui::Ui, tab: PanelTab) {
-        let is_active = self.panel_tab == tab && !self.sidebar_collapsed;
-        let (icon, label) = (tool_icon(tab, is_active), tab.label());
-
-        let fill = if is_active { ACCENT_DIM } else { BTN_BG };
-        let stroke_col = if is_active { ACCENT.gamma_multiply(0.65) } else { BORDER };
-        let text_col = if is_active { TEXT_PRI } else { TEXT_SEC };
-
-        let text = RichText::new(format!("{icon}  {label}")).size(10.5).color(text_col);
-
-        let hover = if is_active {
-            format!("{}  [{}]   ·   click again to hide sidebar", label, tab_shortcut(tab))
-        } else if self.sidebar_collapsed {
-            format!("{}  [{}]   ·   opens sidebar", label, tab_shortcut(tab))
-        } else {
-            format!("{}  [{}]", label, tab_shortcut(tab))
-        };
-
-        let resp = ui
-            .add(
-                egui::Button::new(text)
-                    .fill(fill)
-                    .stroke(Stroke::new(if is_active { 1.0 } else { 0.5 }, stroke_col))
-                    .min_size(egui::vec2(0.0, TAB_INNER_H))
-                    .corner_radius(4.0),
-            )
-            .on_hover_text(hover);
-
-        if resp.clicked() {
-            if self.sidebar_collapsed {
-                self.sidebar_collapsed = false;
-                self.panel_tab = tab;
-            } else if self.panel_tab == tab {
-                self.sidebar_collapsed = true;
-            } else {
-                self.panel_tab = tab;
-            }
-        }
-    }
-
     // ── Hamburger: global actions ────────────────────────────────────────── //
 
     fn menu_hamburger(&mut self, ui: &mut egui::Ui) {
@@ -321,34 +255,6 @@ impl SimulationApp {
 
 fn vsep(ui: &mut egui::Ui) {
     ui.add(egui::Separator::default().vertical());
-}
-
-fn tool_icon(tab: PanelTab, active: bool) -> &'static str {
-    match (tab, active) {
-        (PanelTab::Overview, false) => icons::TOOL_OVERVIEW,
-        (PanelTab::Overview, true) => icons::TOOL_OVERVIEW_ON,
-        (PanelTab::Add, false) => icons::TOOL_ADD,
-        (PanelTab::Add, true) => icons::TOOL_ADD_ON,
-        (PanelTab::Templates, false) => icons::TOOL_TEMPLATES,
-        (PanelTab::Templates, true) => icons::TOOL_TEMPLATES_ON,
-        (PanelTab::View, false) => icons::TOOL_VIEW,
-        (PanelTab::View, true) => icons::TOOL_VIEW_ON,
-        (PanelTab::Camera, false) => icons::TOOL_CAMERA,
-        (PanelTab::Camera, true) => icons::TOOL_CAMERA_ON,
-        (PanelTab::Config, false) => icons::TOOL_CONFIG,
-        (PanelTab::Config, true) => icons::TOOL_CONFIG_ON,
-    }
-}
-
-fn tab_shortcut(tab: PanelTab) -> &'static str {
-    match tab {
-        PanelTab::Overview => "1",
-        PanelTab::Add => "2",
-        PanelTab::Templates => "3",
-        PanelTab::View => "4",
-        PanelTab::Camera => "5",
-        PanelTab::Config => "6",
-    }
 }
 
 fn tb_icon_btn(ui: &mut egui::Ui, icon: &str, hover: &str) -> egui::Response {

@@ -1,11 +1,11 @@
 use crate::app::render_params::{RenderParams, compute_render_radius};
 use crate::app::ui::{SelectionForm, SemanticScaleMode, SimulationApp, UndoRecord};
 use crate::physics::orbital::{compute_elements, dominant_primary};
+use crate::render::lighting::{LightSpec, SceneLighting};
 use crate::render::CallbackFn;
 use crate::render::orbit_overlay::{
     OrbitOverlayStyle, draw_orbit_apsides, draw_orbit_polyline,
 };
-use crate::render::wgpu_backend::LightSource;
 use crate::templates::instantiate_at;
 use eframe::egui::{self, Color32, FontId, Pos2, Stroke};
 use eframe::egui_wgpu;
@@ -236,14 +236,65 @@ impl SimulationApp {
                 screen_positions.push(([px, py], b));
             }
 
-            for (sp, b) in &screen_positions {
-                if b.is_luminous() {
-                    backend.add_light_source(LightSource {
-                        screen_pos: *sp,
-                        luminosity: b.luminosity as f32,
+            // Build the per-frame scene lighting from every luminous body.
+            // Intensities are normalised by the brightest source so the
+            // primary star sits at 1.0 and companions scale relatively —
+            // this keeps the shader's attenuation knob (`r_ref`) tuned to
+            // scene scale rather than absolute luminosity units.
+            let max_lum = bodies
+                .iter()
+                .filter(|b| b.is_luminous())
+                .map(|b| b.luminosity)
+                .fold(0.0_f64, f64::max);
+            let lights: Vec<LightSpec> = if max_lum > 0.0 {
+                bodies
+                    .iter()
+                    .filter(|b| b.is_luminous())
+                    .map(|b| LightSpec {
+                        world_pos: [b.x as f32, b.y as f32, 0.0],
+                        intensity: (b.luminosity / max_lum) as f32,
+                    })
+                    .collect()
+            } else {
+                Vec::new()
+            };
+
+            // Characteristic distance for the 1/r² falloff. Without this,
+            // scenes spanning >10× in radius (Solar System: Mercury at 0.4 AU
+            // vs Neptune at 30 AU → 75× range → 5600× flux ratio) drop outer
+            // planets to ~0.1% brightness — physically correct but visually
+            // invisible against HDR black.
+            //
+            // Using the RMS distance from the primary light to all non-lit
+            // bodies lands r_ref mid-scene: inner planets saturate (good, they
+            // are already fully lit in reality), outer planets keep a usable
+            // fraction. The RMS (vs. plain mean) weights toward outer bodies
+            // deliberately — it's the outer planets that need the help.
+            let r_ref = if let Some(primary) = lights.first() {
+                let lx = primary.world_pos[0] as f64;
+                let ly = primary.world_pos[1] as f64;
+                let (sum_sq, n) = bodies
+                    .iter()
+                    .filter(|b| !b.is_luminous())
+                    .fold((0.0_f64, 0usize), |(acc, k), b| {
+                        let dx = b.x - lx;
+                        let dy = b.y - ly;
+                        (acc + dx * dx + dy * dy, k + 1)
                     });
-                }
-            }
+                if n > 0 { (sum_sq / n as f64).sqrt().max(1e-3) as f32 } else { 1.0 }
+            } else {
+                1.0
+            };
+
+            backend.set_scene_lighting(SceneLighting {
+                lights,
+                r_ref,
+                // Backstop for bodies far beyond r_ref whose attenuation still
+                // rounds to zero (e.g. Pluto in a Solar-System view). Without
+                // this floor they collapse into pure black in HDR space.
+                ambient_floor: 0.10,
+                ..Default::default()
+            });
 
             for (i, (sp, b)) in screen_positions.iter().enumerate() {
                 let rgb = match body_colors_override.as_ref() {
@@ -252,7 +303,22 @@ impl SimulationApp {
                 };
                 let r = compute_render_radius(b.physical_radius, render_params);
 
-                backend.draw_circle(*sp, r, rgb);
+                // Luminous bodies: self-lit disc (emissive carries the colour,
+                // albedo stays dark so the unlit side doesn't darken their
+                // surface). Non-luminous: pure albedo, no self-emission.
+                let base = [
+                    rgb[0] as f32 / 255.0,
+                    rgb[1] as f32 / 255.0,
+                    rgb[2] as f32 / 255.0,
+                ];
+                let (albedo, emissive) = if b.is_luminous() {
+                    ([0.0, 0.0, 0.0, 1.0], [base[0], base[1], base[2], 1.0])
+                } else {
+                    ([base[0], base[1], base[2], 1.0], [0.0, 0.0, 0.0, 1.0])
+                };
+                let world_pos = [b.x as f32, b.y as f32, 0.0];
+
+                backend.draw_body(*sp, r, world_pos, albedo, emissive);
             }
 
             // Predicted Keplerian orbits — pure visual annotation, never
@@ -418,7 +484,6 @@ impl SimulationApp {
                 }
             }
 
-            backend.set_lighting_params(0.55, 0.7);
             backend.center = [center_after_pan.x, center_after_pan.y];
             backend.scale = self.scale;
             backend.trail_style = self.trail_style_preset.style(self.trail_width);
