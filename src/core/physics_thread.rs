@@ -336,8 +336,8 @@ impl PhysicsHandle {
     /// At worst the data is one frame stale — completely acceptable for saves.
     ///
     /// (The old blocking-RPC path via `RequestSnapshot` was removed because it
-    /// could time out when the physics thread was mid-batch with high
-    /// `steps_per_frame`, producing an empty snapshot with 0 bodies / 0 steps.)
+    /// could time out when the physics thread was mid-batch, producing an empty
+    /// snapshot with 0 bodies / 0 steps.)
     pub fn to_snapshot(&self) -> SimSnapshot {
         use crate::io::snapshot::BodyRecord;
         let m = self.metrics;
