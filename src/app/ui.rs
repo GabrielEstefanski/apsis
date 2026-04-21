@@ -475,6 +475,15 @@ impl SimulationApp {
         // ── Sync latest physics state into local cache ────────────────────────
         self.system.sync();
 
+        // ── Dense-output: interpolate body positions to the render instant ────
+        // Advances t_render by sim_rate_target × wall_delta so bodies move
+        // smoothly between physics publishes.  Skipped while paused so the
+        // display freezes at the last physics position.
+        if !self.paused {
+            let wall_delta = ctx.input(|i| i.unstable_dt as f64).min(0.2);
+            self.system.advance_render_time(wall_delta, self.sim_rate_target);
+        }
+
         // ── Single-step: re-pause after one frame of physics ─────────────────
         if self.step_pending {
             self.step_pending = false;
