@@ -215,4 +215,13 @@ pub trait Integrator: Send {
 
     /// Which algorithm this integrator represents.
     fn kind(&self) -> IntegratorKind;
+
+    /// Set the error tolerance for adaptive integrators (IAS15).
+    /// No-op for fixed-step integrators.
+    fn set_epsilon(&mut self, _eps: f64) {}
+
+    /// Return the current error tolerance, if applicable.
+    fn epsilon(&self) -> Option<f64> {
+        None
+    }
 }
