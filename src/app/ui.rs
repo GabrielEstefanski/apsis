@@ -532,13 +532,23 @@ impl SimulationApp {
         }
 
         // ── Global keyboard shortcuts ─────────────────────────────────────────
-        let (ctrl_z, space, key_f, key_h, key_b) = ctx.input_mut(|i| {
+        let (ctrl_z, space, key_f, key_h, key_b, tool_keys) = ctx.input_mut(|i| {
             (
                 i.consume_key(egui::Modifiers::CTRL, egui::Key::Z),
                 i.consume_key(egui::Modifiers::NONE, egui::Key::Space),
                 i.consume_key(egui::Modifiers::NONE, egui::Key::F),
                 i.consume_key(egui::Modifiers::NONE, egui::Key::H),
                 i.consume_key(egui::Modifiers::NONE, egui::Key::B),
+                // Tool rail 1..6 — always open the sidebar onto that tool
+                // (keyboard = predictable, never toggles closed).
+                [
+                    i.consume_key(egui::Modifiers::NONE, egui::Key::Num1),
+                    i.consume_key(egui::Modifiers::NONE, egui::Key::Num2),
+                    i.consume_key(egui::Modifiers::NONE, egui::Key::Num3),
+                    i.consume_key(egui::Modifiers::NONE, egui::Key::Num4),
+                    i.consume_key(egui::Modifiers::NONE, egui::Key::Num5),
+                    i.consume_key(egui::Modifiers::NONE, egui::Key::Num6),
+                ],
             )
         });
         if ctrl_z {
@@ -556,12 +566,18 @@ impl SimulationApp {
         if key_b {
             self.sidebar_collapsed = !self.sidebar_collapsed;
         }
+        for (i, pressed) in tool_keys.iter().enumerate() {
+            if *pressed {
+                self.activate_tool(PanelTab::ALL[i]);
+            }
+        }
 
         // Registration order carves space: top → bottom → left rail → left
         // panel → right inspector → central canvas. See `panel/mod.rs` for the
         // layout diagram.
         self.draw_toolbar(&ctx);
         self.draw_playbar(&ctx);
+        self.draw_tool_rail(&ctx);
         if !self.sidebar_collapsed {
             self.draw_panel(&ctx);
         }

@@ -306,32 +306,6 @@ fn grid_line(world : vec2<f32>, s : f32) -> f32 {
     return max(grid_aa(world.x, s), grid_aa(world.y, s));
 }
 
-/// Per-axis color and coverage for the principal axes (x = 0, y = 0).
-///
-/// Follows the scientific / CAD convention:
-///   X-axis (y = 0) → muted red
-///   Y-axis (x = 0) → muted green
-///
-/// Returns vec4(rgb, alpha). Alpha is 0 when neither axis is close.
-fn axis_color(world : vec2<f32>) -> vec4<f32> {
-    let px        = abs(world) * u.scale;
-    let threshold = 1.2;
-    // ax: coverage of the Y-axis (vertical line at x = 0)
-    let ax = 1.0 - smoothstep(0.0, threshold, px.x);
-    // ay: coverage of the X-axis (horizontal line at y = 0)
-    let ay = 1.0 - smoothstep(0.0, threshold, px.y);
-
-    if ax > ay && ax > 0.01 {
-        // Y-axis: muted green — conventional "up" axis in 2-D science plots
-        return vec4<f32>(0.25, 0.52, 0.32, ax * 0.85);
-    }
-    if ay > 0.01 {
-        // X-axis: muted red — conventional horizontal axis
-        return vec4<f32>(0.55, 0.25, 0.25, ay * 0.85);
-    }
-    return vec4<f32>(0.0, 0.0, 0.0, 0.0);
-}
-
 // ── Fragment ──────────────────────────────────────────────────────────────── //
 
 @fragment
@@ -393,13 +367,6 @@ fn fs_grid(@builtin(position) frag_coord : vec4<f32>) -> @location(0) vec4<f32> 
     if a_coarse > best_a {
         best_a   = a_coarse;
         best_rgb = vec3<f32>(0.30, 0.30, 0.42);
-    }
-
-    // Principal axes override grid color entirely when present.
-    let ac = axis_color(world);
-    if ac.a > best_a {
-        best_a   = ac.a;
-        best_rgb = ac.rgb;
     }
 
     if best_a < 0.004 { discard; }
