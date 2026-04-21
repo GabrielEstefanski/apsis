@@ -187,9 +187,10 @@ pub struct SimulationApp {
     pub(super) pinned_orbits: HashSet<usize>,
     pub(super) show_grid: bool,
     pub(super) show_vectors: bool,
-    /// Wall-clock milliseconds the physics thread may spend per frame.
-    /// Maps directly to `PhysicsCmd::SetBatchBudgetMs`. Range [1, 200].
-    pub(super) batch_budget_ms: u32,
+    /// Target sim-time advance per real second (sim units/s).
+    /// Maps directly to `PhysicsCmd::SetSimRateTarget`.
+    /// Default: 2π ≈ 1 yr/s in internal units (G=1, AU, solar masses).
+    pub(super) sim_rate_target: f64,
     pub(super) place_mode: bool,
     pub(super) place_drag_start: Option<egui::Pos2>,
     pub(super) place_mass: f64,
@@ -374,7 +375,7 @@ impl SimulationApp {
             pinned_orbits: HashSet::new(),
             show_grid: true,
             show_vectors: false,
-            batch_budget_ms: 8,
+            sim_rate_target: std::f64::consts::TAU,
             place_mode: false,
             place_drag_start: None,
             place_mass: 1.0,
@@ -490,7 +491,7 @@ impl SimulationApp {
         // These are cheap fire-and-forget sends; the thread drains them before
         // each batch, so latency is at most one batch period (~100 µs).
         self.system.set_paused(self.paused);
-        self.system.set_batch_budget_ms(self.batch_budget_ms);
+        self.system.set_sim_rate_target(self.sim_rate_target);
 
         // Recompute render hints from the freshly-synced body list.
         self.render_hints = compute_render_hints(self.system.bodies());
@@ -598,7 +599,7 @@ impl SimulationApp {
         // Re-apply paused state after UI rendering — button clicks this frame
         // (play/pause, step) may have changed self.paused after the early sync.
         self.system.set_paused(self.paused);
-        self.system.set_batch_budget_ms(self.batch_budget_ms);
+        self.system.set_sim_rate_target(self.sim_rate_target);
 
         if !self.paused {
             // Running: repaint every frame to keep the canvas live.
