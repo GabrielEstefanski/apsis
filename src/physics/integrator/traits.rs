@@ -284,11 +284,20 @@ pub trait Integrator: Send {
 pub struct AdaptiveStats {
     /// Accepted sub-steps.
     pub substeps: u64,
-    /// Rejected attempts (controller shrank `dt` and retried).
+    /// Total rejected attempts (controller shrank `dt` and retried).
+    /// Sum of `rejections_picard` + `rejections_truncation`.
     pub rejections: u64,
+    /// Rejections caused by Picard predictor–corrector non-convergence.
+    /// A high ratio vs. `rejections_truncation` means the step size
+    /// routinely exceeds the local Lipschitz bound (stiff / high-e regime).
+    pub rejections_picard: u64,
+    /// Rejections where Picard converged but truncation error exceeded
+    /// `ε`. This is the "well-behaved" rejection class handled by the
+    /// standard `(ε/err)^(1/7)` controller.
+    pub rejections_truncation: u64,
     /// Total Picard iterations across all attempts (accepted + rejected).
     pub picard_iters: u64,
-    /// Accepted sub-steps that hit the `DT_MIN` escape without meeting
-    /// tolerance. Should be zero in healthy scenes.
+    /// Accepted sub-steps that hit the `DT_MIN` escape or deadline
+    /// without meeting tolerance. Should be zero in healthy scenes.
     pub degraded: u64,
 }
