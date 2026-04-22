@@ -17,7 +17,7 @@
 //!
 //! # Usage
 //!
-//! ```
+//! ```ignore
 //! let h = (t_render - snap.t0) / snap.dt;   // ∈ [0, 1]
 //! let (x, y) = snap.interpolate(body_idx, h.clamp(0.0, 1.0));
 //! ```
