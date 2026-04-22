@@ -92,6 +92,19 @@ pub struct System {
     pub(crate) diagnostics: DiagnosticsComputer,
     pub(crate) last_diag: SimulationDiagnostics,
 
+    /// `true` if the most recent step was accepted under duress (e.g. an
+    /// IAS15 sub-step that hit the `DT_MIN` floor without satisfying the
+    /// tolerance). Mirrors [`StepResult::degraded`]; surfaced via
+    /// [`Metrics::last_step_degraded`] so the UI can flag quality loss.
+    pub(crate) last_step_degraded: bool,
+
+    /// Optional cooperative deadline passed into [`IntegratorContext`] on
+    /// every [`System::step`] call. The physics-thread batch loop sets
+    /// this to its per-batch wall-clock cap so adaptive integrators can
+    /// short-circuit retry spins in pathological scenes. `None` means no
+    /// deadline (the default; fixed-step integrators always ignore it).
+    pub(crate) step_deadline: Option<std::time::Instant>,
+
     /// Step counter.
     pub(crate) steps: u64,
 
@@ -230,6 +243,8 @@ impl System {
             softening_scale: 1.0,
             diagnostics: DiagnosticsComputer::new(),
             last_diag: SimulationDiagnostics::default(),
+            last_step_degraded: false,
+            step_deadline: None,
             steps: 0,
             t: 0.0,
             current_dt: dt,

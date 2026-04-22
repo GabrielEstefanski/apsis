@@ -722,6 +722,11 @@ fn physics_loop(
             let mut steps_since_check = 0u32;
             let mut shutdown = false;
 
+            // Hand the batch deadline to adaptive integrators so their
+            // retry loop can cooperate with the batch budget rather than
+            // spinning past it. Fixed-step integrators ignore this.
+            system.set_step_deadline(Some(hard_deadline));
+
             'batch: loop {
                 system.step();
                 steps_since_check += 1;
@@ -823,6 +828,11 @@ fn physics_loop(
                     }
                 }
             }
+
+            // Clear the per-batch deadline so any step taken outside the
+            // batch loop (single-step command, template load side-effects)
+            // does not inherit a stale one.
+            system.set_step_deadline(None);
 
             if shutdown {
                 return;

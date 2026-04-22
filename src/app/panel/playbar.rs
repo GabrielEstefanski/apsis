@@ -68,7 +68,6 @@ impl SimulationApp {
                             ("Fast",   1e-6,  "ε = 1×10⁻⁶  ·  faster, less accurate"),
                             ("Normal", 1e-9,  "ε = 1×10⁻⁹  ·  REBOUND default — recommended"),
                             ("Fine",   1e-12, "ε = 1×10⁻¹²  ·  high precision, slower"),
-                            ("Ultra",  1e-15, "ε = 1×10⁻¹⁵  ·  near machine precision"),
                         ];
                         let current_label = presets
                             .iter()

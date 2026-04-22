@@ -160,6 +160,18 @@ pub struct IntegratorContext<'a> {
 
     /// Non-gravitational perturbation forces (radiation, drag, …).
     pub perturbations: &'a [Box<dyn PerturbationForce>],
+
+    /// Optional cooperative wall-clock deadline. Adaptive integrators
+    /// (IAS15) check this after each rejection in the retry loop; when
+    /// the deadline is passed they accept the current attempt rather
+    /// than spending more wall time shrinking `dt`, and mark the step
+    /// as [`StepResult::degraded`].
+    ///
+    /// This is a courtesy knob so the physics-thread batch loop stays
+    /// responsive to the UI even in a pathological scene; it does not
+    /// strictly bound the step because the current attempt is still
+    /// allowed to run to completion. Fixed-step integrators ignore it.
+    pub deadline: Option<std::time::Instant>,
 }
 
 // ── StepResult ────────────────────────────────────────────────────────────────
@@ -197,6 +209,16 @@ pub struct StepResult {
     /// [`System::step`] supplies an Order-2 fallback using the pre-step
     /// kinematics.
     pub step_snapshot: Option<super::dense::DenseSnapshot>,
+
+    /// `true` when the integrator accepted a sub-step under duress rather
+    /// than on merit. For IAS15 this means the error controller wanted to
+    /// shrink `dt` further but hit the `DT_MIN` floor; the step was taken
+    /// anyway to avoid stalling the simulation, but the local truncation
+    /// bound `ε` was not actually satisfied. Fixed-step integrators (VV,
+    /// Y4, WH) always report `false`. Callers that care about energy-budget
+    /// quality can use this to surface a warning or log a degraded-step
+    /// event (REBOUND logs an equivalent `ias15.min_dt` warning).
+    pub degraded: bool,
 }
 
 // ── Integrator trait ──────────────────────────────────────────────────────────
@@ -244,4 +266,29 @@ pub trait Integrator: Send {
     fn epsilon(&self) -> Option<f64> {
         None
     }
+
+    /// Cumulative adaptive-integrator counters. `None` for fixed-step
+    /// integrators (they have no sub-step / rejection / Picard notion).
+    /// See [`AdaptiveStats`] for field semantics.
+    fn adaptive_stats(&self) -> Option<AdaptiveStats> {
+        None
+    }
+}
+
+/// Per-integrator lifetime counters exposed by [`Integrator::adaptive_stats`].
+///
+/// Counts are **cumulative** from integrator construction. Compute rates in
+/// the caller (e.g. `rejections / substeps` as an acceptance-efficiency
+/// indicator, or `picard_iters / attempts` for mean inner-loop work).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct AdaptiveStats {
+    /// Accepted sub-steps.
+    pub substeps: u64,
+    /// Rejected attempts (controller shrank `dt` and retried).
+    pub rejections: u64,
+    /// Total Picard iterations across all attempts (accepted + rejected).
+    pub picard_iters: u64,
+    /// Accepted sub-steps that hit the `DT_MIN` escape without meeting
+    /// tolerance. Should be zero in healthy scenes.
+    pub degraded: u64,
 }

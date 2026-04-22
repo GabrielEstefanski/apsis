@@ -61,7 +61,7 @@ pub use ias15::Ias15;
 pub use kepler::kepler_step;
 pub use perturbation::PerturbationForce;
 pub use primitives::{drift, kick};
-pub use traits::{Integrator, IntegratorContext, IntegratorKind, StepResult};
+pub use traits::{AdaptiveStats, Integrator, IntegratorContext, IntegratorKind, StepResult};
 pub use velocity_verlet::VelocityVerlet;
 pub use wisdom_holman::WisdomHolman;
 pub use yoshida4::Yoshida4;

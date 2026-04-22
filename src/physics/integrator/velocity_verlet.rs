@@ -47,6 +47,7 @@ impl Integrator for VelocityVerlet {
             potential_energy: pe,
             used_fallback: false,
             step_snapshot: None,
+            degraded: false,
         }
     }
 
