@@ -135,6 +135,7 @@ impl System {
         self.last_kinetic = 0.0;
         self.diagnostics = DiagnosticsComputer::new();
         self.last_diag = SimulationDiagnostics::default();
+        self.last_step_degraded = false;
         self.dt_ctrl.reset();
         self.theta_ctrl.set(self.force_model.theta());
 

@@ -43,11 +43,13 @@ impl System {
             max_acc: self.last_diag.max_acc,
             jerk: self.last_diag.jerk,
             max_vel: self.last_diag.max_vel,
+            last_step_degraded: self.last_step_degraded,
 
             r_min: self.r_min,
             softening_max: self.softening_max,
 
             recommended_dt: self.recommended_dt(),
+            adaptive_stats: self.integrator.adaptive_stats(),
         }
     }
 
