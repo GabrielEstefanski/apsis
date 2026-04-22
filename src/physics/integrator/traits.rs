@@ -169,6 +169,19 @@ pub struct IntegratorContext<'a> {
 /// Centralises the physical diagnostics that `System` needs after each step,
 /// so no integrator-specific logic leaks into the orchestrator.
 pub struct StepResult {
+    /// Simulated time actually advanced by this call, in the same units as
+    /// the `dt` input. For fixed-step integrators (VV, Y4, WH) this is
+    /// always equal to the requested `dt`. For adaptive integrators (IAS15)
+    /// the step is a single sub-step whose size is chosen by the error
+    /// controller; `consumed_dt` reports the accepted size — the caller is
+    /// responsible for re-invoking `step` until the desired budget is met.
+    ///
+    /// `System::step` advances `System::t` by **this value**, never by the
+    /// requested `dt`. This keeps `System::t` consistent with the physical
+    /// state of the bodies when an adaptive integrator accepts a sub-step
+    /// smaller than the caller's budget (Rein & Spiegel 2015, §2.3).
+    pub consumed_dt: f64,
+
     /// Gravitational potential energy at the end-of-step positions,
     /// **already scaled** by `g_factor`.
     pub potential_energy: f64,
@@ -179,9 +192,10 @@ pub struct StepResult {
 
     /// Dense-output snapshot for sub-step interpolation.
     ///
-    /// IAS15 fills this with the last accepted sub-step's b-coefficients.
-    /// Other integrators leave it `None`; [`System::step`] supplies an
-    /// Order-2 fallback using the pre-step kinematics.
+    /// IAS15 fills this with the accepted sub-step's b-coefficients, valid
+    /// over `[t − consumed_dt, t]`. Other integrators leave it `None`;
+    /// [`System::step`] supplies an Order-2 fallback using the pre-step
+    /// kinematics.
     pub step_snapshot: Option<super::dense::DenseSnapshot>,
 }
 
@@ -191,7 +205,13 @@ pub struct StepResult {
 ///
 /// # Contract
 ///
-/// - `step()` advances `bodies` by one time step `dt`.
+/// - `step()` advances `bodies` by **at most** the requested `dt`.
+///   - Fixed-step integrators (VV, Y4, WH) always consume exactly `dt`.
+///   - Adaptive integrators (IAS15) take **one** internal sub-step whose
+///     size is chosen by the error controller; the accepted size is
+///     reported via [`StepResult::consumed_dt`]. The caller loops until
+///     the desired simulation time is reached, mirroring the REBOUND API
+///     (`reb_integrator_ias15_part1/2` — Rein & Spiegel 2015).
 /// - `step()` may call `ctx.force.compute()` one or more times.
 /// - `step()` must leave `acc` consistent with the final body positions
 ///   (so that diagnostics can read it).
