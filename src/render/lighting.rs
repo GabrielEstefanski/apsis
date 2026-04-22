@@ -65,7 +65,9 @@ pub struct SceneLighting {
 
     /// Multiplicative ambient floor in [0, 1]. The body shader computes
     ///
-    ///     lit_factor = mix(ambient_floor, 1.0, saturate(diffuse_total))
+    /// ```text
+    /// lit_factor = mix(ambient_floor, 1.0, saturate(diffuse_total))
+    /// ```
     ///
     /// so `0.0` is pure Lambert (black terminator), `1.0` fully flat
     /// (no shading). Small values (~0.05) prevent distant / back-facing
@@ -78,7 +80,9 @@ pub struct SceneLighting {
     ///
     /// The falloff in the shader is
     ///
-    ///     attenuation = r_ref² / (r² + falloff_bias²)
+    /// ```text
+    /// attenuation = r_ref² / (r² + falloff_bias²)
+    /// ```
     ///
     /// so picking `r_ref = characteristic_distance` of the scene
     /// (e.g. 1 AU for a Solar-System view) keeps the "typical" body
