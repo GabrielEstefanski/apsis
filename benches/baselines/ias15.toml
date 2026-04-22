@@ -1,0 +1,61 @@
+# IAS15 benchmark baseline — versioned regression gate.
+#
+# Regenerate with:  IAS15_BENCH_UPDATE_BASELINE=1 cargo bench
+# Validate with:    cargo bench
+#
+# Recorded at: 2026-04-22T21:46:19Z
+# Git commit:  879a0f5
+# Runs per scenario: 10
+
+[kepler_e05]
+degraded_total = { value = 0.0, tol_abs = 0.0 }
+dt_max = { value = 0.25288419148705543, tol_factor = 1.0 }
+dt_mean = { value = 0.09425874154731537, tol_factor = 1.0 }
+dt_min = { value = 0.01767258390653126, tol_factor = 1.0 }
+dt_p50 = { value = 0.06943179114117015, tol_factor = 1.0 }
+dt_p95 = { value = 0.23165906354785193, tol_factor = 1.0 }
+peak_energy_err = { value = 2.6645352591003733e-15, tol_factor = 1.0 }
+picard_iters_total = { value = 59505.0, tol_abs = 0.0 }
+rejections_picard = { value = 27.0, tol_abs = 0.0 }
+rejections_truncation = { value = 2.0, tol_abs = 0.0 }
+substeps = { value = 13332.0, tol_abs = 0.0 }
+
+[kepler_e09]
+degraded_total = { value = 0.0, tol_abs = 0.0 }
+dt_max = { value = 0.10212995711972184, tol_factor = 1.0 }
+dt_mean = { value = 0.016893094291863666, tol_factor = 1.0 }
+dt_min = { value = 4.419349407456252e-4, tol_factor = 1.0 }
+dt_p50 = { value = 0.005670067635549003, tol_factor = 1.0 }
+dt_p95 = { value = 0.07380625916439953, tol_factor = 1.0 }
+peak_energy_err = { value = 1.0658141036401465e-14, tol_factor = 1.0 }
+picard_iters_total = { value = 53885.0, tol_abs = 0.0 }
+rejections_picard = { value = 16.0, tol_abs = 0.0 }
+rejections_truncation = { value = 2.0, tol_abs = 0.0 }
+substeps = { value = 13150.0, tol_abs = 0.0 }
+
+[kepler_e099]
+degraded_total = { value = 0.0, tol_abs = 0.0 }
+dt_max = { value = 0.12060452278603861, tol_factor = 1.0 }
+dt_mean = { value = 0.010303533217705201, tol_factor = 1.0 }
+dt_min = { value = 1.385224299355059e-5, tol_factor = 1.0 }
+dt_p50 = { value = 9.124660888044644e-4, tol_factor = 1.0 }
+dt_p95 = { value = 0.060271336677139686, tol_factor = 1.0 }
+peak_energy_err = { value = 8.526512829121202e-14, tol_factor = 1.0 }
+picard_iters_total = { value = 35042.0, tol_abs = 0.0 }
+rejections_picard = { value = 8.0, tol_abs = 0.0 }
+rejections_truncation = { value = 23.0, tol_abs = 0.0 }
+substeps = { value = 8624.0, tol_abs = 0.0 }
+
+[pythagorean]
+degraded_total = { value = 0.0, tol_abs = 0.0 }
+dt_max = { value = 0.1, tol_factor = 1.0 }
+dt_mean = { value = 0.006321124504097367, tol_factor = 1.0 }
+dt_min = { value = 9.741436715060559e-6, tol_factor = 1.0 }
+dt_p50 = { value = 0.0014089698154031716, tol_factor = 1.0 }
+dt_p95 = { value = 0.027665865833570225, tol_factor = 1.0 }
+peak_energy_err = { value = 2.062745293169877e-12, tol_factor = 1.0 }
+picard_iters_total = { value = 6362.0, tol_abs = 0.0 }
+rejections_picard = { value = 0.0, tol_abs = 0.0 }
+rejections_truncation = { value = 1.0, tol_abs = 0.0 }
+substeps = { value = 1582.0, tol_abs = 0.0 }
+
