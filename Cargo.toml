@@ -6,7 +6,7 @@ edition = "2024"
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-toml = { version = "1.1.2+spec-1.1.0", default-features = false, features = ["parse", "serde"] }
+toml = { version = "1.1.2+spec-1.1.0", default-features = false, features = ["parse", "display", "serde"] }
 eframe = "0.34.1"
 egui = "0.34.1"
 egui-phosphor = { version = "0.12", default-features = false, features = ["regular", "fill"] }
@@ -25,3 +25,14 @@ approx = "0.5"
 pretty_assertions = "1.4"
 insta = { version = "1.39", features = ["json"] }
 criterion = "0.8.2"
+
+# ── Benchmarks ────────────────────────────────────────────────────────────────
+#
+# `harness = false` disables libtest so `benches/ias15.rs` can provide its own
+# `fn main()`. The custom main enforces single-thread determinism and runs a
+# baseline-validation phase *before* handing control to Criterion — both are
+# impossible with the default harness.
+
+[[bench]]
+name = "ias15"
+harness = false
