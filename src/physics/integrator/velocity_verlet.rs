@@ -43,6 +43,7 @@ impl Integrator for VelocityVerlet {
         kick(bodies, acc, 0.5 * dt);
 
         StepResult {
+            consumed_dt: dt,
             potential_energy: pe,
             used_fallback: false,
             step_snapshot: None,
