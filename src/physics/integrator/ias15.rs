@@ -405,6 +405,21 @@ pub struct Ias15 {
     /// Cumulative count of degraded accepts (`DT_MIN` escape clause
     /// or deadline fired). Should stay at zero for well-posed scenes.
     degraded_total: u64,
+
+    // ── Picard scratch buffers ───────────────────────────────────────
+    //
+    // Start-of-attempt positions and velocities, and the previous
+    // iteration's `b₆` snapshot. These are logically local to
+    // [`Self::picard_loop`] — moving them into the struct swaps a
+    // per-retry `Vec` allocation for a `clear() + extend()` reuse of
+    // the existing heap buffer, which steady-state is zero-alloc.
+    //
+    // Left in a possibly-stale state between calls: the Picard
+    // implementation always re-fills them via `clear() + extend`
+    // before reading, so the previous run's contents cannot leak.
+    pic_x0: Vec<(f64, f64)>,
+    pic_v0: Vec<(f64, f64)>,
+    pic_b6_old: Vec<(f64, f64)>,
 }
 
 impl Default for Ias15 {
@@ -430,6 +445,9 @@ impl Ias15 {
             rejections_truncation_total: 0,
             picard_iters_total: 0,
             degraded_total: 0,
+            pic_x0: Vec::new(),
+            pic_v0: Vec::new(),
+            pic_b6_old: Vec::new(),
         }
     }
 
@@ -695,6 +713,17 @@ impl Ias15 {
     /// iteration cap. Returns `(converged, residual, iters)` — `iters`
     /// counts the actual iterations consumed (1..=MAX_PICARD_ITERATIONS)
     /// so the outer controller can aggregate them into diagnostics.
+    ///
+    /// Thin wrapper over [`Self::picard_loop_inner`]: moves the
+    /// persistent scratch buffers out of `self` for the duration of
+    /// the call so the inner function can hold `&mut` on them
+    /// simultaneously with `&mut self` (needed to call
+    /// [`Self::update_g_and_b`]). The Vec instances are returned to
+    /// their fields on every exit path; `mem::take` leaves the fields
+    /// as empty `Vec`s during the call, so a panic mid-iteration
+    /// would leave the integrator state internally consistent
+    /// (capacity lost, but length correct) — not that IAS15 is
+    /// expected to survive panics in any meaningful way.
     fn picard_loop(
         &mut self,
         bodies: &mut [Body],
@@ -703,12 +732,42 @@ impl Ias15 {
         a0: &[(f64, f64)],
         dt_try: f64,
     ) -> (bool, f64, u32) {
+        let mut x0 = std::mem::take(&mut self.pic_x0);
+        let mut v0 = std::mem::take(&mut self.pic_v0);
+        let mut b6_old = std::mem::take(&mut self.pic_b6_old);
+
+        let result =
+            self.picard_loop_inner(bodies, ctx, acc, a0, dt_try, &mut x0, &mut v0, &mut b6_old);
+
+        self.pic_x0 = x0;
+        self.pic_v0 = v0;
+        self.pic_b6_old = b6_old;
+        result
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn picard_loop_inner(
+        &mut self,
+        bodies: &mut [Body],
+        ctx: &mut IntegratorContext<'_>,
+        acc: &mut Vec<(f64, f64)>,
+        a0: &[(f64, f64)],
+        dt_try: f64,
+        x0: &mut Vec<(f64, f64)>,
+        v0: &mut Vec<(f64, f64)>,
+        b6_old: &mut Vec<(f64, f64)>,
+    ) -> (bool, f64, u32) {
         let n = bodies.len();
-        // We keep a pristine copy of the start-of-attempt positions and
-        // velocities so each stage can predict from (x0, v0) without
-        // worrying about the previous stage having mutated `bodies`.
-        let x0: Vec<(f64, f64)> = bodies.iter().map(|b| (b.x, b.y)).collect();
-        let v0: Vec<(f64, f64)> = bodies.iter().map(|b| (b.vx, b.vy)).collect();
+
+        // Populate the scratch buffers for this call. `clear() + extend`
+        // reuses the existing allocation when `len` fits into `capacity`;
+        // when `n` changed since the last call the first push realloc's
+        // once and the rest reuse. In steady-state (constant body count)
+        // these loops are zero-alloc.
+        x0.clear();
+        x0.extend(bodies.iter().map(|b| (b.x, b.y)));
+        v0.clear();
+        v0.extend(bodies.iter().map(|b| (b.vx, b.vy)));
 
         let mut last_residual = f64::INFINITY;
         let mut no_improve: u32 = 0;
@@ -718,7 +777,8 @@ impl Ias15 {
             iters = (iter as u32) + 1;
             // Snapshot b₆ before the iteration — residual is measured
             // against this.
-            let b6_old: Vec<(f64, f64)> = self.b.iter().map(|row| row[6]).collect();
+            b6_old.clear();
+            b6_old.extend(self.b.iter().map(|row| row[6]));
 
             for stage in 1..=7 {
                 let s = H[stage];
@@ -753,7 +813,7 @@ impl Ias15 {
             if residual < PICARD_TOL {
                 // Restore positions/velocities to start-of-attempt so
                 // the caller can advance cleanly from (x0, v0).
-                restore_xv(bodies, &x0, &v0);
+                restore_xv(bodies, x0, v0);
                 return (true, residual, iters);
             }
 
@@ -766,7 +826,7 @@ impl Ias15 {
             if iter >= 2 && residual > last_residual {
                 no_improve += 1;
                 if no_improve >= 2 {
-                    restore_xv(bodies, &x0, &v0);
+                    restore_xv(bodies, x0, v0);
                     return (false, residual, iters);
                 }
             } else {
@@ -775,7 +835,7 @@ impl Ias15 {
             last_residual = residual;
         }
 
-        restore_xv(bodies, &x0, &v0);
+        restore_xv(bodies, x0, v0);
         (false, last_residual, iters)
     }
 
