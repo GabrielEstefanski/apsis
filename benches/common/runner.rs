@@ -49,6 +49,12 @@ pub const STEPS_PER_ITER: usize = 100;
 /// trails — sizing it larger would waste work per step without
 /// affecting the controller's behaviour we're measuring.
 pub fn run_for_validation(spec: &ScenarioSpec) -> ScenarioMetrics {
+    // With the `ias15-profile` feature compiled in, zero the thread-local
+    // phase-timing accumulator so each scenario's breakdown reflects only
+    // its own sub-steps. No-op when the feature is off.
+    #[cfg(feature = "ias15-profile")]
+    gravity_sim::physics::integrator::ias15::profile::reset();
+
     let mut sys = build_system(spec);
 
     // Capacity estimate: upper bound on number of accepted substeps.
@@ -78,7 +84,73 @@ pub fn run_for_validation(spec: &ScenarioSpec) -> ScenarioMetrics {
         .adaptive_stats
         .expect("IAS15 must expose AdaptiveStats; check IntegratorKind::Ias15 was set");
 
+    #[cfg(feature = "ias15-profile")]
+    print_phase_profile(spec.name);
+
     metrics::assemble(&samples, &stats)
+}
+
+/// Print the accumulated per-phase breakdown from [`ias15::profile`].
+/// Feature-gated — the function (and its call site in
+/// [`run_for_validation`]) disappear entirely when the profile feature
+/// is off. Invoked after a full scenario run, so the numbers reflect
+/// the entire validation window (not one Criterion iteration).
+#[cfg(feature = "ias15-profile")]
+fn print_phase_profile(scenario_name: &str) {
+    use gravity_sim::physics::integrator::ias15::profile::{PhaseEntry, snapshot};
+
+    let snap = snapshot();
+
+    // Collect (name, entry) in a stable display order. This order
+    // reflects the nesting within a sub-step: outermost setup first
+    // (snapshot/warmstart/recompute_g), then the inner Picard hot
+    // loop (update_g_and_b + evaluate + residual), then accept-path
+    // work (advance_state + snapshot_restore for rejections).
+    let rows: &[(&str, PhaseEntry)] = &[
+        ("snapshot_capture", snap.snapshot_capture),
+        ("warmstart_b", snap.warmstart_b),
+        ("recompute_g_from_b", snap.recompute_g_from_b),
+        ("evaluate", snap.evaluate),
+        ("update_g_and_b", snap.update_g_and_b),
+        ("residual_compute", snap.residual_compute),
+        ("advance_state", snap.advance_state),
+        ("snapshot_restore", snap.snapshot_restore),
+    ];
+
+    let total_ns: u128 = rows.iter().map(|(_, e)| e.total.as_nanos()).sum();
+    // Guard: if the feature was compiled in but no phase was ever
+    // entered (e.g. a scenario with zero sub-steps), percentage math
+    // would divide by zero. Report the row counts verbatim and bail
+    // on the percentage column.
+    let total_divisor = total_ns.max(1);
+
+    println!();
+    println!("═══ phase profile — {} ═══", scenario_name);
+    println!(
+        "  {:<20} {:>12} {:>10} {:>14} {:>8}",
+        "phase", "total (ms)", "calls", "ns / call", "% total"
+    );
+    println!("  {}", "─".repeat(66));
+    for (name, entry) in rows {
+        let ns = entry.total.as_nanos();
+        let ms = entry.total.as_secs_f64() * 1000.0;
+        let ns_per_call = if entry.count == 0 {
+            0.0
+        } else {
+            ns as f64 / entry.count as f64
+        };
+        let pct = (ns * 100) as f64 / total_divisor as f64;
+        println!(
+            "  {:<20} {:>12.3} {:>10} {:>14.1} {:>7.2}%",
+            name, ms, entry.count, ns_per_call, pct
+        );
+    }
+    println!("  {}", "─".repeat(66));
+    let total_ms = total_ns as f64 / 1_000_000.0;
+    println!(
+        "  {:<20} {:>12.3}                               {:>6.2}%",
+        "sum", total_ms, 100.0
+    );
 }
 
 /// Construct a `System` in the scenario's initial state. Called once

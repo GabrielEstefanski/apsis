@@ -26,6 +26,20 @@ pretty_assertions = "1.4"
 insta = { version = "1.39", features = ["json"] }
 criterion = "0.8.2"
 
+# ── Features ──────────────────────────────────────────────────────────────────
+#
+# ias15-profile: compiles in per-phase wall-time accumulation inside the IAS15
+# integrator. Invisible in normal builds (macros expand to identity). Used
+# exclusively from the benchmark harness via
+#
+#     IAS15_BENCH_PROFILE_PHASES=1 cargo bench --features ias15-profile
+#
+# which prints per-phase time + call count after each scenario's validation
+# run. See docs/experiments/ for usage notes.
+
+[features]
+ias15-profile = []
+
 # ── Benchmarks ────────────────────────────────────────────────────────────────
 #
 # `harness = false` disables libtest so `benches/ias15.rs` can provide its own
