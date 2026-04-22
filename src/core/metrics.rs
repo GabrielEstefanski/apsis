@@ -1,5 +1,5 @@
 use crate::core::adaptive::DtMode;
-use crate::physics::integrator::IntegratorKind;
+use crate::physics::integrator::{AdaptiveStats, IntegratorKind};
 
 /// Snapshot of the physical state of the simulation at a single instant.
 ///
@@ -90,6 +90,12 @@ pub struct Metrics {
     pub jerk: f64,
     pub max_vel: f64,
 
+    /// `true` if the most recent step was accepted under duress (e.g. an
+    /// adaptive integrator that hit its minimum step size without meeting
+    /// tolerance). A UI can surface this as a quality warning; for
+    /// fixed-step integrators this is always `false`.
+    pub last_step_degraded: bool,
+
     // ── Softening diagnostics ─────────────────────────────────────────────── //
     /// Minimum pairwise separation observed at the last step (simulation units).
     ///
@@ -128,4 +134,10 @@ pub struct Metrics {
     /// - Power et al. (2003). MNRAS 338, 14–34. §3.
     /// - Aarseth, S. J. (2003). *Gravitational N-Body Simulations*. Cambridge. §2.
     pub recommended_dt: Option<f64>,
+
+    /// Cumulative adaptive-integrator counters (sub-steps, rejections,
+    /// Picard iterations, degraded accepts). `None` for fixed-step
+    /// integrators; `Some(..)` only when the active integrator is adaptive
+    /// (currently: IAS15). See [`AdaptiveStats`] for field semantics.
+    pub adaptive_stats: Option<AdaptiveStats>,
 }

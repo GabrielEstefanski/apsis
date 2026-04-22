@@ -64,9 +64,11 @@ impl System {
             force: &mut *self.force_model,
             g_factor,
             perturbations: &self.perturbations,
+            deadline: self.step_deadline,
         };
         let result = self.integrator.step(&mut self.bodies, &mut ctx, dt, &mut self.scratch_acc);
         self.last_potential = result.potential_energy;
+        self.last_step_degraded = result.degraded;
 
         // Advance by the time the integrator actually consumed. For fixed-step
         // integrators (VV, Y4, WH) this always equals `dt`; for IAS15 it is the

@@ -166,6 +166,23 @@ const MAX_PICARD_ITERATIONS: usize = 12;
 /// fail to improve, which we also do.
 const PICARD_TOL: f64 = 1e-16;
 
+/// Lower bound on user-settable epsilon. f64 machine epsilon is
+/// ≈2.22e-16, so tolerances below ~1e-14 cannot be distinguished from
+/// floating-point round-off in either the Picard residual or the
+/// truncation estimate. Pinning the floor three decades above machine
+/// epsilon keeps the error controller honest: at `ε = 1e-13` the
+/// optimal-dt formula `(ε/err)^(1/7)` still produces meaningful
+/// adjustments rather than noise, and the retry loop cannot stall
+/// with Picard residual and truncation both floating on round-off.
+const EPSILON_MIN: f64 = 1e-13;
+
+/// Upper bound on user-settable epsilon. Above `~1e-3` the local
+/// truncation error approaches the step itself and the 15th-order
+/// machinery buys nothing over a cheap low-order method; we cap here
+/// to flag misconfiguration rather than silently degrade to
+/// garbage-quality integration.
+const EPSILON_MAX: f64 = 1e-3;
+
 // ── Integrator struct ────────────────────────────────────────────────────────
 
 /// Per-body polynomial state for one substep (coefficients of the
@@ -202,6 +219,24 @@ pub struct Ias15 {
     /// ratio is correct. Zero means "no accepted step yet" — warm-start is
     /// skipped and `e` is left at zero.
     dt_last_accepted: f64,
+
+    /// Cumulative sub-step count across the integrator's lifetime
+    /// (one per accepted attempt). Surfaced via [`Metrics`] so a UI
+    /// can show effective work rate (sub-steps / wall-second).
+    substeps_total: u64,
+
+    /// Cumulative count of rejected attempts. High values vs. `substeps_total`
+    /// indicate the error controller is over-estimating dt; diagnostic only.
+    rejections_total: u64,
+
+    /// Cumulative Picard iteration count summed across all attempts
+    /// (accepted and rejected). Mean iterations per sub-step is
+    /// `picard_iters_total / (substeps_total + rejections_total)`.
+    picard_iters_total: u64,
+
+    /// Cumulative count of degraded accepts (`DT_MIN` escape clause fired).
+    /// Should stay at zero for well-posed scenes.
+    degraded_total: u64,
 }
 
 impl Default for Ias15 {
@@ -222,14 +257,18 @@ impl Ias15 {
             csv: Vec::new(),
             dt_next: 0.0,
             dt_last_accepted: 0.0,
+            substeps_total: 0,
+            rejections_total: 0,
+            picard_iters_total: 0,
+            degraded_total: 0,
         }
     }
 
     /// Override the default tolerance (`1e-9`). Tighter values give
     /// better energy conservation at the cost of proportionally smaller
-    /// step sizes.
+    /// step sizes. Clamped to `[EPSILON_MIN, EPSILON_MAX]`.
     pub fn with_epsilon(mut self, epsilon: f64) -> Self {
-        self.epsilon = epsilon;
+        self.epsilon = epsilon.clamp(EPSILON_MIN, EPSILON_MAX);
         self
     }
 
@@ -352,14 +391,16 @@ impl Integrator for Ias15 {
         // configuration forces the controller down to it, we accept the
         // step unconditionally to keep the simulation progressing rather
         // than spin forever.
-        let (accepted_dt, final_pe, final_snapshot) = loop {
+        let (accepted_dt, final_pe, final_snapshot, degraded) = loop {
             if self.dt_last_accepted > 0.0 {
                 self.warmstart_b(dt_try, self.dt_last_accepted);
             }
             self.recompute_g_from_b();
 
-            let (converged, picard_err) =
+            let (converged, picard_err, picard_iters) =
                 self.picard_loop(bodies, ctx, acc, &a0, dt_try);
+            self.picard_iters_total =
+                self.picard_iters_total.saturating_add(picard_iters as u64);
 
             let trunc_err = self.truncation_error(&a0);
             let max_err = trunc_err.max(picard_err).max(0.0);
@@ -369,15 +410,31 @@ impl Integrator for Ias15 {
             // truncation error within tolerance. A non-converged Picard
             // with incidentally-small residual is **not** admissible —
             // that path silently accepted divergent coefficients in the
-            // previous outer-budget-loop implementation. The floor case
-            // (`dt_try <= DT_MIN`) is the only escape hatch.
-            let accept =
-                (converged && max_err <= self.epsilon) || dt_try <= DT_MIN;
+            // previous outer-budget-loop implementation. Two escape
+            // hatches accept without (i)+(ii) holding:
+            //   - the floor case `dt_try <= DT_MIN` (pathological scene);
+            //   - an exhausted cooperative `ctx.deadline` (host wants the
+            //     call to return even if we haven't converged).
+            // In either case we flag the step as `degraded` so the caller
+            // can surface the condition.
+            let on_merit = converged && max_err <= self.epsilon;
+            let deadline_hit = ctx
+                .deadline
+                .map(|d| std::time::Instant::now() >= d)
+                .unwrap_or(false);
+            let accept = on_merit || dt_try <= DT_MIN || deadline_hit;
 
             if !accept {
+                self.rejections_total = self.rejections_total.saturating_add(1);
                 snapshot.restore(bodies, self);
                 dt_try = dt_optimal.max(DT_MIN).min(dt_cap);
                 continue;
+            }
+
+            let step_degraded = !on_merit;
+            self.substeps_total = self.substeps_total.saturating_add(1);
+            if step_degraded {
+                self.degraded_total = self.degraded_total.saturating_add(1);
             }
 
             // Accept path ────────────────────────────────────────────────
@@ -412,7 +469,7 @@ impl Integrator for Ias15 {
             // clamps it on the next entry to `step()` via `dt_cap`.
             self.dt_next = dt_optimal.max(DT_MIN);
 
-            break (dt_try, pe, step_snapshot);
+            break (dt_try, pe, step_snapshot, step_degraded);
         };
 
         StepResult {
@@ -420,6 +477,7 @@ impl Integrator for Ias15 {
             potential_energy: final_pe,
             used_fallback: false,
             step_snapshot: Some(final_snapshot),
+            degraded,
         }
     }
 
@@ -428,11 +486,20 @@ impl Integrator for Ias15 {
     }
 
     fn set_epsilon(&mut self, eps: f64) {
-        self.epsilon = eps.clamp(1e-15, 1e-3);
+        self.epsilon = eps.clamp(EPSILON_MIN, EPSILON_MAX);
     }
 
     fn epsilon(&self) -> Option<f64> {
         Some(self.epsilon)
+    }
+
+    fn adaptive_stats(&self) -> Option<super::traits::AdaptiveStats> {
+        Some(super::traits::AdaptiveStats {
+            substeps: self.substeps_total,
+            rejections: self.rejections_total,
+            picard_iters: self.picard_iters_total,
+            degraded: self.degraded_total,
+        })
     }
 }
 
@@ -441,7 +508,9 @@ impl Ias15 {
     /// Inner predictor-corrector iteration. Given `a0` (acceleration at
     /// the start of the attempt) and a target `dt_try`, iteratively
     /// refines `b` until max|Δb₆|/max|a₀| < `PICARD_TOL` or we hit the
-    /// iteration cap. Returns `(converged, residual)`.
+    /// iteration cap. Returns `(converged, residual, iters)` — `iters`
+    /// counts the actual iterations consumed (1..=MAX_PICARD_ITERATIONS)
+    /// so the outer controller can aggregate them into diagnostics.
     fn picard_loop(
         &mut self,
         bodies: &mut [Body],
@@ -449,7 +518,7 @@ impl Ias15 {
         acc: &mut Vec<(f64, f64)>,
         a0: &[(f64, f64)],
         dt_try: f64,
-    ) -> (bool, f64) {
+    ) -> (bool, f64, u32) {
         let n = bodies.len();
         // We keep a pristine copy of the start-of-attempt positions and
         // velocities so each stage can predict from (x0, v0) without
@@ -458,8 +527,10 @@ impl Ias15 {
         let v0: Vec<(f64, f64)> = bodies.iter().map(|b| (b.vx, b.vy)).collect();
 
         let mut last_residual = f64::INFINITY;
+        let mut iters: u32 = 0;
 
         for iter in 0..MAX_PICARD_ITERATIONS {
+            iters = (iter as u32) + 1;
             // Snapshot b₆ before the iteration — residual is measured
             // against this.
             let b6_old: Vec<(f64, f64)> = self.b.iter().map(|row| row[6]).collect();
@@ -500,20 +571,20 @@ impl Ias15 {
                 // Restore positions/velocities to start-of-attempt so
                 // the caller can advance cleanly from (x0, v0).
                 restore_xv(bodies, &x0, &v0);
-                return (true, residual);
+                return (true, residual, iters);
             }
 
             // Stagnation guard: if we're not making progress, bail.
             // Consistent with REBOUND's heuristic.
             if iter >= 2 && residual > last_residual {
                 restore_xv(bodies, &x0, &v0);
-                return (false, residual);
+                return (false, residual, iters);
             }
             last_residual = residual;
         }
 
         restore_xv(bodies, &x0, &v0);
-        (false, last_residual)
+        (false, last_residual, iters)
     }
 
     /// Advance positions and velocities to the end of the accepted

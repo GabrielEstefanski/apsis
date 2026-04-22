@@ -74,6 +74,7 @@ impl System {
         self.last_potential = 0.0;
         self.diagnostics = crate::core::diagnostics::DiagnosticsComputer::new();
         self.last_diag = crate::core::diagnostics::SimulationDiagnostics::default();
+        self.last_step_degraded = false;
         self.orbital_cache.clear();
         self.dt_ctrl.reset();
         self.theta_ctrl.set(snap.theta);
