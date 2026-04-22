@@ -286,6 +286,12 @@ impl Ias15 {
             self.csx = vec![(0.0, 0.0); n];
             self.csv = vec![(0.0, 0.0); n];
             self.dt_last_accepted = 0.0;
+            // Reset dt_next too: a value from a different body count is
+            // physically meaningless (different acceleration regime) and
+            // would spend rejections in the retry loop before re-calibrating.
+            // The `if self.dt_next <= 0.0` guard in `step()` re-seeds from
+            // the caller's budget on the next entry.
+            self.dt_next = 0.0;
         }
     }
 }
