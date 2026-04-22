@@ -107,23 +107,87 @@ const H: [f64; 8] = [
 // REBOUND reference implementation.
 
 const C_MAT: [[f64; 7]; 7] = [
-    [0.0,                         0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-    [-0.056_262_560_536_922_146,  0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-    [ 0.010_140_802_830_063_630, -0.236_503_252_273_814_5,   0.0, 0.0, 0.0, 0.0, 0.0],
-    [-0.003_575_897_729_251_617,  0.093_537_695_259_462_07, -0.589_127_969_386_984_1,   0.0, 0.0, 0.0, 0.0],
-    [ 0.001_956_565_409_947_221, -0.054_755_386_889_068_69,  0.415_881_200_082_306_86, -1.136_281_595_717_539_5,   0.0, 0.0, 0.0],
-    [-0.001_436_530_236_370_892,  0.042_158_527_721_268_71, -0.360_099_596_502_056_8,   1.250_150_711_840_691_0,  -1.870_491_772_932_950_1,   0.0, 0.0],
-    [ 0.001_271_790_309_026_868, -0.038_760_357_915_906_77,  0.360_962_243_452_846_0,  -1.466_884_208_400_426_9,   2.906_136_259_308_429_3,  -2.755_812_719_772_045_8, 0.0],
+    [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    [-0.056_262_560_536_922_146, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    [0.010_140_802_830_063_630, -0.236_503_252_273_814_5, 0.0, 0.0, 0.0, 0.0, 0.0],
+    [
+        -0.003_575_897_729_251_617,
+        0.093_537_695_259_462_07,
+        -0.589_127_969_386_984_1,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+    ],
+    [
+        0.001_956_565_409_947_221,
+        -0.054_755_386_889_068_69,
+        0.415_881_200_082_306_86,
+        -1.136_281_595_717_539_5,
+        0.0,
+        0.0,
+        0.0,
+    ],
+    [
+        -0.001_436_530_236_370_892,
+        0.042_158_527_721_268_71,
+        -0.360_099_596_502_056_8,
+        1.250_150_711_840_691_0,
+        -1.870_491_772_932_950_1,
+        0.0,
+        0.0,
+    ],
+    [
+        0.001_271_790_309_026_868,
+        -0.038_760_357_915_906_77,
+        0.360_962_243_452_846_0,
+        -1.466_884_208_400_426_9,
+        2.906_136_259_308_429_3,
+        -2.755_812_719_772_045_8,
+        0.0,
+    ],
 ];
 
 const D_MAT: [[f64; 7]; 7] = [
-    [0.0,                         0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-    [0.056_262_560_536_922_146,   0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-    [0.003_165_475_718_170_829,   0.236_503_252_273_814_5,   0.0, 0.0, 0.0, 0.0, 0.0],
-    [0.000_178_097_769_221_743,   0.045_792_985_506_027_92,  0.589_127_969_386_984_1,   0.0, 0.0, 0.0, 0.0],
-    [0.000_010_020_236_522_329_1, 0.008_431_857_153_525_70,  0.253_534_069_054_569_27,  1.136_281_595_717_539_5,   0.0, 0.0, 0.0],
-    [0.000_000_563_764_163_931_8, 0.001_529_784_002_500_466, 0.097_834_236_532_444_00,  0.875_254_664_684_091_1,   1.870_491_772_932_950_1,   0.0, 0.0],
-    [0.000_000_031_718_815_401_8, 0.000_276_293_090_982_648, 0.036_028_553_983_736_46,  0.576_733_000_277_078_7,   2.248_588_760_769_159_8,   2.755_812_719_772_045_8, 0.0],
+    [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    [0.056_262_560_536_922_146, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    [0.003_165_475_718_170_829, 0.236_503_252_273_814_5, 0.0, 0.0, 0.0, 0.0, 0.0],
+    [
+        0.000_178_097_769_221_743,
+        0.045_792_985_506_027_92,
+        0.589_127_969_386_984_1,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+    ],
+    [
+        0.000_010_020_236_522_329_1,
+        0.008_431_857_153_525_70,
+        0.253_534_069_054_569_27,
+        1.136_281_595_717_539_5,
+        0.0,
+        0.0,
+        0.0,
+    ],
+    [
+        0.000_000_563_764_163_931_8,
+        0.001_529_784_002_500_466,
+        0.097_834_236_532_444_00,
+        0.875_254_664_684_091_1,
+        1.870_491_772_932_950_1,
+        0.0,
+        0.0,
+    ],
+    [
+        0.000_000_031_718_815_401_8,
+        0.000_276_293_090_982_648,
+        0.036_028_553_983_736_46,
+        0.576_733_000_277_078_7,
+        2.248_588_760_769_159_8,
+        2.755_812_719_772_045_8,
+        0.0,
+    ],
 ];
 
 // ── Tuning parameters ────────────────────────────────────────────────────────
@@ -183,6 +247,99 @@ const EPSILON_MIN: f64 = 1e-13;
 /// garbage-quality integration.
 const EPSILON_MAX: f64 = 1e-3;
 
+/// Shrink factor applied when the Picard predictor–corrector fails to
+/// converge. Divergence is a Lipschitz-regime problem (the step is
+/// simply too large for the local dynamics); a fixed halving matches
+/// REBOUND's heuristic and converges faster than the truncation formula
+/// `(ε/err)^(1/7)` when the error comes from non-convergence, not from
+/// dt⁷-scaled truncation.
+const PICARD_SHRINK: f64 = 0.5;
+
+// ── Controller decision type ─────────────────────────────────────────────────
+
+/// Outcome of one attempt at an IAS15 sub-step, as decided by
+/// [`decide_dt`] from the two independent error signals.
+///
+/// Keeping this as a small, `PartialEq`-able enum makes the branching
+/// trivial to unit-test in isolation, and was the whole point of
+/// factoring it out of the retry loop in [`Integrator::step`] — prior
+/// revisions collapsed the two signals through `max(picard, trunc)`
+/// and so lost the information of *which* signal was failing, which
+/// drives the right shrink strategy (TD-004).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DtDecision {
+    /// Accept this attempt. `degraded = true` when the acceptance was
+    /// forced by an escape hatch (`DT_MIN` floor or cooperative deadline)
+    /// rather than convergence + tolerance actually being met; the caller
+    /// should then surface [`StepResult::degraded`].
+    Accept { degraded: bool },
+    /// Picard predictor–corrector did not converge. Apply [`PICARD_SHRINK`]
+    /// (a fixed halving); the truncation formula would under-estimate the
+    /// needed shrink in this regime because it assumes the dt⁷ scaling
+    /// that only holds when Picard has actually produced valid `b`
+    /// coefficients.
+    RejectPicard,
+    /// Picard converged but truncation bound `|b₆|/|a₀|` is above `ε`.
+    /// Shrink using the standard controller formula
+    /// `dt · safety · (ε / trunc_err)^(1/7)` — this is the well-posed
+    /// signal the formula was derived for.
+    RejectTruncation,
+}
+
+/// Pure decision function for the IAS15 adaptive controller.
+///
+/// # Why pure
+///
+/// The retry loop around this function holds `&mut self` on a bunch of
+/// coefficient buffers and runs a non-trivial sequence of force
+/// evaluations. By isolating the *decision* (which is first-order
+/// logic on two floats + two bools) from the *mutation* (which is
+/// second-order through the force model), we get cheap unit tests on
+/// the control behaviour without standing up a full `System`.
+///
+/// # Arguments
+///
+/// - `picard_converged` — whether the predictor–corrector satisfied
+///   [`PICARD_TOL`] before hitting [`MAX_PICARD_ITERATIONS`]. Note this
+///   is **independent** of `trunc_err`: Picard can diverge while
+///   `trunc_err` is incidentally small, and that case must still be
+///   rejected rather than silently accepted.
+/// - `trunc_err` — the truncation-error estimate `max|b₆|/max|a₀|`,
+///   scaling as `dt⁷`.
+/// - `dt_try` — step size of the attempt being judged. Used only for
+///   the `DT_MIN` escape check.
+/// - `eps` — user's target tolerance; clamped to `[EPSILON_MIN, EPSILON_MAX]`
+///   on the way in by [`Ias15::set_epsilon`].
+/// - `deadline_hit` — cooperative wall-clock budget has been exceeded;
+///   used to short-circuit retry spins in pathological scenes.
+///
+/// # Decision table
+///
+/// | `converged` | `trunc ≤ ε` | `dt ≤ DT_MIN` | `deadline` | → |
+/// |---|---|---|---|---|
+/// | T | T | — | — | `Accept { degraded: false }` |
+/// | F | — | T | — | `Accept { degraded: true }` |
+/// | T | F | T | — | `Accept { degraded: true }` |
+/// | — | — | — | T | `Accept { degraded: true }` |
+/// | F | — | F | F | `RejectPicard` |
+/// | T | F | F | F | `RejectTruncation` |
+fn decide_dt(
+    picard_converged: bool,
+    trunc_err: f64,
+    dt_try: f64,
+    eps: f64,
+    deadline_hit: bool,
+) -> DtDecision {
+    let on_merit = picard_converged && trunc_err <= eps;
+    if on_merit {
+        return DtDecision::Accept { degraded: false };
+    }
+    if dt_try <= DT_MIN || deadline_hit {
+        return DtDecision::Accept { degraded: true };
+    }
+    if !picard_converged { DtDecision::RejectPicard } else { DtDecision::RejectTruncation }
+}
+
 // ── Integrator struct ────────────────────────────────────────────────────────
 
 /// Per-body polynomial state for one substep (coefficients of the
@@ -225,17 +382,28 @@ pub struct Ias15 {
     /// can show effective work rate (sub-steps / wall-second).
     substeps_total: u64,
 
-    /// Cumulative count of rejected attempts. High values vs. `substeps_total`
-    /// indicate the error controller is over-estimating dt; diagnostic only.
-    rejections_total: u64,
+    /// Cumulative rejections caused by Picard predictor–corrector not
+    /// converging within [`MAX_PICARD_ITERATIONS`]. High values here
+    /// (relative to `rejections_truncation_total`) indicate a stiff
+    /// or high-eccentricity regime where the step size exceeds the
+    /// Lipschitz bound — the error controller cannot see this signal
+    /// through the truncation estimate alone (cf. TD-004).
+    rejections_picard_total: u64,
+
+    /// Cumulative rejections where Picard converged but the truncation
+    /// bound `|b₆|/|a₀|` exceeded `ε`. This is the "well-posed"
+    /// rejection class — the controller formula applies and the next
+    /// attempt uses `(ε/err)^(1/7)` scaling.
+    rejections_truncation_total: u64,
 
     /// Cumulative Picard iteration count summed across all attempts
-    /// (accepted and rejected). Mean iterations per sub-step is
-    /// `picard_iters_total / (substeps_total + rejections_total)`.
+    /// (accepted and rejected). Mean iterations per attempt is
+    /// `picard_iters_total / (substeps_total + rejections_picard_total
+    /// + rejections_truncation_total)`.
     picard_iters_total: u64,
 
-    /// Cumulative count of degraded accepts (`DT_MIN` escape clause fired).
-    /// Should stay at zero for well-posed scenes.
+    /// Cumulative count of degraded accepts (`DT_MIN` escape clause
+    /// or deadline fired). Should stay at zero for well-posed scenes.
     degraded_total: u64,
 }
 
@@ -258,7 +426,8 @@ impl Ias15 {
             dt_next: 0.0,
             dt_last_accepted: 0.0,
             substeps_total: 0,
-            rejections_total: 0,
+            rejections_picard_total: 0,
+            rejections_truncation_total: 0,
             picard_iters_total: 0,
             degraded_total: 0,
         }
@@ -403,79 +572,85 @@ impl Integrator for Ias15 {
             }
             self.recompute_g_from_b();
 
-            let (converged, picard_err, picard_iters) =
+            let (converged, _picard_err, picard_iters) =
                 self.picard_loop(bodies, ctx, acc, &a0, dt_try);
-            self.picard_iters_total =
-                self.picard_iters_total.saturating_add(picard_iters as u64);
+            self.picard_iters_total = self.picard_iters_total.saturating_add(picard_iters as u64);
 
             let trunc_err = self.truncation_error(&a0);
-            let max_err = trunc_err.max(picard_err).max(0.0);
-            let dt_optimal = self.optimal_dt(dt_try, max_err);
 
-            // Acceptance requires both (i) Picard convergence and (ii) a
-            // truncation error within tolerance. A non-converged Picard
-            // with incidentally-small residual is **not** admissible —
-            // that path silently accepted divergent coefficients in the
-            // previous outer-budget-loop implementation. Two escape
-            // hatches accept without (i)+(ii) holding:
-            //   - the floor case `dt_try <= DT_MIN` (pathological scene);
-            //   - an exhausted cooperative `ctx.deadline` (host wants the
-            //     call to return even if we haven't converged).
-            // In either case we flag the step as `degraded` so the caller
-            // can surface the condition.
-            let on_merit = converged && max_err <= self.epsilon;
-            let deadline_hit = ctx
-                .deadline
-                .map(|d| std::time::Instant::now() >= d)
-                .unwrap_or(false);
-            let accept = on_merit || dt_try <= DT_MIN || deadline_hit;
+            // Delegate acceptance/rejection to the pure [`decide_dt`]
+            // function. It treats Picard convergence and truncation error
+            // as independent signals (TD-004) so the shrink strategy can
+            // be picked correctly for each failure class; prior revisions
+            // collapsed them with `max(…)` and underfed the controller.
+            let deadline_hit =
+                ctx.deadline.map(|d| std::time::Instant::now() >= d).unwrap_or(false);
 
-            if !accept {
-                self.rejections_total = self.rejections_total.saturating_add(1);
-                snapshot.restore(bodies, self);
-                dt_try = dt_optimal.max(DT_MIN).min(dt_cap);
-                continue;
+            match decide_dt(converged, trunc_err, dt_try, self.epsilon, deadline_hit) {
+                DtDecision::RejectPicard => {
+                    self.rejections_picard_total = self.rejections_picard_total.saturating_add(1);
+                    snapshot.restore(bodies, self);
+                    // Fixed halving (REBOUND convention): divergence
+                    // means the step exceeds the local Lipschitz bound;
+                    // the dt⁷ formula would under-shrink here.
+                    dt_try = (dt_try * PICARD_SHRINK).max(DT_MIN).min(dt_cap);
+                    continue;
+                },
+                DtDecision::RejectTruncation => {
+                    self.rejections_truncation_total =
+                        self.rejections_truncation_total.saturating_add(1);
+                    snapshot.restore(bodies, self);
+                    // Standard controller: dt · safety · (ε/err)^(1/7).
+                    dt_try = self.optimal_dt(dt_try, trunc_err).max(DT_MIN).min(dt_cap);
+                    continue;
+                },
+                DtDecision::Accept { degraded: step_degraded } => {
+                    self.substeps_total = self.substeps_total.saturating_add(1);
+                    if step_degraded {
+                        self.degraded_total = self.degraded_total.saturating_add(1);
+                    }
+
+                    // Accept path ──────────────────────────────────────
+                    // Build the dense-output snapshot *before* we advance
+                    // the state, so it carries the pre-step kinematics
+                    // (the b-coeffs below are the accepted values —
+                    // `self.b` is not further modified on the accept
+                    // path). The caller (`System::step`) fills in the
+                    // absolute `t0` as `system.t() - consumed_dt`.
+                    let step_snapshot = DenseSnapshot {
+                        t0: 0.0,
+                        dt: dt_try,
+                        x0: snapshot.x.clone(),
+                        v0: snapshot.v.clone(),
+                        a0: a0.clone(),
+                        b: self.b.clone(),
+                        kind: IntegratorKind::Ias15,
+                    };
+
+                    self.advance_state(bodies, &a0, dt_try);
+
+                    // Post-step force evaluation: publishes `acc`
+                    // consistent with the final body positions, and
+                    // returns the potential energy the caller will use
+                    // for energy-conservation diagnostics.
+                    let raw_pe = evaluate(bodies, ctx.force, acc);
+                    let pe = scale_acc_and_pe(acc, ctx.g_factor, raw_pe);
+                    apply_perturbations(bodies, acc, ctx.perturbations);
+
+                    self.update_warmstart_record();
+                    self.dt_last_accepted = dt_try;
+                    // Propose next dt from the clean truncation signal
+                    // only. Prior revisions used `max(trunc, picard)`
+                    // here, but Picard convergence is binary and
+                    // `picard_err` is a residual from a root-finding
+                    // iteration — not a truncation-error surrogate.
+                    // Feeding it into `optimal_dt` distorted the
+                    // controller (cf. TD-004).
+                    self.dt_next = self.optimal_dt(dt_try, trunc_err).max(DT_MIN);
+
+                    break (dt_try, pe, step_snapshot, step_degraded);
+                },
             }
-
-            let step_degraded = !on_merit;
-            self.substeps_total = self.substeps_total.saturating_add(1);
-            if step_degraded {
-                self.degraded_total = self.degraded_total.saturating_add(1);
-            }
-
-            // Accept path ────────────────────────────────────────────────
-            // Build the dense-output snapshot *before* we advance the
-            // state, so it carries the pre-step kinematics (the b-coeffs
-            // below are the accepted values — `self.b` is not further
-            // modified on the accept path). The caller (`System::step`)
-            // fills in the absolute `t0` as `system.t() - consumed_dt`.
-            let step_snapshot = DenseSnapshot {
-                t0: 0.0,
-                dt: dt_try,
-                x0: snapshot.x.clone(),
-                v0: snapshot.v.clone(),
-                a0: a0.clone(),
-                b: self.b.clone(),
-                kind: IntegratorKind::Ias15,
-            };
-
-            self.advance_state(bodies, &a0, dt_try);
-
-            // Post-step force evaluation: publishes `acc` consistent with
-            // the final body positions, and returns the potential energy
-            // the caller will use for energy-conservation diagnostics.
-            let raw_pe = evaluate(bodies, ctx.force, acc);
-            let pe = scale_acc_and_pe(acc, ctx.g_factor, raw_pe);
-            apply_perturbations(bodies, acc, ctx.perturbations);
-
-            self.update_warmstart_record();
-            self.dt_last_accepted = dt_try;
-            // `dt_next` is driven by the pure error formula, no relative
-            // growth cap (cf. REBOUND's controller). The external budget
-            // clamps it on the next entry to `step()` via `dt_cap`.
-            self.dt_next = dt_optimal.max(DT_MIN);
-
-            break (dt_try, pe, step_snapshot, step_degraded);
         };
 
         StepResult {
@@ -500,9 +675,13 @@ impl Integrator for Ias15 {
     }
 
     fn adaptive_stats(&self) -> Option<super::traits::AdaptiveStats> {
+        let rejections_picard = self.rejections_picard_total;
+        let rejections_truncation = self.rejections_truncation_total;
         Some(super::traits::AdaptiveStats {
             substeps: self.substeps_total,
-            rejections: self.rejections_total,
+            rejections: rejections_picard.saturating_add(rejections_truncation),
+            rejections_picard,
+            rejections_truncation,
             picard_iters: self.picard_iters_total,
             degraded: self.degraded_total,
         })
@@ -510,7 +689,6 @@ impl Integrator for Ias15 {
 }
 
 impl Ias15 {
-
     /// Inner predictor-corrector iteration. Given `a0` (acceleration at
     /// the start of the attempt) and a target `dt_try`, iteratively
     /// refines `b` until max|Δb₆|/max|a₀| < `PICARD_TOL` or we hit the
@@ -545,9 +723,7 @@ impl Ias15 {
                 let s = H[stage];
                 // Predict positions at node `s`.
                 for i in 0..n {
-                    let (px, py) = predict_ias15(
-                        x0[i], v0[i], a0[i], &self.b[i], s, dt_try,
-                    );
+                    let (px, py) = predict_ias15(x0[i], v0[i], a0[i], &self.b[i], s, dt_try);
                     bodies[i].x = px;
                     bodies[i].y = py;
                 }
@@ -603,49 +779,47 @@ impl Ias15 {
 
             // Full-step position increment (s = 1):
             //   Δx/dt² = a₀/2 + b₀/6 + b₁/12 + b₂/20 + b₃/30 + b₄/42 + b₅/56 + b₆/72
-            let dx = dt * dt * (
-                a0[i].0 * 0.5
+            let dx = dt
+                * dt
+                * (a0[i].0 * 0.5
                     + bi[0].0 / 6.0
                     + bi[1].0 / 12.0
                     + bi[2].0 / 20.0
                     + bi[3].0 / 30.0
                     + bi[4].0 / 42.0
                     + bi[5].0 / 56.0
-                    + bi[6].0 / 72.0
-            );
-            let dy = dt * dt * (
-                a0[i].1 * 0.5
+                    + bi[6].0 / 72.0);
+            let dy = dt
+                * dt
+                * (a0[i].1 * 0.5
                     + bi[0].1 / 6.0
                     + bi[1].1 / 12.0
                     + bi[2].1 / 20.0
                     + bi[3].1 / 30.0
                     + bi[4].1 / 42.0
                     + bi[5].1 / 56.0
-                    + bi[6].1 / 72.0
-            );
+                    + bi[6].1 / 72.0);
 
             // Full-step velocity increment:
             //   Δv/dt = a₀ + b₀/2 + b₁/3 + b₂/4 + b₃/5 + b₄/6 + b₅/7 + b₆/8
-            let dvx = dt * (
-                a0[i].0
+            let dvx = dt
+                * (a0[i].0
                     + bi[0].0 / 2.0
                     + bi[1].0 / 3.0
                     + bi[2].0 / 4.0
                     + bi[3].0 / 5.0
                     + bi[4].0 / 6.0
                     + bi[5].0 / 7.0
-                    + bi[6].0 / 8.0
-            );
-            let dvy = dt * (
-                a0[i].1
+                    + bi[6].0 / 8.0);
+            let dvy = dt
+                * (a0[i].1
                     + bi[0].1 / 2.0
                     + bi[1].1 / 3.0
                     + bi[2].1 / 4.0
                     + bi[3].1 / 5.0
                     + bi[4].1 / 6.0
                     + bi[5].1 / 7.0
-                    + bi[6].1 / 8.0
-            );
+                    + bi[6].1 / 8.0);
 
             // First integrate the v·dt contribution to position.
             let vdt_x = bodies[i].vx * dt;
@@ -720,7 +894,7 @@ impl Ias15 {
             ];
 
             // Rescale b-coefficients for the new step size.
-            self.e[i][0] = (self.b[i][0].0 * q,  self.b[i][0].1 * q);
+            self.e[i][0] = (self.b[i][0].0 * q, self.b[i][0].1 * q);
             self.e[i][1] = (self.b[i][1].0 * q2, self.b[i][1].1 * q2);
             self.e[i][2] = (self.b[i][2].0 * q3, self.b[i][2].1 * q3);
             self.e[i][3] = (self.b[i][3].0 * q4, self.b[i][3].1 * q4);
@@ -758,12 +932,7 @@ impl Ias15 {
     /// via Newton divided differences of (F - F₀); then propagate the
     /// delta back into b₀..b_{n-1} using c_mat. Compensated summation
     /// keeps round-off under control across many Picard iterations.
-    fn update_g_and_b(
-        &mut self,
-        stage: usize,
-        a0: &[(f64, f64)],
-        acc_n: &[(f64, f64)],
-    ) {
+    fn update_g_and_b(&mut self, stage: usize, a0: &[(f64, f64)], acc_n: &[(f64, f64)]) {
         let n = stage - 1; // index of the g coefficient we're updating
         let hn = H[stage];
 
@@ -885,7 +1054,9 @@ mod tests {
         assert!(
             peak < PEAK_TOL,
             "IAS15 Kepler: peak |δE/E₀| = {:.3e} exceeds {:.0e} over {} orbits",
-            peak, PEAK_TOL, N_ORBITS,
+            peak,
+            PEAK_TOL,
+            N_ORBITS,
         );
 
         // Linear regression on the samples. A well-behaved IAS15 run
@@ -909,7 +1080,10 @@ mod tests {
             drift < DRIFT_TOL,
             "IAS15 Kepler: monotonic drift |slope·t_final| = {:.3e} exceeds {:.0e} \
              (slope = {:.3e}, peak = {:.3e}) — suggests asymmetric state update",
-            drift, DRIFT_TOL, slope, peak,
+            drift,
+            DRIFT_TOL,
+            slope,
+            peak,
         );
     }
 
@@ -956,7 +1130,9 @@ mod tests {
             peak < PEAK_TOL,
             "IAS15 high-e Kepler (e={E}): peak |δE/E₀| = {:.3e} exceeds {:.0e} \
              over {} orbits — adaptive step control not tracking perihelion",
-            peak, PEAK_TOL, N_ORBITS,
+            peak,
+            PEAK_TOL,
+            N_ORBITS,
         );
     }
 
@@ -980,11 +1156,13 @@ mod tests {
         const PEAK_TOL: f64 = 1e-11;
 
         let mut bodies = vec![
-            Body::new( 1.0,  3.0, 0.0, 0.0, 3.0, Material::Rocky),
+            Body::new(1.0, 3.0, 0.0, 0.0, 3.0, Material::Rocky),
             Body::new(-2.0, -1.0, 0.0, 0.0, 4.0, Material::Rocky),
-            Body::new( 1.0, -1.0, 0.0, 0.0, 5.0, Material::Rocky),
+            Body::new(1.0, -1.0, 0.0, 0.0, 5.0, Material::Rocky),
         ];
-        for b in &mut bodies { b.softening = 0.0; }
+        for b in &mut bodies {
+            b.softening = 0.0;
+        }
 
         let mut sys = System::new(bodies, 0.5, DT, 10, 1);
         sys.set_integrator(IntegratorKind::Ias15);
@@ -1000,7 +1178,8 @@ mod tests {
             peak < PEAK_TOL,
             "IAS15 Pythagorean: peak |δE/E₀| = {:.3e} exceeds {:.0e} over t=[0,{T_END}] \
              — likely a bug in rejection rollback or the truncation-error estimator",
-            peak, PEAK_TOL,
+            peak,
+            PEAK_TOL,
         );
     }
 
@@ -1046,10 +1225,7 @@ mod tests {
         sys.step();
         let consumed = sys.t() - t0;
 
-        assert!(
-            consumed > 0.0,
-            "IAS15 sub-step consumed zero time — caller would busy-loop"
-        );
+        assert!(consumed > 0.0, "IAS15 sub-step consumed zero time — caller would busy-loop");
         assert!(
             consumed < dt_budget,
             "IAS15 step() consumed the full budget ({:.3e}) instead of adapting \
@@ -1067,9 +1243,80 @@ mod tests {
             assert!(
                 t_now > t_prev,
                 "System::t regressed at sub-step {}: {:.6e} → {:.6e}",
-                k, t_prev, t_now,
+                k,
+                t_prev,
+                t_now,
             );
             t_prev = t_now;
         }
+    }
+
+    // ── decide_dt pure-function tests (TD-004) ────────────────────────────
+    //
+    // The controller's decision logic is factored out as a pure function
+    // on two floats + two bools so it can be exhaustively tested without
+    // standing up a `System`. Each case covers one row of the decision
+    // table documented on [`decide_dt`]; flipping an input and checking
+    // the output changes is how we'll catch regressions in future
+    // tuning work.
+
+    #[test]
+    fn decide_dt_accepts_on_merit() {
+        // Picard converged AND truncation within tolerance → clean accept.
+        let d = decide_dt(true, 5e-10, 1e-3, 1e-9, false);
+        assert_eq!(d, DtDecision::Accept { degraded: false });
+    }
+
+    #[test]
+    fn decide_dt_rejects_picard_when_not_converged() {
+        // Non-convergence dominates: even an incidentally-small trunc
+        // must not let us accept divergent `b` coefficients.
+        let d = decide_dt(false, 1e-12, 1e-3, 1e-9, false);
+        assert_eq!(d, DtDecision::RejectPicard);
+    }
+
+    #[test]
+    fn decide_dt_rejects_truncation_when_converged_but_over_tol() {
+        // Picard fine, but trunc_err above ε → standard controller path.
+        let d = decide_dt(true, 1e-6, 1e-3, 1e-9, false);
+        assert_eq!(d, DtDecision::RejectTruncation);
+    }
+
+    #[test]
+    fn decide_dt_dt_min_escape_degrades() {
+        // At the floor, we accept regardless of error state so the
+        // simulation progresses — but flagged degraded for the caller.
+        let d = decide_dt(false, 1.0, DT_MIN, 1e-9, false);
+        assert_eq!(d, DtDecision::Accept { degraded: true });
+
+        // Same floor, different failure class (trunc) — still degraded.
+        let d = decide_dt(true, 1.0, DT_MIN, 1e-9, false);
+        assert_eq!(d, DtDecision::Accept { degraded: true });
+    }
+
+    #[test]
+    fn decide_dt_deadline_forces_degraded_accept() {
+        // Cooperative deadline passed: accept current attempt rather
+        // than spend more wall time shrinking.
+        let d = decide_dt(false, 1.0, 1e-3, 1e-9, true);
+        assert_eq!(d, DtDecision::Accept { degraded: true });
+    }
+
+    #[test]
+    fn decide_dt_deadline_does_not_demote_clean_accept() {
+        // On-merit result takes precedence over deadline — deadline is
+        // an escape hatch for *stuck* attempts, not a degrade-poisoner
+        // for attempts that converged within tolerance.
+        let d = decide_dt(true, 5e-10, 1e-3, 1e-9, true);
+        assert_eq!(d, DtDecision::Accept { degraded: false });
+    }
+
+    #[test]
+    fn decide_dt_trunc_exactly_at_epsilon_is_merit() {
+        // Boundary: trunc_err == ε should be accepted (≤, not <).
+        // Matches REBOUND's threshold convention; flipping this would
+        // silently change step-size distributions in benchmarks.
+        let d = decide_dt(true, 1e-9, 1e-3, 1e-9, false);
+        assert_eq!(d, DtDecision::Accept { degraded: false });
     }
 }
