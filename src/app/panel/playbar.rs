@@ -59,22 +59,58 @@ impl SimulationApp {
 
                     vsep(ui);
 
-                    // ── DT ───────────────────────────────────────────────────
-                    ui.label(RichText::new("DT").size(8.5).color(TEXT_DIM).strong());
-                    let mut dt = self.system.dt();
-                    let dt_speed = (dt * 0.05).max(1e-7);
-                    if ui
-                        .add(
-                            egui::DragValue::new(&mut dt)
-                                .speed(dt_speed)
-                                .range(1e-7_f64..=10.0)
-                                .max_decimals(6)
-                                .min_decimals(1),
-                        )
-                        .on_hover_text("Integration timestep — smaller = more accurate but slower")
-                        .changed()
-                    {
-                        self.system.set_dt(dt);
+                    // ── DT / ACC ─────────────────────────────────────────────
+                    // IAS15 controls accuracy via epsilon (ε), not a fixed DT.
+                    // For all other integrators, show the DT drag-value as usual.
+                    if self.physics_cfg.integrator == IntegratorKind::Ias15 {
+                        ui.label(RichText::new("ACC").size(8.5).color(TEXT_DIM).strong());
+                        let presets: &[(&str, f64, &str)] = &[
+                            ("Fast",   1e-6,  "ε = 1×10⁻⁶  ·  faster, less accurate"),
+                            ("Normal", 1e-9,  "ε = 1×10⁻⁹  ·  REBOUND default — recommended"),
+                            ("Fine",   1e-12, "ε = 1×10⁻¹²  ·  high precision, slower"),
+                            ("Ultra",  1e-15, "ε = 1×10⁻¹⁵  ·  near machine precision"),
+                        ];
+                        let current_label = presets
+                            .iter()
+                            .min_by(|a, b| {
+                                let da = (a.1.log10() - self.ias15_epsilon.log10()).abs();
+                                let db = (b.1.log10() - self.ias15_epsilon.log10()).abs();
+                                da.partial_cmp(&db).unwrap()
+                            })
+                            .map(|p| p.0)
+                            .unwrap_or("Normal");
+                        egui::ComboBox::from_id_salt("playbar_ias15_epsilon")
+                            .selected_text(
+                                RichText::new(current_label).size(10.0).color(TEXT_PRI),
+                            )
+                            .width(70.0)
+                            .show_ui(ui, |ui| {
+                                for (label, eps, hint) in presets {
+                                    ui.selectable_value(
+                                        &mut self.ias15_epsilon,
+                                        *eps,
+                                        RichText::new(*label).size(10.0),
+                                    )
+                                    .on_hover_text(*hint);
+                                }
+                            });
+                    } else {
+                        ui.label(RichText::new("DT").size(8.5).color(TEXT_DIM).strong());
+                        let mut dt = self.system.dt();
+                        let dt_speed = (dt * 0.05).max(1e-7);
+                        if ui
+                            .add(
+                                egui::DragValue::new(&mut dt)
+                                    .speed(dt_speed)
+                                    .range(1e-7_f64..=10.0)
+                                    .max_decimals(6)
+                                    .min_decimals(1),
+                            )
+                            .on_hover_text("Integration timestep — smaller = more accurate but slower")
+                            .changed()
+                        {
+                            self.system.set_dt(dt);
+                        }
                     }
 
                     vsep(ui);
