@@ -68,8 +68,16 @@ impl System {
         let result = self.integrator.step(&mut self.bodies, &mut ctx, dt, &mut self.scratch_acc);
         self.last_potential = result.potential_energy;
 
+        // Advance by the time the integrator actually consumed. For fixed-step
+        // integrators (VV, Y4, WH) this always equals `dt`; for IAS15 it is the
+        // adaptive sub-step size chosen by the error controller. Using
+        // `consumed_dt` here is what prevents the "teleport" class of bug where
+        // `System::t` drifts away from the physical body state when an adaptive
+        // integrator accepts a sub-step smaller than the caller's budget
+        // (see ADR-004; Rein & Spiegel 2015, §2.3).
+        let consumed_dt = result.consumed_dt;
         self.steps += 1;
-        self.t += dt;
+        self.t += consumed_dt;
 
         // Produce the dense-output snapshot.  t0 = system.t() - snapshot.dt
         // works for both cases: IAS15 sub-steps use their own dt, Order-2 uses
@@ -80,8 +88,8 @@ impl System {
             Some(snap)
         } else if need_order2 {
             Some(DenseSnapshot {
-                t0: self.t - dt,
-                dt,
+                t0: self.t - consumed_dt,
+                dt: consumed_dt,
                 x0: pre_x0,
                 v0: pre_v0,
                 a0: pre_a0,
@@ -92,7 +100,7 @@ impl System {
             None
         };
 
-        self.last_diag = self.diagnostics.compute(&self.scratch_acc, &self.bodies, dt);
+        self.last_diag = self.diagnostics.compute(&self.scratch_acc, &self.bodies, consumed_dt);
 
         self.update_energy_tracking();
         self.update_angular_momentum_tracking();
