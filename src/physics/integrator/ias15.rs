@@ -711,6 +711,7 @@ impl Ias15 {
         let v0: Vec<(f64, f64)> = bodies.iter().map(|b| (b.vx, b.vy)).collect();
 
         let mut last_residual = f64::INFINITY;
+        let mut no_improve: u32 = 0;
         let mut iters: u32 = 0;
 
         for iter in 0..MAX_PICARD_ITERATIONS {
@@ -756,11 +757,20 @@ impl Ias15 {
                 return (true, residual, iters);
             }
 
-            // Stagnation guard: if we're not making progress, bail.
-            // Consistent with REBOUND's heuristic.
+            // Stagnation guard: require two consecutive iterations
+            // without improvement before declaring divergence. Near
+            // PICARD_TOL = 1e-16 the residual oscillates on round-off
+            // noise — a single "worse" iteration is normal and must
+            // not trigger a spurious reject + dt halving. Matches
+            // REBOUND's heuristic.
             if iter >= 2 && residual > last_residual {
-                restore_xv(bodies, &x0, &v0);
-                return (false, residual, iters);
+                no_improve += 1;
+                if no_improve >= 2 {
+                    restore_xv(bodies, &x0, &v0);
+                    return (false, residual, iters);
+                }
+            } else {
+                no_improve = 0;
             }
             last_residual = residual;
         }
@@ -779,47 +789,54 @@ impl Ias15 {
 
             // Full-step position increment (s = 1):
             //   Δx/dt² = a₀/2 + b₀/6 + b₁/12 + b₂/20 + b₃/30 + b₄/42 + b₅/56 + b₆/72
+            //
+            // Summation order: smallest-magnitude term first (b₆/72) up
+            // to largest (a₀/2). Natural/left-to-right order accumulates
+            // into a growing partial sum, which loses low bits of each
+            // subsequent smaller term. Reverse order preserves 1–2 extra
+            // bits of precision per step — free, and material over the
+            // 10⁹-orbit round-off budget the module advertises.
             let dx = dt
                 * dt
-                * (a0[i].0 * 0.5
-                    + bi[0].0 / 6.0
-                    + bi[1].0 / 12.0
-                    + bi[2].0 / 20.0
-                    + bi[3].0 / 30.0
-                    + bi[4].0 / 42.0
+                * (bi[6].0 / 72.0
                     + bi[5].0 / 56.0
-                    + bi[6].0 / 72.0);
+                    + bi[4].0 / 42.0
+                    + bi[3].0 / 30.0
+                    + bi[2].0 / 20.0
+                    + bi[1].0 / 12.0
+                    + bi[0].0 / 6.0
+                    + a0[i].0 * 0.5);
             let dy = dt
                 * dt
-                * (a0[i].1 * 0.5
-                    + bi[0].1 / 6.0
-                    + bi[1].1 / 12.0
-                    + bi[2].1 / 20.0
-                    + bi[3].1 / 30.0
-                    + bi[4].1 / 42.0
+                * (bi[6].1 / 72.0
                     + bi[5].1 / 56.0
-                    + bi[6].1 / 72.0);
+                    + bi[4].1 / 42.0
+                    + bi[3].1 / 30.0
+                    + bi[2].1 / 20.0
+                    + bi[1].1 / 12.0
+                    + bi[0].1 / 6.0
+                    + a0[i].1 * 0.5);
 
-            // Full-step velocity increment:
+            // Full-step velocity increment (same ascending-magnitude rule):
             //   Δv/dt = a₀ + b₀/2 + b₁/3 + b₂/4 + b₃/5 + b₄/6 + b₅/7 + b₆/8
             let dvx = dt
-                * (a0[i].0
-                    + bi[0].0 / 2.0
-                    + bi[1].0 / 3.0
-                    + bi[2].0 / 4.0
-                    + bi[3].0 / 5.0
-                    + bi[4].0 / 6.0
+                * (bi[6].0 / 8.0
                     + bi[5].0 / 7.0
-                    + bi[6].0 / 8.0);
+                    + bi[4].0 / 6.0
+                    + bi[3].0 / 5.0
+                    + bi[2].0 / 4.0
+                    + bi[1].0 / 3.0
+                    + bi[0].0 / 2.0
+                    + a0[i].0);
             let dvy = dt
-                * (a0[i].1
-                    + bi[0].1 / 2.0
-                    + bi[1].1 / 3.0
-                    + bi[2].1 / 4.0
-                    + bi[3].1 / 5.0
-                    + bi[4].1 / 6.0
+                * (bi[6].1 / 8.0
                     + bi[5].1 / 7.0
-                    + bi[6].1 / 8.0);
+                    + bi[4].1 / 6.0
+                    + bi[3].1 / 5.0
+                    + bi[2].1 / 4.0
+                    + bi[1].1 / 3.0
+                    + bi[0].1 / 2.0
+                    + a0[i].1);
 
             // First integrate the v·dt contribution to position.
             let vdt_x = bodies[i].vx * dt;
