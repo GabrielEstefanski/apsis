@@ -87,6 +87,8 @@ pub enum PhysicsCmd {
     /// The physics thread integrates until `system.t() >= t_target` or the
     /// hard CPU cap (`MAX_BATCH_WALL_MS`) is exceeded — whichever comes first.
     SetSimRateTarget(f64),
+    /// IAS15 error tolerance (ε). No-op for other integrators.
+    SetIas15Epsilon(f64),
     SetExactThreshold(usize),
     SetSeed(u64),
     SetTheta(f64),
@@ -303,6 +305,11 @@ impl PhysicsHandle {
         if rate > 0.0 {
             self.send(PhysicsCmd::SetSimRateTarget(rate));
         }
+    }
+
+    /// Set the IAS15 error tolerance. No-op for other integrators.
+    pub fn set_ias15_epsilon(&self, eps: f64) {
+        self.send(PhysicsCmd::SetIas15Epsilon(eps));
     }
     pub fn set_dt(&self, dt: f64) {
         self.send(PhysicsCmd::SetDt(dt));
@@ -532,6 +539,7 @@ fn apply_cmd(
         PhysicsCmd::Shutdown => return CmdEffect::Shutdown,
         PhysicsCmd::SetPaused(p) => *paused = p,
         PhysicsCmd::SetSimRateTarget(rate) => *sim_rate_target = rate.max(1e-9),
+        PhysicsCmd::SetIas15Epsilon(eps) => system.set_ias15_epsilon(eps),
         PhysicsCmd::SetDt(dt) => {
             system.set_dt(dt);
             *needs_full_publish = true;

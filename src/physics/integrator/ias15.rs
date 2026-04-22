@@ -11,6 +11,9 @@
 //!     A. Carusi & G. B. Valsecchi eds., Astrophysics and Space Science
 //!     Library 115, 185–202.
 //!
+//! The layout of this file mirrors REBOUND's `integrator_ias15.c` so the
+//! two implementations are straightforward to cross-read.
+//!
 //! IAS15 is the modern refinement of Everhart's RADAU15. It combines
 //!
 //!   * 8-node Gauss-Radau quadrature (one end-point node + 7 interior),
@@ -27,14 +30,31 @@
 //! method for bound orbits, and strictly superior for close encounters
 //! or high eccentricities where fixed-step schemes degrade.
 //!
-//! # Time-budget contract
+//! # Sub-step semantics (ADR-004)
 //!
-//! The [`Integrator`] trait is called with a scheduler-chosen `dt`. We
-//! treat `dt` as a **time budget** rather than a physical step: the
-//! internal adaptive loop keeps accepting attempts until the full
-//! `dt` is consumed. This preserves cross-integrator determinism of
-//! `System::t` and keeps the outer world unaware that the step is
-//! actually composed of a variable number of internal sub-steps.
+//! A single call to [`Integrator::step`] performs **one** adaptive
+//! sub-step. The `dt` argument is treated as an upper bound on the
+//! sub-step size (the caller's budget for this tick); the error
+//! controller may accept anything in `(DT_MIN, dt]` and reports the
+//! actual size via [`StepResult::consumed_dt`]. The caller (the
+//! [`System::step`] orchestrator) loops until its desired simulation
+//! time is reached, exactly as REBOUND does via
+//! `reb_integrator_ias15_part1` / `part2`.
+//!
+//! This design — substep-granularity at the trait boundary — was
+//! chosen for three reasons:
+//!
+//!   * `System::t` stays consistent with body state even when a close
+//!     encounter forces the controller to shrink `dt_try` well below
+//!     the caller's hint (previous releases hid this under an outer
+//!     "budget loop" and incremented `t` by the requested `dt`
+//!     regardless, causing a visual *teleport* when the internal
+//!     substep budget was exceeded).
+//!   * The dense-output snapshot reflects the *actual* sub-step the
+//!     integrator just accepted, giving the renderer a clean,
+//!     well-defined window `[t − consumed_dt, t]` to interpolate.
+//!   * Callers can respond to external events (pause, shutdown) between
+//!     sub-steps without modifying the integrator.
 //!
 //! # Rejection rollback
 //!
@@ -118,13 +138,15 @@ const DEFAULT_EPSILON: f64 = 1e-9;
 /// Floor on `dt` to prevent a pathological scene (e.g. contact
 /// singularity) from driving the step size to zero and stalling the
 /// scheduler. Below this, we accept the attempt regardless and let
-/// the caller decide what to do.
+/// the caller decide what to do (typically: log a degraded-step and
+/// keep integrating). Matches REBOUND's `integrator_ias15.min_dt`
+/// default behaviour when no explicit floor is configured.
 const DT_MIN: f64 = 1e-12;
 
 /// Multiplier on the theoretically optimal Δt after each attempt.
 /// Keeps the controller away from the accept/reject boundary so
 /// step size doesn't oscillate between borderline-too-large and
-/// too-small. 0.9 matches REBOUND.
+/// too-small. 0.9 matches REBOUND (`integrator_ias15.safety_factor`).
 const DT_SAFETY: f64 = 0.9;
 
 /// Conservative growth factor used only as a fallback when the error
@@ -160,7 +182,7 @@ pub struct Ias15 {
     /// Warm-started from the previous accepted step.
     b: Vec<BodyCoeffs>,
     /// Coefficients at the previous accepted step — used to extrapolate
-    /// `b` when the step size changes (see `warmstart_b_for_next`).
+    /// `b` when the step size changes (see [`Self::warmstart_b`]).
     e: Vec<BodyCoeffs>,
     /// Newton divided-difference form, derived from `b` on-demand.
     g: Vec<BodyCoeffs>,
@@ -176,18 +198,10 @@ pub struct Ias15 {
     dt_next: f64,
 
     /// The `dt_try` that was accepted on the most recent internal attempt.
-    /// Used as `dt_prev` in `warmstart_b` so the q = dt_try/dt_prev ratio
-    /// is correct. Zero means "no accepted step yet" — warm-start is skipped.
+    /// Used as `dt_prev` in [`Self::warmstart_b`] so the q = dt_try/dt_prev
+    /// ratio is correct. Zero means "no accepted step yet" — warm-start is
+    /// skipped and `e` is left at zero.
     dt_last_accepted: f64,
-
-    /// `true` until the first completed step — skips the warm-start
-    /// extrapolation of `b` (since `e` is zero anyway).
-    first_step: bool,
-
-    /// Dense-output snapshot from the last accepted sub-step.
-    /// Returned via `StepResult` so the render thread can interpolate
-    /// positions within the sub-step without re-running physics.
-    last_dense: Option<DenseSnapshot>,
 }
 
 impl Default for Ias15 {
@@ -208,18 +222,20 @@ impl Ias15 {
             csv: Vec::new(),
             dt_next: 0.0,
             dt_last_accepted: 0.0,
-            first_step: true,
-            last_dense: None,
         }
     }
 
     /// Override the default tolerance (`1e-9`). Tighter values give
     /// better energy conservation at the cost of proportionally smaller
     /// step sizes.
-    #[allow(dead_code)]
     pub fn with_epsilon(mut self, epsilon: f64) -> Self {
         self.epsilon = epsilon;
         self
+    }
+
+    /// Returns the current error tolerance.
+    pub fn epsilon(&self) -> f64 {
+        self.epsilon
     }
 
     fn ensure_capacity(&mut self, n: usize) {
@@ -231,7 +247,6 @@ impl Ias15 {
             self.csx = vec![(0.0, 0.0); n];
             self.csv = vec![(0.0, 0.0); n];
             self.dt_last_accepted = 0.0;
-            self.first_step = true;
         }
     }
 }
@@ -265,24 +280,35 @@ impl Attempt {
         }
     }
 
-    fn restore(self, bodies: &mut [Body], ias: &mut Ias15) {
+    /// Roll bodies and integrator state back to the start of the current
+    /// sub-step. Ref-based so a single snapshot can be reused across
+    /// multiple rejection retries within one `step()` call.
+    fn restore(&self, bodies: &mut [Body], ias: &mut Ias15) {
         for (i, b) in bodies.iter_mut().enumerate() {
             b.x = self.x[i].0;
             b.y = self.x[i].1;
             b.vx = self.v[i].0;
             b.vy = self.v[i].1;
         }
-        ias.b = self.b;
-        ias.e = self.e;
-        ias.csb = self.csb;
-        ias.csx = self.csx;
-        ias.csv = self.csv;
+        ias.b.clone_from(&self.b);
+        ias.e.clone_from(&self.e);
+        ias.csb.clone_from(&self.csb);
+        ias.csx.clone_from(&self.csx);
+        ias.csv.clone_from(&self.csv);
     }
 }
 
 // ── Core algorithm ───────────────────────────────────────────────────────────
 
 impl Integrator for Ias15 {
+    /// Perform **one** adaptive Gauss-Radau sub-step.
+    ///
+    /// The input `dt` is treated as the caller's budget: the accepted
+    /// sub-step will not exceed it. The actual step size, chosen by the
+    /// error controller, is reported through [`StepResult::consumed_dt`],
+    /// and the caller is expected to re-invoke `step` until the full
+    /// simulation-time target has been reached (REBOUND-style driver;
+    /// see the module-level documentation on sub-step semantics).
     fn step(
         &mut self,
         bodies: &mut [Body],
@@ -293,138 +319,124 @@ impl Integrator for Ias15 {
         let n = bodies.len();
         self.ensure_capacity(n);
 
-        // Seed `dt_next` from the scheduler on first use / after reset.
+        // The caller's budget acts as a hard upper bound on this sub-step
+        // size; the error controller may shrink it further. A zero or
+        // negative hint is treated as DT_MIN (pathological, but legal).
+        let dt_cap = dt.max(DT_MIN);
+
+        // Seed `dt_next` from the budget on the very first call.
         if self.dt_next <= 0.0 {
-            self.dt_next = dt;
+            self.dt_next = dt_cap;
         }
 
-        let mut time_remaining = dt;
-        let mut last_pe = 0.0;
+        let mut dt_try = self.dt_next.min(dt_cap).max(DT_MIN);
 
-        // Outer time-budget loop: consume the full `dt` via a variable
-        // number of internal attempts. Keeps `System::t` deterministic
-        // across integrators.
-        while time_remaining > 0.0 {
-            let dt_try = self.dt_next.min(time_remaining).max(DT_MIN);
+        // Snapshot taken once per sub-step: body kinematics + integrator
+        // state that must survive rejection retries. `a0` (start-of-step
+        // acceleration) is also invariant across retries because the
+        // snapshot restores positions, so we evaluate it only once —
+        // saving up to `max_picard_iter × n_rejects` force calls per
+        // sub-step compared to re-evaluating inside the retry loop.
+        let snapshot = Attempt::snapshot(bodies, self);
 
-            let (accepted_dt, pe) = self.attempt(bodies, ctx, acc, dt_try);
-            last_pe = pe;
-            time_remaining -= accepted_dt;
+        let raw_pe = evaluate(bodies, ctx.force, acc);
+        scale_acc_and_pe(acc, ctx.g_factor, raw_pe);
+        apply_perturbations(bodies, acc, ctx.perturbations);
+        let a0: Vec<(f64, f64)> = acc.clone();
 
-            // If the remaining budget is now tiny, avoid a final
-            // under-DT_MIN attempt: fold it into the just-completed one.
-            if time_remaining < DT_MIN {
-                break;
-            }
-        }
-
-        self.first_step = false;
-
-        StepResult {
-            potential_energy: last_pe,
-            used_fallback: false,
-            step_snapshot: self.last_dense.take(),
-        }
-    }
-
-    fn kind(&self) -> IntegratorKind {
-        IntegratorKind::Ias15
-    }
-}
-
-impl Ias15 {
-    /// Run the adaptive error-controlled loop until a single attempt at
-    /// some `dt_try` is accepted. Returns `(accepted_dt, final_pe)`.
-    fn attempt(
-        &mut self,
-        bodies: &mut [Body],
-        ctx: &mut IntegratorContext<'_>,
-        acc: &mut Vec<(f64, f64)>,
-        mut dt_try: f64,
-    ) -> (f64, f64) {
-        loop {
-            let snapshot = Attempt::snapshot(bodies, self);
-
-            // Warm-start: extrapolate `b` from the previous accepted step's
-            // dt to the current `dt_try`. Skipped until we have one accepted
-            // step recorded (dt_last_accepted > 0).
+        // ── Rejection retry loop ─────────────────────────────────────────
+        //
+        // Each iteration: warm-start `b`, run Picard, estimate error. On
+        // reject we restore snapshot (positions *and* integrator state)
+        // and shrink `dt_try`. DT_MIN is a hard floor — if a pathological
+        // configuration forces the controller down to it, we accept the
+        // step unconditionally to keep the simulation progressing rather
+        // than spin forever.
+        let (accepted_dt, final_pe, final_snapshot) = loop {
             if self.dt_last_accepted > 0.0 {
                 self.warmstart_b(dt_try, self.dt_last_accepted);
             }
             self.recompute_g_from_b();
 
-            // Evaluate a0 at the current positions. (Force caching
-            // across accepted steps is a documented future optimisation.)
-            let raw_pe = evaluate(bodies, ctx.force, acc);
-            let _ = scale_acc_and_pe(acc, ctx.g_factor, raw_pe);
-            apply_perturbations(bodies, acc, ctx.perturbations);
-            let a0 = acc.clone();
-
-            // Predictor-corrector Picard loop.
             let (converged, picard_err) =
                 self.picard_loop(bodies, ctx, acc, &a0, dt_try);
 
-            // Truncation-error estimate: magnitude of the last
-            // b-coefficient normalised by the acceleration scale.
             let trunc_err = self.truncation_error(&a0);
-
             let max_err = trunc_err.max(picard_err).max(0.0);
             let dt_optimal = self.optimal_dt(dt_try, max_err);
 
-            let accept = max_err <= self.epsilon
-                || dt_try <= DT_MIN
-                || !converged && dt_try <= DT_MIN;
+            // Acceptance requires both (i) Picard convergence and (ii) a
+            // truncation error within tolerance. A non-converged Picard
+            // with incidentally-small residual is **not** admissible —
+            // that path silently accepted divergent coefficients in the
+            // previous outer-budget-loop implementation. The floor case
+            // (`dt_try <= DT_MIN`) is the only escape hatch.
+            let accept =
+                (converged && max_err <= self.epsilon) || dt_try <= DT_MIN;
 
             if !accept {
-                // Reject: rewind everything and retry at the error-optimal dt.
-                // No relative floor — severe encounters need severe shrinking.
-                let new_dt = dt_optimal.max(DT_MIN);
                 snapshot.restore(bodies, self);
-                dt_try = new_dt;
+                dt_try = dt_optimal.max(DT_MIN).min(dt_cap);
                 continue;
             }
 
-            // Accept: advance x and v with the converged polynomial
-            // (compensated summation) and evaluate PE at end-of-step.
-            //
-            // Capture start-of-attempt kinematics for dense output BEFORE
-            // advancing state — snapshot.x/v hold the pre-attempt positions.
-            self.last_dense = Some(DenseSnapshot {
-                t0: 0.0, // set to system.t() - dt_try by the physics thread
+            // Accept path ────────────────────────────────────────────────
+            // Build the dense-output snapshot *before* we advance the
+            // state, so it carries the pre-step kinematics (the b-coeffs
+            // below are the accepted values — `self.b` is not further
+            // modified on the accept path). The caller (`System::step`)
+            // fills in the absolute `t0` as `system.t() - consumed_dt`.
+            let step_snapshot = DenseSnapshot {
+                t0: 0.0,
                 dt: dt_try,
                 x0: snapshot.x.clone(),
                 v0: snapshot.v.clone(),
                 a0: a0.clone(),
                 b: self.b.clone(),
                 kind: IntegratorKind::Ias15,
-            });
+            };
+
             self.advance_state(bodies, &a0, dt_try);
 
-            // Post-step acceleration for diagnostics + the next
-            // call's `acc`. Scale + perturb consistently.
+            // Post-step force evaluation: publishes `acc` consistent with
+            // the final body positions, and returns the potential energy
+            // the caller will use for energy-conservation diagnostics.
             let raw_pe = evaluate(bodies, ctx.force, acc);
             let pe = scale_acc_and_pe(acc, ctx.g_factor, raw_pe);
             apply_perturbations(bodies, acc, ctx.perturbations);
 
-            // Record `e` for warm-start of the next attempt.
-            // dt_next is driven purely by the error formula — no relative
-            // growth/shrink caps. This matches REBOUND's controller and
-            // lets dt_next recover quickly after close encounters without
-            // being slowed by an artificial ceiling tied to dt_try.
-            //
-            // Note: when the scheduler's budget is small (e.g. real-time
-            // display at dt=0.001) and the scene is smooth (Solar System),
-            // dt_next converges to ~budget × (ε/err)^(1/7). To fully
-            // exploit IAS15's adaptive stepping, use a larger scheduler dt
-            // (typically 10–100× VV/Y4) — the budget loop handles exact
-            // time consumption either way.
             self.update_warmstart_record();
             self.dt_last_accepted = dt_try;
+            // `dt_next` is driven by the pure error formula, no relative
+            // growth cap (cf. REBOUND's controller). The external budget
+            // clamps it on the next entry to `step()` via `dt_cap`.
             self.dt_next = dt_optimal.max(DT_MIN);
 
-            return (dt_try, pe);
+            break (dt_try, pe, step_snapshot);
+        };
+
+        StepResult {
+            consumed_dt: accepted_dt,
+            potential_energy: final_pe,
+            used_fallback: false,
+            step_snapshot: Some(final_snapshot),
         }
     }
+
+    fn kind(&self) -> IntegratorKind {
+        IntegratorKind::Ias15
+    }
+
+    fn set_epsilon(&mut self, eps: f64) {
+        self.epsilon = eps.clamp(1e-15, 1e-3);
+    }
+
+    fn epsilon(&self) -> Option<f64> {
+        Some(self.epsilon)
+    }
+}
+
+impl Ias15 {
 
     /// Inner predictor-corrector iteration. Given `a0` (acceleration at
     /// the start of the attempt) and a target `dt_try`, iteratively
@@ -747,36 +759,49 @@ mod tests {
         const E: f64 = 0.5;
         const MU: f64 = 2.0;
         const N_ORBITS: u64 = 100;
-        const DT: f64 = 0.05; // IAS15 adapts internally; this is just the budget
         const PEAK_TOL: f64 = 1e-12;
         const DRIFT_TOL: f64 = 1e-13;
 
         let r_peri = A * (1.0 - E);
         let v_peri = (MU * (1.0 + E) / (A * (1.0 - E))).sqrt();
 
+        let period = 2.0 * std::f64::consts::PI * (A.powi(3) / MU).sqrt();
+        let total_time = N_ORBITS as f64 * period;
+        // Budget of `period/20` lets the error controller choose any
+        // sub-step up to that size. At ε = 1e-9 on an e=0.5 orbit the
+        // controller tends to settle near `period/30` — a smaller budget
+        // merely caps growth without changing step count in practice,
+        // while a smaller budget *combined with* a fixed for-loop
+        // driver artificially inflates the number of `step()` calls.
+        let dt_budget = period / 20.0;
+
         let mut b1 = Body::new(-r_peri / 2.0, 0.0, 0.0, -v_peri / 2.0, 1.0, Material::Rocky);
         b1.softening = 0.0;
         let mut b2 = Body::new(r_peri / 2.0, 0.0, 0.0, v_peri / 2.0, 1.0, Material::Rocky);
         b2.softening = 0.0;
 
-        let mut sys = System::new(vec![b1, b2], 0.5, DT, 10, 1);
+        let mut sys = System::new(vec![b1, b2], 0.5, dt_budget, 10, 1);
         sys.set_integrator(IntegratorKind::Ias15);
 
-        let period = 2.0 * std::f64::consts::PI * (A.powi(3) / MU).sqrt();
-        let total_time = N_ORBITS as f64 * period;
-        let n_steps = (total_time / DT).ceil() as u64;
-
         let mut peak = 0.0_f64;
-        // Samples for drift detection: (t, δE/E₀) every few % of the run.
+        // Samples for drift detection: (t, δE/E₀) every ~0.5% of the run.
         let mut samples: Vec<(f64, f64)> = Vec::new();
-        let sample_every = (n_steps / 200).max(1);
+        let sample_dt = total_time / 200.0;
+        let mut next_sample = 0.0;
 
-        for k in 0..n_steps {
+        // REBOUND-style driver: advance by calling `step()` until the
+        // target simulation time is reached. Each call consumes one
+        // adaptive sub-step whose size IAS15 chose; using a fixed
+        // `for _ in 0..n_steps` loop here would silently assume every
+        // call consumes `dt_budget` and fall short of the intended
+        // integration window.
+        while sys.t() < total_time {
             sys.step();
             let err = sys.metrics().rel_energy_error;
             peak = peak.max(err.abs());
-            if k % sample_every == 0 {
-                samples.push(((k as f64) * DT, err));
+            if sys.t() >= next_sample {
+                samples.push((sys.t(), err));
+                next_sample += sample_dt;
             }
         }
 
@@ -900,5 +925,74 @@ mod tests {
              — likely a bug in rejection rollback or the truncation-error estimator",
             peak, PEAK_TOL,
         );
+    }
+
+    /// Regression: `System::t` must track the sub-step IAS15 physically
+    /// executed, not the caller's budget.
+    ///
+    /// The previous implementation ran an internal `while budget > 0` loop
+    /// inside `step()` and returned `consumed_dt == dt`, advancing `System::t`
+    /// by the full requested `dt` while the dense-output snapshot only
+    /// covered the *last* sub-step. Interpolating inside that window then
+    /// extrapolated over earlier sub-steps, producing the visible "teleport"
+    /// artefact.
+    ///
+    /// Under the REBOUND-style contract (`reb_integrator_ias15_part1/2`,
+    /// Rein & Spiegel 2015 §2.3), each `step()` call executes exactly one
+    /// adaptive sub-step and reports its size via `StepResult::consumed_dt`;
+    /// `System::step` advances `System::t` by that value. A budget far
+    /// larger than what the controller can accept at perihelion therefore
+    /// yields `System::t` strictly below the budget after one call.
+    #[test]
+    fn ias15_system_t_matches_adaptive_substep() {
+        const A: f64 = 1.0;
+        const E: f64 = 0.9;
+        const MU: f64 = 2.0;
+
+        let r_peri = A * (1.0 - E);
+        let v_peri = (MU * (1.0 + E) / (A * (1.0 - E))).sqrt();
+
+        // Budget of a full orbital period — far too large for a single IAS15
+        // sub-step at perihelion, so the controller MUST shrink it.
+        let period = 2.0 * std::f64::consts::PI * (A.powi(3) / MU).sqrt();
+        let dt_budget = period;
+
+        let mut b1 = Body::new(-r_peri / 2.0, 0.0, 0.0, -v_peri / 2.0, 1.0, Material::Rocky);
+        b1.softening = 0.0;
+        let mut b2 = Body::new(r_peri / 2.0, 0.0, 0.0, v_peri / 2.0, 1.0, Material::Rocky);
+        b2.softening = 0.0;
+
+        let mut sys = System::new(vec![b1, b2], 0.5, dt_budget, 10, 1);
+        sys.set_integrator(IntegratorKind::Ias15);
+
+        let t0 = sys.t();
+        sys.step();
+        let consumed = sys.t() - t0;
+
+        assert!(
+            consumed > 0.0,
+            "IAS15 sub-step consumed zero time — caller would busy-loop"
+        );
+        assert!(
+            consumed < dt_budget,
+            "IAS15 step() consumed the full budget ({:.3e}) instead of adapting \
+             down at perihelion — teleport regression (budget loop leaked back in)",
+            dt_budget,
+        );
+
+        // System::t must advance strictly monotonically across further
+        // sub-steps; any regression here implies the caller is reading a
+        // stale `consumed_dt` or the integrator is returning negative time.
+        let mut t_prev = sys.t();
+        for k in 0..200 {
+            sys.step();
+            let t_now = sys.t();
+            assert!(
+                t_now > t_prev,
+                "System::t regressed at sub-step {}: {:.6e} → {:.6e}",
+                k, t_prev, t_now,
+            );
+            t_prev = t_now;
+        }
     }
 }

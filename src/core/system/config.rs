@@ -107,6 +107,16 @@ impl System {
         self.integrator = make_integrator(kind);
     }
 
+    /// Set the IAS15 error tolerance. No-op for other integrators.
+    pub fn set_ias15_epsilon(&mut self, eps: f64) {
+        self.integrator.set_epsilon(eps);
+    }
+
+    /// Returns the active IAS15 epsilon, or `None` for other integrators.
+    pub fn ias15_epsilon(&self) -> Option<f64> {
+        self.integrator.epsilon()
+    }
+
     /// `true` if the system satisfies the Wisdom-Holman dominance criterion.
     pub fn is_wh_suitable(&self) -> bool {
         crate::physics::integrator::wisdom_holman::WisdomHolman::is_suitable_for(&self.bodies)
