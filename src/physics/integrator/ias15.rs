@@ -72,6 +72,80 @@ use crate::physics::integrator::traits::{
     Integrator, IntegratorContext, IntegratorKind, StepResult,
 };
 
+// ── Phase-timing instrumentation (feature-gated) ─────────────────────────────
+//
+// When compiled with `--features ias15-profile`, every wrapped phase accumulates
+// wall time and call count into a thread-local [`profile::PhaseTimings`]. When
+// the feature is off, [`time_phase!`] expands to its block expression unchanged
+// — zero call overhead, zero codegen footprint.
+//
+// The instrumentation is exposed only through [`profile::snapshot`] and
+// [`profile::reset`] (feature-gated). The benchmark harness is the only
+// consumer; production builds are unaffected.
+
+#[cfg(feature = "ias15-profile")]
+pub mod profile {
+    use std::cell::RefCell;
+    use std::time::Duration;
+
+    #[derive(Default, Debug, Clone, Copy)]
+    pub struct PhaseEntry {
+        pub total: Duration,
+        pub count: u64,
+    }
+
+    #[derive(Default, Debug, Clone)]
+    pub struct PhaseTimings {
+        pub evaluate: PhaseEntry,
+        pub update_g_and_b: PhaseEntry,
+        pub warmstart_b: PhaseEntry,
+        pub recompute_g_from_b: PhaseEntry,
+        pub advance_state: PhaseEntry,
+        pub residual_compute: PhaseEntry,
+        pub snapshot_capture: PhaseEntry,
+        pub snapshot_restore: PhaseEntry,
+    }
+
+    thread_local! {
+        pub(super) static TIMINGS: RefCell<PhaseTimings> =
+            RefCell::new(PhaseTimings::default());
+    }
+
+    /// Snapshot of the current accumulated timings. Cheap clone — the
+    /// struct is a few Durations and counters.
+    pub fn snapshot() -> PhaseTimings {
+        TIMINGS.with(|t| t.borrow().clone())
+    }
+
+    /// Zero the accumulator. Called by the bench harness between scenarios
+    /// so each scenario's breakdown is reported independently.
+    pub fn reset() {
+        TIMINGS.with(|t| *t.borrow_mut() = PhaseTimings::default());
+    }
+}
+
+#[cfg(feature = "ias15-profile")]
+macro_rules! time_phase {
+    ($field:ident, $block:block) => {{
+        let __profile_start = std::time::Instant::now();
+        let __profile_result = $block;
+        let __profile_elapsed = __profile_start.elapsed();
+        $crate::physics::integrator::ias15::profile::TIMINGS.with(|t| {
+            let mut s = t.borrow_mut();
+            s.$field.total += __profile_elapsed;
+            s.$field.count += 1;
+        });
+        __profile_result
+    }};
+}
+
+#[cfg(not(feature = "ias15-profile"))]
+macro_rules! time_phase {
+    ($field:ident, $block:block) => {{
+        $block
+    }};
+}
+
 // ── Gauss-Radau node spacings ────────────────────────────────────────────────
 //
 // 8 nodes on [0, 1]: h₀ = 0 is the left end-point (implicit; the step
@@ -569,9 +643,13 @@ impl Integrator for Ias15 {
         // snapshot restores positions, so we evaluate it only once —
         // saving up to `max_picard_iter × n_rejects` force calls per
         // sub-step compared to re-evaluating inside the retry loop.
-        let snapshot = Attempt::snapshot(bodies, self);
+        let snapshot = time_phase!(snapshot_capture, {
+            Attempt::snapshot(bodies, self)
+        });
 
-        let raw_pe = evaluate(bodies, ctx.force, acc);
+        let raw_pe = time_phase!(evaluate, {
+            evaluate(bodies, ctx.force, acc)
+        });
         scale_acc_and_pe(acc, ctx.g_factor, raw_pe);
         apply_perturbations(bodies, acc, ctx.perturbations);
         let a0: Vec<(f64, f64)> = acc.clone();
@@ -586,9 +664,13 @@ impl Integrator for Ias15 {
         // than spin forever.
         let (accepted_dt, final_pe, final_snapshot, degraded) = loop {
             if self.dt_last_accepted > 0.0 {
-                self.warmstart_b(dt_try, self.dt_last_accepted);
+                time_phase!(warmstart_b, {
+                    self.warmstart_b(dt_try, self.dt_last_accepted);
+                });
             }
-            self.recompute_g_from_b();
+            time_phase!(recompute_g_from_b, {
+                self.recompute_g_from_b();
+            });
 
             let (converged, _picard_err, picard_iters) =
                 self.picard_loop(bodies, ctx, acc, &a0, dt_try);
@@ -607,7 +689,9 @@ impl Integrator for Ias15 {
             match decide_dt(converged, trunc_err, dt_try, self.epsilon, deadline_hit) {
                 DtDecision::RejectPicard => {
                     self.rejections_picard_total = self.rejections_picard_total.saturating_add(1);
-                    snapshot.restore(bodies, self);
+                    time_phase!(snapshot_restore, {
+                        snapshot.restore(bodies, self);
+                    });
                     // Fixed halving (REBOUND convention): divergence
                     // means the step exceeds the local Lipschitz bound;
                     // the dt⁷ formula would under-shrink here.
@@ -617,7 +701,9 @@ impl Integrator for Ias15 {
                 DtDecision::RejectTruncation => {
                     self.rejections_truncation_total =
                         self.rejections_truncation_total.saturating_add(1);
-                    snapshot.restore(bodies, self);
+                    time_phase!(snapshot_restore, {
+                        snapshot.restore(bodies, self);
+                    });
                     // Standard controller: dt · safety · (ε/err)^(1/7).
                     dt_try = self.optimal_dt(dt_try, trunc_err).max(DT_MIN).min(dt_cap);
                     continue;
@@ -645,13 +731,17 @@ impl Integrator for Ias15 {
                         kind: IntegratorKind::Ias15,
                     };
 
-                    self.advance_state(bodies, &a0, dt_try);
+                    time_phase!(advance_state, {
+                        self.advance_state(bodies, &a0, dt_try);
+                    });
 
                     // Post-step force evaluation: publishes `acc`
                     // consistent with the final body positions, and
                     // returns the potential energy the caller will use
                     // for energy-conservation diagnostics.
-                    let raw_pe = evaluate(bodies, ctx.force, acc);
+                    let raw_pe = time_phase!(evaluate, {
+                        evaluate(bodies, ctx.force, acc)
+                    });
                     let pe = scale_acc_and_pe(acc, ctx.g_factor, raw_pe);
                     apply_perturbations(bodies, acc, ctx.perturbations);
 
@@ -790,25 +880,31 @@ impl Ias15 {
                 }
 
                 // Evaluate acceleration at predicted positions.
-                let raw_pe = evaluate(bodies, ctx.force, acc);
+                let raw_pe = time_phase!(evaluate, {
+                    evaluate(bodies, ctx.force, acc)
+                });
                 let _ = scale_acc_and_pe(acc, ctx.g_factor, raw_pe);
                 apply_perturbations(bodies, acc, ctx.perturbations);
 
                 // Update divided-difference g and then b via c-coeffs.
-                self.update_g_and_b(stage, a0, acc);
+                time_phase!(update_g_and_b, {
+                    self.update_g_and_b(stage, a0, acc);
+                });
             }
 
             // Residual = max‖Δb₆‖ / max‖a₀‖ (vector norms; per-body).
-            let mut max_db6 = 0.0_f64;
-            let mut max_a = 0.0_f64;
-            for i in 0..n {
-                let db6x = self.b[i][6].0 - b6_old[i].0;
-                let db6y = self.b[i][6].1 - b6_old[i].1;
-                max_db6 = max_db6.max((db6x * db6x + db6y * db6y).sqrt());
-                let a_mag = (a0[i].0 * a0[i].0 + a0[i].1 * a0[i].1).sqrt();
-                max_a = max_a.max(a_mag);
-            }
-            let residual = if max_a > 0.0 { max_db6 / max_a } else { max_db6 };
+            let residual = time_phase!(residual_compute, {
+                let mut max_db6 = 0.0_f64;
+                let mut max_a = 0.0_f64;
+                for i in 0..n {
+                    let db6x = self.b[i][6].0 - b6_old[i].0;
+                    let db6y = self.b[i][6].1 - b6_old[i].1;
+                    max_db6 = max_db6.max((db6x * db6x + db6y * db6y).sqrt());
+                    let a_mag = (a0[i].0 * a0[i].0 + a0[i].1 * a0[i].1).sqrt();
+                    max_a = max_a.max(a_mag);
+                }
+                if max_a > 0.0 { max_db6 / max_a } else { max_db6 }
+            });
 
             if residual < PICARD_TOL {
                 // Restore positions/velocities to start-of-attempt so
