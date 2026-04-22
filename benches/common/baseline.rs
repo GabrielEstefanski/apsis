@@ -101,26 +101,48 @@ impl ToleranceSpec {
     /// Check `measured` against this spec. On violation returns a
     /// human-readable reason that makes the baseline-vs-measured
     /// delta obvious at a glance.
+    ///
+    /// `tol_factor == 1.0` is interpreted as "bit-exact required" and
+    /// uses `to_bits` comparison. The alternative — `value/1 ≤ x ≤
+    /// value·1` — is mathematically equivalent to bit-exact *when*
+    /// the stored value and the measured value share a bit pattern,
+    /// but can fail spuriously if stringification through TOML loses
+    /// a round-trip bit that no reviewer would call a regression.
+    /// When tol_factor > 1.0, the range check is the well-posed
+    /// semantic and we use it unchanged.
     fn check(&self, measured: f64) -> Result<(), String> {
         if let Some(abs) = self.tol_abs {
             let delta = (measured - self.value).abs();
             if delta > abs {
                 return Err(format!(
-                    "Δ={delta:.6e} > tol_abs={abs:.6e} \
-                     (baseline={:.6e}, measured={:.6e})",
+                    "Δ={delta:e} > tol_abs={abs:e} \
+                     (baseline={}, measured={})",
                     self.value, measured
                 ));
             }
         }
         if let Some(factor) = self.tol_factor {
-            let lo = self.value / factor;
-            let hi = self.value * factor;
-            if measured < lo || measured > hi {
-                return Err(format!(
-                    "measured={measured:.6e} outside [{lo:.6e}, {hi:.6e}] \
-                     (baseline={:.6e}, tol_factor={factor})",
-                    self.value
-                ));
+            if factor == 1.0 {
+                if measured.to_bits() != self.value.to_bits() {
+                    return Err(format!(
+                        "bit-exact mismatch (tol_factor=1.0): \
+                         baseline={} (0x{:016x}), measured={} (0x{:016x})",
+                        self.value,
+                        self.value.to_bits(),
+                        measured,
+                        measured.to_bits(),
+                    ));
+                }
+            } else {
+                let lo = self.value / factor;
+                let hi = self.value * factor;
+                if measured < lo || measured > hi {
+                    return Err(format!(
+                        "measured={measured:e} outside [{lo:e}, {hi:e}] \
+                         (baseline={}, tol_factor={factor})",
+                        self.value
+                    ));
+                }
             }
         }
         Ok(())
@@ -363,6 +385,13 @@ fn derive_tolerance(
     let max = values.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
     let mean = values.iter().sum::<f64>() / values.len() as f64;
 
+    // When all runs are bit-identical we must store that shared value
+    // verbatim, not an arithmetic mean of it. `(X * N) / N` drifts by
+    // up to 1 ULP via intermediate rounding, which would bite every
+    // subsequent validation run (which computes `X` directly and then
+    // fails the bit-exact check).
+    let value = if min == max { min } else { mean };
+
     match tier {
         MetricTier::Counter => {
             // Hard determinism requirement. Any run-to-run variation
@@ -378,7 +407,7 @@ fn derive_tolerance(
                 ));
             }
             Ok(ToleranceSpec {
-                value: mean,
+                value,
                 tol_abs: Some(0.0),
                 tol_factor: None,
             })
@@ -395,7 +424,7 @@ fn derive_tolerance(
                 (1.0 + 2.0 * rel_range).min(MAX_ALLOWED_TOL_FACTOR)
             };
             Ok(ToleranceSpec {
-                value: mean,
+                value,
                 tol_abs: None,
                 tol_factor: Some(tol_factor),
             })
@@ -425,26 +454,35 @@ fn format_tolerance_line(metric_name: &str, spec: &ToleranceSpec) -> String {
     }
 }
 
-/// Format a float for TOML: exponent notation for magnitude extremes
-/// (readable at a glance), fixed decimal otherwise. Integer-valued
-/// floats get a trailing `.0` so TOML recognises them as floats
-/// rather than ints (a 12450.0 value written as `12450` would parse
-/// as i64, not f64, and break round-tripping).
+/// Format a float for TOML such that parse-then-format round-trips to
+/// the identical f64 bit pattern.
+///
+/// Rust's default `Display` for f64 emits the shortest decimal that
+/// round-trips; `{:e}` does the same in scientific form. We pick
+/// between the two based on magnitude (readability only — precision
+/// is identical) and add a trailing `.0` for integer-valued floats
+/// so TOML parses them as floats, not ints.
+///
+/// An earlier revision used `{:.6e}` for magnitude extremes, which
+/// truncated to 6 decimal digits and broke round-tripping: baselines
+/// recorded from a bench run no longer matched the metrics produced
+/// by a replay of the same run. Never reintroduce a precision modifier
+/// here — the default round-trip guarantee is the whole point.
 fn format_f64(x: f64) -> String {
     if x == 0.0 {
         return "0.0".into();
     }
-    if x.is_nan() || x.is_infinite() {
+    if !x.is_finite() {
         return format!("{x}");
     }
     let mag = x.abs();
     if mag < 1e-3 || mag >= 1e6 {
-        return format!("{x:.6e}");
+        format!("{x:e}")
+    } else if x == x.trunc() {
+        format!("{x:.1}")
+    } else {
+        format!("{x}")
     }
-    if x == x.trunc() {
-        return format!("{x:.1}");
-    }
-    format!("{x}")
 }
 
 fn baseline_path() -> PathBuf {
