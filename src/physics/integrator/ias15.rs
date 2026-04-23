@@ -104,6 +104,22 @@ pub mod profile {
         pub residual_compute: PhaseEntry,
         pub snapshot_capture: PhaseEntry,
         pub snapshot_restore: PhaseEntry,
+        /// Cost of `let a0 = acc.clone();` at the top of `step()`.
+        /// Allocates a fresh `Vec<(f64, f64)>` of length N per sub-step
+        /// — an alloc path entirely independent of the persistent
+        /// rollback snapshot and therefore not caught by
+        /// `snapshot_capture`. Called out because at large N it
+        /// becomes a non-trivial fraction of per-sub-step work, and
+        /// is an obvious candidate for persistent-buffer reuse.
+        pub a0_clone: PhaseEntry,
+        /// Cost of constructing the `DenseSnapshot` on the accept
+        /// path — the 4 `Vec::clone()` calls that copy x/v/a0/b into
+        /// a fresh owned snapshot for downstream consumers (renderer
+        /// interpolation). At N=641 this is ~100 KB of alloc+memcpy
+        /// per accepted sub-step; at the accept rate the IAS15
+        /// controller typically runs, this is the dominant source
+        /// of allocator pressure visible as render-thread stutter.
+        pub dense_snapshot_build: PhaseEntry,
     }
 
     thread_local! {
@@ -741,7 +757,9 @@ impl Integrator for Ias15 {
         });
         scale_acc_and_pe(acc, ctx.g_factor, raw_pe);
         apply_perturbations(bodies, acc, ctx.perturbations);
-        let a0: Vec<(f64, f64)> = acc.clone();
+        let a0: Vec<(f64, f64)> = time_phase!(a0_clone, {
+            acc.clone()
+        });
 
         // ── Rejection retry loop ─────────────────────────────────────────
         //
@@ -810,15 +828,17 @@ impl Integrator for Ias15 {
                     // `self.b` is not further modified on the accept
                     // path). The caller (`System::step`) fills in the
                     // absolute `t0` as `system.t() - consumed_dt`.
-                    let step_snapshot = DenseSnapshot {
-                        t0: 0.0,
-                        dt: dt_try,
-                        x0: self.snap_x.clone(),
-                        v0: self.snap_v.clone(),
-                        a0: a0.clone(),
-                        b: self.b.clone(),
-                        kind: IntegratorKind::Ias15,
-                    };
+                    let step_snapshot = time_phase!(dense_snapshot_build, {
+                        DenseSnapshot {
+                            t0: 0.0,
+                            dt: dt_try,
+                            x0: self.snap_x.clone(),
+                            v0: self.snap_v.clone(),
+                            a0: a0.clone(),
+                            b: self.b.clone(),
+                            kind: IntegratorKind::Ias15,
+                        }
+                    });
 
                     time_phase!(advance_state, {
                         self.advance_state(bodies, &a0, dt_try);

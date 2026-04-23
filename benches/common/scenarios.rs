@@ -43,6 +43,24 @@ pub struct ScenarioSpec {
     pub bodies: Vec<Body>,
     pub dt_budget: f64,
     pub duration: f64,
+    /// Whether this scenario participates in the Criterion wall-time
+    /// benchmark group. `false` for scenarios whose single sub-step is
+    /// expensive enough that Criterion's sample batching (typically 100
+    /// iterations × `STEPS_PER_ITER` sub-steps) would push total bench
+    /// wall time beyond a few minutes. Such scenarios still run through
+    /// the validation + phase-profile path, which is the diagnostic
+    /// signal we care about for them — the Criterion-specific
+    /// statistical comparisons are not worth the wait at large N.
+    pub criterion_bench: bool,
+
+    /// Whether mismatches against the stored baseline are a regression
+    /// (exit 2) or an advisory (scenario runs, phase profile prints,
+    /// exit stays 0). `false` for scenarios still under active
+    /// diagnosis — the metrics are expected to shift as the
+    /// investigation progresses, and a hard gate would block progress
+    /// without adding signal. Flip back to `true` once the scenario
+    /// has a known-good baseline that a PR is supposed to preserve.
+    pub gate_on_baseline: bool,
 }
 
 /// Two-body Keplerian orbit at moderate eccentricity (e=0.5).
@@ -95,6 +113,8 @@ pub fn pythagorean() -> ScenarioSpec {
         bodies,
         dt_budget: 0.1,
         duration: 10.0,
+        criterion_bench: true,
+        gate_on_baseline: true,
     }
 }
 
@@ -173,13 +193,105 @@ pub fn cluster_n50() -> ScenarioSpec {
         // distribution — is fully exercised in a fraction of a
         // dynamical time.
         duration: 0.5,
+        criterion_bench: true,
+        gate_on_baseline: true,
+    }
+}
+
+/// Central-body + 640 test-particle disk approximating the interactive
+/// app's `solar_system` preset (Sun + planets + asteroid belt +
+/// comets ≈ 641 bodies). Purpose: diagnose IAS15 stutter reported at
+/// this scale in normal playback mode.
+///
+/// Simplifications relative to the full preset:
+///
+///   * All test particles are equal-mass (1e-10 solar masses) rather
+///     than a mix of planets + asteroids + comets. The goal is
+///     allocator pressure and phase distribution at N≈641, not
+///     trajectory fidelity.
+///   * Single annulus [0.5, 5] AU instead of the preset's
+///     planets-and-belt structure. Keplerian circular velocities
+///     around the central mass.
+///   * `G = 1` rather than `G = 4π²` (solar-AU-year). The preset's
+///     physical correctness is preserved elsewhere; the bench only
+///     cares about wall-time / alloc behaviour, which is invariant
+///     under uniform velocity / time scaling.
+///
+/// Marked `criterion_bench: false` — at N=641 a single Criterion
+/// iteration (`STEPS_PER_ITER = 100` accepted sub-steps) takes on
+/// the order of seconds; a 100-sample Criterion run would consume
+/// tens of minutes. The validation + phase-profile path provides
+/// the diagnostic signal we need (per-phase breakdown with the new
+/// `a0_clone` and `dense_snapshot_build` timers).
+pub fn solar_n641() -> ScenarioSpec {
+    const N_TEST: usize = 640; // + 1 central body = 641 total
+    const M_CENTRAL: f64 = 1.0;
+    const M_TEST: f64 = 1e-10;
+    const R_INNER: f64 = 0.5;
+    const R_OUTER: f64 = 5.0;
+    const SOFTENING: f64 = 0.01;
+    const SEED: u64 = 0x501a5; // "solaš"
+
+    let mut rng = SmallRng::seed_from_u64(SEED);
+    let mut bodies = Vec::with_capacity(N_TEST + 1);
+
+    // Central body: massive star at origin, at rest.
+    bodies.push(Body::new(0.0, 0.0, 0.0, 0.0, M_CENTRAL, Material::Star));
+
+    for _ in 0..N_TEST {
+        // Uniform in [R_INNER, R_OUTER] via rejection-free sampling.
+        // Linear-in-U gives concentration at small r; for a disk
+        // benchmark it's fine because the inner bodies stress the
+        // controller more than the outer ones (tighter orbital
+        // periods → smaller effective dt).
+        let r = R_INNER + (R_OUTER - R_INNER) * rng.random::<f64>();
+        let theta = rng.random::<f64>() * std::f64::consts::TAU;
+        let x = r * theta.cos();
+        let y = r * theta.sin();
+
+        // Circular Keplerian velocity around the central body:
+        // v_circ = sqrt(G · M_central / r). With G = 1, v = 1/sqrt(r).
+        let v_circ = (M_CENTRAL / r).sqrt();
+        let vx = -v_circ * theta.sin();
+        let vy = v_circ * theta.cos();
+
+        let mut b = Body::new(x, y, vx, vy, M_TEST, Material::Asteroid);
+        b.softening = SOFTENING;
+        bodies.push(b);
+    }
+
+    ScenarioSpec {
+        name: "solar_n641",
+        bodies,
+        // dt_budget generous: the controller will shrink it at the
+        // inner-radius bodies (shortest orbital periods). Chosen to
+        // leave headroom for the adaptive mechanism rather than
+        // clipping it.
+        dt_budget: 0.05,
+        // Very short duration: at N=641 with IAS15 and BH each
+        // accepted sub-step takes on the order of tens of ms, so
+        // even 0.1 time units produces enough sub-steps (~hundreds)
+        // for reliable phase statistics. Longer windows only add
+        // wall time without improving the diagnostic signal.
+        duration: 0.1,
+        criterion_bench: false,
+        gate_on_baseline: false,
     }
 }
 
 /// Ordered list of all scenarios. The order determines the order of
+
+/// Ordered list of all scenarios. The order determines the order of
 /// sections in the baseline file.
 pub fn all() -> Vec<ScenarioSpec> {
-    vec![kepler_e05(), kepler_e09(), kepler_e099(), pythagorean(), cluster_n50()]
+    vec![
+        kepler_e05(),
+        kepler_e09(),
+        kepler_e099(),
+        pythagorean(),
+        cluster_n50(),
+        solar_n641(),
+    ]
 }
 
 // ── Internal helpers ─────────────────────────────────────────────────────────
@@ -212,5 +324,7 @@ fn kepler_two_body(
         // the budget acting as a cap.
         dt_budget: period / 20.0,
         duration: n_orbits as f64 * period,
+        criterion_bench: true,
+        gate_on_baseline: true,
     }
 }
