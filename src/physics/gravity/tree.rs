@@ -34,6 +34,21 @@ pub(crate) const NO_CHILD: u32 = u32::MAX;
 /// avoiding tree overhead that dominates at small particle counts.
 pub(crate) const EXACT_THRESHOLD: usize = 64;
 
+/// Upper clamp on the configurable exact-evaluation threshold, and the
+/// canonical "direct mode" threshold. When
+/// [`BarnesHutEngine::set_exact_threshold`] is called with a value
+/// ≥ this constant, the engine's BH branch becomes unreachable for any
+/// practical N and the force computation is guaranteed deterministic
+/// (see [`BarnesHutEngine::is_direct_mode`]).
+///
+/// Why a constant and not `usize::MAX`: clamping to a finite value
+/// simplifies both the `is_direct_mode` predicate and any downstream
+/// determinism check that needs a comparison. The value of 10 000 is
+/// two orders of magnitude above the largest interactive body counts
+/// this simulator targets; if that ever changes, this is the single
+/// place to revisit.
+pub(crate) const DIRECT_MODE_THRESHOLD: usize = 10_000;
+
 /// Small padding added to the root bounding box so that no body ever sits
 /// exactly on a cell boundary (which would cause ambiguous quadrant assignment).
 const TREE_PAD: f64 = 1e-2;

@@ -232,13 +232,17 @@ impl System {
             rel_energy_error: 0.0,
             force_model,
             scratch_acc: Vec::new(),
-            // IAS15 is the default integrator (Rein & Spiegel 2015): 15th-order
-            // adaptive Gauss-Radau, conserves energy to machine precision for
-            // bound orbits, and handles close encounters / high eccentricities
-            // without the artefacts seen in fixed-step symplectic schemes.
-            // Matches REBOUND's default. Callers that need a symplectic method
-            // can still opt into VV / Y4 / WH via `set_integrator`.
-            integrator: make_integrator(IntegratorKind::Ias15),
+            // Yoshida 4 is the default: 4th-order symplectic composition with
+            // bounded per-step wall time, safe to drive from the render loop
+            // at realistic body counts. IAS15 (15th-order adaptive) remains
+            // available via `set_integrator` but is intentionally *not* the
+            // default — its per-step cost is unbounded in stiff regimes
+            // (dt → DT_MIN cascades), which makes it unsuitable for
+            // interactive playback at N ≳ a few hundred. REBOUND itself uses
+            // IAS15 only in offline script mode; the integrator-execution-
+            // profile ADR captures the rationale. Callers that want a
+            // precision run opt into IAS15 explicitly.
+            integrator: make_integrator(IntegratorKind::Yoshida4),
             orbital_cache: Vec::new(),
             softening_scale: 1.0,
             diagnostics: DiagnosticsComputer::new(),
