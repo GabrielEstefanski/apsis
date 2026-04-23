@@ -1,0 +1,1756 @@
+//! IAS15 — 15th-order adaptive Gauss-Radau integrator.
+//!
+//! Reference implementation of the algorithm described in:
+//!
+//!   * Rein H. & Spiegel D. S. (2015). *IAS15: a fast, adaptive,
+//!     high-order integrator for gravitational dynamics, accurate to
+//!     machine precision over a billion orbits*, MNRAS **446**,
+//!     1424–1437.  [arXiv:1409.4779](https://arxiv.org/abs/1409.4779)
+//!   * Everhart E. (1985). *An efficient integrator that uses Gauss-Radau
+//!     spacings*, in «Dynamics of Comets: Their Origin and Evolution»,
+//!     A. Carusi & G. B. Valsecchi eds., Astrophysics and Space Science
+//!     Library 115, 185–202.
+//!
+//! The layout of this file mirrors REBOUND's `integrator_ias15.c` so the
+//! two implementations are straightforward to cross-read.
+//!
+//! IAS15 is the modern refinement of Everhart's RADAU15. It combines
+//!
+//!   * 8-node Gauss-Radau quadrature (one end-point node + 7 interior),
+//!   * a power-series ansatz for the acceleration within the step,
+//!   * a predictor–corrector Picard loop to solve the implicit system,
+//!   * adaptive step control driven by the dominant truncation term
+//!     (∝ |b₆|), with a safety factor to damp oscillation, and
+//!   * compensated summation on every state update to keep rounding
+//!     error below the truncation error even over ∼10⁹ orbits.
+//!
+//! Unlike symplectic integrators, IAS15 is **not** measure-preserving,
+//! but the adaptive step control delivers energy conservation at the
+//! round-off floor — in practice indistinguishable from a symplectic
+//! method for bound orbits, and strictly superior for close encounters
+//! or high eccentricities where fixed-step schemes degrade.
+//!
+//! # Sub-step semantics (ADR-004)
+//!
+//! A single call to [`Integrator::step`] performs **one** adaptive
+//! sub-step. The `dt` argument is treated as an upper bound on the
+//! sub-step size (the caller's budget for this tick); the error
+//! controller may accept anything in `(DT_MIN, dt]` and reports the
+//! actual size via [`StepResult::consumed_dt`]. The caller (the
+//! [`System::step`] orchestrator) loops until its desired simulation
+//! time is reached, exactly as REBOUND does via
+//! `reb_integrator_ias15_part1` / `part2`.
+//!
+//! This design — substep-granularity at the trait boundary — was
+//! chosen for three reasons:
+//!
+//!   * `System::t` stays consistent with body state even when a close
+//!     encounter forces the controller to shrink `dt_try` well below
+//!     the caller's hint (previous releases hid this under an outer
+//!     "budget loop" and incremented `t` by the requested `dt`
+//!     regardless, causing a visual *teleport* when the internal
+//!     substep budget was exceeded).
+//!   * The dense-output snapshot reflects the *actual* sub-step the
+//!     integrator just accepted, giving the renderer a clean,
+//!     well-defined window `[t − consumed_dt, t]` to interpolate.
+//!   * Callers can respond to external events (pause, shutdown) between
+//!     sub-steps without modifying the integrator.
+//!
+//! # Rejection rollback
+//!
+//! When a candidate attempt fails the error tolerance, we **must**
+//! restore every piece of integrator state — not just positions and
+//! velocities, but also `b[]`, `e[]`, the compensated-summation
+//! accumulators (`csx`, `csv`, `csb`) — otherwise the divergent
+//! information from the rejected attempt silently contaminates the
+//! next try. See `Attempt::snapshot` / `Attempt::restore`.
+
+use crate::domain::body::Body;
+use crate::physics::integrator::dense::{DenseSnapshot, predict_ias15};
+use crate::physics::integrator::helpers::{apply_perturbations, evaluate, scale_acc_and_pe};
+use crate::physics::integrator::traits::{
+    Integrator, IntegratorContext, IntegratorKind, StepResult,
+};
+
+// ── Phase-timing instrumentation (feature-gated) ─────────────────────────────
+//
+// When compiled with `--features ias15-profile`, every wrapped phase accumulates
+// wall time and call count into a thread-local [`profile::PhaseTimings`]. When
+// the feature is off, [`time_phase!`] expands to its block expression unchanged
+// — zero call overhead, zero codegen footprint.
+//
+// The instrumentation is exposed only through [`profile::snapshot`] and
+// [`profile::reset`] (feature-gated). The benchmark harness is the only
+// consumer; production builds are unaffected.
+
+#[cfg(feature = "ias15-profile")]
+pub mod profile {
+    use std::cell::RefCell;
+    use std::time::Duration;
+
+    #[derive(Default, Debug, Clone, Copy)]
+    pub struct PhaseEntry {
+        pub total: Duration,
+        pub count: u64,
+    }
+
+    #[derive(Default, Debug, Clone)]
+    pub struct PhaseTimings {
+        pub evaluate: PhaseEntry,
+        pub update_g_and_b: PhaseEntry,
+        pub warmstart_b: PhaseEntry,
+        pub recompute_g_from_b: PhaseEntry,
+        pub advance_state: PhaseEntry,
+        pub residual_compute: PhaseEntry,
+        pub snapshot_capture: PhaseEntry,
+        pub snapshot_restore: PhaseEntry,
+        /// Cost of `let a0 = acc.clone();` at the top of `step()`.
+        /// Allocates a fresh `Vec<(f64, f64)>` of length N per sub-step
+        /// — an alloc path entirely independent of the persistent
+        /// rollback snapshot and therefore not caught by
+        /// `snapshot_capture`. Called out because at large N it
+        /// becomes a non-trivial fraction of per-sub-step work, and
+        /// is an obvious candidate for persistent-buffer reuse.
+        pub a0_clone: PhaseEntry,
+        /// Cost of constructing the `DenseSnapshot` on the accept
+        /// path — the 4 `Vec::clone()` calls that copy x/v/a0/b into
+        /// a fresh owned snapshot for downstream consumers (renderer
+        /// interpolation). At N=641 this is ~100 KB of alloc+memcpy
+        /// per accepted sub-step; at the accept rate the IAS15
+        /// controller typically runs, this is the dominant source
+        /// of allocator pressure visible as render-thread stutter.
+        pub dense_snapshot_build: PhaseEntry,
+
+        /// Wall time of Barnes-Hut **tree construction** specifically.
+        /// Set from inside `GravityForceModel::compute` when the
+        /// `ias15-profile` feature is compiled into the force model.
+        /// Paired with `tree_traverse` it decomposes the `evaluate`
+        /// phase into its two structural halves — answering whether
+        /// the per-call cost at large N is dominated by rebuilding
+        /// the tree (fixable by caching across Picard iterations)
+        /// or by traversing it (requires traversal-level SIMD).
+        pub tree_build: PhaseEntry,
+
+        /// Wall time of Barnes-Hut **tree traversal** (the force
+        /// accumulation itself). Complements `tree_build`; the two
+        /// together approximately reconstruct `evaluate` — the gap
+        /// between `evaluate - (build + traverse)` is the per-call
+        /// function-dispatch / bookkeeping overhead and should be
+        /// small.
+        pub tree_traverse: PhaseEntry,
+    }
+
+    thread_local! {
+        pub(super) static TIMINGS: RefCell<PhaseTimings> =
+            RefCell::new(PhaseTimings::default());
+    }
+
+    /// Snapshot of the current accumulated timings. Cheap clone — the
+    /// struct is a few Durations and counters.
+    pub fn snapshot() -> PhaseTimings {
+        TIMINGS.with(|t| t.borrow().clone())
+    }
+
+    /// Zero the accumulator. Called by the bench harness between scenarios
+    /// so each scenario's breakdown is reported independently.
+    pub fn reset() {
+        TIMINGS.with(|t| *t.borrow_mut() = PhaseTimings::default());
+    }
+
+    /// Record a Barnes-Hut tree-build sample. Invoked from inside
+    /// `GravityForceModel::compute` (i.e. crossing out of
+    /// `ias15.rs`), so it needs a free-function entry point rather
+    /// than the `time_phase!` macro which is scoped to this file.
+    pub fn record_tree_build(elapsed: std::time::Duration) {
+        TIMINGS.with(|t| {
+            let mut s = t.borrow_mut();
+            s.tree_build.total += elapsed;
+            s.tree_build.count += 1;
+        });
+    }
+
+    /// Record a Barnes-Hut tree-traversal sample. Paired with
+    /// [`record_tree_build`] across `GravityForceModel::compute`
+    /// to split the `evaluate` phase.
+    pub fn record_tree_traverse(elapsed: std::time::Duration) {
+        TIMINGS.with(|t| {
+            let mut s = t.borrow_mut();
+            s.tree_traverse.total += elapsed;
+            s.tree_traverse.count += 1;
+        });
+    }
+}
+
+#[cfg(feature = "ias15-profile")]
+macro_rules! time_phase {
+    ($field:ident, $block:block) => {{
+        let __profile_start = std::time::Instant::now();
+        let __profile_result = $block;
+        let __profile_elapsed = __profile_start.elapsed();
+        $crate::physics::integrator::ias15::profile::TIMINGS.with(|t| {
+            let mut s = t.borrow_mut();
+            s.$field.total += __profile_elapsed;
+            s.$field.count += 1;
+        });
+        __profile_result
+    }};
+}
+
+#[cfg(not(feature = "ias15-profile"))]
+macro_rules! time_phase {
+    ($field:ident, $block:block) => {{
+        $block
+    }};
+}
+
+// ── Gauss-Radau node spacings ────────────────────────────────────────────────
+//
+// 8 nodes on [0, 1]: h₀ = 0 is the left end-point (implicit; the step
+// starts there); h₁ … h₇ are the 7 interior Gauss-Radau quadrature
+// points. Values are literal transcriptions of Everhart (1985) /
+// Rein & Spiegel (2015) — extra digits are preserved so the sums
+// `h[j] - h[i]` stay exact to double precision.
+
+const H: [f64; 8] = [
+    0.0,
+    0.056_262_560_536_922_146_465_652_191_031_8,
+    0.180_240_691_736_892_364_987_579_942_835_4,
+    0.352_624_717_113_169_637_373_907_770_280_6,
+    0.547_153_626_330_555_383_001_448_557_701_4,
+    0.734_210_177_215_410_531_523_210_621_826_2,
+    0.885_320_946_839_095_768_090_359_762_915_4,
+    0.977_520_613_561_287_501_891_174_500_440_5,
+];
+
+// ── Triangular b ↔ g conversion coefficients ─────────────────────────────────
+//
+// `g_k` is the (k+1)-th Newton divided difference of the acceleration
+// increment F(hₙ) - F(h₀); `b_k` is the power-series coefficient such
+// that F(u) ≈ F₀ + Σ b_k · uᵏ⁺¹ (with u = τ/dt ∈ [0,1]).
+//
+// The mapping is upper-triangular:
+//
+//     b_j = g_j + Σ_{k>j}  c_mat[k][j] · g_k
+//     g_j = b_j + Σ_{k>j}  d_mat[k][j] · b_k
+//
+// We store only the lower triangle (row k, cols 0..k). Values from
+// Everhart (1985) table I; constants cross-checked against the
+// REBOUND reference implementation.
+
+const C_MAT: [[f64; 7]; 7] = [
+    [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    [-0.056_262_560_536_922_146, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    [0.010_140_802_830_063_630, -0.236_503_252_273_814_5, 0.0, 0.0, 0.0, 0.0, 0.0],
+    [
+        -0.003_575_897_729_251_617,
+        0.093_537_695_259_462_07,
+        -0.589_127_969_386_984_1,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+    ],
+    [
+        0.001_956_565_409_947_221,
+        -0.054_755_386_889_068_69,
+        0.415_881_200_082_306_86,
+        -1.136_281_595_717_539_5,
+        0.0,
+        0.0,
+        0.0,
+    ],
+    [
+        -0.001_436_530_236_370_892,
+        0.042_158_527_721_268_71,
+        -0.360_099_596_502_056_8,
+        1.250_150_711_840_691_0,
+        -1.870_491_772_932_950_1,
+        0.0,
+        0.0,
+    ],
+    [
+        0.001_271_790_309_026_868,
+        -0.038_760_357_915_906_77,
+        0.360_962_243_452_846_0,
+        -1.466_884_208_400_426_9,
+        2.906_136_259_308_429_3,
+        -2.755_812_719_772_045_8,
+        0.0,
+    ],
+];
+
+const D_MAT: [[f64; 7]; 7] = [
+    [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    [0.056_262_560_536_922_146, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    [0.003_165_475_718_170_829, 0.236_503_252_273_814_5, 0.0, 0.0, 0.0, 0.0, 0.0],
+    [
+        0.000_178_097_769_221_743,
+        0.045_792_985_506_027_92,
+        0.589_127_969_386_984_1,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+    ],
+    [
+        0.000_010_020_236_522_329_1,
+        0.008_431_857_153_525_70,
+        0.253_534_069_054_569_27,
+        1.136_281_595_717_539_5,
+        0.0,
+        0.0,
+        0.0,
+    ],
+    [
+        0.000_000_563_764_163_931_8,
+        0.001_529_784_002_500_466,
+        0.097_834_236_532_444_00,
+        0.875_254_664_684_091_1,
+        1.870_491_772_932_950_1,
+        0.0,
+        0.0,
+    ],
+    [
+        0.000_000_031_718_815_401_8,
+        0.000_276_293_090_982_648,
+        0.036_028_553_983_736_46,
+        0.576_733_000_277_078_7,
+        2.248_588_760_769_159_8,
+        2.755_812_719_772_045_8,
+        0.0,
+    ],
+];
+
+// ── Tuning parameters ────────────────────────────────────────────────────────
+
+/// Target relative error on the dominant truncation term. `1e-9` is
+/// the value recommended by Rein & Spiegel (2015) as giving machine-
+/// precision energy conservation over gigayear integrations while
+/// remaining robust. Exposed via [`Ias15::with_epsilon`] for users
+/// who need looser/tighter control.
+const DEFAULT_EPSILON: f64 = 1e-9;
+
+/// Floor on `dt` to prevent a pathological scene (e.g. contact
+/// singularity) from driving the step size to zero and stalling the
+/// scheduler. Below this, we accept the attempt regardless and let
+/// the caller decide what to do (typically: log a degraded-step and
+/// keep integrating). Matches REBOUND's `integrator_ias15.min_dt`
+/// default behaviour when no explicit floor is configured.
+const DT_MIN: f64 = 1e-12;
+
+/// Multiplier on the theoretically optimal Δt after each attempt.
+/// Keeps the controller away from the accept/reject boundary so
+/// step size doesn't oscillate between borderline-too-large and
+/// too-small. 0.9 matches REBOUND (`integrator_ias15.safety_factor`).
+const DT_SAFETY: f64 = 0.9;
+
+/// Conservative growth factor used only as a fallback when the error
+/// estimate is zero (exact machine-precision step). In all other cases
+/// the error formula drives dt_next directly — no growth cap is applied,
+/// matching REBOUND's controller exactly.
+const DT_ZERO_ERR_GROWTH: f64 = 2.0;
+
+/// Cap on predictor-corrector Picard iterations per attempt. In well-
+/// behaved regimes 2–3 suffice; 12 is a safety net against pathological
+/// cases where the iteration fails to converge at all.
+const MAX_PICARD_ITERATIONS: usize = 12;
+
+/// Convergence threshold on max|Δb₆|/max|a₀| across one Picard
+/// iteration. `1e-16` is essentially round-off: REBOUND uses the
+/// same threshold with an early-exit when two consecutive iterations
+/// fail to improve, which we also do.
+const PICARD_TOL: f64 = 1e-16;
+
+/// Lower bound on user-settable epsilon. f64 machine epsilon is
+/// ≈2.22e-16, so tolerances below ~1e-14 cannot be distinguished from
+/// floating-point round-off in either the Picard residual or the
+/// truncation estimate. Pinning the floor three decades above machine
+/// epsilon keeps the error controller honest: at `ε = 1e-13` the
+/// optimal-dt formula `(ε/err)^(1/7)` still produces meaningful
+/// adjustments rather than noise, and the retry loop cannot stall
+/// with Picard residual and truncation both floating on round-off.
+const EPSILON_MIN: f64 = 1e-13;
+
+/// Upper bound on user-settable epsilon. Above `~1e-3` the local
+/// truncation error approaches the step itself and the 15th-order
+/// machinery buys nothing over a cheap low-order method; we cap here
+/// to flag misconfiguration rather than silently degrade to
+/// garbage-quality integration.
+const EPSILON_MAX: f64 = 1e-3;
+
+/// Shrink factor applied when the Picard predictor–corrector fails to
+/// converge. Divergence is a Lipschitz-regime problem (the step is
+/// simply too large for the local dynamics); a fixed halving matches
+/// REBOUND's heuristic and converges faster than the truncation formula
+/// `(ε/err)^(1/7)` when the error comes from non-convergence, not from
+/// dt⁷-scaled truncation.
+const PICARD_SHRINK: f64 = 0.5;
+
+// ── Controller decision type ─────────────────────────────────────────────────
+
+/// Outcome of one attempt at an IAS15 sub-step, as decided by
+/// [`decide_dt`] from the two independent error signals.
+///
+/// Keeping this as a small, `PartialEq`-able enum makes the branching
+/// trivial to unit-test in isolation, and was the whole point of
+/// factoring it out of the retry loop in [`Integrator::step`] — prior
+/// revisions collapsed the two signals through `max(picard, trunc)`
+/// and so lost the information of *which* signal was failing, which
+/// drives the right shrink strategy (TD-004).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DtDecision {
+    /// Accept this attempt. `degraded = true` when the acceptance was
+    /// forced by an escape hatch (`DT_MIN` floor or cooperative deadline)
+    /// rather than convergence + tolerance actually being met; the caller
+    /// should then surface [`StepResult::degraded`].
+    Accept { degraded: bool },
+    /// Picard predictor–corrector did not converge. Apply [`PICARD_SHRINK`]
+    /// (a fixed halving); the truncation formula would under-estimate the
+    /// needed shrink in this regime because it assumes the dt⁷ scaling
+    /// that only holds when Picard has actually produced valid `b`
+    /// coefficients.
+    RejectPicard,
+    /// Picard converged but truncation bound `|b₆|/|a₀|` is above `ε`.
+    /// Shrink using the standard controller formula
+    /// `dt · safety · (ε / trunc_err)^(1/7)` — this is the well-posed
+    /// signal the formula was derived for.
+    RejectTruncation,
+}
+
+/// Pure decision function for the IAS15 adaptive controller.
+///
+/// # Why pure
+///
+/// The retry loop around this function holds `&mut self` on a bunch of
+/// coefficient buffers and runs a non-trivial sequence of force
+/// evaluations. By isolating the *decision* (which is first-order
+/// logic on two floats + two bools) from the *mutation* (which is
+/// second-order through the force model), we get cheap unit tests on
+/// the control behaviour without standing up a full `System`.
+///
+/// # Arguments
+///
+/// - `picard_converged` — whether the predictor–corrector satisfied
+///   [`PICARD_TOL`] before hitting [`MAX_PICARD_ITERATIONS`]. Note this
+///   is **independent** of `trunc_err`: Picard can diverge while
+///   `trunc_err` is incidentally small, and that case must still be
+///   rejected rather than silently accepted.
+/// - `trunc_err` — the truncation-error estimate `max|b₆|/max|a₀|`,
+///   scaling as `dt⁷`.
+/// - `dt_try` — step size of the attempt being judged. Used only for
+///   the `DT_MIN` escape check.
+/// - `eps` — user's target tolerance; clamped to `[EPSILON_MIN, EPSILON_MAX]`
+///   on the way in by [`Ias15::set_epsilon`].
+/// - `deadline_hit` — cooperative wall-clock budget has been exceeded;
+///   used to short-circuit retry spins in pathological scenes.
+///
+/// # Decision table
+///
+/// | `converged` | `trunc ≤ ε` | `dt ≤ DT_MIN` | `deadline` | → |
+/// |---|---|---|---|---|
+/// | T | T | — | — | `Accept { degraded: false }` |
+/// | F | — | T | — | `Accept { degraded: true }` |
+/// | T | F | T | — | `Accept { degraded: true }` |
+/// | — | — | — | T | `Accept { degraded: true }` |
+/// | F | — | F | F | `RejectPicard` |
+/// | T | F | F | F | `RejectTruncation` |
+fn decide_dt(
+    picard_converged: bool,
+    trunc_err: f64,
+    dt_try: f64,
+    eps: f64,
+    deadline_hit: bool,
+) -> DtDecision {
+    let on_merit = picard_converged && trunc_err <= eps;
+    if on_merit {
+        return DtDecision::Accept { degraded: false };
+    }
+    if dt_try <= DT_MIN || deadline_hit {
+        return DtDecision::Accept { degraded: true };
+    }
+    if !picard_converged { DtDecision::RejectPicard } else { DtDecision::RejectTruncation }
+}
+
+// ── Integrator struct ────────────────────────────────────────────────────────
+
+/// Per-body polynomial state for one substep (coefficients of the
+/// series expansion of the acceleration within the step). Index 0..7
+/// is the coefficient order; the pair is (x-component, y-component).
+type BodyCoeffs = [(f64, f64); 7];
+
+// Layout guard: the snapshot path uses `copy_from_slice` for tight
+// memcpy semantics and would silently copy padding if a future
+// refactor (e.g. adding a third component for 3D, or re-typing
+// the tuple) broke the tight 7·16-byte packing. Caught at compile
+// time — zero runtime cost.
+const _: () = {
+    assert!(
+        std::mem::size_of::<BodyCoeffs>() == 7 * 16,
+        "BodyCoeffs layout changed — verify snapshot copy_from_slice still hits \
+         the intended byte range"
+    );
+    assert!(std::mem::align_of::<BodyCoeffs>() == 8);
+};
+
+pub struct Ias15 {
+    /// Target relative error on the dominant truncation term.
+    epsilon: f64,
+
+    /// Power-series coefficients for the acceleration, per body.
+    /// `b[i][k]` gives the k-th coefficient for body i.
+    /// Warm-started from the previous accepted step.
+    b: Vec<BodyCoeffs>,
+    /// Coefficients at the previous accepted step — used to extrapolate
+    /// `b` when the step size changes (see [`Self::warmstart_b`]).
+    e: Vec<BodyCoeffs>,
+    /// Newton divided-difference form, derived from `b` on-demand.
+    g: Vec<BodyCoeffs>,
+    /// Compensated-summation carry terms for the `b` coefficients.
+    csb: Vec<BodyCoeffs>,
+    /// Compensated-summation carry for positions.
+    csx: Vec<(f64, f64)>,
+    /// Compensated-summation carry for velocities.
+    csv: Vec<(f64, f64)>,
+
+    /// Step size proposed for the next attempt. Seeded from the caller's
+    /// `dt` on first use; thereafter driven by the error controller.
+    dt_next: f64,
+
+    /// The `dt_try` that was accepted on the most recent internal attempt.
+    /// Used as `dt_prev` in [`Self::warmstart_b`] so the q = dt_try/dt_prev
+    /// ratio is correct. Zero means "no accepted step yet" — warm-start is
+    /// skipped and `e` is left at zero.
+    dt_last_accepted: f64,
+
+    /// Cumulative sub-step count across the integrator's lifetime
+    /// (one per accepted attempt). Surfaced via [`Metrics`] so a UI
+    /// can show effective work rate (sub-steps / wall-second).
+    substeps_total: u64,
+
+    /// Cumulative rejections caused by Picard predictor–corrector not
+    /// converging within [`MAX_PICARD_ITERATIONS`]. High values here
+    /// (relative to `rejections_truncation_total`) indicate a stiff
+    /// or high-eccentricity regime where the step size exceeds the
+    /// Lipschitz bound — the error controller cannot see this signal
+    /// through the truncation estimate alone (cf. TD-004).
+    rejections_picard_total: u64,
+
+    /// Cumulative rejections where Picard converged but the truncation
+    /// bound `|b₆|/|a₀|` exceeded `ε`. This is the "well-posed"
+    /// rejection class — the controller formula applies and the next
+    /// attempt uses `(ε/err)^(1/7)` scaling.
+    rejections_truncation_total: u64,
+
+    /// Cumulative Picard iteration count summed across all attempts
+    /// (accepted and rejected). Mean iterations per attempt is
+    /// `picard_iters_total / (substeps_total + rejections_picard_total
+    /// + rejections_truncation_total)`.
+    picard_iters_total: u64,
+
+    /// Cumulative count of degraded accepts (`DT_MIN` escape clause
+    /// or deadline fired). Should stay at zero for well-posed scenes.
+    degraded_total: u64,
+
+    // ── Picard scratch buffers ───────────────────────────────────────
+    //
+    // Start-of-attempt positions and velocities, and the previous
+    // iteration's `b₆` snapshot. These are logically local to
+    // [`Self::picard_loop`] — moving them into the struct swaps a
+    // per-retry `Vec` allocation for a `clear() + extend()` reuse of
+    // the existing heap buffer, which steady-state is zero-alloc.
+    //
+    // Left in a possibly-stale state between calls: the Picard
+    // implementation always re-fills them via `clear() + extend`
+    // before reading, so the previous run's contents cannot leak.
+    pic_x0: Vec<(f64, f64)>,
+    pic_v0: Vec<(f64, f64)>,
+    pic_b6_old: Vec<(f64, f64)>,
+
+    // ── Rejection-rollback snapshot buffers ──────────────────────────
+    //
+    // Before the rollback refactor this was a stack-allocated `Attempt`
+    // struct that cloned seven `Vec`s per sub-step. Phase profiling
+    // (see docs/experiments/2026-04-22-ias15-phase-profile.md) showed
+    // 4–8% of total wall time spent in those clones while >99% of
+    // sub-steps never reject, making the allocation/memcpy/drop cycle
+    // pure waste.
+    //
+    // Each buffer here is sized to `n` exactly once per body-count
+    // change in [`Self::ensure_capacity`]; `capture_snapshot` and
+    // `restore_snapshot` then move data via `copy_from_slice` /
+    // explicit fills with no further allocation. The
+    // [`Self::snapshot_valid`] flag guards the lifecycle: a
+    // `restore_snapshot` call without a prior `capture_snapshot`
+    // (e.g. after `ensure_capacity` resets buffers) is a programmer
+    // error and panics in debug builds rather than silently restoring
+    // stale data.
+    //
+    // `snap_csx` / `snap_csv` are retained despite the invariant that
+    // rejections never touch the live `csx`/`csv` (only `advance_state`
+    // on the accept path writes them). Keeping them in the snapshot
+    // means future code that violates that invariant — e.g. a hook
+    // that runs during a rejected attempt — still gets correct
+    // rollback semantics without silently corrupting compensated-
+    // summation carries. Cost is 32 bytes of memcpy per sub-step at
+    // N=2, well inside the wash of the bigger `b`/`e`/`csb` copies.
+    snap_x: Vec<(f64, f64)>,
+    snap_v: Vec<(f64, f64)>,
+    snap_b: Vec<BodyCoeffs>,
+    snap_e: Vec<BodyCoeffs>,
+    snap_csb: Vec<BodyCoeffs>,
+    snap_csx: Vec<(f64, f64)>,
+    snap_csv: Vec<(f64, f64)>,
+    snapshot_valid: bool,
+}
+
+impl Default for Ias15 {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Ias15 {
+    pub fn new() -> Self {
+        Self {
+            epsilon: DEFAULT_EPSILON,
+            b: Vec::new(),
+            e: Vec::new(),
+            g: Vec::new(),
+            csb: Vec::new(),
+            csx: Vec::new(),
+            csv: Vec::new(),
+            dt_next: 0.0,
+            dt_last_accepted: 0.0,
+            substeps_total: 0,
+            rejections_picard_total: 0,
+            rejections_truncation_total: 0,
+            picard_iters_total: 0,
+            degraded_total: 0,
+            pic_x0: Vec::new(),
+            pic_v0: Vec::new(),
+            pic_b6_old: Vec::new(),
+            snap_x: Vec::new(),
+            snap_v: Vec::new(),
+            snap_b: Vec::new(),
+            snap_e: Vec::new(),
+            snap_csb: Vec::new(),
+            snap_csx: Vec::new(),
+            snap_csv: Vec::new(),
+            snapshot_valid: false,
+        }
+    }
+
+    /// Override the default tolerance (`1e-9`). Tighter values give
+    /// better energy conservation at the cost of proportionally smaller
+    /// step sizes. Clamped to `[EPSILON_MIN, EPSILON_MAX]`.
+    pub fn with_epsilon(mut self, epsilon: f64) -> Self {
+        self.epsilon = epsilon.clamp(EPSILON_MIN, EPSILON_MAX);
+        self
+    }
+
+    /// Returns the current error tolerance.
+    pub fn epsilon(&self) -> f64 {
+        self.epsilon
+    }
+
+    fn ensure_capacity(&mut self, n: usize) {
+        if self.b.len() != n {
+            self.b = vec![[(0.0, 0.0); 7]; n];
+            self.e = vec![[(0.0, 0.0); 7]; n];
+            self.g = vec![[(0.0, 0.0); 7]; n];
+            self.csb = vec![[(0.0, 0.0); 7]; n];
+            self.csx = vec![(0.0, 0.0); n];
+            self.csv = vec![(0.0, 0.0); n];
+            self.dt_last_accepted = 0.0;
+            // Reset dt_next too: a value from a different body count is
+            // physically meaningless (different acceleration regime) and
+            // would spend rejections in the retry loop before re-calibrating.
+            // The `if self.dt_next <= 0.0` guard in `step()` re-seeds from
+            // the caller's budget on the next entry.
+            self.dt_next = 0.0;
+
+            // Snapshot buffers: size to exactly `n`. From this point on,
+            // `capture_snapshot` and `restore_snapshot` use length-stable
+            // `copy_from_slice` and element-wise fills without reallocating.
+            // Invalidate until the first capture so a premature
+            // `restore_snapshot` is caught by the debug assertion.
+            self.snap_x = vec![(0.0, 0.0); n];
+            self.snap_v = vec![(0.0, 0.0); n];
+            self.snap_b = vec![[(0.0, 0.0); 7]; n];
+            self.snap_e = vec![[(0.0, 0.0); 7]; n];
+            self.snap_csb = vec![[(0.0, 0.0); 7]; n];
+            self.snap_csx = vec![(0.0, 0.0); n];
+            self.snap_csv = vec![(0.0, 0.0); n];
+            self.snapshot_valid = false;
+        }
+    }
+
+    /// Populate the rollback snapshot buffers with the current state.
+    /// Called once per sub-step, before any `b`/`e`/`csb` modification.
+    /// After this returns, [`Self::restore_snapshot`] is allowed.
+    ///
+    /// Uses per-slot assignment for body-derived fields (which need a
+    /// tuple transformation from the `Body` struct) and `copy_from_slice`
+    /// for Ias15-internal fields (which are already `Vec<BodyCoeffs>` or
+    /// `Vec<(f64, f64)>`). Both paths are pure memcpy on the happy path
+    /// where the destination is already sized to `n` by
+    /// [`Self::ensure_capacity`].
+    fn capture_snapshot(&mut self, bodies: &[Body]) {
+        debug_assert_eq!(self.snap_x.len(), bodies.len(), "snapshot buffer size mismatch");
+
+        for (dst, src) in self.snap_x.iter_mut().zip(bodies.iter()) {
+            *dst = (src.x, src.y);
+        }
+        for (dst, src) in self.snap_v.iter_mut().zip(bodies.iter()) {
+            *dst = (src.vx, src.vy);
+        }
+        self.snap_b.copy_from_slice(&self.b);
+        self.snap_e.copy_from_slice(&self.e);
+        self.snap_csb.copy_from_slice(&self.csb);
+        self.snap_csx.copy_from_slice(&self.csx);
+        self.snap_csv.copy_from_slice(&self.csv);
+
+        self.snapshot_valid = true;
+    }
+
+    /// Roll `bodies` and the integrator state back to the last
+    /// [`Self::capture_snapshot`]. Called on rejection branches.
+    ///
+    /// Debug-asserts the snapshot has actually been captured —
+    /// calling `restore` without a prior `capture` (e.g. immediately
+    /// after `ensure_capacity`'s buffer reset) is a programmer error
+    /// that previously would have silently restored all-zero state;
+    /// this fails loud in debug builds and is a single branch-predicted
+    /// check in release.
+    fn restore_snapshot(&mut self, bodies: &mut [Body]) {
+        debug_assert!(
+            self.snapshot_valid,
+            "restore_snapshot called without a prior capture_snapshot"
+        );
+        debug_assert_eq!(self.snap_x.len(), bodies.len(), "snapshot buffer size mismatch");
+
+        for (b, src) in bodies.iter_mut().zip(self.snap_x.iter()) {
+            b.x = src.0;
+            b.y = src.1;
+        }
+        for (b, src) in bodies.iter_mut().zip(self.snap_v.iter()) {
+            b.vx = src.0;
+            b.vy = src.1;
+        }
+        self.b.copy_from_slice(&self.snap_b);
+        self.e.copy_from_slice(&self.snap_e);
+        self.csb.copy_from_slice(&self.snap_csb);
+        self.csx.copy_from_slice(&self.snap_csx);
+        self.csv.copy_from_slice(&self.snap_csv);
+    }
+}
+
+// ── Core algorithm ───────────────────────────────────────────────────────────
+
+impl Integrator for Ias15 {
+    /// Perform **one** adaptive Gauss-Radau sub-step.
+    ///
+    /// The input `dt` is treated as the caller's budget: the accepted
+    /// sub-step will not exceed it. The actual step size, chosen by the
+    /// error controller, is reported through [`StepResult::consumed_dt`],
+    /// and the caller is expected to re-invoke `step` until the full
+    /// simulation-time target has been reached (REBOUND-style driver;
+    /// see the module-level documentation on sub-step semantics).
+    fn step(
+        &mut self,
+        bodies: &mut [Body],
+        ctx: &mut IntegratorContext<'_>,
+        dt: f64,
+        acc: &mut Vec<(f64, f64)>,
+    ) -> StepResult {
+        let n = bodies.len();
+        self.ensure_capacity(n);
+
+        // The caller's budget acts as a hard upper bound on this sub-step
+        // size; the error controller may shrink it further. A zero or
+        // negative hint is treated as DT_MIN (pathological, but legal).
+        let dt_cap = dt.max(DT_MIN);
+
+        // Seed `dt_next` from the budget on the very first call.
+        if self.dt_next <= 0.0 {
+            self.dt_next = dt_cap;
+        }
+
+        let mut dt_try = self.dt_next.min(dt_cap).max(DT_MIN);
+
+        // Snapshot taken once per sub-step: body kinematics + integrator
+        // state that must survive rejection retries. `a0` (start-of-step
+        // acceleration) is also invariant across retries because the
+        // snapshot restores positions, so we evaluate it only once —
+        // saving up to `max_picard_iter × n_rejects` force calls per
+        // sub-step compared to re-evaluating inside the retry loop.
+        //
+        // The snapshot lives in persistent `snap_*` fields (sized in
+        // `ensure_capacity`), so this call path is pure memcpy — no
+        // per-sub-step allocation. See the field comments on `snap_*`
+        // for the lifecycle contract that `snapshot_valid` enforces.
+        time_phase!(snapshot_capture, {
+            self.capture_snapshot(bodies);
+        });
+
+        let raw_pe = time_phase!(evaluate, {
+            evaluate(bodies, ctx.force, acc)
+        });
+        scale_acc_and_pe(acc, ctx.g_factor, raw_pe);
+        apply_perturbations(bodies, acc, ctx.perturbations);
+        let a0: Vec<(f64, f64)> = time_phase!(a0_clone, {
+            acc.clone()
+        });
+
+        // ── Rejection retry loop ─────────────────────────────────────────
+        //
+        // Each iteration: warm-start `b`, run Picard, estimate error. On
+        // reject we restore snapshot (positions *and* integrator state)
+        // and shrink `dt_try`. DT_MIN is a hard floor — if a pathological
+        // configuration forces the controller down to it, we accept the
+        // step unconditionally to keep the simulation progressing rather
+        // than spin forever.
+        let (accepted_dt, final_pe, final_snapshot, degraded) = loop {
+            if self.dt_last_accepted > 0.0 {
+                time_phase!(warmstart_b, {
+                    self.warmstart_b(dt_try, self.dt_last_accepted);
+                });
+            }
+            time_phase!(recompute_g_from_b, {
+                self.recompute_g_from_b();
+            });
+
+            let (converged, _picard_err, picard_iters) =
+                self.picard_loop(bodies, ctx, acc, &a0, dt_try);
+            self.picard_iters_total = self.picard_iters_total.saturating_add(picard_iters as u64);
+
+            let trunc_err = self.truncation_error(&a0);
+
+            // Delegate acceptance/rejection to the pure [`decide_dt`]
+            // function. It treats Picard convergence and truncation error
+            // as independent signals (TD-004) so the shrink strategy can
+            // be picked correctly for each failure class; prior revisions
+            // collapsed them with `max(…)` and underfed the controller.
+            let deadline_hit =
+                ctx.deadline.map(|d| std::time::Instant::now() >= d).unwrap_or(false);
+
+            match decide_dt(converged, trunc_err, dt_try, self.epsilon, deadline_hit) {
+                DtDecision::RejectPicard => {
+                    self.rejections_picard_total = self.rejections_picard_total.saturating_add(1);
+                    time_phase!(snapshot_restore, {
+                        self.restore_snapshot(bodies);
+                    });
+                    // Fixed halving (REBOUND convention): divergence
+                    // means the step exceeds the local Lipschitz bound;
+                    // the dt⁷ formula would under-shrink here.
+                    dt_try = (dt_try * PICARD_SHRINK).max(DT_MIN).min(dt_cap);
+                    continue;
+                },
+                DtDecision::RejectTruncation => {
+                    self.rejections_truncation_total =
+                        self.rejections_truncation_total.saturating_add(1);
+                    time_phase!(snapshot_restore, {
+                        self.restore_snapshot(bodies);
+                    });
+                    // Standard controller: dt · safety · (ε/err)^(1/7).
+                    dt_try = self.optimal_dt(dt_try, trunc_err).max(DT_MIN).min(dt_cap);
+                    continue;
+                },
+                DtDecision::Accept { degraded: step_degraded } => {
+                    self.substeps_total = self.substeps_total.saturating_add(1);
+                    if step_degraded {
+                        self.degraded_total = self.degraded_total.saturating_add(1);
+                        // Distinguish the two causes reported by `decide_dt`:
+                        // `dt_try <= DT_MIN` means the adaptive controller
+                        // wanted to shrink further but saturated the floor,
+                        // which is a **scenario stiffness signal** — the
+                        // close-encounter geometry is beyond what IAS15 can
+                        // resolve at f64 precision. The deadline branch
+                        // (cooperative budget exhausted) is expected in
+                        // interactive precision runs and is not a scenario
+                        // indictment — silenced here; the cumulative counter
+                        // in `AdaptiveStats` still tracks it.
+                        //
+                        // Log rate: first three occurrences verbatim, then
+                        // every power of two (4, 8, 16, 32, ...). Exponentially
+                        // thins the emission rate while keeping a running
+                        // `floor_hit_count` in every event. Avoids drowning
+                        // stderr when a pathological scene hits the floor
+                        // thousands of times, without losing the initial
+                        // signal.
+                        if dt_try <= DT_MIN {
+                            let c = self.degraded_total;
+                            if c <= 3 || c.is_power_of_two() {
+                                crate::warn_diag!(
+                                    crate::core::log::Source::Integrator,
+                                    "IAS15 dt floor reached; controller accepted degraded step",
+                                    dt = dt_try,
+                                    floor = DT_MIN,
+                                    floor_hit_count = c,
+                                    substep = self.substeps_total,
+                                    hint = "scenario may be stiff — consider increasing softening, reducing N, or relaxing epsilon",
+                                );
+                            }
+                        }
+                    }
+
+                    // Accept path ──────────────────────────────────────
+                    // Build the dense-output snapshot *before* we advance
+                    // the state, so it carries the pre-step kinematics
+                    // (the b-coeffs below are the accepted values —
+                    // `self.b` is not further modified on the accept
+                    // path). The caller (`System::step`) fills in the
+                    // absolute `t0` as `system.t() - consumed_dt`.
+                    let step_snapshot = time_phase!(dense_snapshot_build, {
+                        DenseSnapshot {
+                            t0: 0.0,
+                            dt: dt_try,
+                            x0: self.snap_x.clone(),
+                            v0: self.snap_v.clone(),
+                            a0: a0.clone(),
+                            b: self.b.clone(),
+                            kind: IntegratorKind::Ias15,
+                        }
+                    });
+
+                    time_phase!(advance_state, {
+                        self.advance_state(bodies, &a0, dt_try);
+                    });
+
+                    // Post-step force evaluation: publishes `acc`
+                    // consistent with the final body positions, and
+                    // returns the potential energy the caller will use
+                    // for energy-conservation diagnostics.
+                    let raw_pe = time_phase!(evaluate, {
+                        evaluate(bodies, ctx.force, acc)
+                    });
+                    let pe = scale_acc_and_pe(acc, ctx.g_factor, raw_pe);
+                    apply_perturbations(bodies, acc, ctx.perturbations);
+
+                    self.update_warmstart_record();
+                    self.dt_last_accepted = dt_try;
+                    // Propose next dt from the clean truncation signal
+                    // only. Prior revisions used `max(trunc, picard)`
+                    // here, but Picard convergence is binary and
+                    // `picard_err` is a residual from a root-finding
+                    // iteration — not a truncation-error surrogate.
+                    // Feeding it into `optimal_dt` distorted the
+                    // controller (cf. TD-004).
+                    self.dt_next = self.optimal_dt(dt_try, trunc_err).max(DT_MIN);
+
+                    break (dt_try, pe, step_snapshot, step_degraded);
+                },
+            }
+        };
+
+        StepResult {
+            consumed_dt: accepted_dt,
+            potential_energy: final_pe,
+            used_fallback: false,
+            step_snapshot: Some(final_snapshot),
+            degraded,
+        }
+    }
+
+    fn kind(&self) -> IntegratorKind {
+        IntegratorKind::Ias15
+    }
+
+    fn set_epsilon(&mut self, eps: f64) {
+        self.epsilon = eps.clamp(EPSILON_MIN, EPSILON_MAX);
+    }
+
+    fn epsilon(&self) -> Option<f64> {
+        Some(self.epsilon)
+    }
+
+    fn adaptive_stats(&self) -> Option<super::traits::AdaptiveStats> {
+        let rejections_picard = self.rejections_picard_total;
+        let rejections_truncation = self.rejections_truncation_total;
+        Some(super::traits::AdaptiveStats {
+            substeps: self.substeps_total,
+            rejections: rejections_picard.saturating_add(rejections_truncation),
+            rejections_picard,
+            rejections_truncation,
+            picard_iters: self.picard_iters_total,
+            degraded: self.degraded_total,
+        })
+    }
+
+    fn execution_profile(&self) -> super::traits::ExecutionProfile {
+        // Adaptive Gauss-Radau with unbounded shrinking toward DT_MIN in
+        // stiff regimes; per-step wall time is not bounded by N alone.
+        super::traits::ExecutionProfile::Precision
+    }
+
+    fn requires_deterministic_force(&self) -> bool {
+        // Picard predictor-corrector reaches its fixed point only when
+        // f(x, v, t) is bit-reproducible across iterations. BH tree
+        // rebuilds are position-dependent and break this; direct O(N²)
+        // satisfies it.
+        true
+    }
+}
+
+impl Ias15 {
+    /// Inner predictor-corrector iteration. Given `a0` (acceleration at
+    /// the start of the attempt) and a target `dt_try`, iteratively
+    /// refines `b` until max|Δb₆|/max|a₀| < `PICARD_TOL` or we hit the
+    /// iteration cap. Returns `(converged, residual, iters)` — `iters`
+    /// counts the actual iterations consumed (1..=MAX_PICARD_ITERATIONS)
+    /// so the outer controller can aggregate them into diagnostics.
+    ///
+    /// Thin wrapper over [`Self::picard_loop_inner`]: moves the
+    /// persistent scratch buffers out of `self` for the duration of
+    /// the call so the inner function can hold `&mut` on them
+    /// simultaneously with `&mut self` (needed to call
+    /// [`Self::update_g_and_b`]). The Vec instances are returned to
+    /// their fields on every exit path; `mem::take` leaves the fields
+    /// as empty `Vec`s during the call, so a panic mid-iteration
+    /// would leave the integrator state internally consistent
+    /// (capacity lost, but length correct) — not that IAS15 is
+    /// expected to survive panics in any meaningful way.
+    fn picard_loop(
+        &mut self,
+        bodies: &mut [Body],
+        ctx: &mut IntegratorContext<'_>,
+        acc: &mut Vec<(f64, f64)>,
+        a0: &[(f64, f64)],
+        dt_try: f64,
+    ) -> (bool, f64, u32) {
+        let mut x0 = std::mem::take(&mut self.pic_x0);
+        let mut v0 = std::mem::take(&mut self.pic_v0);
+        let mut b6_old = std::mem::take(&mut self.pic_b6_old);
+
+        let result =
+            self.picard_loop_inner(bodies, ctx, acc, a0, dt_try, &mut x0, &mut v0, &mut b6_old);
+
+        self.pic_x0 = x0;
+        self.pic_v0 = v0;
+        self.pic_b6_old = b6_old;
+        result
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn picard_loop_inner(
+        &mut self,
+        bodies: &mut [Body],
+        ctx: &mut IntegratorContext<'_>,
+        acc: &mut Vec<(f64, f64)>,
+        a0: &[(f64, f64)],
+        dt_try: f64,
+        x0: &mut Vec<(f64, f64)>,
+        v0: &mut Vec<(f64, f64)>,
+        b6_old: &mut Vec<(f64, f64)>,
+    ) -> (bool, f64, u32) {
+        let n = bodies.len();
+
+        // Populate the scratch buffers for this call. `clear() + extend`
+        // reuses the existing allocation when `len` fits into `capacity`;
+        // when `n` changed since the last call the first push realloc's
+        // once and the rest reuse. In steady-state (constant body count)
+        // these loops are zero-alloc.
+        x0.clear();
+        x0.extend(bodies.iter().map(|b| (b.x, b.y)));
+        v0.clear();
+        v0.extend(bodies.iter().map(|b| (b.vx, b.vy)));
+
+        let mut last_residual = f64::INFINITY;
+        let mut no_improve: u32 = 0;
+        let mut iters: u32 = 0;
+
+        for iter in 0..MAX_PICARD_ITERATIONS {
+            iters = (iter as u32) + 1;
+            // Snapshot b₆ before the iteration — residual is measured
+            // against this.
+            b6_old.clear();
+            b6_old.extend(self.b.iter().map(|row| row[6]));
+
+            for stage in 1..=7 {
+                let s = H[stage];
+                // Predict positions at node `s`.
+                for i in 0..n {
+                    let (px, py) = predict_ias15(x0[i], v0[i], a0[i], &self.b[i], s, dt_try);
+                    bodies[i].x = px;
+                    bodies[i].y = py;
+                }
+
+                // Evaluate acceleration at predicted positions.
+                let raw_pe = time_phase!(evaluate, {
+                    evaluate(bodies, ctx.force, acc)
+                });
+                let _ = scale_acc_and_pe(acc, ctx.g_factor, raw_pe);
+                apply_perturbations(bodies, acc, ctx.perturbations);
+
+                // Update divided-difference g and then b via c-coeffs.
+                time_phase!(update_g_and_b, {
+                    self.update_g_and_b(stage, a0, acc);
+                });
+            }
+
+            // Residual: RMS over per-body relative convergence ratios
+            // `||Δb₆[i]|| / ||a₀[i]||`, rather than the ratio of the
+            // two maxes across bodies.
+            //
+            // ## Why per-body, why RMS
+            //
+            // The previous formulation `max||Δb₆|| / max||a₀||` mixed
+            // two maxes over potentially different bodies. At N≈2
+            // this is harmless (a single body dominates both). At
+            // N≈641 the numerator picks up one body's convergence
+            // noise outlier while the denominator picks up a
+            // completely different body's acceleration magnitude —
+            // the ratio is *not* a convergence criterion any more,
+            // it is a noise-to-signal floor that grows with body
+            // count. Solar_system-class scenarios then cascade into
+            // truncation rejections (measured: 3878 rejections over
+            // 2001 accepted sub-steps at N=641 before this change)
+            // because the reported residual is artificially high.
+            //
+            // Per-body ratio keeps each body's convergence
+            // self-referential (numerator and denominator are the
+            // same body). RMS aggregation is O(N) like max but
+            // scales gracefully: a single noisy body contributes
+            // 1/√N to the total, so the floor shrinks as N grows
+            // rather than staying pinned to the worst outlier.
+            // This is the criterion REBOUND's IAS15 uses in spirit:
+            // evaluate convergence per degree of freedom, not on
+            // the extremal degree of freedom.
+            //
+            // Bodies with `||a₀[i]|| == 0` are degenerate and
+            // skipped (they do not constrain Picard convergence).
+            // If every body has zero acceleration the system is
+            // gravity-free and any `b` satisfies the ansatz — we
+            // return zero residual rather than an undefined
+            // quantity.
+            let residual = time_phase!(residual_compute, {
+                let mut sum_sq = 0.0_f64;
+                let mut count: usize = 0;
+                for i in 0..n {
+                    let db6x = self.b[i][6].0 - b6_old[i].0;
+                    let db6y = self.b[i][6].1 - b6_old[i].1;
+                    let db6 = (db6x * db6x + db6y * db6y).sqrt();
+                    let a_mag = (a0[i].0 * a0[i].0 + a0[i].1 * a0[i].1).sqrt();
+                    if a_mag > 0.0 {
+                        let rel = db6 / a_mag;
+                        sum_sq += rel * rel;
+                        count += 1;
+                    }
+                }
+                if count > 0 { (sum_sq / count as f64).sqrt() } else { 0.0 }
+            });
+
+            if residual < PICARD_TOL {
+                // Restore positions/velocities to start-of-attempt so
+                // the caller can advance cleanly from (x0, v0).
+                restore_xv(bodies, x0, v0);
+                return (true, residual, iters);
+            }
+
+            // Stagnation guard: require two consecutive iterations
+            // without improvement before declaring divergence. Near
+            // PICARD_TOL = 1e-16 the residual oscillates on round-off
+            // noise — a single "worse" iteration is normal and must
+            // not trigger a spurious reject + dt halving. Matches
+            // REBOUND's heuristic.
+            if iter >= 2 && residual > last_residual {
+                no_improve += 1;
+                if no_improve >= 2 {
+                    restore_xv(bodies, x0, v0);
+                    return (false, residual, iters);
+                }
+            } else {
+                no_improve = 0;
+            }
+            last_residual = residual;
+        }
+
+        restore_xv(bodies, x0, v0);
+        (false, last_residual, iters)
+    }
+
+    /// Advance positions and velocities to the end of the accepted
+    /// attempt using compensated summation (Neumaier-style) so the
+    /// integrator's round-off error stays O(ε) rather than O(ε·N_steps).
+    fn advance_state(&mut self, bodies: &mut [Body], a0: &[(f64, f64)], dt: f64) {
+        let n = bodies.len();
+        for i in 0..n {
+            let bi = &self.b[i];
+
+            // Full-step position increment (s = 1):
+            //   Δx/dt² = a₀/2 + b₀/6 + b₁/12 + b₂/20 + b₃/30 + b₄/42 + b₅/56 + b₆/72
+            //
+            // Summation order: smallest-magnitude term first (b₆/72) up
+            // to largest (a₀/2). Natural/left-to-right order accumulates
+            // into a growing partial sum, which loses low bits of each
+            // subsequent smaller term. Reverse order preserves 1–2 extra
+            // bits of precision per step — free, and material over the
+            // 10⁹-orbit round-off budget the module advertises.
+            let dx = dt
+                * dt
+                * (bi[6].0 / 72.0
+                    + bi[5].0 / 56.0
+                    + bi[4].0 / 42.0
+                    + bi[3].0 / 30.0
+                    + bi[2].0 / 20.0
+                    + bi[1].0 / 12.0
+                    + bi[0].0 / 6.0
+                    + a0[i].0 * 0.5);
+            let dy = dt
+                * dt
+                * (bi[6].1 / 72.0
+                    + bi[5].1 / 56.0
+                    + bi[4].1 / 42.0
+                    + bi[3].1 / 30.0
+                    + bi[2].1 / 20.0
+                    + bi[1].1 / 12.0
+                    + bi[0].1 / 6.0
+                    + a0[i].1 * 0.5);
+
+            // Full-step velocity increment (same ascending-magnitude rule):
+            //   Δv/dt = a₀ + b₀/2 + b₁/3 + b₂/4 + b₃/5 + b₄/6 + b₅/7 + b₆/8
+            let dvx = dt
+                * (bi[6].0 / 8.0
+                    + bi[5].0 / 7.0
+                    + bi[4].0 / 6.0
+                    + bi[3].0 / 5.0
+                    + bi[2].0 / 4.0
+                    + bi[1].0 / 3.0
+                    + bi[0].0 / 2.0
+                    + a0[i].0);
+            let dvy = dt
+                * (bi[6].1 / 8.0
+                    + bi[5].1 / 7.0
+                    + bi[4].1 / 6.0
+                    + bi[3].1 / 5.0
+                    + bi[2].1 / 4.0
+                    + bi[1].1 / 3.0
+                    + bi[0].1 / 2.0
+                    + a0[i].1);
+
+            // First integrate the v·dt contribution to position.
+            let vdt_x = bodies[i].vx * dt;
+            let vdt_y = bodies[i].vy * dt;
+
+            add_cs(&mut bodies[i].x, &mut self.csx[i].0, vdt_x);
+            add_cs(&mut bodies[i].y, &mut self.csx[i].1, vdt_y);
+            add_cs(&mut bodies[i].x, &mut self.csx[i].0, dx);
+            add_cs(&mut bodies[i].y, &mut self.csx[i].1, dy);
+
+            add_cs(&mut bodies[i].vx, &mut self.csv[i].0, dvx);
+            add_cs(&mut bodies[i].vy, &mut self.csv[i].1, dvy);
+        }
+    }
+
+    /// Estimate of the dominant truncation error term, normalised by
+    /// the acceleration magnitude: per-body ‖b₆[i]‖ / ‖a₀[i]‖
+    /// aggregated as an RMS across bodies. For a 15th-order method
+    /// this is the correct leading term since b₆ multiplies u⁷ ≈ 1
+    /// at the end of the step.
+    ///
+    /// ## Why per-body RMS and not max-max
+    ///
+    /// This must use the *same* norm as the Picard convergence check
+    /// in `picard_loop_inner`. The two measurements interact through
+    /// the outer controller: convergence decides whether b was
+    /// computed correctly, truncation decides whether b's magnitude
+    /// is acceptable physics. If they use different norms, a step
+    /// can "converge" under one definition while "failing truncation"
+    /// under the other — producing a cascade of rejections with no
+    /// physical cause.
+    ///
+    /// Empirically this showed up at solar_system-class N (≈641
+    /// bodies) as a 194% rejection rate (3878 rejections over 2001
+    /// accepted sub-steps), nearly all via `RejectTruncation`. The
+    /// original max-max formula treated outliers as if they were
+    /// representative of the whole system: `max||b₆||` picked up the
+    /// one body whose `b₆` had the largest round-off noise,
+    /// `max||a₀||` picked up the Sun's dominant acceleration,
+    /// producing a ratio that was a noise-to-signal measurement
+    /// rather than a truncation estimate. See the diagnostic write-
+    /// up referenced in `picard_loop_inner`.
+    fn truncation_error(&self, a0: &[(f64, f64)]) -> f64 {
+        let mut sum_sq = 0.0_f64;
+        let mut count: usize = 0;
+        for (i, row) in self.b.iter().enumerate() {
+            let b = row[6];
+            let b6 = (b.0 * b.0 + b.1 * b.1).sqrt();
+            let a_mag = (a0[i].0 * a0[i].0 + a0[i].1 * a0[i].1).sqrt();
+            if a_mag > 0.0 {
+                let rel = b6 / a_mag;
+                sum_sq += rel * rel;
+                count += 1;
+            }
+        }
+        if count > 0 { (sum_sq / count as f64).sqrt() } else { 0.0 }
+    }
+
+    /// Compute the optimal Δt for the next attempt given the current
+    /// `dt` and the measured error `err`. Safety factor damps the
+    /// controller, and the exponent 1/7 comes from the dominant term
+    /// scaling as dt⁷ (since b₆ already multiplies u⁷).
+    fn optimal_dt(&self, dt_current: f64, err: f64) -> f64 {
+        if err <= 0.0 {
+            // Zero error means the step was exact to machine precision.
+            // Grow conservatively rather than to infinity.
+            return dt_current * DT_ZERO_ERR_GROWTH;
+        }
+        let ratio = (self.epsilon / err).powf(1.0 / 7.0);
+        dt_current * DT_SAFETY * ratio
+    }
+
+    /// Extrapolate `b` from the previous accepted step to the current
+    /// `dt_try`. Uses the standard REBOUND formula: b_new is a simple
+    /// rescaling of b by powers of `(dt_try / dt_prev)` plus a
+    /// correction from the drift `e = b - b_prev` to capture how the
+    /// coefficients changed last step. This drastically reduces the
+    /// number of Picard iterations in steady-state integration.
+    fn warmstart_b(&mut self, dt_try: f64, dt_prev: f64) {
+        if dt_prev <= 0.0 {
+            return;
+        }
+        let q = dt_try / dt_prev;
+        let q2 = q * q;
+        let q3 = q2 * q;
+        let q4 = q3 * q;
+        let q5 = q4 * q;
+        let q6 = q5 * q;
+        let q7 = q6 * q;
+
+        for i in 0..self.b.len() {
+            let be = [
+                (self.b[i][0].0 - self.e[i][0].0, self.b[i][0].1 - self.e[i][0].1),
+                (self.b[i][1].0 - self.e[i][1].0, self.b[i][1].1 - self.e[i][1].1),
+                (self.b[i][2].0 - self.e[i][2].0, self.b[i][2].1 - self.e[i][2].1),
+                (self.b[i][3].0 - self.e[i][3].0, self.b[i][3].1 - self.e[i][3].1),
+                (self.b[i][4].0 - self.e[i][4].0, self.b[i][4].1 - self.e[i][4].1),
+                (self.b[i][5].0 - self.e[i][5].0, self.b[i][5].1 - self.e[i][5].1),
+                (self.b[i][6].0 - self.e[i][6].0, self.b[i][6].1 - self.e[i][6].1),
+            ];
+
+            // Rescale b-coefficients for the new step size.
+            self.e[i][0] = (self.b[i][0].0 * q, self.b[i][0].1 * q);
+            self.e[i][1] = (self.b[i][1].0 * q2, self.b[i][1].1 * q2);
+            self.e[i][2] = (self.b[i][2].0 * q3, self.b[i][2].1 * q3);
+            self.e[i][3] = (self.b[i][3].0 * q4, self.b[i][3].1 * q4);
+            self.e[i][4] = (self.b[i][4].0 * q5, self.b[i][4].1 * q5);
+            self.e[i][5] = (self.b[i][5].0 * q6, self.b[i][5].1 * q6);
+            self.e[i][6] = (self.b[i][6].0 * q7, self.b[i][6].1 * q7);
+
+            for k in 0..7 {
+                self.b[i][k] = (self.e[i][k].0 + be[k].0, self.e[i][k].1 + be[k].1);
+            }
+        }
+    }
+
+    fn update_warmstart_record(&mut self) {
+        self.e = self.b.clone();
+    }
+
+    fn recompute_g_from_b(&mut self) {
+        // g_j = b_j + Σ_{k>j} d_mat[k][j] · b_k
+        for i in 0..self.b.len() {
+            let bi = self.b[i];
+            for j in 0..7 {
+                let mut gx = bi[j].0;
+                let mut gy = bi[j].1;
+                for k in (j + 1)..7 {
+                    gx += D_MAT[k][j] * bi[k].0;
+                    gy += D_MAT[k][j] * bi[k].1;
+                }
+                self.g[i][j] = (gx, gy);
+            }
+        }
+    }
+
+    /// After evaluating acceleration at stage `n` (1..=7), update g_{n-1}
+    /// via Newton divided differences of (F - F₀); then propagate the
+    /// delta back into b₀..b_{n-1} using c_mat. Compensated summation
+    /// keeps round-off under control across many Picard iterations.
+    fn update_g_and_b(&mut self, stage: usize, a0: &[(f64, f64)], acc_n: &[(f64, f64)]) {
+        let n = stage - 1; // index of the g coefficient we're updating
+        let hn = H[stage];
+
+        for i in 0..self.g.len() {
+            // Compute Newton divided difference of order n+1 for body i.
+            let dfx = acc_n[i].0 - a0[i].0;
+            let dfy = acc_n[i].1 - a0[i].1;
+
+            let (mut tx, mut ty) = (dfx / hn, dfy / hn);
+            for k in 0..n {
+                tx = (tx - self.g[i][k].0) / (hn - H[k + 1]);
+                ty = (ty - self.g[i][k].1) / (hn - H[k + 1]);
+            }
+
+            let dgx = tx - self.g[i][n].0;
+            let dgy = ty - self.g[i][n].1;
+            self.g[i][n] = (tx, ty);
+
+            // Propagate Δg_n into b₀..b_n using compensated summation.
+            for j in 0..=n {
+                let coeff = if j == n { 1.0 } else { C_MAT[n][j] };
+                let dbx = coeff * dgx;
+                let dby = coeff * dgy;
+                add_cs(&mut self.b[i][j].0, &mut self.csb[i][j].0, dbx);
+                add_cs(&mut self.b[i][j].1, &mut self.csb[i][j].1, dby);
+            }
+        }
+    }
+}
+
+// ── Free helpers ─────────────────────────────────────────────────────────────
+
+/// Compensated summation (Neumaier): `p += inp` with `csp` absorbing
+/// the rounding residual. Standard round-off-resistant accumulation.
+fn add_cs(p: &mut f64, csp: &mut f64, inp: f64) {
+    let y = inp - *csp;
+    let t = *p + y;
+    *csp = (t - *p) - y;
+    *p = t;
+}
+
+fn restore_xv(bodies: &mut [Body], x: &[(f64, f64)], v: &[(f64, f64)]) {
+    for (i, b) in bodies.iter_mut().enumerate() {
+        b.x = x[i].0;
+        b.y = x[i].1;
+        b.vx = v[i].0;
+        b.vy = v[i].1;
+    }
+}
+
+// ── Tests ────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::system::System;
+    use crate::domain::body::Body;
+
+    /// Kepler e=0.5 orbit: tests both (i) peak |δE/E₀| never exceeds
+    /// the quoted tolerance over 100 orbits AND (ii) the energy error
+    /// is oscillatory rather than monotonically drifting. The latter
+    /// check catches a classical family of bugs (missing state in
+    /// rollback, asymmetric update, etc.) that a peak-only assertion
+    /// lets through when the bug drifts the error slowly in one
+    /// direction.
+    #[test]
+    fn ias15_kepler_energy_peak_and_monotonic_drift() {
+        const A: f64 = 2.0;
+        const E: f64 = 0.5;
+        const MU: f64 = 2.0;
+        const N_ORBITS: u64 = 100;
+        const PEAK_TOL: f64 = 1e-12;
+        const DRIFT_TOL: f64 = 1e-13;
+
+        let r_peri = A * (1.0 - E);
+        let v_peri = (MU * (1.0 + E) / (A * (1.0 - E))).sqrt();
+
+        let period = 2.0 * std::f64::consts::PI * (A.powi(3) / MU).sqrt();
+        let total_time = N_ORBITS as f64 * period;
+        // Budget of `period/20` lets the error controller choose any
+        // sub-step up to that size. At ε = 1e-9 on an e=0.5 orbit the
+        // controller tends to settle near `period/30` — a smaller budget
+        // merely caps growth without changing step count in practice,
+        // while a smaller budget *combined with* a fixed for-loop
+        // driver artificially inflates the number of `step()` calls.
+        let dt_budget = period / 20.0;
+
+        let mut b1 = Body::rocky(1.0).at(-r_peri / 2.0, 0.0).with_velocity(0.0, -v_peri / 2.0);
+        b1.softening = 0.0;
+        let mut b2 = Body::rocky(1.0).at(r_peri / 2.0, 0.0).with_velocity(0.0, v_peri / 2.0);
+        b2.softening = 0.0;
+
+        let mut sys = System::new(vec![b1, b2]).with_theta(0.5).with_dt(dt_budget).with_max_depth(10);
+        sys.set_integrator(IntegratorKind::Ias15);
+
+        let mut peak = 0.0_f64;
+        // Samples for drift detection: (t, δE/E₀) every ~0.5% of the run.
+        let mut samples: Vec<(f64, f64)> = Vec::new();
+        let sample_dt = total_time / 200.0;
+        let mut next_sample = 0.0;
+
+        // REBOUND-style driver: advance by calling `step()` until the
+        // target simulation time is reached. Each call consumes one
+        // adaptive sub-step whose size IAS15 chose; using a fixed
+        // `for _ in 0..n_steps` loop here would silently assume every
+        // call consumes `dt_budget` and fall short of the intended
+        // integration window.
+        while sys.t() < total_time {
+            sys.step();
+            let err = sys.metrics().rel_energy_error;
+            peak = peak.max(err.abs());
+            if sys.t() >= next_sample {
+                samples.push((sys.t(), err));
+                next_sample += sample_dt;
+            }
+        }
+
+        assert!(
+            peak < PEAK_TOL,
+            "IAS15 Kepler: peak |δE/E₀| = {:.3e} exceeds {:.0e} over {} orbits",
+            peak,
+            PEAK_TOL,
+            N_ORBITS,
+        );
+
+        // Linear regression on the samples. A well-behaved IAS15 run
+        // produces near-zero slope; a rollback/rounding bug shows up
+        // as a consistent drift in one direction.
+        let n = samples.len() as f64;
+        let sum_t: f64 = samples.iter().map(|&(t, _)| t).sum();
+        let sum_e: f64 = samples.iter().map(|&(_, e)| e).sum();
+        let mean_t = sum_t / n;
+        let mean_e = sum_e / n;
+        let mut num = 0.0;
+        let mut den = 0.0;
+        for &(t, e) in &samples {
+            num += (t - mean_t) * (e - mean_e);
+            den += (t - mean_t).powi(2);
+        }
+        let slope = if den > 0.0 { num / den } else { 0.0 };
+        let drift = (slope * total_time).abs();
+
+        assert!(
+            drift < DRIFT_TOL,
+            "IAS15 Kepler: monotonic drift |slope·t_final| = {:.3e} exceeds {:.0e} \
+             (slope = {:.3e}, peak = {:.3e}) — suggests asymmetric state update",
+            drift,
+            DRIFT_TOL,
+            slope,
+            peak,
+        );
+    }
+
+    /// High-eccentricity Kepler (e = 0.9): the regime where fixed-step
+    /// symplectic integrators lose their advantage and where IAS15's
+    /// adaptive step size is essential — perihelion passages happen
+    /// fast, apoapsis is leisurely, and the time-scale ratio is ~400.
+    ///
+    /// Published IAS15 results (Rein & Spiegel 2015, Fig. 5) show
+    /// machine-precision energy conservation across 10⁴ orbits at e=0.9.
+    /// Here we check 50 orbits with a tight tolerance to keep the test
+    /// fast; the asserted bound is conservative relative to the paper.
+    #[test]
+    fn ias15_kepler_high_eccentricity() {
+        const A: f64 = 1.0;
+        const E: f64 = 0.9;
+        const MU: f64 = 2.0;
+        const N_ORBITS: u64 = 50;
+        const DT: f64 = 0.1; // large budget; IAS15 will subdivide near perihelion
+        const PEAK_TOL: f64 = 1e-11;
+
+        let r_peri = A * (1.0 - E);
+        let v_peri = (MU * (1.0 + E) / (A * (1.0 - E))).sqrt();
+
+        let mut b1 = Body::rocky(1.0).at(-r_peri / 2.0, 0.0).with_velocity(0.0, -v_peri / 2.0);
+        b1.softening = 0.0;
+        let mut b2 = Body::rocky(1.0).at(r_peri / 2.0, 0.0).with_velocity(0.0, v_peri / 2.0);
+        b2.softening = 0.0;
+
+        let mut sys = System::new(vec![b1, b2]).with_theta(0.5).with_dt(DT).with_max_depth(10);
+        sys.set_integrator(IntegratorKind::Ias15);
+
+        let period = 2.0 * std::f64::consts::PI * (A.powi(3) / MU).sqrt();
+        let total_time = N_ORBITS as f64 * period;
+        let n_steps = (total_time / DT).ceil() as u64;
+
+        let mut peak = 0.0_f64;
+        for _ in 0..n_steps {
+            sys.step();
+            peak = peak.max(sys.metrics().rel_energy_error.abs());
+        }
+
+        assert!(
+            peak < PEAK_TOL,
+            "IAS15 high-e Kepler (e={E}): peak |δE/E₀| = {:.3e} exceeds {:.0e} \
+             over {} orbits — adaptive step control not tracking perihelion",
+            peak,
+            PEAK_TOL,
+            N_ORBITS,
+        );
+    }
+
+    /// Pythagorean (Burrau 1913) three-body: m=(3,4,5) placed on the
+    /// vertices of a 3-4-5 triangle at rest. Pure gravity, ε=0, G=1.
+    ///
+    /// The system is chaotic, with violent close encounters around
+    /// t ≈ 2–5 before chaos-driven ejection (~t ≈ 46). IAS15's
+    /// adaptive step is tested most severely during these encounters:
+    /// any asymmetric rollback, missed state variable, or controller
+    /// oscillation shows up as energy drift.
+    ///
+    /// We integrate past the strongest close-encounter phase (t=10)
+    /// and assert a tight relative energy bound — well beyond what
+    /// any fixed-step integrator in the zoo (VV / Y4) can deliver at
+    /// comparable cost.
+    #[test]
+    fn ias15_pythagorean_energy_through_close_encounters() {
+        const DT: f64 = 0.01;
+        const T_END: f64 = 10.0;
+        const PEAK_TOL: f64 = 1e-11;
+
+        let mut bodies = vec![
+            Body::rocky(3.0).at(1.0, 3.0).with_velocity(0.0, 0.0),
+            Body::rocky(4.0).at(-2.0, -1.0).with_velocity(0.0, 0.0),
+            Body::rocky(5.0).at(1.0, -1.0).with_velocity(0.0, 0.0),
+        ];
+        for b in &mut bodies {
+            b.softening = 0.0;
+        }
+
+        let mut sys = System::new(bodies).with_theta(0.5).with_dt(DT).with_max_depth(10);
+        sys.set_integrator(IntegratorKind::Ias15);
+
+        let n_steps = (T_END / DT).ceil() as u64;
+        let mut peak = 0.0_f64;
+        for _ in 0..n_steps {
+            sys.step();
+            peak = peak.max(sys.metrics().rel_energy_error.abs());
+        }
+
+        assert!(
+            peak < PEAK_TOL,
+            "IAS15 Pythagorean: peak |δE/E₀| = {:.3e} exceeds {:.0e} over t=[0,{T_END}] \
+             — likely a bug in rejection rollback or the truncation-error estimator",
+            peak,
+            PEAK_TOL,
+        );
+    }
+
+    /// Regression: `System::t` must track the sub-step IAS15 physically
+    /// executed, not the caller's budget.
+    ///
+    /// The previous implementation ran an internal `while budget > 0` loop
+    /// inside `step()` and returned `consumed_dt == dt`, advancing `System::t`
+    /// by the full requested `dt` while the dense-output snapshot only
+    /// covered the *last* sub-step. Interpolating inside that window then
+    /// extrapolated over earlier sub-steps, producing the visible "teleport"
+    /// artefact.
+    ///
+    /// Under the REBOUND-style contract (`reb_integrator_ias15_part1/2`,
+    /// Rein & Spiegel 2015 §2.3), each `step()` call executes exactly one
+    /// adaptive sub-step and reports its size via `StepResult::consumed_dt`;
+    /// `System::step` advances `System::t` by that value. A budget far
+    /// larger than what the controller can accept at perihelion therefore
+    /// yields `System::t` strictly below the budget after one call.
+    #[test]
+    fn ias15_system_t_matches_adaptive_substep() {
+        const A: f64 = 1.0;
+        const E: f64 = 0.9;
+        const MU: f64 = 2.0;
+
+        let r_peri = A * (1.0 - E);
+        let v_peri = (MU * (1.0 + E) / (A * (1.0 - E))).sqrt();
+
+        // Budget of a full orbital period — far too large for a single IAS15
+        // sub-step at perihelion, so the controller MUST shrink it.
+        let period = 2.0 * std::f64::consts::PI * (A.powi(3) / MU).sqrt();
+        let dt_budget = period;
+
+        let mut b1 = Body::rocky(1.0).at(-r_peri / 2.0, 0.0).with_velocity(0.0, -v_peri / 2.0);
+        b1.softening = 0.0;
+        let mut b2 = Body::rocky(1.0).at(r_peri / 2.0, 0.0).with_velocity(0.0, v_peri / 2.0);
+        b2.softening = 0.0;
+
+        let mut sys = System::new(vec![b1, b2]).with_theta(0.5).with_dt(dt_budget).with_max_depth(10);
+        sys.set_integrator(IntegratorKind::Ias15);
+
+        let t0 = sys.t();
+        sys.step();
+        let consumed = sys.t() - t0;
+
+        assert!(consumed > 0.0, "IAS15 sub-step consumed zero time — caller would busy-loop");
+        assert!(
+            consumed < dt_budget,
+            "IAS15 step() consumed the full budget ({:.3e}) instead of adapting \
+             down at perihelion — teleport regression (budget loop leaked back in)",
+            dt_budget,
+        );
+
+        // System::t must advance strictly monotonically across further
+        // sub-steps; any regression here implies the caller is reading a
+        // stale `consumed_dt` or the integrator is returning negative time.
+        let mut t_prev = sys.t();
+        for k in 0..200 {
+            sys.step();
+            let t_now = sys.t();
+            assert!(
+                t_now > t_prev,
+                "System::t regressed at sub-step {}: {:.6e} → {:.6e}",
+                k,
+                t_prev,
+                t_now,
+            );
+            t_prev = t_now;
+        }
+    }
+
+    // ── decide_dt pure-function tests (TD-004) ────────────────────────────
+    //
+    // The controller's decision logic is factored out as a pure function
+    // on two floats + two bools so it can be exhaustively tested without
+    // standing up a `System`. Each case covers one row of the decision
+    // table documented on [`decide_dt`]; flipping an input and checking
+    // the output changes is how we'll catch regressions in future
+    // tuning work.
+
+    #[test]
+    fn decide_dt_accepts_on_merit() {
+        // Picard converged AND truncation within tolerance → clean accept.
+        let d = decide_dt(true, 5e-10, 1e-3, 1e-9, false);
+        assert_eq!(d, DtDecision::Accept { degraded: false });
+    }
+
+    #[test]
+    fn decide_dt_rejects_picard_when_not_converged() {
+        // Non-convergence dominates: even an incidentally-small trunc
+        // must not let us accept divergent `b` coefficients.
+        let d = decide_dt(false, 1e-12, 1e-3, 1e-9, false);
+        assert_eq!(d, DtDecision::RejectPicard);
+    }
+
+    #[test]
+    fn decide_dt_rejects_truncation_when_converged_but_over_tol() {
+        // Picard fine, but trunc_err above ε → standard controller path.
+        let d = decide_dt(true, 1e-6, 1e-3, 1e-9, false);
+        assert_eq!(d, DtDecision::RejectTruncation);
+    }
+
+    #[test]
+    fn decide_dt_dt_min_escape_degrades() {
+        // At the floor, we accept regardless of error state so the
+        // simulation progresses — but flagged degraded for the caller.
+        let d = decide_dt(false, 1.0, DT_MIN, 1e-9, false);
+        assert_eq!(d, DtDecision::Accept { degraded: true });
+
+        // Same floor, different failure class (trunc) — still degraded.
+        let d = decide_dt(true, 1.0, DT_MIN, 1e-9, false);
+        assert_eq!(d, DtDecision::Accept { degraded: true });
+    }
+
+    #[test]
+    fn decide_dt_deadline_forces_degraded_accept() {
+        // Cooperative deadline passed: accept current attempt rather
+        // than spend more wall time shrinking.
+        let d = decide_dt(false, 1.0, 1e-3, 1e-9, true);
+        assert_eq!(d, DtDecision::Accept { degraded: true });
+    }
+
+    #[test]
+    fn decide_dt_deadline_does_not_demote_clean_accept() {
+        // On-merit result takes precedence over deadline — deadline is
+        // an escape hatch for *stuck* attempts, not a degrade-poisoner
+        // for attempts that converged within tolerance.
+        let d = decide_dt(true, 5e-10, 1e-3, 1e-9, true);
+        assert_eq!(d, DtDecision::Accept { degraded: false });
+    }
+
+    #[test]
+    fn decide_dt_trunc_exactly_at_epsilon_is_merit() {
+        // Boundary: trunc_err == ε should be accepted (≤, not <).
+        // Matches REBOUND's threshold convention; flipping this would
+        // silently change step-size distributions in benchmarks.
+        let d = decide_dt(true, 1e-9, 1e-3, 1e-9, false);
+        assert_eq!(d, DtDecision::Accept { degraded: false });
+    }
+}

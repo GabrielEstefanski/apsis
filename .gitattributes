@@ -1,0 +1,6 @@
+# Normalise text files to LF on commit; leave working tree alone.
+# Git auto-detects binary; override below where detection is wrong.
+* text=auto eol=lf
+
+# Simulation save format is a packed binary with magic bytes + raw f64.
+*.grav binary
