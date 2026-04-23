@@ -32,7 +32,7 @@ use crate::domain::body::Body;
 use rayon::prelude::*;
 
 use super::kernel::{G, pair_eps2, plummer_acc, plummer_phi};
-use super::tree::{EXACT_THRESHOLD, NO_CHILD, Node, QuadTree};
+use super::tree::{DIRECT_MODE_THRESHOLD, EXACT_THRESHOLD, NO_CHILD, Node, QuadTree};
 
 // ── BarnesHutEngine ───────────────────────────────────────────────────────── //
 
@@ -61,14 +61,29 @@ impl BarnesHutEngine {
 
     /// Set the N threshold below which exact O(N²) evaluation is used.
     ///
-    /// Range is clamped to [1, 10_000].
+    /// Range is clamped to `[1, DIRECT_MODE_THRESHOLD]`. Passing
+    /// `usize::MAX` (or any value at or above `DIRECT_MODE_THRESHOLD`)
+    /// forces the engine into "direct mode" — BH is never used
+    /// regardless of body count. See [`is_direct_mode`](Self::is_direct_mode).
     pub fn set_exact_threshold(&mut self, n: usize) {
-        self.exact_threshold = n.clamp(1, 10_000);
+        self.exact_threshold = n.clamp(1, DIRECT_MODE_THRESHOLD);
     }
 
     /// Current exact-evaluation threshold.
     pub fn exact_threshold(&self) -> usize {
         self.exact_threshold
+    }
+
+    /// `true` iff the engine is configured so direct O(N²) summation
+    /// is used for any practical body count — i.e.
+    /// `exact_threshold() >= DIRECT_MODE_THRESHOLD`.
+    ///
+    /// This is the canonical way to ask "is the BH branch
+    /// unreachable here?". Callers that need to reason about
+    /// determinism (notably `ForceModel::is_deterministic`) should
+    /// go through this rather than hard-coding the clamp ceiling.
+    pub fn is_direct_mode(&self) -> bool {
+        self.exact_threshold >= DIRECT_MODE_THRESHOLD
     }
 
     /// Rebuild the quadtree from the current body positions.

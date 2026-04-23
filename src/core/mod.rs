@@ -12,11 +12,13 @@
 //! | [`calibration`]    | COM recentering, softening/radius helpers                  |
 //! | [`adaptive`]       | [`DtController`], [`ThetaController`]                      |
 //! | [`diagnostics`]    | Per-step acceleration and jerk statistics                  |
+//! | [`log`]            | Structured stderr emitter (`warn_diag!` macro)             |
 
 pub mod adaptive;
 pub mod calibration;
 pub mod diagnostics;
 pub mod hooks;
+pub mod log;
 pub mod metrics;
 pub mod physics_thread;
 pub mod system;

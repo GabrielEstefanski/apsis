@@ -865,27 +865,31 @@ impl Integrator for Ias15 {
                         // wanted to shrink further but saturated the floor,
                         // which is a **scenario stiffness signal** — the
                         // close-encounter geometry is beyond what IAS15 can
-                        // resolve at f64 precision. Worth logging because
-                        // the user chose IAS15 consciously (it is not the
-                        // real-time default) and expects signal when the
-                        // integrator gives up on local truncation.
+                        // resolve at f64 precision. The deadline branch
+                        // (cooperative budget exhausted) is expected in
+                        // interactive precision runs and is not a scenario
+                        // indictment — silenced here; the cumulative counter
+                        // in `AdaptiveStats` still tracks it.
                         //
-                        // The deadline branch (cooperative budget exhausted)
-                        // is expected in interactive precision runs and is
-                        // not a scenario indictment — left silent here; the
-                        // cumulative counter in `AdaptiveStats` still tracks
-                        // it.
+                        // Log rate: first three occurrences verbatim, then
+                        // every power of two (4, 8, 16, 32, ...). Exponentially
+                        // thins the emission rate while keeping a running
+                        // `floor_hit_count` in every event. Avoids drowning
+                        // stderr when a pathological scene hits the floor
+                        // thousands of times, without losing the initial
+                        // signal.
                         if dt_try <= DT_MIN {
-                            eprintln!(
-                                "[gravity-sim] WARN: IAS15 dt floor reached (dt={:.3e} ≤ {:.3e}); \
-                                 controller accepted degraded step #{}. Scenario may be stiff \
-                                 (close-encounter geometry below softening, N too large for \
-                                 controller to resolve). Consider increasing softening, reducing \
-                                 N, or relaxing ε.",
-                                dt_try,
-                                DT_MIN,
-                                self.degraded_total,
-                            );
+                            let c = self.degraded_total;
+                            if c <= 3 || c.is_power_of_two() {
+                                crate::warn_diag!(
+                                    "IAS15 dt floor reached; controller accepted degraded step",
+                                    dt = dt_try,
+                                    floor = DT_MIN,
+                                    floor_hit_count = c,
+                                    substep = self.substeps_total,
+                                    hint = "scenario may be stiff — consider increasing softening, reducing N, or relaxing epsilon",
+                                );
+                            }
                         }
                     }
 

@@ -672,3 +672,120 @@ mod hook_dispatch {
         assert!(!sys.stop_requested());
     }
 }
+
+// ── Integrator / force-model compatibility ────────────────────────────────────
+//
+// Contract (see `docs/adr/003-integrator-execution-profile.md`):
+//
+//   * `System::set_integrator` is the single enforcement point for the
+//     integrator/force-model pairing rule.
+//   * When the new integrator requires a deterministic force and the
+//     current force model is not deterministic, the force model is
+//     auto-reconfigured (exact threshold raised) so BH is unreachable.
+//   * When the new integrator does not require determinism, the
+//     force model is left untouched.
+//
+// These tests guard the contract against accidental regression.
+mod integrator_force_compat {
+    use super::*;
+    use crate::domain::materials::Material;
+
+    /// Build a system large enough that BH would be active by default
+    /// (N > the engine's built-in `EXACT_THRESHOLD = 64`).
+    fn many_body_system() -> System {
+        // N=80 — comfortably above the 64 default but not expensive.
+        let bodies: Vec<Body> = (0..80)
+            .map(|i| {
+                let theta = i as f64 * 0.1;
+                Body::new(theta.cos(), theta.sin(), 0.0, 0.0, 1.0, Material::Rocky)
+            })
+            .collect();
+        System::new(bodies, 0.5, 0.01, 10, 1)
+    }
+
+    #[test]
+    fn ias15_selection_forces_deterministic_force_model() {
+        let mut sys = many_body_system();
+        // Pre-condition: large N + default threshold → BH would be used.
+        // Switch to a non-precision integrator first so the default
+        // (Yoshida 4) does not retroactively affect the check.
+        sys.set_integrator(IntegratorKind::VelocityVerlet);
+        assert!(
+            !sys.bh_engine().unwrap().is_direct_mode(),
+            "baseline: engine should start in BH mode at N=80 with default threshold"
+        );
+
+        sys.set_integrator(IntegratorKind::Ias15);
+
+        assert!(
+            sys.bh_engine().unwrap().is_direct_mode(),
+            "IAS15 selection must auto-switch the force model to direct mode"
+        );
+        assert_eq!(
+            sys.integrator_kind(),
+            IntegratorKind::Ias15,
+            "IAS15 must remain the active integrator after auto-correction"
+        );
+    }
+
+    #[test]
+    fn symplectic_selection_preserves_barnes_hut() {
+        let mut sys = many_body_system();
+        sys.set_integrator(IntegratorKind::VelocityVerlet);
+        let threshold_before = sys.exact_threshold();
+
+        sys.set_integrator(IntegratorKind::Yoshida4);
+
+        assert_eq!(
+            sys.exact_threshold(),
+            threshold_before,
+            "Yoshida 4 does not require determinism; force-model configuration must not change"
+        );
+        assert!(
+            !sys.bh_engine().unwrap().is_direct_mode(),
+            "symplectic integrator must leave BH active at large N"
+        );
+    }
+
+    #[test]
+    fn switching_ias15_then_symplectic_does_not_revert_threshold() {
+        // Once IAS15 has raised the threshold, switching back to a
+        // non-precision integrator does NOT lower it. This is the
+        // correct behaviour: `set_integrator` is a rule about what the
+        // *new* integrator needs, not a reversal of prior adjustments.
+        // If the user wants BH back, they can call
+        // `set_exact_threshold` explicitly.
+        let mut sys = many_body_system();
+        sys.set_integrator(IntegratorKind::Ias15);
+        assert!(sys.bh_engine().unwrap().is_direct_mode());
+
+        sys.set_integrator(IntegratorKind::Yoshida4);
+
+        assert!(
+            sys.bh_engine().unwrap().is_direct_mode(),
+            "switching away from IAS15 should not auto-revert the force-model threshold"
+        );
+    }
+
+    #[test]
+    fn small_n_system_stays_direct_under_ias15() {
+        // At N ≤ 64 the engine is already in the direct path for its
+        // normal operation (BH bypass by `exact_threshold` default).
+        // The check guards that we do not accidentally *decrease* the
+        // threshold in that regime.
+        let bodies = vec![
+            Body::new(-1.0, 0.0, 0.0, -0.5, 1.0, Material::Rocky),
+            Body::new(1.0, 0.0, 0.0, 0.5, 1.0, Material::Rocky),
+        ];
+        let mut sys = System::new(bodies, 0.5, 0.01, 10, 1);
+
+        sys.set_integrator(IntegratorKind::Ias15);
+
+        // Engine exact_threshold must be at or above the direct-mode
+        // threshold after IAS15 selection, regardless of starting state.
+        assert!(
+            sys.bh_engine().unwrap().is_direct_mode(),
+            "IAS15 must leave the engine in direct mode even at small N"
+        );
+    }
+}

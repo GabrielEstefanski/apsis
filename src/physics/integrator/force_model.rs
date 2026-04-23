@@ -163,20 +163,15 @@ impl ForceModel for GravityForceModel {
         Some(&self.engine)
     }
 
-    /// `true` iff the engine is currently configured to **always** use
-    /// the direct O(N²) path — i.e. its `exact_threshold` is at or
-    /// above the maximum body count the clamp allows (10 000).
+    /// Delegates to [`BarnesHutEngine::is_direct_mode`]. The engine is
+    /// a deterministic function of state iff it is configured so the
+    /// BH branch is unreachable — i.e. `exact_threshold ≥ DIRECT_MODE_THRESHOLD`.
     ///
-    /// When the threshold is lower, the engine may switch to Barnes-Hut
-    /// for body counts above the threshold, and BH's position-dependent
-    /// tree rebuild introduces a non-deterministic variation in the
-    /// per-body force that breaks IAS15's Picard fixed-point iteration.
-    /// The state-sensitive nature of this property matters:
-    /// `set_exact_threshold(usize::MAX)` flips the model to
-    /// deterministic; any lower threshold flips it back.
+    /// Note the state-sensitive nature: `set_exact_threshold(usize::MAX)`
+    /// flips this model to deterministic; any threshold below the
+    /// clamp ceiling flips it back. `System::set_integrator` uses this
+    /// to enforce the integrator/force-model compatibility rule.
     fn is_deterministic(&self) -> bool {
-        // 10_000 is the upper bound of the engine's clamp range; at this
-        // threshold the BH branch is unreachable for any practical N.
-        self.engine.exact_threshold() >= 10_000
+        self.engine.is_direct_mode()
     }
 }
