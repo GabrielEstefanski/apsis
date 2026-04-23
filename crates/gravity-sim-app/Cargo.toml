@@ -1,0 +1,30 @@
+[package]
+name = "gravity-sim-app"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "gravity-sim"
+path = "src/main.rs"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+gravity-sim-core = { path = "../gravity-sim-core" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }
+eframe = { workspace = true }
+egui = { workspace = true }
+egui-phosphor = { workspace = true }
+rand = { workspace = true }
+rayon = { workspace = true }
+wgpu = { workspace = true }
+winit = { workspace = true }
+pollster = { workspace = true }
+bytemuck = { workspace = true }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }
+insta = { workspace = true }
