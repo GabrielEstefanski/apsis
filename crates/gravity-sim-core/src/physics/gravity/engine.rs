@@ -402,7 +402,7 @@ mod tests {
     }
 
     fn body(x: f64, y: f64, m: f64) -> Body {
-        Body::new(x, y, 0.0, 0.0, m, crate::domain::materials::Material::Rocky)
+        Body::rocky(m).at(x, y).with_velocity(0.0, 0.0)
     }
 
     // ── Newton's 3rd law ───────────────────────────────────────────── //

@@ -52,6 +52,21 @@ use crate::physics::integrator::{
 };
 use crate::physics::orbital::OrbitalElements;
 
+// ── Default parameters (used by System::new) ──────────────────────────────────
+
+/// Default Barnes-Hut opening angle. Standard in the literature for accuracy
+/// vs speed on mixed scenes.
+const DEFAULT_THETA: f64 = 0.6;
+
+/// Default fixed timestep. Safe for unit-scale scenarios and Yoshida-4; users
+/// with stiff scenes should call [`System::with_dt`] explicitly or enable
+/// adaptive dt via [`System::set_dt_mode`].
+const DEFAULT_DT: f64 = 1e-4;
+
+/// Default maximum quadtree depth. Covers scenes up to ~10⁹ spatial extent
+/// before degrading to leaf splits; rarely touched.
+const DEFAULT_MAX_DEPTH: usize = 32;
+
 /// Central simulation state for an N-body gravitational system.
 pub struct System {
     /// Bodies participating in the simulation.
@@ -179,37 +194,56 @@ pub struct System {
 }
 
 impl System {
-    /// Create a simulation with the default Barnes-Hut force model.
+    /// Create a simulation from a body list, using default parameters.
     ///
-    /// - `theta`:      Barnes-Hut opening angle (accuracy vs speed).
-    /// - `dt`:         Fixed timestep.
-    /// - `max_depth`:  Maximum quadtree depth.
-    /// - `trail_every`: Sampling interval for trail ring-buffer.
-    pub fn new(
-        bodies: Vec<Body>,
-        theta: f64,
-        dt: f64,
-        max_depth: usize,
-        trail_every: usize,
-    ) -> Self {
-        Self::with_force_model(
+    /// Defaults are chosen to match REBOUND-equivalent expectations for
+    /// small-N research scripts:
+    ///
+    /// | Parameter              | Default                     |
+    /// |------------------------|-----------------------------|
+    /// | Integrator             | Yoshida 4th order (symplectic) |
+    /// | dt                     | `1e-4` simulation time units |
+    /// | Barnes-Hut θ           | `0.6`                        |
+    /// | Max quadtree depth     | `32`                         |
+    /// | Softening scale        | `1.0`                        |
+    ///
+    /// Override any of these with the fluent [`with_*`](Self::with_dt)
+    /// builder methods. A typical research script reads:
+    ///
+    /// ```ignore
+    /// use gravity_sim_core::core::system::System;
+    /// use gravity_sim_core::domain::body::Body;
+    /// use gravity_sim_core::physics::integrator::IntegratorKind;
+    ///
+    /// let sun = Body::star(1.0);
+    /// let earth = Body::rocky(3e-6).at(1.0, 0.0).with_velocity(0.0, 1.0);
+    ///
+    /// let mut sys = System::new(vec![sun, earth])
+    ///     .with_integrator(IntegratorKind::Ias15)
+    ///     .with_dt(1e-4);
+    ///
+    /// sys.integrate_for(100.0);
+    /// println!("dE/E = {:.3e}", sys.energy_delta());
+    /// ```
+    pub fn new(bodies: Vec<Body>) -> Self {
+        Self::with_force_model_inner(
             bodies,
-            Box::new(GravityForceModel::new(theta, max_depth)),
-            dt,
-            trail_every,
+            Box::new(GravityForceModel::new(DEFAULT_THETA, DEFAULT_MAX_DEPTH)),
+            DEFAULT_DT,
         )
     }
 
-    /// Create a simulation with an arbitrary pluggable force model.
-    ///
-    /// Use this constructor to inject alternative gravity engines (direct
-    /// O(N²), GPU kernel, post-Newtonian, …) at construction time.
-    /// The force model can also be swapped at runtime via [`set_force_model`].
-    pub fn with_force_model(
+    /// Construct with a pluggable force model (direct O(N²), GPU kernel,
+    /// post-Newtonian, …). Escape hatch for advanced users; most callers
+    /// prefer [`new`](Self::new) followed by builder methods.
+    pub fn with_force_model(bodies: Vec<Body>, force_model: Box<dyn ForceModel>) -> Self {
+        Self::with_force_model_inner(bodies, force_model, DEFAULT_DT)
+    }
+
+    fn with_force_model_inner(
         bodies: Vec<Body>,
         force_model: Box<dyn ForceModel>,
         dt: f64,
-        _trail_every: usize,
     ) -> Self {
         let total_mass = bodies.iter().map(|b| b.mass).sum();
         let names = {
@@ -280,5 +314,70 @@ impl System {
             pending_com_shift: (0.0, 0.0),
             last_dense_snapshot: None,
         }
+    }
+
+    // ── Fluent construction builder ───────────────────────────────────────────
+    //
+    // Each method consumes and returns `Self`, so the full configuration
+    // reads top-to-bottom at construction time:
+    //
+    //     let sys = System::new(bodies)
+    //         .with_integrator(IntegratorKind::Ias15)
+    //         .with_dt(1e-4)
+    //         .with_theta(0.6);
+    //
+    // Runtime mutation uses the `set_*` counterparts in
+    // [`crate::core::system::config`].
+
+    /// Fixed timestep for the integrator.
+    #[inline]
+    #[must_use]
+    pub fn with_dt(mut self, dt: f64) -> Self {
+        self.set_dt(dt);
+        self
+    }
+
+    /// Barnes-Hut opening angle `θ` (accuracy ↔ speed trade-off).
+    #[inline]
+    #[must_use]
+    pub fn with_theta(mut self, theta: f64) -> Self {
+        self.set_theta(theta);
+        self
+    }
+
+    /// Integrator choice (see [`IntegratorKind`]).
+    #[inline]
+    #[must_use]
+    pub fn with_integrator(mut self, kind: IntegratorKind) -> Self {
+        self.set_integrator(kind);
+        self
+    }
+
+    /// Maximum Barnes-Hut quadtree depth.
+    ///
+    /// Most scenes do not need to touch this; the default (32) covers a
+    /// spatial extent of ~10⁹ before degrading to forced leaf splits.
+    #[inline]
+    #[must_use]
+    pub fn with_max_depth(mut self, max_depth: usize) -> Self {
+        let theta = self.force_model.theta();
+        self.set_force_model(Box::new(GravityForceModel::new(theta, max_depth)));
+        self
+    }
+
+    /// Global softening scale (multiplies each body's ε at pairwise evaluation).
+    #[inline]
+    #[must_use]
+    pub fn with_softening_scale(mut self, scale: f64) -> Self {
+        self.set_softening_scale(scale);
+        self
+    }
+
+    /// RNG seed forwarded to any seeded integrator / sampler.
+    #[inline]
+    #[must_use]
+    pub fn with_seed(mut self, seed: u64) -> Self {
+        self.set_seed(seed);
+        self
     }
 }

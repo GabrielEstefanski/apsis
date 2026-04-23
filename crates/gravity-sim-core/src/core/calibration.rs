@@ -100,7 +100,7 @@ mod tests {
     use std::collections::VecDeque;
 
     fn body(x: f64, y: f64, vx: f64, vy: f64, mass: f64) -> Body {
-        Body::new(x, y, vx, vy, mass, crate::domain::materials::Material::Rocky)
+        Body::rocky(mass).at(x, y).with_velocity(vx, vy)
     }
 
     // ── zero_com_velocity ────────────────────────────────────────────────── //

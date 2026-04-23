@@ -101,9 +101,9 @@ pub fn kepler_e099() -> ScenarioSpec {
 /// chaos amplify bit-level noise into macroscopic trajectory divergence.
 pub fn pythagorean() -> ScenarioSpec {
     let mut bodies = vec![
-        Body::new(1.0, 3.0, 0.0, 0.0, 3.0, Material::Rocky),
-        Body::new(-2.0, -1.0, 0.0, 0.0, 4.0, Material::Rocky),
-        Body::new(1.0, -1.0, 0.0, 0.0, 5.0, Material::Rocky),
+        Body::rocky(3.0).at(1.0, 3.0).with_velocity(0.0, 0.0),
+        Body::rocky(4.0).at(-2.0, -1.0).with_velocity(0.0, 0.0),
+        Body::rocky(5.0).at(1.0, -1.0).with_velocity(0.0, 0.0),
     ];
     for b in &mut bodies {
         b.softening = 0.0;
@@ -174,7 +174,7 @@ pub fn cluster_n50() -> ScenarioSpec {
         let vx = -v_mag * theta.sin();
         let vy = v_mag * theta.cos();
 
-        let mut b = Body::new(x, y, vx, vy, mass_per_body, Material::Rocky);
+        let mut b = Body::rocky(mass_per_body).at(x, y).with_velocity(vx, vy);
         b.softening = SOFTENING;
         bodies.push(b);
     }
@@ -265,7 +265,7 @@ pub fn solar_n641() -> ScenarioSpec {
     let mut bodies = Vec::with_capacity(N_TEST + 1);
 
     // Central body: massive star at origin, at rest.
-    bodies.push(Body::new(0.0, 0.0, 0.0, 0.0, M_CENTRAL, Material::Star));
+    bodies.push(Body::star(M_CENTRAL).at(0.0, 0.0).with_velocity(0.0, 0.0));
 
     for _ in 0..N_TEST {
         // Uniform in [R_INNER, R_OUTER] via rejection-free sampling.
@@ -280,7 +280,7 @@ pub fn solar_n641() -> ScenarioSpec {
         let vx = -v_circ * theta.sin();
         let vy = v_circ * theta.cos();
 
-        let mut b = Body::new(x, y, vx, vy, M_TEST, Material::Asteroid);
+        let mut b = Body::asteroid(M_TEST).at(x, y).with_velocity(vx, vy);
         b.softening = SOFTENING;
         bodies.push(b);
     }
@@ -372,7 +372,7 @@ pub fn structured_rings_n641() -> ScenarioSpec {
     let mut rng = SmallRng::seed_from_u64(SEED);
     let mut bodies = Vec::with_capacity(N_TEST + 1);
 
-    bodies.push(Body::new(0.0, 0.0, 0.0, 0.0, M_CENTRAL, Material::Star));
+    bodies.push(Body::star(M_CENTRAL).at(0.0, 0.0).with_velocity(0.0, 0.0));
 
     let dr = (R_OUTER - R_INNER) / (N_RINGS as f64 - 1.0);
     let dtheta = std::f64::consts::TAU / BODIES_PER_RING as f64;
@@ -391,7 +391,7 @@ pub fn structured_rings_n641() -> ScenarioSpec {
             let vx = -v_circ * theta.sin();
             let vy = v_circ * theta.cos();
 
-            let mut b = Body::new(x, y, vx, vy, M_TEST, Material::Asteroid);
+            let mut b = Body::asteroid(M_TEST).at(x, y).with_velocity(vx, vy);
             b.softening = SOFTENING;
             bodies.push(b);
         }
@@ -448,9 +448,9 @@ fn kepler_two_body(
     let v_peri = (mu * (1.0 + e) / (a * (1.0 - e))).sqrt();
     let period = 2.0 * std::f64::consts::PI * (a.powi(3) / mu).sqrt();
 
-    let mut b1 = Body::new(-r_peri / 2.0, 0.0, 0.0, -v_peri / 2.0, 1.0, Material::Rocky);
+    let mut b1 = Body::rocky(1.0).at(-r_peri / 2.0, 0.0).with_velocity(0.0, -v_peri / 2.0);
     b1.softening = 0.0;
-    let mut b2 = Body::new(r_peri / 2.0, 0.0, 0.0, v_peri / 2.0, 1.0, Material::Rocky);
+    let mut b2 = Body::rocky(1.0).at(r_peri / 2.0, 0.0).with_velocity(0.0, v_peri / 2.0);
     b2.softening = 0.0;
 
     ScenarioSpec {

@@ -55,13 +55,10 @@ pub fn run(config: &RunConfig) -> Result<(), Box<dyn std::error::Error>> {
     let template = (entry.build)(config.seed);
     let named_bodies = instantiate(&template);
 
-    let mut system = System::new(
-        vec![],
-        0.6, // θ — standard accuracy
-        config.dt,
-        32, // max BH tree depth
-        1,
-    );
+    let mut system = System::new(vec![])
+        .with_theta(0.6) // standard accuracy
+        .with_dt(config.dt)
+        .with_max_depth(32);
     system.set_seed(config.seed);
     system.set_integrator(config.integrator);
     system.add_named_bodies(named_bodies);

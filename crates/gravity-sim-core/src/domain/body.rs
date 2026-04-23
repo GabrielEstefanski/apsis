@@ -60,9 +60,10 @@ pub struct Body {
 
 /// Body payload with an optional explicit display name.
 ///
-/// Template instantiation uses this type to preserve authored names when bodies
-/// are inserted into the simulation. Callers may leave `name` as `None` to let
-/// the system derive a stable material-based fallback.
+/// Returned by [`Body::named`] and by the template catalog. Consumed by
+/// [`System::add_named_body`](crate::core::system::System::add_named_body)
+/// to preserve authored names; otherwise the system derives a stable
+/// material-based fallback.
 #[derive(Clone, Debug)]
 pub struct NamedBody {
     pub body: Body,
@@ -70,16 +71,76 @@ pub struct NamedBody {
 }
 
 impl Body {
-    pub fn new(x: f64, y: f64, vx: f64, vy: f64, mass: f64, material: Material) -> Self {
+    // ── Material constructors ─────────────────────────────────────────────────
+    //
+    // Each constructor creates a body at the origin, at rest, with physical
+    // properties derived from `mass` and the canonical material profile.
+    // Position and velocity are set via the fluent builder methods below.
+
+    /// Star — main-sequence luminous body. Default density, luminous material.
+    pub fn star(mass: f64) -> Self {
+        Self::from_material(mass, Material::Star)
+    }
+
+    /// Brown dwarf — sub-stellar, deuterium-burning regime.
+    pub fn brown_dwarf(mass: f64) -> Self {
+        Self::from_material(mass, Material::BrownDwarf)
+    }
+
+    /// White dwarf — compact stellar remnant.
+    pub fn white_dwarf(mass: f64) -> Self {
+        Self::from_material(mass, Material::WhiteDwarf)
+    }
+
+    /// Gas giant — Jupiter-class hydrogen/helium envelope.
+    pub fn gas_giant(mass: f64) -> Self {
+        Self::from_material(mass, Material::Gas)
+    }
+
+    /// Ice giant — Neptune-class water/methane envelope.
+    pub fn ice_giant(mass: f64) -> Self {
+        Self::from_material(mass, Material::IceGiant)
+    }
+
+    /// Rocky body — terrestrial planet or large rocky satellite.
+    pub fn rocky(mass: f64) -> Self {
+        Self::from_material(mass, Material::Rocky)
+    }
+
+    /// Icy body — water-dominated composition (outer satellites, KBOs).
+    pub fn icy(mass: f64) -> Self {
+        Self::from_material(mass, Material::Icy)
+    }
+
+    /// Asteroid — rocky minor body.
+    pub fn asteroid(mass: f64) -> Self {
+        Self::from_material(mass, Material::Asteroid)
+    }
+
+    /// Comet — volatile-rich minor body.
+    pub fn comet(mass: f64) -> Self {
+        Self::from_material(mass, Material::Comet)
+    }
+
+    /// Body with an explicit material.
+    ///
+    /// Prefer the material-named constructors ([`star`](Self::star),
+    /// [`rocky`](Self::rocky), …) for readability; this is the escape hatch
+    /// when the material is computed programmatically.
+    pub fn of(mass: f64, material: Material) -> Self {
+        Self::from_material(mass, material)
+    }
+
+    fn from_material(mass: f64, material: Material) -> Self {
         let density = density(material, mass);
         let physical_radius = radius_from_density_mass(density, mass);
         let softening = default_softening(mass);
 
         Self {
-            x,
-            y,
-            vx,
-            vy,
+            x: 0.0,
+            y: 0.0,
+            vx: 0.0,
+            vy: 0.0,
             mass,
             softening,
             physical_radius,
@@ -90,33 +151,81 @@ impl Body {
         }
     }
 
+    // ── Fluent builder ────────────────────────────────────────────────────────
+    //
+    // Each method consumes and returns `Self`, so they chain naturally:
+    //
+    //     Body::rocky(3e-6).at(1.0, 0.0).with_velocity(0.0, 1.0)
+
+    /// Position in simulation coordinates.
+    #[inline]
+    #[must_use]
+    pub fn at(mut self, x: f64, y: f64) -> Self {
+        self.x = x;
+        self.y = y;
+        self
+    }
+
+    /// Velocity in simulation coordinates.
+    #[inline]
+    #[must_use]
+    pub fn with_velocity(mut self, vx: f64, vy: f64) -> Self {
+        self.vx = vx;
+        self.vy = vy;
+        self
+    }
+
+    /// Override the material-default density. Radius is recomputed to match.
+    #[inline]
+    #[must_use]
+    pub fn with_density(mut self, density: f64) -> Self {
+        self.density = density;
+        self.physical_radius = radius_from_density_mass(self.density, self.mass);
+        self
+    }
+
+    /// Attach an explicit display name, producing a [`NamedBody`] consumable
+    /// by [`System::add_named_body`](crate::core::system::System::add_named_body).
+    #[inline]
+    #[must_use]
+    pub fn named(self, name: impl Into<String>) -> NamedBody {
+        NamedBody {
+            body: self,
+            name: Some(name.into()),
+        }
+    }
+
+    // ── Mutators ──────────────────────────────────────────────────────────────
+
     /// Recompute physical-only quantities from the current mass and density.
     ///
-    /// This must be used whenever mass or density changes. It intentionally
+    /// Must be used whenever `mass` or `density` is mutated in place
+    /// (e.g. via direct field assignment on a `&mut Body`). It intentionally
     /// does **not** touch the calibrated contact radius, which belongs to the
     /// numerical collision model rather than the body's physical geometry.
-
     pub fn sync_physical_properties(&mut self) {
         self.physical_radius = radius_from_density_mass(self.density, self.mass);
     }
 
-    /// Computes the bolometric luminosity of this body in solar luminosities.
+    /// Updates the cached [`luminosity`](Self::luminosity) field from the
+    /// current mass, radius, and supplied unit conversion factors.
     ///
-    /// This is a **pure function** — it does not modify `self` and can be
-    /// called at any time for diagnostic or UI purposes.
+    /// Must be called explicitly after:
+    /// - construction if radiation is enabled
+    /// - any change to `mass` or `density` (after [`sync_physical_properties`])
+    /// - any change to `material`
     ///
-    /// # Unit conversion parameters
-    ///
-    /// | Parameter        | Meaning                                     |
-    /// |------------------|---------------------------------------------|
-    /// | `mass_to_solar`  | internal mass unit → M☉                    |
-    /// | `radius_to_solar`| internal length unit → R☉                  |
-    ///
-    /// # Accuracy
-    ///
-    /// Order-of-magnitude estimate suitable for radiation pressure
-    /// calculations. Not a stellar evolution model.
-    pub fn luminosity_solar(&self, mass_to_solar: f64, radius_to_solar: f64) -> f64 {
+    /// `l_sun` is L☉ expressed in internal energy · time⁻¹ units.
+    pub(crate) fn update_luminosity(
+        &mut self,
+        mass_to_solar: f64,
+        radius_to_solar: f64,
+        l_sun: f64,
+    ) {
+        self.luminosity = self.luminosity_solar(mass_to_solar, radius_to_solar) * l_sun;
+    }
+
+    pub(crate) fn luminosity_solar(&self, mass_to_solar: f64, radius_to_solar: f64) -> f64 {
         let m = self.mass * mass_to_solar;
         match self.material {
             Material::Star => main_sequence_luminosity_smooth(m),
@@ -124,19 +233,6 @@ impl Body {
             Material::WhiteDwarf => white_dwarf_luminosity(self.physical_radius * radius_to_solar),
             _ => 0.0,
         }
-    }
-
-    /// Updates the cached [`luminosity`](Self::luminosity) field from the
-    /// current mass, radius, and supplied unit conversion factors.
-    ///
-    /// Must be called explicitly after:
-    /// - construction (`Body::new`) if radiation is enabled
-    /// - any change to `mass` or `density` (after [`sync_physical_properties`])
-    /// - any change to `material`
-    ///
-    /// `l_sun` is L☉ expressed in internal energy · time⁻¹ units.
-    pub fn update_luminosity(&mut self, mass_to_solar: f64, radius_to_solar: f64, l_sun: f64) {
-        self.luminosity = self.luminosity_solar(mass_to_solar, radius_to_solar) * l_sun;
     }
 
     /// Returns `true` if this body emits radiation.
@@ -149,16 +245,8 @@ impl Body {
 }
 
 /// Default softening before system-scale calibration.
-pub fn default_softening(mass: f64) -> f64 {
+pub(crate) fn default_softening(mass: f64) -> f64 {
     EPS_BASE * mass.abs().cbrt()
-}
-
-/// Density from mass and radius: ρ = m / (4/3 π r³).
-///
-/// Returns a safe positive fallback when `radius ≤ 0`.
-pub fn density_from_mass_radius(mass: f64, radius: f64) -> f64 {
-    let vol = sphere_volume(radius);
-    if vol > 0.0 { mass / vol } else { 1.0 }
 }
 
 /// Radius from density and mass: r = (3m / 4πρ)^(1/3).
@@ -167,24 +255,14 @@ pub fn radius_from_density_mass(density: f64, mass: f64) -> f64 {
     sphere_radius_from_volume(vol)
 }
 
-/// Volume of a sphere: V = 4/3 π r³.
 #[inline]
-pub fn sphere_volume(radius: f64) -> f64 {
-    (4.0 / 3.0) * PI * radius.powi(3)
-}
-
-/// Radius of a sphere given its volume: r = (3V / 4π)^(1/3).
-#[inline]
-pub fn sphere_radius_from_volume(volume: f64) -> f64 {
+pub(crate) fn sphere_radius_from_volume(volume: f64) -> f64 {
     ((3.0 * volume) / (4.0 * PI)).cbrt()
 }
 
 // ── Luminosity models ─────────────────────────────────────────────────────────
 
 /// Logistic sigmoid: smooth step from 0 → 1 centred at `m0` with width `w`.
-///
-/// Used to blend continuously between power-law regimes, avoiding the
-/// derivative discontinuities of a piecewise-constant exponent.
 #[inline]
 fn logistic(m: f64, m0: f64, w: f64) -> f64 {
     1.0 / (1.0 + ((m0 - m) / w).exp())
@@ -200,29 +278,18 @@ fn logistic(m: f64, m0: f64, w: f64) -> f64 {
 /// | Low-mass     | M ≲ 0.43 M☉ | 2.3 | Fully convective interior |
 /// | Solar-type   | M ≳ 0.43 M☉ | 3.5 | Radiative core            |
 ///
-/// Blending width: 0.15 M☉.  The function is strictly monotonically
-/// increasing for all M > 0: `dL/dM = α · M^(α−1) > 0`.
-///
-/// The Eddington luminosity limit is not enforced here; for the
-/// N-body force model (radiation pressure, PR drag) the error from
-/// ignoring Eddington clamping is negligible at the masses used.
-///
 /// References: Salaris & Cassisi (2005) §5.3; Tout et al. (1996) *MNRAS* 281.
 fn main_sequence_luminosity_smooth(m: f64) -> f64 {
     if m <= 0.0 {
         return 0.0;
     }
 
-    let alpha = 2.3 + (3.5 - 2.3) * logistic(m, 0.43, 0.15); // low-mass → solar
+    let alpha = 2.3 + (3.5 - 2.3) * logistic(m, 0.43, 0.15);
 
     m.powf(alpha)
 }
 
 /// Deuterium-burning luminosity for sub-stellar objects.
-///
-/// Power-law fit for `0.013 M☉ < M < 0.08 M☉`. A logistic onset term
-/// ensures `L → 0` smoothly at the deuterium-burning limit rather than
-/// cutting off abruptly.
 ///
 /// Reference: Burrows et al. (1997) *ApJ* 491, 856.
 fn brown_dwarf_luminosity(m: f64) -> f64 {
@@ -234,16 +301,6 @@ fn brown_dwarf_luminosity(m: f64) -> f64 {
 }
 
 /// Stefan–Boltzmann cooling luminosity for a white dwarf.
-///
-/// ```text
-/// L / L☉ = (R / R☉)² · (T_eff / T☉)⁴
-/// ```
-///
-/// Uses `T_eff = 10 000 K` (typical for a ~1 Gyr cooling age) and
-/// `T☉ = 5 778 K`. Actual luminosity ranges from ~0.1 L☉ (young) to
-/// ~10⁻⁴ L☉ (old); this estimate is appropriate for middle-aged white dwarfs.
-///
-/// `r_solar` must be the physical radius already converted to R☉.
 ///
 /// Reference: Koester & Chanmugam (1990) *Rep. Prog. Phys.* 53, 837.
 fn white_dwarf_luminosity(r_solar: f64) -> f64 {
@@ -261,7 +318,6 @@ mod tests {
 
     #[test]
     fn solar_mass_star_has_unit_luminosity() {
-        // By definition L(1 M☉) = 1 L☉ on the main sequence.
         let l = main_sequence_luminosity_smooth(1.0);
         assert!((l - 1.0).abs() < 0.01, "L(1 M☉) = {l}, expected ~1");
     }
@@ -275,12 +331,10 @@ mod tests {
 
     #[test]
     fn luminosity_continuous_at_low_mass_boundary() {
-        // dL/dM must not jump at M = 0.43 M☉
         let eps = 1e-4;
         let l_lo = main_sequence_luminosity_smooth(0.43 - eps);
         let l_hi = main_sequence_luminosity_smooth(0.43 + eps);
         let slope = (l_hi - l_lo) / (2.0 * eps);
-        // Finite difference of the slope — should be smooth, not infinite
         assert!(slope.is_finite(), "discontinuity at 0.43 M☉");
         assert!(slope > 0.0, "luminosity must increase with mass");
     }
@@ -309,27 +363,45 @@ mod tests {
 
     #[test]
     fn white_dwarf_typical_luminosity_in_range() {
-        // A WD with R = 0.01 R☉ should give L ~ 10⁻³–10⁻² L☉
         let l = white_dwarf_luminosity(0.01);
         assert!(l > 1e-4 && l < 0.1, "WD luminosity out of expected range: {l}");
     }
 
     #[test]
+    fn fluent_builder_produces_expected_state() {
+        let b = Body::rocky(3e-6).at(1.0, 0.0).with_velocity(0.0, 1.0);
+        assert_eq!(b.x, 1.0);
+        assert_eq!(b.y, 0.0);
+        assert_eq!(b.vx, 0.0);
+        assert_eq!(b.vy, 1.0);
+        assert_eq!(b.mass, 3e-6);
+        assert_eq!(b.material, Material::Rocky);
+    }
+
+    #[test]
+    fn material_constructors_use_material_default_density() {
+        let rocky = Body::rocky(1.0);
+        let icy = Body::icy(1.0);
+        assert!(rocky.density > 0.0);
+        assert!(icy.density > 0.0);
+        assert!(rocky.density != icy.density);
+    }
+
+    #[test]
     fn non_luminous_materials_return_zero() {
-        let body = Body::new(0.0, 0.0, 0.0, 0.0, 1.0, Material::Rocky);
+        let body = Body::rocky(1.0);
         assert_eq!(body.luminosity_solar(1.0, 1.0), 0.0);
     }
 
     #[test]
     fn is_luminous_false_before_update() {
-        let body = Body::new(0.0, 0.0, 0.0, 0.0, 1.0, Material::Star);
-        // luminosity field starts at 0.0 until update_luminosity is called
+        let body = Body::star(1.0);
         assert!(!body.is_luminous());
     }
 
     #[test]
     fn is_luminous_true_after_update() {
-        let mut body = Body::new(0.0, 0.0, 0.0, 0.0, 1.0, Material::Star);
+        let mut body = Body::star(1.0);
         body.update_luminosity(1.0, 1.0 / 0.00465, 1.0);
         assert!(body.is_luminous());
     }
