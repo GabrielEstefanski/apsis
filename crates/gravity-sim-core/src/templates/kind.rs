@@ -241,4 +241,45 @@ mod tests {
             assert!(!tpl.bodies.is_empty(), "{:?} produced zero bodies", t);
         }
     }
+
+    #[test]
+    fn with_seed_rebuilds_randomised_preset() {
+        use crate::core::system::System;
+
+        // Jupiter Trojans uses the seed for cluster layout; different seeds
+        // must produce different first-body positions.
+        let sys0 = System::from_template(TemplateKind::JupiterTrojans);
+        let sys1 =
+            System::from_template(TemplateKind::JupiterTrojans).with_seed(42);
+
+        assert_eq!(sys0.bodies().len(), sys1.bodies().len());
+        let any_differ = sys0
+            .bodies()
+            .iter()
+            .zip(sys1.bodies().iter())
+            .any(|(a, b)| (a.x - b.x).abs() > 1e-12 || (a.y - b.y).abs() > 1e-12);
+        assert!(any_differ, "with_seed must rebuild randomised preset");
+    }
+
+    #[test]
+    fn manual_mutation_clears_template_source() {
+        use crate::core::system::System;
+        use crate::domain::body::Body;
+
+        // After from_template + manual add, a subsequent with_seed must NOT
+        // wipe the manually-added body. This is enforced by the auto-clear
+        // of template_source inside add_body / add_named_bodies / etc.
+        let mut sys = System::from_template(TemplateKind::JupiterTrojans);
+        let n_before = sys.bodies().len();
+        sys.add_body(Body::rocky(1.0).at(100.0, 100.0));
+        assert_eq!(sys.bodies().len(), n_before + 1);
+
+        let sys = sys.with_seed(99);
+        // Bodies must still be the mutated count, not the fresh template count.
+        assert_eq!(
+            sys.bodies().len(),
+            n_before + 1,
+            "with_seed on a manually-mutated system must not rebuild"
+        );
+    }
 }

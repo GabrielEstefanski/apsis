@@ -48,7 +48,7 @@ use crate::physics::integrator::{
 };
 use crate::physics::orbital::OrbitalElements;
 use crate::templates::instantiate::instantiate;
-use crate::templates::kind::{TemplateKind, UnknownTemplate};
+use crate::templates::kind::TemplateKind;
 
 // ── Default parameters (used by System::new) ──────────────────────────────────
 
@@ -171,6 +171,14 @@ pub struct System {
     /// Persisted in snapshots so a run can be replayed exactly.
     pub(crate) seed: u64,
 
+    /// When the system was built via [`System::from_template`], remembers the
+    /// preset so [`with_seed`](System::with_seed) can rebuild the body list
+    /// with a new seed without forcing a separate `from_template_with_seed`
+    /// entry point. `None` after manual construction, snapshot restore, or
+    /// any mutation that invalidates the "bodies equal `kind.build(seed)`"
+    /// invariant.
+    pub(crate) template_source: Option<TemplateKind>,
+
     /// Registered observer/command hooks. Dispatched from [`System::step`].
     pub(crate) hooks: HookRegistry,
 
@@ -241,45 +249,38 @@ impl System {
     /// Construct a system from a built-in preset.
     ///
     /// Defaults match [`System::new`]; override any with `.with_*` builder
-    /// methods:
+    /// methods. For randomised presets (e.g. [`TemplateKind::JupiterTrojans`])
+    /// the initial seed is `0`; change it via `.with_seed(42)` — which
+    /// rebuilds the body list with the new seed automatically, keeping a
+    /// single builder entry point for the whole construction chain.
     ///
     /// ```ignore
     /// use gravity_sim_core::core::system::System;
     /// use gravity_sim_core::physics::integrator::IntegratorKind;
     /// use gravity_sim_core::templates::TemplateKind;
     ///
-    /// let mut sys = System::from_template(TemplateKind::SolarSystem)
+    /// let mut sys = System::from_template(TemplateKind::JupiterTrojans)
+    ///     .with_seed(42)        // rebuilds the trojan layout with seed=42
     ///     .with_integrator(IntegratorKind::Ias15)
     ///     .with_dt(1e-4);
-    /// sys.integrate_for(100.0);
     /// ```
     ///
-    /// Presets that use randomised placement (e.g.
-    /// [`TemplateKind::JupiterTrojans`]) use seed `0` here. For a specific
-    /// seed at template build time, use
-    /// [`from_template_with_seed`](Self::from_template_with_seed).
+    /// For string-keyed lookup (config files, CLI input), resolve the name
+    /// first via [`TemplateKind::from_name`]:
+    ///
+    /// ```ignore
+    /// let kind = TemplateKind::from_name(&config.preset)?;
+    /// let sys  = System::from_template(kind);
+    /// ```
     pub fn from_template(kind: TemplateKind) -> Self {
-        Self::from_template_with_seed(kind, 0)
-    }
-
-    /// Construct from a preset with an explicit seed for template-time
-    /// randomisation. Deterministic presets ignore the seed.
-    pub fn from_template_with_seed(kind: TemplateKind, seed: u64) -> Self {
-        let template = kind.build(seed);
+        let template = kind.build(0);
         let named = instantiate(&template);
         let mut sys = Self::new(Vec::new());
         sys.add_named_bodies(named);
+        // add_named_bodies cleared template_source; re-set it so a
+        // subsequent .with_seed(...) can rebuild the body list.
+        sys.template_source = Some(kind);
         sys
-    }
-
-    /// String-keyed variant of [`from_template`] for config-file and
-    /// plugin use. Returns [`UnknownTemplate`] with the list of valid
-    /// names when the input does not match any preset.
-    ///
-    /// In Rust code, prefer [`from_template`](Self::from_template) for
-    /// type-safe autocomplete and compile-time typo rejection.
-    pub fn from_template_str(name: &str) -> Result<Self, UnknownTemplate> {
-        Ok(Self::from_template(TemplateKind::from_name(name)?))
     }
 
     fn with_force_model_inner(
@@ -355,6 +356,7 @@ impl System {
             stop_requested: false,
             pending_com_shift: (0.0, 0.0),
             last_dense_snapshot: None,
+            template_source: None,
         }
     }
 
@@ -415,11 +417,43 @@ impl System {
         self
     }
 
-    /// RNG seed forwarded to any seeded integrator / sampler.
-    #[inline]
+    /// RNG seed.
+    ///
+    /// For systems built from scratch with [`System::new`], this only sets
+    /// the runtime seed forwarded to seeded integrators and samplers.
+    ///
+    /// For systems built via [`System::from_template`], this **also rebuilds
+    /// the body list** using the preset's builder with the new seed —
+    /// keeping a single fluent chain for the whole construction, no
+    /// separate `from_template_with_seed` entry point.
+    ///
+    /// The rebuild is a no-op for deterministic presets (most of them) and
+    /// regenerates only the randomised ones (Jupiter Trojans, cluster
+    /// layouts, …). `template_source` is preserved, so subsequent
+    /// `.with_seed(...)` calls still rebuild.
     #[must_use]
     pub fn with_seed(mut self, seed: u64) -> Self {
         self.set_seed(seed);
+        if let Some(kind) = self.template_source {
+            self.rebuild_from_template(kind, seed);
+        }
         self
+    }
+
+    fn rebuild_from_template(&mut self, kind: TemplateKind, seed: u64) {
+        self.bodies.clear();
+        self.names.clear();
+        self.total_mass = 0.0;
+        self.initial_energy = None;
+        self.initial_angular_momentum = None;
+        self.rel_energy_error = 0.0;
+        self.rel_angular_momentum_error = 0.0;
+        self.abs_angular_momentum_error = 0.0;
+        let template = kind.build(seed);
+        let named = instantiate(&template);
+        self.add_named_bodies(named);
+        // add_named_bodies cleared template_source; this is an internal
+        // rebuild path, so restore the invariant.
+        self.template_source = Some(kind);
     }
 }
