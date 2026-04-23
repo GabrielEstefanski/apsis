@@ -65,6 +65,10 @@ impl System {
         self.integrator = make_integrator(snap.integrator_kind);
         // trail_every is now managed by TrailRecorder at app level.
         self.seed = snap.seed;
+        // Bodies came from disk, not a preset builder — invalidate the
+        // template-rebuild path so a later `.with_seed(...)` won't
+        // overwrite the restored state.
+        self.template_source = None;
         self.initial_energy = None;
         self.initial_angular_momentum = None;
         self.rel_energy_error = 0.0;
