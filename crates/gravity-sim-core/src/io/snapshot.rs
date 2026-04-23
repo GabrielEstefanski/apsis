@@ -148,7 +148,9 @@ impl BodyRecord {
 
     /// Reconstruct a [`Body`] from this record.
     pub fn into_body(self) -> Body {
-        let mut b = Body::new(self.x, self.y, self.vx, self.vy, self.mass, self.material);
+        let mut b = Body::of(self.mass, self.material)
+            .at(self.x, self.y)
+            .with_velocity(self.vx, self.vy);
         b.density = self.density;
         b.softening = self.softening;
         b.physical_radius = self.physical_radius;

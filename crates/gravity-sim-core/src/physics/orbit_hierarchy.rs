@@ -522,7 +522,7 @@ mod tests {
     use crate::domain::materials::Material;
 
     fn body(x: f64, y: f64, vx: f64, vy: f64, mass: f64) -> Body {
-        let mut b = Body::new(x, y, vx, vy, mass, Material::Asteroid);
+        let mut b = Body::asteroid(mass).at(x, y).with_velocity(vx, vy);
         b.physical_radius = 0.0;
         b
     }

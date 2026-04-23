@@ -596,16 +596,10 @@ impl SimulationApp {
                             (0.0, 0.0)
                         };
 
-                        use gravity_sim_core::domain::materials::density as mat_density;
-                        let mut body = gravity_sim_core::domain::body::Body::new(
-                            wx,
-                            wy,
-                            vx,
-                            vy,
-                            self.place_mass,
-                            self.place_material,
-                        );
-                        body.density = mat_density(self.place_material, self.place_mass);
+                        let mut body =
+                            gravity_sim_core::domain::body::Body::of(self.place_mass, self.place_material)
+                                .at(wx, wy)
+                                .with_velocity(vx, vy);
                         body.sync_physical_properties();
 
                         self.push_undo(UndoRecord::AddedBodies(1));

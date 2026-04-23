@@ -77,6 +77,55 @@ impl System {
         self.rel_energy_error
     }
 
+    // ── Direct scalar queries ────────────────────────────────────────────────
+    //
+    // Each returns the single value most scripts reach for, computed or
+    // cached with no DTO allocation. Use [`metrics`](Self::metrics) when you
+    // need everything at once (e.g. periodic CSV dumps).
+
+    /// Total energy `E = K + U` at the last completed step.
+    pub fn energy(&self) -> f64 {
+        total_energy(self.last_kinetic, self.last_potential)
+    }
+
+    /// Relative energy drift `δE = (E − E₀) / |E₀|` at the last step.
+    ///
+    /// Alias for [`rel_energy_error`](Self::rel_energy_error); named to
+    /// match `energy()` for script ergonomics (`sys.energy()` /
+    /// `sys.energy_delta()`).
+    #[inline]
+    pub fn energy_delta(&self) -> f64 {
+        self.rel_energy_error
+    }
+
+    /// Kinetic energy `K = Σ ½ mᵢ vᵢ²` at the last completed step.
+    #[inline]
+    pub fn kinetic_energy(&self) -> f64 {
+        self.last_kinetic
+    }
+
+    /// Potential energy `U = Σᵢ Σⱼ<ᵢ −G mᵢ mⱼ / |rᵢ−rⱼ|` at the last step.
+    #[inline]
+    pub fn potential_energy(&self) -> f64 {
+        self.last_potential
+    }
+
+    /// Total angular momentum (z-component) at the current body state.
+    pub fn lz(&self) -> f64 {
+        angular_momentum_z(&self.bodies)
+    }
+
+    /// Relative angular-momentum drift `δLz = (Lz − Lz₀) / |Lz₀|`.
+    #[inline]
+    pub fn lz_delta(&self) -> f64 {
+        self.rel_angular_momentum_error
+    }
+
+    /// Centre-of-mass state `(x, y, vx, vy)` at the current body state.
+    pub fn center_of_mass(&self) -> (f64, f64, f64, f64) {
+        center_of_mass_state(&self.bodies)
+    }
+
     /// Physics-justified recommended timestep from the current system state.
     ///
     /// Uses two criteria (Power et al. 2003 acceleration + Aarseth jerk).

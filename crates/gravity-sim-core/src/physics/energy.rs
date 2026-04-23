@@ -83,52 +83,52 @@ mod tests {
 
     #[test]
     fn kinetic_energy_single_body() {
-        let b = Body::new(0.0, 0.0, 3.0, 4.0, 2.0, crate::domain::materials::Material::Rocky);
+        let b = Body::rocky(2.0).at(0.0, 0.0).with_velocity(3.0, 4.0);
         assert!((kinetic_energy(&[b]) - 25.0).abs() < 1e-12);
     }
 
     #[test]
     fn kinetic_energy_at_rest_is_zero() {
-        let b = Body::new(1.0, 2.0, 0.0, 0.0, 5.0, crate::domain::materials::Material::Rocky);
+        let b = Body::rocky(5.0).at(1.0, 2.0).with_velocity(0.0, 0.0);
         assert_eq!(kinetic_energy(&[b]), 0.0);
     }
 
     #[test]
     fn kinetic_energy_is_nonnegative() {
-        let b = Body::new(0.0, 0.0, -3.0, 4.0, 1.0, crate::domain::materials::Material::Rocky);
+        let b = Body::rocky(1.0).at(0.0, 0.0).with_velocity(-3.0, 4.0);
         assert!(kinetic_energy(&[b]) >= 0.0);
     }
 
     #[test]
     fn kinetic_energy_is_additive() {
-        let b1 = Body::new(0.0, 0.0, 1.0, 0.0, 1.0, crate::domain::materials::Material::Rocky);
-        let b2 = Body::new(0.0, 0.0, 0.0, 2.0, 2.0, crate::domain::materials::Material::Rocky);
+        let b1 = Body::rocky(1.0).at(0.0, 0.0).with_velocity(1.0, 0.0);
+        let b2 = Body::rocky(2.0).at(0.0, 0.0).with_velocity(0.0, 2.0);
         assert!((kinetic_energy(&[b1, b2]) - 4.5).abs() < 1e-12);
     }
 
     #[test]
     fn angular_momentum_z_circular_orbit() {
         let (r, v, m) = (3.0, 2.0, 4.0);
-        let b = Body::new(r, 0.0, 0.0, v, m, crate::domain::materials::Material::Rocky);
+        let b = Body::rocky(m).at(r, 0.0).with_velocity(0.0, v);
         assert!((angular_momentum_z(&[b]) - m * r * v).abs() < 1e-12);
     }
 
     #[test]
     fn angular_momentum_z_positive_for_ccw() {
-        let b = Body::new(1.0, 0.0, 0.0, 1.0, 1.0, crate::domain::materials::Material::Rocky);
+        let b = Body::rocky(1.0).at(1.0, 0.0).with_velocity(0.0, 1.0);
         assert!(angular_momentum_z(&[b]) > 0.0);
     }
 
     #[test]
     fn angular_momentum_z_negative_for_cw() {
-        let b = Body::new(1.0, 0.0, 0.0, -1.0, 1.0, crate::domain::materials::Material::Rocky);
+        let b = Body::rocky(1.0).at(1.0, 0.0).with_velocity(0.0, -1.0);
         assert!(angular_momentum_z(&[b]) < 0.0);
     }
 
     #[test]
     fn angular_momentum_z_is_additive() {
-        let b1 = Body::new(1.0, 0.0, 0.0, 1.0, 1.0, crate::domain::materials::Material::Rocky);
-        let b2 = Body::new(0.0, 2.0, -1.0, 0.0, 1.0, crate::domain::materials::Material::Rocky);
+        let b1 = Body::rocky(1.0).at(1.0, 0.0).with_velocity(0.0, 1.0);
+        let b2 = Body::rocky(1.0).at(0.0, 2.0).with_velocity(-1.0, 0.0);
         assert!((angular_momentum_z(&[b1, b2]) - 3.0).abs() < 1e-12);
     }
 
@@ -140,8 +140,8 @@ mod tests {
 
     #[test]
     fn com_position_is_midpoint_for_equal_masses() {
-        let b1 = Body::new(0.0, 0.0, 0.0, 0.0, 1.0, crate::domain::materials::Material::Rocky);
-        let b2 = Body::new(4.0, 2.0, 0.0, 0.0, 1.0, crate::domain::materials::Material::Rocky);
+        let b1 = Body::rocky(1.0).at(0.0, 0.0).with_velocity(0.0, 0.0);
+        let b2 = Body::rocky(1.0).at(4.0, 2.0).with_velocity(0.0, 0.0);
         let (cx, cy, _, _) = center_of_mass_state(&[b1, b2]);
         assert!((cx - 2.0).abs() < 1e-12);
         assert!((cy - 1.0).abs() < 1e-12);
@@ -149,8 +149,8 @@ mod tests {
 
     #[test]
     fn com_velocity_is_mass_weighted_mean() {
-        let b1 = Body::new(0.0, 0.0, 4.0, 0.0, 1.0, crate::domain::materials::Material::Rocky);
-        let b2 = Body::new(0.0, 0.0, 0.0, 0.0, 3.0, crate::domain::materials::Material::Rocky);
+        let b1 = Body::rocky(1.0).at(0.0, 0.0).with_velocity(4.0, 0.0);
+        let b2 = Body::rocky(3.0).at(0.0, 0.0).with_velocity(0.0, 0.0);
         let (_, _, vx, vy) = center_of_mass_state(&[b1, b2]);
         assert!((vx - 1.0).abs() < 1e-12);
         assert!(vy.abs() < 1e-12);
