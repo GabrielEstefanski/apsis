@@ -52,6 +52,7 @@ enum ControlIntent {
     Resume,
     Abort,
     Acknowledge,
+    ClearQueue,
 }
 
 impl SimulationApp {
@@ -59,19 +60,14 @@ impl SimulationApp {
     /// ([`ui::update`](crate::app::ui)) decides when to invoke
     /// this vs. the real-time playbar.
     pub(in crate::app) fn draw_precision_panel(&mut self, ctx: &egui::Context) {
-        // Snapshot controller state + telemetry under one lock.
         let (state, telemetry, t_sim_now) = {
             let ctrl_arc = self.system.precision_controller();
             let ctrl = ctrl_arc.lock().unwrap();
             (ctrl.state(), ctrl.telemetry().clone(), self.system.t())
         };
+        let pending = self.system.pending_edits_count();
 
-        // Collect UI output (intent) while rendering; apply after
-        // the panel closure returns so mutations on `self.system`
-        // do not conflict with the panel's borrow of `self`.
         let mut intent = ControlIntent::None;
-        // A mutable duration reference lets the DragValue write back
-        // into the app-level field without cloning the value each frame.
         let duration_ref = &mut self.precision_run_duration;
 
         egui::Panel::bottom("precision_panel")
@@ -87,10 +83,10 @@ impl SimulationApp {
             .resizable(false)
             .show(ctx, |ui| match state {
                 RunState::Idle => {
-                    setup_content(ui, duration_ref, t_sim_now, &mut intent);
+                    setup_content(ui, duration_ref, t_sim_now, pending, &mut intent);
                 }
                 _ => {
-                    run_content(ui, state, &telemetry, t_sim_now, &mut intent);
+                    run_content(ui, state, &telemetry, t_sim_now, pending, &mut intent);
                 }
             });
 
@@ -101,18 +97,39 @@ impl SimulationApp {
     }
 
     fn apply_precision_intent(&mut self, intent: ControlIntent, t_sim_now: f64) {
-        let ctrl_arc = self.system.precision_controller();
-        let mut ctrl = ctrl_arc.lock().unwrap();
         match intent {
             ControlIntent::None => {}
             ControlIntent::Start => {
+                let ctrl_arc = self.system.precision_controller();
+                let mut ctrl = ctrl_arc.lock().unwrap();
                 let t_target = t_sim_now + self.precision_run_duration.max(0.0);
                 ctrl.start(t_target, t_sim_now);
             }
-            ControlIntent::Pause => ctrl.request_pause(),
-            ControlIntent::Resume => ctrl.resume(),
-            ControlIntent::Abort => ctrl.request_abort(),
-            ControlIntent::Acknowledge => ctrl.acknowledge(),
+            ControlIntent::Pause => self.system.precision_controller().lock().unwrap().request_pause(),
+            ControlIntent::Resume => self.system.precision_controller().lock().unwrap().resume(),
+            ControlIntent::Abort => self.system.precision_controller().lock().unwrap().request_abort(),
+            ControlIntent::Acknowledge => {
+                // Acknowledge bridges the Completed state back to
+                // Idle; the outcome decides what happens with the
+                // edits the user queued during the run.
+                let outcome = {
+                    let ctrl_arc = self.system.precision_controller();
+                    let ctrl = ctrl_arc.lock().unwrap();
+                    match ctrl.state() {
+                        RunState::Completed { outcome } => Some(outcome),
+                        _ => None,
+                    }
+                };
+                match outcome {
+                    Some(RunOutcome::Reached) => self.system.commit_pending_edits(),
+                    Some(RunOutcome::UserAborted) | Some(RunOutcome::Errored) => {
+                        self.system.clear_pending_edits();
+                    }
+                    None => {}
+                }
+                self.system.precision_controller().lock().unwrap().acknowledge();
+            }
+            ControlIntent::ClearQueue => self.system.clear_pending_edits(),
         }
     }
 }
@@ -123,6 +140,7 @@ fn setup_content(
     ui: &mut egui::Ui,
     duration: &mut f64,
     t_sim_now: f64,
+    pending: usize,
     intent: &mut ControlIntent,
 ) {
     ui.spacing_mut().item_spacing.y = 6.0;
@@ -150,6 +168,26 @@ fn setup_content(
                 .size(10.0)
                 .color(TEXT_SEC),
         );
+
+        if pending > 0 {
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                let clear = egui::Button::new(
+                    RichText::new("Clear").size(10.0).color(TEXT_SEC),
+                )
+                .fill(Color32::TRANSPARENT)
+                .stroke(Stroke::new(0.5, BORDER))
+                .min_size(egui::vec2(54.0, 20.0));
+                if ui.add(clear).clicked() {
+                    *intent = ControlIntent::ClearQueue;
+                }
+                ui.add_space(6.0);
+                ui.label(
+                    RichText::new(format!("{} queued edit{}", pending, if pending == 1 { "" } else { "s" }))
+                        .size(10.0)
+                        .color(ACCENT),
+                );
+            });
+        }
     });
 
     ui.horizontal(|ui| {
@@ -212,12 +250,13 @@ fn run_content(
     state: RunState,
     telemetry: &Telemetry,
     t_sim_now: f64,
+    pending: usize,
     intent: &mut ControlIntent,
 ) {
     ui.spacing_mut().item_spacing.y = 4.0;
 
     draw_progress_row(ui, state, telemetry, t_sim_now);
-    draw_metrics_row(ui, state, telemetry);
+    draw_metrics_row(ui, state, telemetry, pending);
     draw_controls_row(ui, state, intent);
 }
 
@@ -264,7 +303,7 @@ fn draw_progress_row(
     });
 }
 
-fn draw_metrics_row(ui: &mut egui::Ui, state: RunState, telemetry: &Telemetry) {
+fn draw_metrics_row(ui: &mut egui::Ui, state: RunState, telemetry: &Telemetry, pending: usize) {
     ui.horizontal(|ui| {
         let (label_text, label_color) = state_tag(state);
         ui.label(RichText::new("STATE").size(9.0).color(TEXT_DIM).strong());
@@ -309,6 +348,10 @@ fn draw_metrics_row(ui: &mut egui::Ui, state: RunState, telemetry: &Telemetry) {
                 DANGER,
             );
         }
+
+        if pending > 0 {
+            metric_inline_colored(ui, "queued", &format!("{}", pending), ACCENT);
+        }
     });
 }
 
@@ -344,20 +387,27 @@ fn draw_controls_row(ui: &mut egui::Ui, state: RunState, intent: &mut ControlInt
             *intent = ControlIntent::Abort;
         }
 
-        // Right-aligned action: Close on Completed (acknowledges and
-        // returns to Idle). For active runs we reserve this slot for
-        // the future Commit action (B-future: commit & export).
+        // Right-aligned action: labels split on outcome. On a
+        // successfully completed run the button is "Commit" (applies
+        // the queued edits and acknowledges); on an aborted run it
+        // is "Close" (edits were discarded on abort, we just clear
+        // the state machine). Other states show a disabled Commit
+        // slot so the layout does not jump when the run ends.
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            if is_completed {
-                if control_btn(ui, "Close", true, false).clicked() {
-                    *intent = ControlIntent::Acknowledge;
+            match state {
+                RunState::Completed { outcome: RunOutcome::Reached } => {
+                    if control_btn(ui, "Commit", true, false).clicked() {
+                        *intent = ControlIntent::Acknowledge;
+                    }
                 }
-            } else {
-                // Placeholder slot reserved for Commit (post-run
-                // artefact export). Disabled until the Summary work
-                // in Block C lands, at which point the button
-                // triggers the export flow rather than simply closing.
-                control_btn(ui, "Commit", false, false);
+                RunState::Completed { .. } => {
+                    if control_btn(ui, "Close", true, false).clicked() {
+                        *intent = ControlIntent::Acknowledge;
+                    }
+                }
+                _ => {
+                    control_btn(ui, "Commit", false, false);
+                }
             }
         });
     });
