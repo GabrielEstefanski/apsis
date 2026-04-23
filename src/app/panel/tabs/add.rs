@@ -145,6 +145,17 @@ fn sub_section(ui: &mut egui::Ui, label: &str) {
 
 impl SimulationApp {
     pub(super) fn panel_tab_add(&mut self, ui: &mut egui::Ui) {
+        if self.is_editing_locked() {
+            ui.add_space(4.0);
+            ui.label(
+                RichText::new(self.editing_lock_hint())
+                    .size(10.5)
+                    .color(ACCENT),
+            );
+            ui.add_space(8.0);
+            ui.disable();
+        }
+
         ui.add_space(4.0);
         ui.label(
             RichText::new("Pick a spawn mode, configure mass and material, then place on the canvas.")

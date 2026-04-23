@@ -519,7 +519,14 @@ impl SimulationApp {
         }
 
         // ── Place-mode: click or drag-release to spawn a body ────────────────
-        if self.place_mode {
+        // Editing is locked during a Precision Run (REBOUND-aligned).
+        // Place-mode silently ignores input in that state; the UI
+        // already greyed out the Add tool in the rail, so user input
+        // should not reach here anyway — belt-and-suspenders.
+        if self.place_mode && self.is_editing_locked() {
+            self.place_drag_start = None;
+            ctx.set_cursor_icon(egui::CursorIcon::NotAllowed);
+        } else if self.place_mode {
             let pointer = ctx.input(|i| i.pointer.clone());
 
             // Track drag start (only when pressing on empty space)

@@ -7,6 +7,12 @@ use eframe::egui::{self, RichText};
 
 impl SimulationApp {
     pub(super) fn inspector_content(&mut self, ui: &mut egui::Ui, idx: usize) {
+        // Inspector stays visible during a Precision Run (read-only
+        // view of the selected body is useful) but every interactive
+        // widget below is disabled.
+        if self.is_editing_locked() {
+            ui.disable();
+        }
         let body = self.system.bodies()[idx];
 
         ui.horizontal(|ui| {
