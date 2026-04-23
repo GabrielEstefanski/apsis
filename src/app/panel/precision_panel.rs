@@ -31,6 +31,7 @@
 //!   feed, auto-correction notice. Those insertion points are
 //!   called out below with `// TODO(Bn)` markers.
 
+use crate::app::icons;
 use crate::app::theme::{ACCENT, ACCENT_DIM, BORDER, DANGER, PANEL_BG, SUCCESS, TEXT_DIM, TEXT_PRI, TEXT_SEC};
 use crate::app::ui::SimulationApp;
 use crate::core::precision_run::{RunOutcome, RunState, Telemetry};
@@ -242,7 +243,9 @@ fn setup_content(
 
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             let start_btn = egui::Button::new(
-                RichText::new("Start").size(12.0).color(TEXT_PRI),
+                RichText::new(format!("{}  Start", icons::PRECISION_START))
+                    .size(12.0)
+                    .color(TEXT_PRI),
             )
             .fill(ACCENT_DIM)
             .stroke(Stroke::new(1.0, ACCENT))
@@ -385,46 +388,45 @@ fn draw_controls_row(ui: &mut egui::Ui, state: RunState, intent: &mut ControlInt
         let can_abort = is_running || is_pausing || is_paused;
 
         // Pause / Resume / Pausing… toggle.
-        let (label, enabled, produces) = if is_paused {
-            ("Resume", true, ControlIntent::Resume)
+        let (icon, label, enabled, produces) = if is_paused {
+            (icons::PRECISION_RESUME, "Resume", true, ControlIntent::Resume)
         } else if is_pausing {
-            ("Pausing…", false, ControlIntent::None)
+            (icons::PRECISION_PAUSE, "Pausing…", false, ControlIntent::None)
         } else if is_running {
-            ("Pause", true, ControlIntent::Pause)
+            (icons::PRECISION_PAUSE, "Pause", true, ControlIntent::Pause)
         } else {
-            ("Pause", false, ControlIntent::None)
+            (icons::PRECISION_PAUSE, "Pause", false, ControlIntent::None)
         };
-        if control_btn(ui, label, enabled, false).clicked() {
+        if control_btn(ui, icon, label, enabled, false).clicked() {
             *intent = produces;
         }
 
-        // Abort — available throughout the active-run lifecycle; not
-        // shown during `Aborting` (already in flight) or after
-        // Completed.
-        if control_btn(ui, "Abort", can_abort && !is_aborting, true).clicked() {
+        if control_btn(
+            ui,
+            icons::PRECISION_ABORT,
+            "Abort",
+            can_abort && !is_aborting,
+            true,
+        )
+        .clicked()
+        {
             *intent = ControlIntent::Abort;
         }
 
-        // Right-aligned action: labels split on outcome. On a
-        // successfully completed run the button is "Commit" (applies
-        // the queued edits and acknowledges); on an aborted run it
-        // is "Close" (edits were discarded on abort, we just clear
-        // the state machine). Other states show a disabled Commit
-        // slot so the layout does not jump when the run ends.
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             match state {
                 RunState::Completed { outcome: RunOutcome::Reached } => {
-                    if control_btn(ui, "Commit", true, false).clicked() {
+                    if control_btn(ui, icons::PRECISION_COMMIT, "Commit", true, false).clicked() {
                         *intent = ControlIntent::Acknowledge;
                     }
                 }
                 RunState::Completed { .. } => {
-                    if control_btn(ui, "Close", true, false).clicked() {
+                    if control_btn(ui, icons::PRECISION_CLOSE, "Close", true, false).clicked() {
                         *intent = ControlIntent::Acknowledge;
                     }
                 }
                 _ => {
-                    control_btn(ui, "Commit", false, false);
+                    control_btn(ui, icons::PRECISION_COMMIT, "Commit", false, false);
                 }
             }
         });
@@ -520,19 +522,27 @@ fn metric_inline_colored(
     ui.add_space(4.0);
 }
 
-/// Control-strip button with consistent styling. Returns the
-/// [`egui::Response`] so the caller can react to `.clicked()`.
-fn control_btn(ui: &mut egui::Ui, label: &str, enabled: bool, danger: bool) -> egui::Response {
+fn control_btn(
+    ui: &mut egui::Ui,
+    icon: &str,
+    label: &str,
+    enabled: bool,
+    danger: bool,
+) -> egui::Response {
     let stroke_color = if danger { DANGER } else { BORDER };
     let text_color = if enabled {
         if danger { DANGER } else { TEXT_PRI }
     } else {
         TEXT_DIM
     };
-    let btn = egui::Button::new(RichText::new(label).size(11.0).color(text_color))
-        .fill(Color32::TRANSPARENT)
-        .stroke(Stroke::new(0.5, stroke_color))
-        .min_size(egui::vec2(82.0, 24.0));
+    let btn = egui::Button::new(
+        RichText::new(format!("{}  {}", icon, label))
+            .size(11.0)
+            .color(text_color),
+    )
+    .fill(Color32::TRANSPARENT)
+    .stroke(Stroke::new(0.5, stroke_color))
+    .min_size(egui::vec2(92.0, 24.0));
 
     ui.add_enabled(enabled, btn)
 }
