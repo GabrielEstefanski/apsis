@@ -12,7 +12,8 @@
 //! | [`calibration`]    | COM recentering, softening/radius helpers                  |
 //! | [`adaptive`]       | [`DtController`], [`ThetaController`]                      |
 //! | [`diagnostics`]    | Per-step acceleration and jerk statistics                  |
-//! | [`log`]            | Structured stderr emitter (`warn_diag!` macro)             |
+//! | [`log`]            | Structured event bus + `warn_diag!`/`info_diag!` macros    |
+//! | [`precision_run`]  | `PrecisionRunController` state machine for IAS15-class runs|
 
 pub mod adaptive;
 pub mod calibration;
@@ -21,4 +22,5 @@ pub mod hooks;
 pub mod log;
 pub mod metrics;
 pub mod physics_thread;
+pub mod precision_run;
 pub mod system;
