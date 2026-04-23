@@ -5,10 +5,12 @@
 
 use crate::app::icons;
 use crate::app::panel::metrics::DriftSeverity;
-use crate::app::theme::{ACCENT, ACCENT_DIM, BORDER, PANEL_BG, SUCCESS, TEXT_DIM, TEXT_PRI, TEXT_SEC};
+use crate::app::theme::{
+    ACCENT, ACCENT_DIM, BORDER, PANEL_BG, SUCCESS, TEXT_DIM, TEXT_PRI, TEXT_SEC,
+};
 use crate::app::ui::SimulationApp;
-use gravity_sim_core::physics::integrator::IntegratorKind;
 use eframe::egui::{self, Color32, RichText, Stroke};
+use gravity_sim_core::physics::integrator::IntegratorKind;
 use std::f64::consts::PI;
 
 pub const PLAYBAR_HEIGHT: f32 = 36.0;
@@ -43,19 +45,9 @@ impl SimulationApp {
                     let t = self.system.t();
                     let yr = t / (2.0 * PI);
                     ui.label(RichText::new("T").size(8.5).color(TEXT_DIM).strong());
-                    ui.label(
-                        RichText::new(fmt_sci(t, 4))
-                            .size(10.0)
-                            .monospace()
-                            .color(TEXT_SEC),
-                    );
+                    ui.label(RichText::new(fmt_sci(t, 4)).size(10.0).monospace().color(TEXT_SEC));
                     ui.label(RichText::new("·").size(9.0).color(TEXT_DIM));
-                    ui.label(
-                        RichText::new(fmt_years(yr))
-                            .size(10.0)
-                            .monospace()
-                            .color(TEXT_DIM),
-                    );
+                    ui.label(RichText::new(fmt_years(yr)).size(10.0).monospace().color(TEXT_DIM));
 
                     vsep(ui);
 
@@ -65,9 +57,9 @@ impl SimulationApp {
                     if self.physics_cfg.integrator == IntegratorKind::Ias15 {
                         ui.label(RichText::new("ACC").size(8.5).color(TEXT_DIM).strong());
                         let presets: &[(&str, f64, &str)] = &[
-                            ("Fast",   1e-6,  "ε = 1×10⁻⁶  ·  faster, less accurate"),
-                            ("Normal", 1e-9,  "ε = 1×10⁻⁹  ·  REBOUND default — recommended"),
-                            ("Fine",   1e-12, "ε = 1×10⁻¹²  ·  high precision, slower"),
+                            ("Fast", 1e-6, "ε = 1×10⁻⁶  ·  faster, less accurate"),
+                            ("Normal", 1e-9, "ε = 1×10⁻⁹  ·  REBOUND default — recommended"),
+                            ("Fine", 1e-12, "ε = 1×10⁻¹²  ·  high precision, slower"),
                         ];
                         let current_label = presets
                             .iter()
@@ -79,9 +71,7 @@ impl SimulationApp {
                             .map(|p| p.0)
                             .unwrap_or("Normal");
                         egui::ComboBox::from_id_salt("playbar_ias15_epsilon")
-                            .selected_text(
-                                RichText::new(current_label).size(10.0).color(TEXT_PRI),
-                            )
+                            .selected_text(RichText::new(current_label).size(10.0).color(TEXT_PRI))
                             .width(70.0)
                             .show_ui(ui, |ui| {
                                 for (label, eps, hint) in presets {
@@ -105,7 +95,9 @@ impl SimulationApp {
                                     .max_decimals(6)
                                     .min_decimals(1),
                             )
-                            .on_hover_text("Integration timestep — smaller = more accurate but slower")
+                            .on_hover_text(
+                                "Integration timestep — smaller = more accurate but slower",
+                            )
                             .changed()
                         {
                             self.system.set_dt(dt);
@@ -135,10 +127,7 @@ impl SimulationApp {
                     let shortfall = sim_rate > 0.0 && actual_yr < speed_yr * 0.8;
                     let speed_col = if shortfall { TEXT_DIM } else { ACCENT };
                     ui.label(
-                        RichText::new(fmt_speed(speed_yr))
-                            .monospace()
-                            .size(10.0)
-                            .color(speed_col),
+                        RichText::new(fmt_speed(speed_yr)).monospace().size(10.0).color(speed_col),
                     )
                     .on_hover_text(
                         "Target simulation speed (yr/s).\n\
@@ -153,9 +142,7 @@ impl SimulationApp {
                     let current = self.physics_cfg.integrator;
                     let current_short = integrator_short_label(current);
                     egui::ComboBox::from_id_salt("playbar_integrator")
-                        .selected_text(
-                            RichText::new(current_short).size(10.0).color(TEXT_PRI),
-                        )
+                        .selected_text(RichText::new(current_short).size(10.0).color(TEXT_PRI))
                         .width(90.0)
                         .show_ui(ui, |ui| {
                             for variant in IntegratorKind::ALL {
@@ -190,10 +177,7 @@ impl SimulationApp {
                     if sim_rate > 0.0 {
                         let yr_per_s = sim_rate / (2.0 * PI);
                         ui.label(
-                            RichText::new(fmt_rate(yr_per_s))
-                                .monospace()
-                                .size(9.5)
-                                .color(TEXT_DIM),
+                            RichText::new(fmt_rate(yr_per_s)).monospace().size(9.5).color(TEXT_DIM),
                         )
                         .on_hover_text(format!(
                             "Simulation throughput\n{:.3e} sim·units/s · {:.3e} yr/s",
@@ -242,11 +226,7 @@ impl SimulationApp {
         let (icon, icon_col, fill_col) = if self.paused {
             (icons::PLAY, SUCCESS, ACCENT_DIM)
         } else {
-            (
-                icons::PAUSE,
-                ACCENT,
-                Color32::from_rgba_unmultiplied(30, 50, 35, 180),
-            )
+            (icons::PAUSE, ACCENT, Color32::from_rgba_unmultiplied(30, 50, 35, 180))
         };
 
         if !self.paused {

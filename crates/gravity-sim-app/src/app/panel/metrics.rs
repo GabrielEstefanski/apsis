@@ -22,11 +22,17 @@ pub(in crate::app::panel) enum DriftSeverity {
 impl DriftSeverity {
     pub(in crate::app::panel) fn from_peak(peak: f64) -> Self {
         let p = peak.abs();
-        if p < 1e-9 { Self::Excellent }
-        else if p < 1e-6 { Self::Good }
-        else if p < 1e-3 { Self::Acceptable }
-        else if p < 1e-1 { Self::Warning }
-        else { Self::Critical }
+        if p < 1e-9 {
+            Self::Excellent
+        } else if p < 1e-6 {
+            Self::Good
+        } else if p < 1e-3 {
+            Self::Acceptable
+        } else if p < 1e-1 {
+            Self::Warning
+        } else {
+            Self::Critical
+        }
     }
 
     pub(in crate::app::panel) fn color(self) -> Color32 {

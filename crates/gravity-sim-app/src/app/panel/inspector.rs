@@ -1,9 +1,9 @@
 use crate::app::theme::{ACCENT, DANGER, SUCCESS, TEXT_DIM, TEXT_PRI, TEXT_SEC};
 use crate::app::theme::{field, metric, primary_btn, secondary_btn, section};
 use crate::app::ui::{SelectionForm, SimulationApp, UndoRecord};
+use eframe::egui::{self, RichText};
 use gravity_sim_core::domain::body::{Body, radius_from_density_mass};
 use gravity_sim_core::physics::orbital::OrbitType;
-use eframe::egui::{self, RichText};
 
 impl SimulationApp {
     pub(super) fn inspector_content(&mut self, ui: &mut egui::Ui, idx: usize) {
@@ -23,11 +23,8 @@ impl SimulationApp {
             ui.painter().circle_filled(dot_rect.center(), 6.0, col);
 
             let raw_name = self.system.name(idx);
-            let display_name = if raw_name.is_empty() {
-                format!("body #{idx}")
-            } else {
-                raw_name.to_owned()
-            };
+            let display_name =
+                if raw_name.is_empty() { format!("body #{idx}") } else { raw_name.to_owned() };
             ui.label(RichText::new(display_name).size(12.5).color(TEXT_PRI).strong());
         });
 
