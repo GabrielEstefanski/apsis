@@ -93,8 +93,27 @@ impl GravityForceModel {
 
 impl ForceModel for GravityForceModel {
     fn compute(&mut self, bodies: &[Body], acc: &mut [(f64, f64)]) -> f64 {
+        // Phase-split instrumentation for the IAS15 diagnostic harness:
+        // separate the tree-build half from the traversal half of the
+        // evaluate work so an optimisation that caches the tree across
+        // Picard iterations can be sized against real data rather than
+        // speculation. Entirely compiled out when `ias15-profile` is
+        // off; accesses thread-local storage owned by `ias15::profile`.
+        #[cfg(feature = "ias15-profile")]
+        let build_start = std::time::Instant::now();
         self.engine.build(bodies);
-        self.engine.evaluate(bodies, self.theta, acc)
+        #[cfg(feature = "ias15-profile")]
+        crate::physics::integrator::ias15::profile::record_tree_build(build_start.elapsed());
+
+        #[cfg(feature = "ias15-profile")]
+        let traverse_start = std::time::Instant::now();
+        let pe = self.engine.evaluate(bodies, self.theta, acc);
+        #[cfg(feature = "ias15-profile")]
+        crate::physics::integrator::ias15::profile::record_tree_traverse(
+            traverse_start.elapsed(),
+        );
+
+        pe
     }
 
     fn theta(&self) -> f64 {
