@@ -7,6 +7,7 @@ use crate::domain::body::Body;
 use crate::domain::materials::Material;
 use crate::io::recorder::SimRecorder;
 use crate::io::snapshot::{SaveEntry, SimSnapshot, list_saves};
+use crate::physics::integrator::IntegratorKind;
 use crate::render::{TrailRenderer, WgpuBackend};
 use crate::templates::{Template, UnitSystem};
 use std::collections::HashSet;
@@ -195,6 +196,24 @@ pub struct SimulationApp {
     /// IAS15 error tolerance. Forwarded to the physics thread every frame.
     /// Ignored when a different integrator is active.
     pub(super) ias15_epsilon: f64,
+    /// Simulation-time duration the user has configured for the next
+    /// Precision Run. The run's `t_target` is resolved as
+    /// `system.t() + precision_run_duration` at Start time, so changing
+    /// the field does not retroactively affect an in-flight run.
+    pub(super) precision_run_duration: f64,
+    /// When `Some`, the user has selected a Precision-profile
+    /// integrator and the confirmation modal is pending resolution.
+    /// The variant is the kind to apply if the user accepts. While
+    /// the modal is up, `physics_cfg.integrator` and the physics
+    /// thread's integrator are NOT changed yet — the intent is held
+    /// here until Continue / Cancel resolves the dialog.
+    pub(super) precision_confirmation_pending: Option<IntegratorKind>,
+    /// When `true`, subsequent selections of a Precision-profile
+    /// integrator skip the modal for the rest of the session. Reset
+    /// on restart — this is a session-local courtesy, not a durable
+    /// preference, so "don't show again" does not silently survive
+    /// across app restarts.
+    pub(super) precision_confirmation_session_skip: bool,
     pub(super) place_mode: bool,
     pub(super) place_drag_start: Option<egui::Pos2>,
     pub(super) place_mass: f64,
@@ -381,6 +400,12 @@ impl SimulationApp {
             show_vectors: false,
             sim_rate_target: std::f64::consts::TAU,
             ias15_epsilon: 1e-9,
+            // Default: roughly one "internal year" at the default
+            // unit system (G = 1 gives orbital period = 2π). Users can
+            // override before starting a run.
+            precision_run_duration: 2.0 * std::f64::consts::PI,
+            precision_confirmation_pending: None,
+            precision_confirmation_session_skip: false,
             place_mode: false,
             place_drag_start: None,
             place_mass: 1.0,
@@ -594,7 +619,26 @@ impl SimulationApp {
         // panel → right inspector → central canvas. See `panel/mod.rs` for the
         // layout diagram.
         self.draw_toolbar(&ctx);
-        self.draw_playbar(&ctx);
+        // Bottom strip: the Precision Run panel owns the slot whenever
+        // either (a) a run is actively in progress or (b) a Precision-
+        // profile integrator is selected (panel then shows the Setup
+        // view so the user can configure and start a run). The real-
+        // time playbar returns only when neither condition is met.
+        let integrator_is_precision = self.physics_cfg.integrator.execution_profile()
+            == crate::physics::integrator::traits::ExecutionProfile::Precision;
+        let run_in_flight = {
+            let ctrl = self.system.precision_controller();
+            let guard = ctrl.lock().unwrap();
+            !matches!(
+                guard.state(),
+                crate::core::precision_run::RunState::Idle
+            )
+        };
+        if integrator_is_precision || run_in_flight {
+            self.draw_precision_panel(&ctx);
+        } else {
+            self.draw_playbar(&ctx);
+        }
         self.draw_tool_rail(&ctx);
         if !self.sidebar_collapsed {
             self.draw_panel(&ctx);
@@ -604,6 +648,7 @@ impl SimulationApp {
         self.draw_save_modal(&ctx);
         self.draw_shortcuts_modal(&ctx);
         self.draw_settings_modal(&ctx);
+        self.draw_precision_confirmation_modal(&ctx);
         self.draw_templates_modal(&ctx);
         self.draw_name_prompt(&ctx);
 

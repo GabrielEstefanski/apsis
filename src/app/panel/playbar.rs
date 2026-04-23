@@ -159,19 +159,26 @@ impl SimulationApp {
                         .width(90.0)
                         .show_ui(ui, |ui| {
                             for variant in IntegratorKind::ALL {
-                                let r = ui.selectable_value(
-                                    &mut self.physics_cfg.integrator,
-                                    variant,
-                                    RichText::new(variant.label()).size(10.0),
-                                )
-                                .on_hover_text(format!(
-                                    "O({}) · {}F/step\n{}",
-                                    variant.order(),
-                                    variant.force_evals_per_step(),
-                                    variant.description(),
-                                ));
+                                // `selectable_label` renders selection state
+                                // without binding `&mut physics_cfg.integrator` —
+                                // the actual mutation goes through
+                                // `request_integrator_change`, which is the
+                                // single code path that can surface the
+                                // precision-confirmation modal.
+                                let selected = self.physics_cfg.integrator == variant;
+                                let r = ui
+                                    .selectable_label(
+                                        selected,
+                                        RichText::new(variant.label()).size(10.0),
+                                    )
+                                    .on_hover_text(format!(
+                                        "O({}) · {}F/step\n{}",
+                                        variant.order(),
+                                        variant.force_evals_per_step(),
+                                        variant.description(),
+                                    ));
                                 if r.clicked() {
-                                    self.system.set_integrator(variant);
+                                    self.request_integrator_change(variant);
                                 }
                             }
                         });
