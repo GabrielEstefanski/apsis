@@ -47,7 +47,20 @@ use common::scenarios::{self, ScenarioSpec};
 use criterion::Criterion;
 use std::collections::BTreeMap;
 
+const MULTITHREAD_ENV_VAR: &str = "IAS15_BENCH_MULTITHREAD";
+
 fn main() {
+    // Multi-thread diagnostic mode: skip single-thread enforcement so
+    // rayon uses its default worker count (num_cpus), run only the
+    // multi-thread-targeted scenarios, and exit without Criterion.
+    // Produces non-deterministic numerical metrics by design — the
+    // goal is to answer the allocator-contention question that
+    // single-thread runs cannot, not to gate on bit-exactness.
+    if std::env::var(MULTITHREAD_ENV_VAR).is_ok() {
+        run_multithread_diagnostic();
+        return;
+    }
+
     enforce_single_thread();
 
     if std::env::var(UPDATE_ENV_VAR).is_ok() {
@@ -60,6 +73,44 @@ fn main() {
 }
 
 // ── Modes ────────────────────────────────────────────────────────────────────
+
+/// Multi-thread diagnostic mode. Runs every scenario for which
+/// `criterion_bench == false` (today: solar_n641 only — the large-N
+/// investigation target), with rayon using its default multi-core
+/// worker pool. Prints the phase profile for each.
+///
+/// Purpose: the standard harness enforces single-thread rayon for
+/// bit-exact determinism, which means it cannot observe multi-thread-
+/// specific costs (allocator contention, cross-thread cache effects,
+/// rayon work-stealing overhead at realistic core counts). This mode
+/// deliberately sacrifices determinism to expose those costs.
+///
+/// No baseline comparison, no Criterion timing. Output is read by a
+/// human, compared against the single-thread phase profile, and the
+/// delta informs whether multi-thread contention explains the gap
+/// between bench numbers and real-app stutter reports.
+fn run_multithread_diagnostic() {
+    eprintln!(
+        "[diagnostic] multi-thread mode — rayon default workers, non-deterministic metrics"
+    );
+    eprintln!(
+        "[diagnostic] running {} scenario(s) flagged criterion_bench=false",
+        scenarios::all()
+            .iter()
+            .filter(|s| !s.criterion_bench)
+            .count()
+    );
+    eprintln!();
+
+    for spec in scenarios::all().into_iter().filter(|s| !s.criterion_bench) {
+        // The phase profile is printed by `run_for_validation` itself
+        // (when the ias15-profile feature is enabled). Discard the
+        // returned metrics — in multi-thread mode their bit pattern
+        // is non-deterministic anyway, so comparing against the
+        // baseline would be noise.
+        let _ = runner::run_for_validation(&spec);
+    }
+}
 
 fn run_validation_mode() {
     let baseline = match baseline::load() {
