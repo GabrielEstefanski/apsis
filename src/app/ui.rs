@@ -379,6 +379,26 @@ pub struct SimulationApp {
 }
 
 impl SimulationApp {
+    /// `true` while a Precision Run owns the simulation (state != Idle).
+    /// UI surfaces that mutate physics state — canvas gestures,
+    /// inspector fields, config sliders, clear/load actions —
+    /// read this to render as disabled. The backend already drops
+    /// such commands (see `PhysicsHandle::send`); the UI-level gate
+    /// is just communication.
+    pub(super) fn is_editing_locked(&self) -> bool {
+        let ctrl = self.system.precision_controller();
+        let guard = ctrl.lock().unwrap();
+        !matches!(
+            guard.state(),
+            crate::core::precision_run::RunState::Idle
+        )
+    }
+
+    /// Short hint shown on hover over disabled edit controls.
+    pub(super) fn editing_lock_hint(&self) -> &'static str {
+        "Precision run in progress — editing is disabled until the run completes"
+    }
+
     pub fn new(system: System) -> Self {
         let mut physics_cfg = PhysicsConfig::default();
         physics_cfg.integrator = system.integrator_kind();

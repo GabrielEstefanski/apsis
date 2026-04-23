@@ -189,8 +189,25 @@ impl SimulationApp {
 
                 vsep(ui);
 
-                // File actions — icon only, tooltips carry the labels
-                if tb_icon_btn(ui, icons::CLEAR, "Clear all bodies").clicked() {
+                // Mutation-capable file actions are disabled during a
+                // Precision Run. Save stays enabled — snapshotting the
+                // in-flight state is a read-only operation.
+                let edit_locked = self.is_editing_locked();
+                let clear_hint = if edit_locked {
+                    self.editing_lock_hint()
+                } else {
+                    "Clear all bodies"
+                };
+                let clear_btn = ui.add_enabled(
+                    !edit_locked,
+                    egui::Button::new(RichText::new(icons::CLEAR).size(13.0).color(TEXT_DIM))
+                        .fill(BTN_BG)
+                        .stroke(Stroke::new(0.5, BORDER))
+                        .min_size(egui::vec2(24.0, TOOLBAR_ROW_H))
+                        .corner_radius(3.0),
+                )
+                .on_hover_text(clear_hint);
+                if clear_btn.clicked() {
                     self.system.load_bodies(vec![]);
                     self.paused = true;
                     self.reset_drift_peaks();
@@ -199,7 +216,21 @@ impl SimulationApp {
                 if tb_icon_btn(ui, icons::SAVE, "Save  Ctrl+S").clicked() {
                     let _ = self.do_save();
                 }
-                if tb_icon_btn(ui, icons::LOAD, "Load saved state").clicked() {
+                let load_hint = if edit_locked {
+                    self.editing_lock_hint()
+                } else {
+                    "Load saved state"
+                };
+                let load_btn = ui.add_enabled(
+                    !edit_locked,
+                    egui::Button::new(RichText::new(icons::LOAD).size(13.0).color(TEXT_DIM))
+                        .fill(BTN_BG)
+                        .stroke(Stroke::new(0.5, BORDER))
+                        .min_size(egui::vec2(24.0, TOOLBAR_ROW_H))
+                        .corner_radius(3.0),
+                )
+                .on_hover_text(load_hint);
+                if load_btn.clicked() {
                     self.open_save_modal();
                 }
             });
