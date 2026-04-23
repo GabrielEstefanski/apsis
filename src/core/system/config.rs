@@ -159,6 +159,7 @@ impl System {
             let new_threshold = self.force_model.exact_threshold();
             let kind_label = kind.slug();
             crate::warn_diag!(
+                crate::core::log::Source::System,
                 "integrator requires deterministic force; switching force model to direct O(N²)",
                 integrator = kind_label,
                 exact_threshold_before = prev_threshold,
@@ -173,6 +174,7 @@ impl System {
             let kind_label = kind.slug();
             let n = self.bodies.len();
             crate::warn_diag!(
+                crate::core::log::Source::System,
                 "Precision-profile integrator selected with many bodies; per-step wall time may spike",
                 integrator = kind_label,
                 n_bodies = n,
