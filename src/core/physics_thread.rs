@@ -29,6 +29,7 @@ use std::time::{Duration, Instant};
 use crate::core::adaptive::DtMode;
 use crate::domain::body::{Body, NamedBody};
 use crate::core::metrics::Metrics;
+use crate::core::precision_run::{PrecisionRunController, RunState, TelemetryBuilder};
 use crate::io::snapshot::SimSnapshot;
 use crate::core::system::System;
 use crate::physics::integrator::IntegratorKind;
@@ -151,6 +152,14 @@ pub struct PhysicsHandle {
     /// clamped to the window `[snap.t0, snap.t0 + snap.dt]`.
     t_render: f64,
 
+    /// Shared Precision Run controller. The UI locks this to read the
+    /// current run state / telemetry and to issue intent (start,
+    /// request_pause, resume, request_abort, acknowledge). The physics
+    /// thread locks it at each iteration to observe the state and to
+    /// write `mark_paused` / `mark_aborted` / `mark_completed` at
+    /// substep boundaries. See [`core::precision_run`](crate::core::precision_run).
+    precision: Arc<Mutex<PrecisionRunController>>,
+
     _thread: thread::JoinHandle<()>,
 }
 
@@ -243,6 +252,22 @@ impl PhysicsHandle {
     /// The UI uses this to display the loading overlay.
     pub fn is_loading(&self) -> bool {
         self.loading.load(Ordering::Relaxed)
+    }
+
+    /// Clone of the shared Precision Run controller. The UI uses this
+    /// to drive the run lifecycle: call `.lock().unwrap().start(t_target, t0)`
+    /// to begin, `.request_pause()` / `.request_abort()` / `.resume()`
+    /// for intent, `.state()` and `.telemetry()` to observe.
+    ///
+    /// The returned `Arc` can be cheaply cloned further if multiple UI
+    /// subsystems need their own handle. All consumers see the same
+    /// controller — this is the single source of truth for the run
+    /// lifecycle, shared between the physics thread and every UI
+    /// subscriber.
+    pub fn precision_controller(
+        &self,
+    ) -> Arc<Mutex<PrecisionRunController>> {
+        self.precision.clone()
     }
 
     pub fn bodies(&self) -> &[Body] {
@@ -445,9 +470,19 @@ pub fn spawn(mut system: System, paused: bool) -> PhysicsHandle {
     let loading_thr = loading.clone();
     let orbital_needed = Arc::new(AtomicBool::new(true));
     let orbital_needed_thr = orbital_needed.clone();
+    let precision = Arc::new(Mutex::new(PrecisionRunController::new()));
+    let precision_thr = precision.clone();
 
     let thread = thread::spawn(move || {
-        physics_loop(system, cmd_rx, render_thr, loading_thr, paused, orbital_needed_thr);
+        physics_loop(
+            system,
+            cmd_rx,
+            render_thr,
+            loading_thr,
+            paused,
+            orbital_needed_thr,
+            precision_thr,
+        );
     });
 
     PhysicsHandle {
@@ -466,6 +501,7 @@ pub fn spawn(mut system: System, paused: bool) -> PhysicsHandle {
         pending_trail_samples: Vec::new(),
         step_snapshot: None,
         t_render: 0.0,
+        precision,
         _thread: thread,
     }
 }
@@ -640,6 +676,7 @@ fn physics_loop(
     loading: Arc<AtomicBool>,
     initial_paused: bool,
     orbital_needed: Arc<AtomicBool>,
+    precision: Arc<Mutex<PrecisionRunController>>,
 ) {
     let mut paused = initial_paused;
     // Target sim-time advance per real second (sim units/s).
@@ -706,6 +743,37 @@ fn physics_loop(
             ) {
                 return;
             }
+        }
+
+        // ── Precision Run branch ─────────────────────────────────────────────
+        //
+        // When a precision run is active, its own run-to-completion logic
+        // supersedes the sim-rate-target loop below. The two modes do not
+        // interleave within a single iteration: `step_precision_run_tick`
+        // returns once the run pauses, aborts, completes, or consumes its
+        // per-tick budget, at which point we fall through to the normal
+        // publish step.
+        let precision_active = matches!(
+            precision.lock().unwrap().state(),
+            RunState::Running { .. } | RunState::Pausing { .. } | RunState::Aborting { .. }
+        );
+        if precision_active {
+            step_precision_run_tick(&mut system, &precision);
+            if let Ok(mut rs) = render.try_lock() {
+                publish_full(
+                    &mut system,
+                    &mut rs,
+                    com_shift_acc,
+                    &mut trail_samples_pending,
+                );
+                rs.sim_rate = current_sim_rate;
+            }
+            com_shift_acc = (0.0, 0.0);
+            // Short sleep so the UI render thread has a chance to
+            // grab the render lock between ticks; precision mode
+            // is not bound by sim_rate_target so we do not spin.
+            thread::sleep(Duration::from_micros(200));
+            continue;
         }
 
         if !paused {
@@ -887,5 +955,141 @@ fn physics_loop(
                 thread::sleep(min_batch_period - elapsed);
             }
         }
+    }
+}
+
+// ── Precision Run tick ────────────────────────────────────────────────────────
+//
+// Drives one "tick" of a precision run: observes UI intent at the substep
+// boundary (pause/abort), steps the system until `t_target` or the per-tick
+// budget is reached, and pushes a fresh telemetry snapshot back into the
+// controller. The outer physics loop calls this instead of the real-time
+// batch loop whenever the controller is in `Running`, `Pausing`, or
+// `Aborting`.
+//
+// # Budget
+//
+// `TICK_BUDGET` bounds how long one call can block the physics thread
+// without yielding. It is NOT a simulation-rate constraint — precision
+// runs ignore `sim_rate_target` on purpose. It exists so the render
+// thread can regularly acquire `render` / `precision` locks (progress
+// bar at ~20 Hz) and so pause/abort intent is observed promptly.
+//
+// # Why intent is observed between sub-steps
+//
+// `PrecisionRunController::request_pause` flips state to `Pausing` from
+// the UI thread. The physics thread observes at the top of its
+// per-substep loop and calls `mark_paused` *only after* the substep
+// currently in flight (none at entry) completes — i.e., at a clean
+// boundary. This preserves determinism: no state change ever lands
+// mid-Picard-iteration.
+fn step_precision_run_tick(
+    system: &mut System,
+    precision: &Arc<Mutex<PrecisionRunController>>,
+) {
+    const TICK_BUDGET: Duration = Duration::from_millis(50);
+
+    // Snapshot entry state. If we are in Pausing / Aborting, the "current
+    // substep" is already complete (we are between iterations), so the
+    // confirmation fires immediately. Otherwise, extract the run bounds.
+    let (t_target, t_start, prev_peak_err) = {
+        let ctrl = precision.lock().unwrap();
+        match ctrl.state() {
+            RunState::Pausing { .. } => {
+                drop(ctrl);
+                precision.lock().unwrap().mark_paused();
+                return;
+            }
+            RunState::Aborting { .. } => {
+                drop(ctrl);
+                precision.lock().unwrap().mark_aborted();
+                return;
+            }
+            RunState::Running { t_target, t_start, .. } => {
+                (t_target, t_start, ctrl.telemetry().peak_energy_err)
+            }
+            // Defensive: caller (`physics_loop`) only invokes this while the
+            // controller is in one of the above states. Any other state is a
+            // benign race and we just return.
+            _ => return,
+        }
+    };
+
+    // Clear any step deadline left over from real-time batches — precision
+    // runs must not self-terminate on the interactive CPU cap.
+    system.set_step_deadline(None);
+
+    let tick_start = Instant::now();
+    let substeps_at_tick_start = system
+        .adaptive_stats()
+        .map(|s| s.substeps)
+        .unwrap_or_else(|| system.steps());
+    let mut running_peak_err = prev_peak_err;
+
+    while system.t() < t_target && tick_start.elapsed() < TICK_BUDGET {
+        // Poll intent between substeps. Lock is held only for the enum read;
+        // the UI thread can request pause/abort concurrently.
+        match precision.lock().unwrap().state() {
+            RunState::Running { .. } => {} // proceed
+            RunState::Pausing { .. } => {
+                precision.lock().unwrap().mark_paused();
+                break;
+            }
+            RunState::Aborting { .. } => {
+                precision.lock().unwrap().mark_aborted();
+                break;
+            }
+            _ => break,
+        }
+
+        system.step();
+
+        let err_abs = system.rel_energy_error().abs();
+        if err_abs > running_peak_err {
+            running_peak_err = err_abs;
+        }
+    }
+
+    // Compute telemetry once per tick.
+    let wall_delta = tick_start.elapsed().as_secs_f64().max(1e-9);
+    let substeps_now = system
+        .adaptive_stats()
+        .map(|s| s.substeps)
+        .unwrap_or_else(|| system.steps());
+    let substeps_in_tick = substeps_now.saturating_sub(substeps_at_tick_start);
+    let substeps_per_s = (substeps_in_tick as f64) / wall_delta;
+    let current_dt = system.dt();
+    let sim_time_delta = substeps_in_tick as f64 * current_dt;
+    let sim_time_per_s = sim_time_delta / wall_delta;
+
+    let progress = {
+        let span = (t_target - t_start).max(f64::MIN_POSITIVE);
+        ((system.t() - t_start) / span).clamp(0.0, 1.0) as f32
+    };
+
+    let mut builder = TelemetryBuilder::new()
+        .with_current_dt(current_dt)
+        .with_substeps_per_second(substeps_per_s)
+        .with_sim_time_per_second(sim_time_per_s)
+        .with_progress_fraction(progress)
+        .with_peak_energy_err(running_peak_err)
+        .with_current_energy_err(system.rel_energy_error());
+
+    if let Some(stats) = system.adaptive_stats() {
+        builder = builder
+            .with_substeps(stats.substeps)
+            .with_rejections_picard(stats.rejections_picard)
+            .with_rejections_truncation(stats.rejections_truncation)
+            .with_picard_iters(stats.picard_iters)
+            .with_degraded(stats.degraded);
+    }
+
+    let telemetry = builder.finish();
+    let reached_target = system.t() >= t_target;
+
+    let mut ctrl = precision.lock().unwrap();
+    ctrl.update_telemetry(telemetry);
+    if reached_target && matches!(ctrl.state(), RunState::Running { .. }) {
+        ctrl.mark_completed();
     }
 }
