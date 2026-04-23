@@ -882,6 +882,7 @@ impl Integrator for Ias15 {
                             let c = self.degraded_total;
                             if c <= 3 || c.is_power_of_two() {
                                 crate::warn_diag!(
+                                    crate::core::log::Source::Integrator,
                                     "IAS15 dt floor reached; controller accepted degraded step",
                                     dt = dt_try,
                                     floor = DT_MIN,
