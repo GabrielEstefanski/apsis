@@ -3,9 +3,25 @@
 # Regenerate with:  IAS15_BENCH_UPDATE_BASELINE=1 cargo bench
 # Validate with:    cargo bench
 #
-# Recorded at: 2026-04-22T22:34:17Z
-# Git commit:  4319988
+# Recorded at: 2026-04-23T00:09:53Z
+# Git commit:  ec66e05
 # Runs per scenario: 10
+
+[cluster_n50]
+degraded_total = { value = 0.0, tol_abs = 0.0 }
+dt_max = { value = 0.0019152387596199616, tol_factor = 1.0 }
+dt_mean = { value = 5.456020579465917e-4, tol_factor = 1.0 }
+dt_min = { value = 2.602851220866731e-4, tol_factor = 1.0 }
+dt_p05 = { value = 3.866745814514738e-4, tol_factor = 1.0 }
+dt_p50 = { value = 4.940859064827552e-4, tol_factor = 1.0 }
+dt_p95 = { value = 7.834578378153045e-4, tol_factor = 1.0 }
+energy_drift_slope = { value = 5.579428833016048e-16, tol_factor = 1.0 }
+peak_energy_err = { value = 5.5592008594688615e-15, tol_factor = 1.0 }
+picard_iters_total = { value = 3865.0, tol_abs = 0.0 }
+rejections_picard = { value = 3.0, tol_abs = 0.0 }
+rejections_truncation = { value = 43.0, tol_abs = 0.0 }
+rel_energy_err_rms = { value = 1.6197252467466426e-15, tol_factor = 1.0 }
+substeps = { value = 917.0, tol_abs = 0.0 }
 
 [kepler_e05]
 degraded_total = { value = 0.0, tol_abs = 0.0 }
