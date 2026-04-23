@@ -7,6 +7,7 @@ use crate::domain::body::Body;
 use crate::domain::materials::Material;
 use crate::io::recorder::SimRecorder;
 use crate::io::snapshot::{SaveEntry, SimSnapshot, list_saves};
+use crate::physics::integrator::IntegratorKind;
 use crate::render::{TrailRenderer, WgpuBackend};
 use crate::templates::{Template, UnitSystem};
 use std::collections::HashSet;
@@ -200,6 +201,19 @@ pub struct SimulationApp {
     /// `system.t() + precision_run_duration` at Start time, so changing
     /// the field does not retroactively affect an in-flight run.
     pub(super) precision_run_duration: f64,
+    /// When `Some`, the user has selected a Precision-profile
+    /// integrator and the confirmation modal is pending resolution.
+    /// The variant is the kind to apply if the user accepts. While
+    /// the modal is up, `physics_cfg.integrator` and the physics
+    /// thread's integrator are NOT changed yet — the intent is held
+    /// here until Continue / Cancel resolves the dialog.
+    pub(super) precision_confirmation_pending: Option<IntegratorKind>,
+    /// When `true`, subsequent selections of a Precision-profile
+    /// integrator skip the modal for the rest of the session. Reset
+    /// on restart — this is a session-local courtesy, not a durable
+    /// preference, so "don't show again" does not silently survive
+    /// across app restarts.
+    pub(super) precision_confirmation_session_skip: bool,
     pub(super) place_mode: bool,
     pub(super) place_drag_start: Option<egui::Pos2>,
     pub(super) place_mass: f64,
@@ -390,6 +404,8 @@ impl SimulationApp {
             // unit system (G = 1 gives orbital period = 2π). Users can
             // override before starting a run.
             precision_run_duration: 2.0 * std::f64::consts::PI,
+            precision_confirmation_pending: None,
+            precision_confirmation_session_skip: false,
             place_mode: false,
             place_drag_start: None,
             place_mass: 1.0,
@@ -632,6 +648,7 @@ impl SimulationApp {
         self.draw_save_modal(&ctx);
         self.draw_shortcuts_modal(&ctx);
         self.draw_settings_modal(&ctx);
+        self.draw_precision_confirmation_modal(&ctx);
         self.draw_templates_modal(&ctx);
         self.draw_name_prompt(&ctx);
 
