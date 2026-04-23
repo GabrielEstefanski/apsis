@@ -52,7 +52,7 @@ pub fn run(config: &RunConfig) -> Result<(), Box<dyn std::error::Error>> {
     })?;
 
     // ── Build system ───────────────────────────────────────────────────────────
-    let template = (entry.build)(config.seed);
+    let template = entry.build(config.seed);
     let named_bodies = instantiate(&template);
 
     let mut system = System::new(vec![])

@@ -216,7 +216,7 @@ impl SimulationApp {
     fn apply_template_action(&mut self, clicked: Option<usize>, dragged: Option<usize>) {
         if let Some(idx) = clicked {
             let entry = &TEMPLATES[idx];
-            let preview = (entry.build)(self.system.seed());
+            let preview = entry.build(self.system.seed());
             let bodies = instantiate_at(&preview, 0.0, 0.0);
             self.push_undo(UndoRecord::AddedBodies(bodies.len()));
             self.system.add_named_bodies(bodies);
@@ -229,8 +229,8 @@ impl SimulationApp {
 
         if let Some(idx) = dragged {
             let seed = self.system.seed();
-            let build_fn = TEMPLATES[idx].build;
-            self.template_drag = Some(Box::new(move || (build_fn)(seed)));
+            let kind = TEMPLATES[idx].kind;
+            self.template_drag = Some(Box::new(move || kind.build(seed)));
         }
     }
 }
