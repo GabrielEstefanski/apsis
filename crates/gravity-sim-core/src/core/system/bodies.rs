@@ -13,7 +13,10 @@ impl System {
     ///
     /// The trail buffer is reset to accommodate the new body count; trail
     /// history is lost.  Energy baseline is reset because the system
-    /// topology has changed.
+    /// topology has changed. Also invalidates any template-rebuild source
+    /// remembered by [`from_template`](System::from_template): a later
+    /// [`with_seed`](System::with_seed) will no longer overwrite this
+    /// manual addition.
     pub fn add_body(&mut self, mut body: Body) {
         use crate::domain::body::default_softening;
         body.sync_physical_properties();
@@ -25,6 +28,7 @@ impl System {
         body.update_luminosity(mass_to_solar(), radius_to_solar(), l_sun());
         self.bodies.push(body);
         self.initial_energy = None;
+        self.template_source = None;
     }
 
     /// Adds a single body while preserving an explicit display name when given.
@@ -50,6 +54,7 @@ impl System {
         }
 
         self.initial_energy = None;
+        self.template_source = None;
     }
 
     /// Add multiple bodies in a single batch while preserving explicit names.
@@ -69,6 +74,7 @@ impl System {
         }
 
         self.initial_energy = None;
+        self.template_source = None;
     }
 
     /// Removes a body from the simulation.
@@ -85,6 +91,7 @@ impl System {
 
             self.initial_energy = None;
             self.rel_energy_error = 0.0;
+            self.template_source = None;
         }
     }
 

@@ -512,7 +512,7 @@ impl SimulationApp {
             templates_search: String::new(),
             templates_meta: gravity_sim_core::templates::TEMPLATES
                 .iter()
-                .map(|e| { let t = (e.build)(0); (t.description, t.body_count()) })
+                .map(|e| { let t = e.build(0); (t.description, t.body_count()) })
                 .collect(),
 
             sim_name: String::new(),
