@@ -29,7 +29,7 @@ use std::time::{Duration, Instant};
 use crate::core::adaptive::DtMode;
 use crate::domain::body::{Body, NamedBody};
 use crate::core::metrics::Metrics;
-use crate::core::precision_run::{PrecisionRunController, RunState, TelemetryBuilder};
+use crate::core::precision_run::{PrecisionRunController, RunOutcome, RunState, TelemetryBuilder};
 use crate::io::snapshot::SimSnapshot;
 use crate::core::system::System;
 use crate::physics::integrator::IntegratorKind;
@@ -718,6 +718,26 @@ fn physics_loop(
     let mut rate_sim_acc = 0.0_f64;
     let mut current_sim_rate = 0.0_f64;
 
+    // Precision Run baseline — the `SimSnapshot` captured at the
+    // moment a run enters `Running` for the first time. Held entirely
+    // within this function; the UI never sees it. Purpose: `Abort`
+    // restores the simulation to this exact pre-run state, so an
+    // aborted precision run leaves no residue in `System`.
+    //
+    // Lifecycle:
+    //   * `None` when no run is in progress.
+    //   * `Some(snapshot)` from the first observation of
+    //     `RunState::Running` until the run completes (`mark_completed`,
+    //     `mark_aborted`, or `mark_errored`).
+    //   * Cleared on `Reached` and `Errored` without use.
+    //   * Consumed on `UserAborted` — `system.restore_from_snapshot`
+    //     puts the bodies back to the pre-run state.
+    //
+    // `SimSnapshot` is an owned deep copy of body state (and integrator
+    // configuration), not a reference into `System`. Holding it here
+    // during a run is safe and does not alias mutable state.
+    let mut precision_baseline: Option<SimSnapshot> = None;
+
     const POS_CHECK_STEPS: u32 = 8;
     // Hard CPU cap per batch. The sim-rate target is the primary control;
     // this cap only fires when physics cannot keep up (large N, tiny dt, high target).
@@ -753,12 +773,65 @@ fn physics_loop(
         // returns once the run pauses, aborts, completes, or consumes its
         // per-tick budget, at which point we fall through to the normal
         // publish step.
+        let entry_state = precision.lock().unwrap().state();
         let precision_active = matches!(
-            precision.lock().unwrap().state(),
+            entry_state,
             RunState::Running { .. } | RunState::Pausing { .. } | RunState::Aborting { .. }
         );
+
+        // Capture baseline on first observation of `Running` in this run.
+        // See `precision_baseline` declaration for lifecycle semantics.
+        if precision_baseline.is_none() && matches!(entry_state, RunState::Running { .. }) {
+            precision_baseline = Some(system.to_snapshot());
+            crate::info_diag!(
+                crate::core::log::Source::PhysicsThread,
+                "precision run: baseline captured for abort rollback",
+                t = system.t(),
+                steps = system.steps(),
+            );
+        }
+
         if precision_active {
             step_precision_run_tick(&mut system, &precision);
+
+            // Observe post-tick outcome. If abort landed during the tick,
+            // restore the baseline *before* publishing so the UI never
+            // sees the mid-run state after the user clicked Abort.
+            // Commit/Reached and Errored drop the baseline unused.
+            let post_state = precision.lock().unwrap().state();
+            match post_state {
+                RunState::Completed { outcome: RunOutcome::UserAborted } => {
+                    if let Some(snap) = precision_baseline.take() {
+                        system.restore_from_snapshot(&snap);
+                        crate::info_diag!(
+                            crate::core::log::Source::PhysicsThread,
+                            "precision run aborted: state restored to baseline",
+                            t = system.t(),
+                            steps = system.steps(),
+                        );
+                        needs_full_publish = true;
+                    }
+                }
+                RunState::Completed { outcome: RunOutcome::Reached } => {
+                    precision_baseline = None;
+                    crate::info_diag!(
+                        crate::core::log::Source::PhysicsThread,
+                        "precision run completed: target simulation time reached",
+                        t = system.t(),
+                        steps = system.steps(),
+                    );
+                }
+                RunState::Completed { outcome: RunOutcome::Errored } => {
+                    // Defensive: drop the baseline rather than leave
+                    // stale state around. Today no producer emits
+                    // Errored, so this branch is exercised by tests
+                    // only; leaving it explicit keeps the state
+                    // machine exhaustive.
+                    precision_baseline = None;
+                }
+                _ => {}
+            }
+
             if let Ok(mut rs) = render.try_lock() {
                 publish_full(
                     &mut system,
