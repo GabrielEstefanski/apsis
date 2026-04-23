@@ -195,6 +195,11 @@ pub struct SimulationApp {
     /// IAS15 error tolerance. Forwarded to the physics thread every frame.
     /// Ignored when a different integrator is active.
     pub(super) ias15_epsilon: f64,
+    /// Simulation-time duration the user has configured for the next
+    /// Precision Run. The run's `t_target` is resolved as
+    /// `system.t() + precision_run_duration` at Start time, so changing
+    /// the field does not retroactively affect an in-flight run.
+    pub(super) precision_run_duration: f64,
     pub(super) place_mode: bool,
     pub(super) place_drag_start: Option<egui::Pos2>,
     pub(super) place_mass: f64,
@@ -381,6 +386,10 @@ impl SimulationApp {
             show_vectors: false,
             sim_rate_target: std::f64::consts::TAU,
             ias15_epsilon: 1e-9,
+            // Default: roughly one "internal year" at the default
+            // unit system (G = 1 gives orbital period = 2π). Users can
+            // override before starting a run.
+            precision_run_duration: 2.0 * std::f64::consts::PI,
             place_mode: false,
             place_drag_start: None,
             place_mass: 1.0,
@@ -594,11 +603,14 @@ impl SimulationApp {
         // panel → right inspector → central canvas. See `panel/mod.rs` for the
         // layout diagram.
         self.draw_toolbar(&ctx);
-        // Bottom strip: the Precision Run panel replaces the playbar for the
-        // full run lifecycle (Running / Pausing / Paused / Aborting /
-        // Completed). The playbar returns once the user acknowledges the
-        // completed run and the controller is back in `Idle`.
-        let precision_active = {
+        // Bottom strip: the Precision Run panel owns the slot whenever
+        // either (a) a run is actively in progress or (b) a Precision-
+        // profile integrator is selected (panel then shows the Setup
+        // view so the user can configure and start a run). The real-
+        // time playbar returns only when neither condition is met.
+        let integrator_is_precision = self.physics_cfg.integrator.execution_profile()
+            == crate::physics::integrator::traits::ExecutionProfile::Precision;
+        let run_in_flight = {
             let ctrl = self.system.precision_controller();
             let guard = ctrl.lock().unwrap();
             !matches!(
@@ -606,7 +618,7 @@ impl SimulationApp {
                 crate::core::precision_run::RunState::Idle
             )
         };
-        if precision_active {
+        if integrator_is_precision || run_in_flight {
             self.draw_precision_panel(&ctx);
         } else {
             self.draw_playbar(&ctx);

@@ -1,49 +1,78 @@
-//! Precision Run bottom panel — replaces the playbar when a
-//! precision run is active.
+//! Precision Run bottom panel — replaces the playbar whenever a
+//! [`ExecutionProfile::Precision`] integrator is selected.
 //!
-//! # Layout
+//! # Two layouts, one panel
 //!
-//! ```text
-//! ┌───────────────────────────────────────────────────────────────┐
-//! │ [■■■■■■■■■■■■░░░░░░░░░░░░░░░░░░]  62%   T = 3.72 / 6.00       │  primary
-//! │ State · Running         substeps 128 · dt 1.8e-3 · 512 step/s │  secondary
-//! │ [Pause]  [Abort]                                   [Commit]   │  controls
-//! └───────────────────────────────────────────────────────────────┘
-//! ```
+//! The panel renders two distinct layouts depending on the
+//! controller's state:
 //!
-//! # Scope — Block B1
+//! * **Setup** (state `Idle`): the user has chosen a Precision
+//!   integrator but no run is active yet. The panel shows the
+//!   target-duration input and a Start button; the rest of the real-
+//!   time transport is suppressed by design because starting a run
+//!   is the one action that matters here.
 //!
-//! This file lands the *container* and primary readouts. The
-//! control buttons (`Pause`, `Abort`, `Commit`) are rendered as
-//! disabled placeholders here so the shape is honest; Block B3
-//! wires them to [`PrecisionRunController`] intent methods. The
-//! auto-correction notice (B6) and deferred-command pending-count
-//! (B4) will append to this same panel.
+//! * **Run** (state not Idle): progress bar, telemetry row, and
+//!   run-lifecycle controls (Pause/Resume, Abort, Commit/Close).
 //!
-//! The panel is drawn only while the controller's state is not
-//! `Idle`; the real-time playbar owns the bottom strip otherwise.
+//! Keeping both layouts in one panel preserves the user's spatial
+//! expectation — the Precision panel always lives at the bottom of
+//! the window — and avoids the whiplash of a modal popping up and
+//! vanishing around the actual run.
+//!
+//! # Scope
+//!
+//! * B1 delivered the Run layout with disabled placeholder buttons.
+//! * B3 (this file's current form) wires the buttons to
+//!   [`PrecisionRunController`] intent methods, adds the Setup
+//!   layout, and introduces the Start flow. Buttons are no longer
+//!   placeholders — they mutate controller state.
+//! * B4/B5/B6 will layer on: pending-command chip, notification
+//!   feed, auto-correction notice. Those insertion points are
+//!   called out below with `// TODO(Bn)` markers.
 
 use crate::app::theme::{ACCENT, ACCENT_DIM, BORDER, DANGER, PANEL_BG, SUCCESS, TEXT_DIM, TEXT_PRI, TEXT_SEC};
 use crate::app::ui::SimulationApp;
 use crate::core::precision_run::{RunOutcome, RunState, Telemetry};
 use eframe::egui::{self, Align, Color32, Layout, RichText, Stroke};
 
-/// Panel height. Taller than the playbar (36 px) because the panel
-/// stacks three logical rows: progress, metrics, controls.
+/// Panel height when rendering the active-run layout. The Setup
+/// layout reuses the same height so the bottom strip does not
+/// resize when the run starts.
 pub const PRECISION_PANEL_HEIGHT: f32 = 96.0;
 
+/// Intent produced by the controls row. Applied after the egui
+/// borrow on `self` is released so we do not hold a double
+/// mutable borrow across the panel body.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum ControlIntent {
+    None,
+    Start,
+    Pause,
+    Resume,
+    Abort,
+    Acknowledge,
+}
+
 impl SimulationApp {
-    /// Draw the Precision Run bottom panel. The caller is responsible
-    /// for choosing between this and the real-time playbar based on
-    /// controller state — see [`ui::update`](crate::app::ui).
+    /// Draw the Precision Run bottom panel. The caller
+    /// ([`ui::update`](crate::app::ui)) decides when to invoke
+    /// this vs. the real-time playbar.
     pub(in crate::app) fn draw_precision_panel(&mut self, ctx: &egui::Context) {
-        // Snapshot state + telemetry once under the lock so subsequent
-        // UI math does not re-lock on every read.
+        // Snapshot controller state + telemetry under one lock.
         let (state, telemetry, t_sim_now) = {
             let ctrl_arc = self.system.precision_controller();
             let ctrl = ctrl_arc.lock().unwrap();
             (ctrl.state(), ctrl.telemetry().clone(), self.system.t())
         };
+
+        // Collect UI output (intent) while rendering; apply after
+        // the panel closure returns so mutations on `self.system`
+        // do not conflict with the panel's borrow of `self`.
+        let mut intent = ControlIntent::None;
+        // A mutable duration reference lets the DragValue write back
+        // into the app-level field without cloning the value each frame.
+        let duration_ref = &mut self.precision_run_duration;
 
         egui::Panel::bottom("precision_panel")
             .frame(
@@ -56,28 +85,140 @@ impl SimulationApp {
             .min_size(PRECISION_PANEL_HEIGHT)
             .max_size(PRECISION_PANEL_HEIGHT)
             .resizable(false)
-            .show(ctx, |ui| {
-                precision_panel_content(ui, state, &telemetry, t_sim_now);
+            .show(ctx, |ui| match state {
+                RunState::Idle => {
+                    setup_content(ui, duration_ref, t_sim_now, &mut intent);
+                }
+                _ => {
+                    run_content(ui, state, &telemetry, t_sim_now, &mut intent);
+                }
             });
+
+        // Apply intent.
+        if intent != ControlIntent::None {
+            self.apply_precision_intent(intent, t_sim_now);
+        }
+    }
+
+    fn apply_precision_intent(&mut self, intent: ControlIntent, t_sim_now: f64) {
+        let ctrl_arc = self.system.precision_controller();
+        let mut ctrl = ctrl_arc.lock().unwrap();
+        match intent {
+            ControlIntent::None => {}
+            ControlIntent::Start => {
+                let t_target = t_sim_now + self.precision_run_duration.max(0.0);
+                ctrl.start(t_target, t_sim_now);
+            }
+            ControlIntent::Pause => ctrl.request_pause(),
+            ControlIntent::Resume => ctrl.resume(),
+            ControlIntent::Abort => ctrl.request_abort(),
+            ControlIntent::Acknowledge => ctrl.acknowledge(),
+        }
     }
 }
 
-fn precision_panel_content(
+// ── Setup layout (state == Idle) ──────────────────────────────────────────────
+
+fn setup_content(
+    ui: &mut egui::Ui,
+    duration: &mut f64,
+    t_sim_now: f64,
+    intent: &mut ControlIntent,
+) {
+    ui.spacing_mut().item_spacing.y = 6.0;
+
+    ui.horizontal(|ui| {
+        ui.label(
+            RichText::new("PRECISION RUN")
+                .size(10.0)
+                .color(TEXT_DIM)
+                .strong(),
+        );
+        ui.label(
+            RichText::new("·")
+                .size(10.0)
+                .color(TEXT_DIM),
+        );
+        ui.label(
+            RichText::new("ready")
+                .size(11.0)
+                .color(ACCENT)
+                .strong(),
+        );
+        ui.label(
+            RichText::new("— select a target simulation time and press Start")
+                .size(10.0)
+                .color(TEXT_SEC),
+        );
+    });
+
+    ui.horizontal(|ui| {
+        ui.label(RichText::new("DURATION").size(9.0).color(TEXT_DIM).strong());
+        // Read the current duration *before* constructing the DragValue
+        // (which borrows `duration` mutably for the lifetime of the
+        // builder) so `.speed(...)` can use the value without aliasing.
+        let duration_speed = (*duration * 0.05).max(1e-3);
+        let drag = egui::DragValue::new(duration)
+            .speed(duration_speed)
+            .range(1e-6..=1e9)
+            .custom_formatter(|v, _| format_duration_compact(v))
+            .custom_parser(|s| parse_duration_compact(s));
+        ui.add(drag).on_hover_text(
+            "Duration the run will advance the simulation by. The target \
+             simulation time is resolved at Start as t + duration.",
+        );
+
+        ui.add_space(16.0);
+        ui.label(RichText::new("TARGET").size(9.0).color(TEXT_DIM).strong());
+        let t_target = t_sim_now + *duration;
+        ui.label(
+            RichText::new(format!("T = {:.3}", t_target))
+                .size(11.0)
+                .monospace()
+                .color(TEXT_PRI),
+        );
+        ui.label(
+            RichText::new(format!("(from {:.3})", t_sim_now))
+                .size(10.0)
+                .monospace()
+                .color(TEXT_SEC),
+        );
+
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            let start_btn = egui::Button::new(
+                RichText::new("Start").size(12.0).color(TEXT_PRI),
+            )
+            .fill(ACCENT_DIM)
+            .stroke(Stroke::new(1.0, ACCENT))
+            .min_size(egui::vec2(110.0, 28.0));
+            if ui.add(start_btn).clicked() {
+                *intent = ControlIntent::Start;
+            }
+        });
+    });
+
+    // TODO(B4): queued-commands chip ("N pending changes · Clear") goes
+    // here — Setup is one of the views where the chip is relevant
+    // (pending changes enqueued during a prior run that is now
+    // Acknowledged).
+    // TODO(B6): auto-correction notice ("Force model switched to
+    // direct O(N²)") also lands here if it fired since app start.
+}
+
+// ── Run layout (state != Idle) ────────────────────────────────────────────────
+
+fn run_content(
     ui: &mut egui::Ui,
     state: RunState,
     telemetry: &Telemetry,
     t_sim_now: f64,
+    intent: &mut ControlIntent,
 ) {
     ui.spacing_mut().item_spacing.y = 4.0;
 
-    // ── Row 1: progress bar + primary labels ─────────────────────────────────
     draw_progress_row(ui, state, telemetry, t_sim_now);
-
-    // ── Row 2: secondary metrics ─────────────────────────────────────────────
     draw_metrics_row(ui, state, telemetry);
-
-    // ── Row 3: controls (disabled placeholders in B1) ────────────────────────
-    draw_controls_row(ui, state);
+    draw_controls_row(ui, state, intent);
 }
 
 fn draw_progress_row(
@@ -90,23 +231,23 @@ fn draw_progress_row(
     let fraction = progress_fraction(state, telemetry, t_sim_now, t_target, t_start);
 
     ui.horizontal(|ui| {
-        // Progress bar takes most of the width; the right-side label is
-        // fixed-width and holds the percentage + T = a / b readout.
         let avail = ui.available_width();
         let label_width = 220.0;
         let bar_width = (avail - label_width - 8.0).max(80.0);
 
         let bar_rect = ui.allocate_space(egui::vec2(bar_width, 12.0)).1;
         let painter = ui.painter_at(bar_rect);
-        // Track.
         painter.rect_filled(bar_rect, 2.0, ACCENT_DIM);
-        // Fill.
         let fill_w = (bar_rect.width() * fraction).clamp(0.0, bar_rect.width());
         let fill_rect =
             egui::Rect::from_min_size(bar_rect.min, egui::vec2(fill_w, bar_rect.height()));
         painter.rect_filled(fill_rect, 2.0, progress_fill_color(state));
-        // Border.
-        painter.rect_stroke(bar_rect, 2.0, Stroke::new(0.5, BORDER), egui::StrokeKind::Inside);
+        painter.rect_stroke(
+            bar_rect,
+            2.0,
+            Stroke::new(0.5, BORDER),
+            egui::StrokeKind::Inside,
+        );
 
         ui.add_space(8.0);
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -125,14 +266,8 @@ fn draw_progress_row(
 
 fn draw_metrics_row(ui: &mut egui::Ui, state: RunState, telemetry: &Telemetry) {
     ui.horizontal(|ui| {
-        // State label (small tag on the left).
         let (label_text, label_color) = state_tag(state);
-        ui.label(
-            RichText::new("STATE")
-                .size(9.0)
-                .color(TEXT_DIM)
-                .strong(),
-        );
+        ui.label(RichText::new("STATE").size(9.0).color(TEXT_DIM).strong());
         ui.label(
             RichText::new(label_text)
                 .size(11.0)
@@ -154,8 +289,6 @@ fn draw_metrics_row(ui: &mut egui::Ui, state: RunState, telemetry: &Telemetry) {
             &format!("{:.2e} t/s", telemetry.sim_time_per_second_window),
         );
 
-        // Acceptance/rejections: only show when there has been at
-        // least one attempt — empty runs would render "0 / 0" noise.
         if telemetry.substeps > 0 || telemetry.rejections_total() > 0 {
             let accept = telemetry.acceptance_rate() * 100.0;
             let color = if accept >= 95.0 {
@@ -165,16 +298,9 @@ fn draw_metrics_row(ui: &mut egui::Ui, state: RunState, telemetry: &Telemetry) {
             } else {
                 DANGER
             };
-            metric_inline_colored(
-                ui,
-                "accept",
-                &format!("{:.1}%", accept),
-                color,
-            );
+            metric_inline_colored(ui, "accept", &format!("{:.1}%", accept), color);
         }
 
-        // Floor-hit indicator — only surfaces if there are any. Hidden
-        // otherwise to keep the row quiet on healthy runs.
         if telemetry.degraded > 0 {
             metric_inline_colored(
                 ui,
@@ -186,36 +312,53 @@ fn draw_metrics_row(ui: &mut egui::Ui, state: RunState, telemetry: &Telemetry) {
     });
 }
 
-fn draw_controls_row(ui: &mut egui::Ui, state: RunState) {
+fn draw_controls_row(ui: &mut egui::Ui, state: RunState, intent: &mut ControlIntent) {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 6.0;
 
-        // Left-aligned: Pause / Abort.
-        let can_pause = matches!(state, RunState::Running { .. });
-        let can_resume = matches!(state, RunState::Paused { .. });
-        let can_abort = matches!(
-            state,
-            RunState::Running { .. } | RunState::Pausing { .. } | RunState::Paused { .. }
-        );
-        let is_completed = matches!(state, RunState::Completed { .. });
+        let is_running = matches!(state, RunState::Running { .. });
+        let is_paused = matches!(state, RunState::Paused { .. });
         let is_pausing = matches!(state, RunState::Pausing { .. });
+        let is_aborting = matches!(state, RunState::Aborting { .. });
+        let is_completed = matches!(state, RunState::Completed { .. });
+        let can_abort = is_running || is_pausing || is_paused;
 
-        // Pause / Resume toggle — one button, label follows state.
-        let (pause_label, pause_enabled) = if can_resume {
-            ("Resume", true)
+        // Pause / Resume / Pausing… toggle.
+        let (label, enabled, produces) = if is_paused {
+            ("Resume", true, ControlIntent::Resume)
         } else if is_pausing {
-            ("Pausing…", false)
+            ("Pausing…", false, ControlIntent::None)
+        } else if is_running {
+            ("Pause", true, ControlIntent::Pause)
         } else {
-            ("Pause", can_pause)
+            ("Pause", false, ControlIntent::None)
         };
-        placeholder_control_btn(ui, pause_label, pause_enabled, false);
+        if control_btn(ui, label, enabled, false).clicked() {
+            *intent = produces;
+        }
 
-        placeholder_control_btn(ui, "Abort", can_abort, true);
+        // Abort — available throughout the active-run lifecycle; not
+        // shown during `Aborting` (already in flight) or after
+        // Completed.
+        if control_btn(ui, "Abort", can_abort && !is_aborting, true).clicked() {
+            *intent = ControlIntent::Abort;
+        }
 
-        // Right-aligned: Commit (only meaningful on completed runs).
+        // Right-aligned action: Close on Completed (acknowledges and
+        // returns to Idle). For active runs we reserve this slot for
+        // the future Commit action (B-future: commit & export).
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            let commit_label = if is_completed { "Close" } else { "Commit" };
-            placeholder_control_btn(ui, commit_label, is_completed, false);
+            if is_completed {
+                if control_btn(ui, "Close", true, false).clicked() {
+                    *intent = ControlIntent::Acknowledge;
+                }
+            } else {
+                // Placeholder slot reserved for Commit (post-run
+                // artefact export). Disabled until the Summary work
+                // in Block C lands, at which point the button
+                // triggers the export flow rather than simply closing.
+                control_btn(ui, "Commit", false, false);
+            }
         });
     });
 }
@@ -298,32 +441,20 @@ fn metric_inline(ui: &mut egui::Ui, label: &str, value: &str) {
     metric_inline_colored(ui, label, value, TEXT_PRI);
 }
 
-fn metric_inline_colored(ui: &mut egui::Ui, label: &str, value: &str, value_color: Color32) {
-    ui.label(
-        RichText::new(label)
-            .size(9.0)
-            .color(TEXT_DIM)
-            .strong(),
-    );
-    ui.label(
-        RichText::new(value)
-            .size(11.0)
-            .monospace()
-            .color(value_color),
-    );
+fn metric_inline_colored(
+    ui: &mut egui::Ui,
+    label: &str,
+    value: &str,
+    value_color: Color32,
+) {
+    ui.label(RichText::new(label).size(9.0).color(TEXT_DIM).strong());
+    ui.label(RichText::new(value).size(11.0).monospace().color(value_color));
     ui.add_space(4.0);
 }
 
-/// Button rendered with the panel's control-strip styling. `enabled` gates
-/// interaction; `danger` paints the stroke and hover with the danger palette.
-/// B1 keeps click handling out of scope — the click is consumed and
-/// discarded until B3 wires it to the controller.
-fn placeholder_control_btn(
-    ui: &mut egui::Ui,
-    label: &str,
-    enabled: bool,
-    danger: bool,
-) {
+/// Control-strip button with consistent styling. Returns the
+/// [`egui::Response`] so the caller can react to `.clicked()`.
+fn control_btn(ui: &mut egui::Ui, label: &str, enabled: bool, danger: bool) -> egui::Response {
     let stroke_color = if danger { DANGER } else { BORDER };
     let text_color = if enabled {
         if danger { DANGER } else { TEXT_PRI }
@@ -335,7 +466,7 @@ fn placeholder_control_btn(
         .stroke(Stroke::new(0.5, stroke_color))
         .min_size(egui::vec2(82.0, 24.0));
 
-    ui.add_enabled(enabled, btn);
+    ui.add_enabled(enabled, btn)
 }
 
 fn fmt_dt(dt: f64) -> String {
@@ -346,4 +477,16 @@ fn fmt_dt(dt: f64) -> String {
     } else {
         format!("{:.2e}", dt)
     }
+}
+
+fn format_duration_compact(v: f64) -> String {
+    if v.abs() >= 1e4 || (v.abs() < 1e-2 && v != 0.0) {
+        format!("{:.3e}", v)
+    } else {
+        format!("{:.3}", v)
+    }
+}
+
+fn parse_duration_compact(s: &str) -> Option<f64> {
+    s.trim().parse::<f64>().ok()
 }
