@@ -27,7 +27,6 @@
 //! harder to interpret when a regression fires.
 
 use gravity_sim_core::domain::body::Body;
-use gravity_sim_core::domain::materials::Material;
 use rand::rngs::SmallRng;
 use rand::{RngExt, SeedableRng};
 

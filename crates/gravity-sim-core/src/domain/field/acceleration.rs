@@ -3,7 +3,7 @@
 
 use super::body_field::{BodyField, FieldContext};
 
-pub struct AccelerationMagnitudeField;
+pub(crate) struct AccelerationMagnitudeField;
 
 impl BodyField for AccelerationMagnitudeField {
     fn id(&self) -> &'static str {

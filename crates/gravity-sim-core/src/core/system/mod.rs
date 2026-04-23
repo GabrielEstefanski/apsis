@@ -39,16 +39,12 @@ pub(crate) mod step;
 #[cfg(test)]
 mod tests;
 
-use crate::core::adaptive::{
-    AccelerationStats, DtAdaptationConfig, DtController, DtMode, ThetaController,
-};
+use crate::core::adaptive::{DtAdaptationConfig, DtController, DtMode, ThetaController};
 use crate::core::diagnostics::{DiagnosticsComputer, SimulationDiagnostics};
 use crate::core::hooks::HookRegistry;
-use crate::core::metrics::Metrics;
 use crate::domain::body::Body;
 use crate::physics::integrator::{
-    DenseSnapshot, ForceModel, GravityForceModel, Integrator, IntegratorKind, PerturbationForce,
-    make_integrator,
+    ForceModel, GravityForceModel, Integrator, IntegratorKind, PerturbationForce, make_integrator,
 };
 use crate::physics::orbital::OrbitalElements;
 

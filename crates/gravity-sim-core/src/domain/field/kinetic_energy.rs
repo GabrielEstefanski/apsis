@@ -2,7 +2,7 @@
 
 use super::body_field::{BodyField, FieldContext};
 
-pub struct KineticEnergyField;
+pub(crate) struct KineticEnergyField;
 
 impl BodyField for KineticEnergyField {
     fn id(&self) -> &'static str {

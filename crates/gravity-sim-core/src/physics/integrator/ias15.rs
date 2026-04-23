@@ -1425,7 +1425,6 @@ mod tests {
     use super::*;
     use crate::core::system::System;
     use crate::domain::body::Body;
-    use crate::domain::materials::Material;
 
     /// Kepler e=0.5 orbit: tests both (i) peak |δE/E₀| never exceeds
     /// the quoted tolerance over 100 orbits AND (ii) the energy error

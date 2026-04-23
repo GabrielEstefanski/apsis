@@ -519,7 +519,6 @@ fn walk_level(start: usize, primary: &[Option<usize>]) -> u8 {
 mod tests {
     use super::*;
     use crate::domain::body::Body;
-    use crate::domain::materials::Material;
 
     fn body(x: f64, y: f64, vx: f64, vy: f64, mass: f64) -> Body {
         let mut b = Body::asteroid(mass).at(x, y).with_velocity(vx, vy);

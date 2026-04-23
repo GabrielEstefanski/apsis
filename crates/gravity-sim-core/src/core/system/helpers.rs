@@ -38,24 +38,6 @@ pub(crate) fn resolved_name(
         .unwrap_or_else(|| auto_name(material, existing))
 }
 
-/// Number of bodies that actually need individual trail rendering.
-///
-/// Belt members and sub-threshold bodies are excluded because their trails are
-/// suppressed by the renderer anyway.
-pub(crate) fn trail_body_count(bodies: &[Body]) -> usize {
-    if bodies.is_empty() {
-        return 0;
-    }
-    let max_mass = bodies.iter().map(|b| b.mass).fold(0.0_f64, f64::max);
-    if max_mass <= 0.0 {
-        return bodies.len();
-    }
-    bodies
-        .iter()
-        .filter(|b| b.mass / max_mass > 1e-6)
-        .count()
-        .max(1)
-}
 
 /// Compute the minimum pairwise separation and maximum effective softening
 /// length over all body pairs.
