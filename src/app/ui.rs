@@ -214,6 +214,13 @@ pub struct SimulationApp {
     /// preference, so "don't show again" does not silently survive
     /// across app restarts.
     pub(super) precision_confirmation_session_skip: bool,
+    /// Consumer-side ring buffer of events published on
+    /// [`crate::core::log`]. Attached to the bus at app construction;
+    /// coalesces same-key bursts and feeds the top-bar notification
+    /// center.
+    pub(super) notifications: Arc<Mutex<crate::app::notifications::NotificationStore>>,
+    pub(super) show_notifications_panel: bool,
+    pub(super) notifications_filter: crate::app::notifications::NotificationFilter,
     pub(super) place_mode: bool,
     pub(super) place_drag_start: Option<egui::Pos2>,
     pub(super) place_mass: f64,
@@ -406,6 +413,15 @@ impl SimulationApp {
             precision_run_duration: 2.0 * std::f64::consts::PI,
             precision_confirmation_pending: None,
             precision_confirmation_session_skip: false,
+            notifications: {
+                let store = Arc::new(Mutex::new(
+                    crate::app::notifications::NotificationStore::new(),
+                ));
+                let _sub = crate::app::notifications::attach_to_bus(store.clone());
+                store
+            },
+            show_notifications_panel: false,
+            notifications_filter: crate::app::notifications::NotificationFilter::default(),
             place_mode: false,
             place_drag_start: None,
             place_mass: 1.0,
@@ -665,6 +681,7 @@ impl SimulationApp {
         self.draw_shortcuts_modal(&ctx);
         self.draw_settings_modal(&ctx);
         self.draw_precision_confirmation_modal(&ctx);
+        self.draw_notifications_panel(&ctx);
         self.draw_templates_modal(&ctx);
         self.draw_name_prompt(&ctx);
 
