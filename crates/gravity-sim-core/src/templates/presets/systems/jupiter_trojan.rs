@@ -6,7 +6,7 @@ use crate::{
 pub fn jupiter_trojans(seed: u64) -> Template {
     use rand::{SeedableRng, RngExt};
     use rand::rngs::SmallRng;
-    use std::f64::consts::{PI, TAU};
+    use std::f64::consts::PI;
     let mut rng: SmallRng = if seed == 0 { rand::make_rng() } else { SmallRng::seed_from_u64(seed) };
 
     let m_sun = 1.0;

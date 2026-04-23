@@ -2,7 +2,7 @@
 
 use crate::core::metrics::Metrics;
 use crate::core::system::System;
-use crate::physics::energy::{angular_momentum_z, center_of_mass_state, kinetic_energy, total_energy};
+use crate::physics::energy::{angular_momentum_z, center_of_mass_state, total_energy};
 
 impl System {
     /// Assemble a [`Metrics`] snapshot of the current simulation state.

@@ -3,7 +3,7 @@
 
 use super::body_field::{BodyField, FieldContext};
 
-pub struct MassField;
+pub(crate) struct MassField;
 
 impl BodyField for MassField {
     fn id(&self) -> &'static str {

@@ -46,7 +46,6 @@
 //! - Fortney et al. (2007). *Planetary radii across five orders of magnitude.*
 //!   ApJ 659, 1661.
 
-use std::f64::consts::PI;
 
 // ── Material classification ───────────────────────────────────────────────────
 
@@ -354,7 +353,7 @@ impl Material {
         }
     }
 
-    pub fn q_pr(self) -> f64 {
+    pub(crate) fn q_pr(self) -> f64 {
         match self {
             // Grain-dominated surfaces — primary targets of radiation pressure
             Material::Asteroid => 1.0, // dark silicate, near-perfect absorber
@@ -367,17 +366,6 @@ impl Material {
         }
     }
 
-    /// Returns `true` if bodies of this material class interact with radiation
-    /// pressure as receivers.
-    ///
-    /// Used by [`RadiationField`] to skip non-receivers cheaply without
-    /// constructing [`RadiationParams`].
-    ///
-    /// [`RadiationField`]: crate::physics::radiation::perturbation::RadiationField
-    #[inline]
-    pub fn is_radiation_receiver(self) -> bool {
-        self.q_pr() > 0.0
-    }
 }
 
 // ── Density function ──────────────────────────────────────────────────────────
@@ -408,26 +396,6 @@ pub fn density(material: Material, mass: f64) -> f64 {
     let rho = p.rho_0 * (m / p.anchor_mass).powf(p.alpha);
 
     rho.clamp(p.rho_min, p.rho_max)
-}
-
-// ── Geometry helpers ──────────────────────────────────────────────────────────
-
-/// Radius from mass and density: r = (3m / 4πρ)^(1/3).
-#[inline]
-pub fn radius_from_mass_density(mass: f64, density: f64) -> f64 {
-    ((3.0 * mass) / (4.0 * PI * density.max(1e-30))).cbrt()
-}
-
-/// Volume of a sphere: V = 4/3 π r³.
-#[inline]
-pub fn sphere_volume(radius: f64) -> f64 {
-    (4.0 / 3.0) * PI * radius.powi(3)
-}
-
-/// Radius of a sphere given its volume: r = (3V / 4π)^(1/3).
-#[inline]
-pub fn sphere_radius_from_volume(volume: f64) -> f64 {
-    ((3.0 * volume) / (4.0 * PI)).cbrt()
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -590,22 +558,6 @@ mod tests {
                 );
             }
         }
-    }
-
-    #[test]
-    fn radiation_receivers_are_small_bodies_only() {
-        // Only grain/rubble-dominated materials should receive radiation pressure.
-        // Massive bodies (planets, stars) have β ≪ 1 and are correctly excluded.
-        assert!(Material::Asteroid.is_radiation_receiver());
-        assert!(Material::Comet.is_radiation_receiver());
-        assert!(Material::Icy.is_radiation_receiver());
-
-        assert!(!Material::Rocky.is_radiation_receiver());
-        assert!(!Material::Gas.is_radiation_receiver());
-        assert!(!Material::IceGiant.is_radiation_receiver());
-        assert!(!Material::Star.is_radiation_receiver());
-        assert!(!Material::BrownDwarf.is_radiation_receiver());
-        assert!(!Material::WhiteDwarf.is_radiation_receiver());
     }
 
     #[test]

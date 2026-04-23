@@ -10,7 +10,6 @@
 
 use super::System;
 use crate::domain::body::Body;
-use crate::domain::materials::Material;
 use crate::physics::integrator::IntegratorKind;
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
@@ -688,7 +687,6 @@ mod hook_dispatch {
 // These tests guard the contract against accidental regression.
 mod integrator_force_compat {
     use super::*;
-    use crate::domain::materials::Material;
 
     /// Build a system large enough that BH would be active by default
     /// (N > the engine's built-in `EXACT_THRESHOLD = 64`).
