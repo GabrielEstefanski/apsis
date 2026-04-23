@@ -505,13 +505,29 @@ impl SimulationApp {
         // ── Sync latest physics state into local cache ────────────────────────
         self.system.sync();
 
-        // ── Dense-output: interpolate body positions to the render instant ────
-        // Advances t_render by sim_rate_target × wall_delta so bodies move
-        // smoothly between physics publishes.  Skipped while paused so the
-        // display freezes at the last physics position.
-        if !self.paused {
+        // Dense-output interpolation. Animation is gated on both the
+        // real-time paused flag AND the Precision Run state so the
+        // view freezes cleanly on Paused / Completed (avoiding the
+        // teleport artefact when stale snapshots would otherwise be
+        // advanced mid-pause). During an active Precision run the
+        // sim_rate_target no longer drives physics — the observed
+        // throughput does — so the render uses that value instead to
+        // keep body motion visually matched to the physics thread.
+        let (should_advance, rate) = {
+            use crate::core::precision_run::RunState;
+            let ctrl = self.system.precision_controller();
+            let guard = ctrl.lock().unwrap();
+            match guard.state() {
+                RunState::Running { .. }
+                | RunState::Pausing { .. }
+                | RunState::Aborting { .. } => (true, self.system.sim_rate()),
+                RunState::Paused { .. } | RunState::Completed { .. } => (false, 0.0),
+                RunState::Idle => (!self.paused, self.sim_rate_target),
+            }
+        };
+        if should_advance {
             let wall_delta = ctx.input(|i| i.unstable_dt as f64).min(0.2);
-            self.system.advance_render_time(wall_delta, self.sim_rate_target);
+            self.system.advance_render_time(wall_delta, rate);
         }
 
         // ── Single-step: re-pause after one frame of physics ─────────────────

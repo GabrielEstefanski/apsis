@@ -61,8 +61,15 @@ pub struct Metrics {
     /// Effective gravitational multiplier (G_eff = G₀ · g_factor).
     pub g_factor: f64,
 
-    /// Barnes–Hut opening angle θ.
+    /// Barnes–Hut opening angle θ. Meaningful only when
+    /// [`force_is_direct`](Self::force_is_direct) is `false`.
     pub theta: f64,
+
+    /// `true` when the force model is configured to skip Barnes-Hut
+    /// entirely — i.e. [`ForceModel::is_deterministic`] at the time
+    /// of the snapshot. UI surfaces should hide θ-related readouts
+    /// when this is `true`, since the opening angle has no effect.
+    pub force_is_direct: bool,
 
     /// Current integration timestep (may differ from `user_dt` when
     /// `dt_mode == DtMode::Adaptive`).
