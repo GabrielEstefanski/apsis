@@ -107,34 +107,46 @@ fn print_phase_profile(scenario_name: &str) {
     // loop (update_g_and_b + evaluate + residual), then accept-path
     // work (advance_state + dense_snapshot_build + snapshot_restore
     // for rejections).
-    let rows: &[(&str, PhaseEntry)] = &[
-        ("snapshot_capture", snap.snapshot_capture),
-        ("a0_clone", snap.a0_clone),
-        ("warmstart_b", snap.warmstart_b),
-        ("recompute_g_from_b", snap.recompute_g_from_b),
-        ("evaluate", snap.evaluate),
-        ("update_g_and_b", snap.update_g_and_b),
-        ("residual_compute", snap.residual_compute),
-        ("advance_state", snap.advance_state),
-        ("dense_snapshot_build", snap.dense_snapshot_build),
-        ("snapshot_restore", snap.snapshot_restore),
+    // Rows are (display-label, PhaseEntry, parent-entry-for-percentage).
+    // A `None` parent means the row is top-level and its percentage
+    // is computed against the total of all top-level phases. A
+    // `Some(parent)` means the row is nested inside `parent` and
+    // should be shown as "% of parent" — this keeps the top-level
+    // percentages honest (not double-counted) while still exposing
+    // build-vs-traverse as a fraction of evaluate where it matters.
+    let rows: &[(&str, PhaseEntry, Option<PhaseEntry>)] = &[
+        ("snapshot_capture", snap.snapshot_capture, None),
+        ("a0_clone", snap.a0_clone, None),
+        ("warmstart_b", snap.warmstart_b, None),
+        ("recompute_g_from_b", snap.recompute_g_from_b, None),
+        ("evaluate", snap.evaluate, None),
+        // Nested inside `evaluate`. The two together approximately
+        // reconstruct evaluate.total; the residual is per-call
+        // dispatch/bookkeeping overhead.
+        ("  ├ tree_build", snap.tree_build, Some(snap.evaluate)),
+        ("  └ tree_traverse", snap.tree_traverse, Some(snap.evaluate)),
+        ("update_g_and_b", snap.update_g_and_b, None),
+        ("residual_compute", snap.residual_compute, None),
+        ("advance_state", snap.advance_state, None),
+        ("dense_snapshot_build", snap.dense_snapshot_build, None),
+        ("snapshot_restore", snap.snapshot_restore, None),
     ];
 
-    let total_ns: u128 = rows.iter().map(|(_, e)| e.total.as_nanos()).sum();
-    // Guard: if the feature was compiled in but no phase was ever
-    // entered (e.g. a scenario with zero sub-steps), percentage math
-    // would divide by zero. Report the row counts verbatim and bail
-    // on the percentage column.
+    // Total only covers top-level phases — nested rows are shown
+    // against their parent, so including them in the denominator
+    // would double-count evaluate's time.
+    let total_ns: u128 =
+        rows.iter().filter(|(_, _, parent)| parent.is_none()).map(|(_, e, _)| e.total.as_nanos()).sum();
     let total_divisor = total_ns.max(1);
 
     println!();
     println!("═══ phase profile — {} ═══", scenario_name);
     println!(
-        "  {:<20} {:>12} {:>10} {:>14} {:>8}",
-        "phase", "total (ms)", "calls", "ns / call", "% total"
+        "  {:<20} {:>12} {:>10} {:>14} {:>10}",
+        "phase", "total (ms)", "calls", "ns / call", "% share"
     );
-    println!("  {}", "─".repeat(66));
-    for (name, entry) in rows {
+    println!("  {}", "─".repeat(70));
+    for (name, entry, parent) in rows {
         let ns = entry.total.as_nanos();
         let ms = entry.total.as_secs_f64() * 1000.0;
         let ns_per_call = if entry.count == 0 {
@@ -142,17 +154,27 @@ fn print_phase_profile(scenario_name: &str) {
         } else {
             ns as f64 / entry.count as f64
         };
-        let pct = (ns * 100) as f64 / total_divisor as f64;
+        let (pct, pct_label) = match parent {
+            None => {
+                let p = (ns * 100) as f64 / total_divisor as f64;
+                (p, "%")
+            }
+            Some(parent_entry) => {
+                let parent_ns = parent_entry.total.as_nanos().max(1);
+                let p = (ns * 100) as f64 / parent_ns as f64;
+                (p, "% of ↑")
+            }
+        };
         println!(
-            "  {:<20} {:>12.3} {:>10} {:>14.1} {:>7.2}%",
-            name, ms, entry.count, ns_per_call, pct
+            "  {:<20} {:>12.3} {:>10} {:>14.1} {:>7.2}{}",
+            name, ms, entry.count, ns_per_call, pct, pct_label
         );
     }
-    println!("  {}", "─".repeat(66));
+    println!("  {}", "─".repeat(70));
     let total_ms = total_ns as f64 / 1_000_000.0;
     println!(
-        "  {:<20} {:>12.3}                               {:>6.2}%",
-        "sum", total_ms, 100.0
+        "  {:<20} {:>12.3}                               {:>8.2}%",
+        "sum (top-level)", total_ms, 100.0
     );
 }
 
