@@ -47,6 +47,8 @@ use crate::physics::integrator::{
     ForceModel, GravityForceModel, Integrator, IntegratorKind, PerturbationForce, make_integrator,
 };
 use crate::physics::orbital::OrbitalElements;
+use crate::templates::instantiate::instantiate;
+use crate::templates::kind::{TemplateKind, UnknownTemplate};
 
 // ── Default parameters (used by System::new) ──────────────────────────────────
 
@@ -234,6 +236,50 @@ impl System {
     /// prefer [`new`](Self::new) followed by builder methods.
     pub fn with_force_model(bodies: Vec<Body>, force_model: Box<dyn ForceModel>) -> Self {
         Self::with_force_model_inner(bodies, force_model, DEFAULT_DT)
+    }
+
+    /// Construct a system from a built-in preset.
+    ///
+    /// Defaults match [`System::new`]; override any with `.with_*` builder
+    /// methods:
+    ///
+    /// ```ignore
+    /// use gravity_sim_core::core::system::System;
+    /// use gravity_sim_core::physics::integrator::IntegratorKind;
+    /// use gravity_sim_core::templates::TemplateKind;
+    ///
+    /// let mut sys = System::from_template(TemplateKind::SolarSystem)
+    ///     .with_integrator(IntegratorKind::Ias15)
+    ///     .with_dt(1e-4);
+    /// sys.integrate_for(100.0);
+    /// ```
+    ///
+    /// Presets that use randomised placement (e.g.
+    /// [`TemplateKind::JupiterTrojans`]) use seed `0` here. For a specific
+    /// seed at template build time, use
+    /// [`from_template_with_seed`](Self::from_template_with_seed).
+    pub fn from_template(kind: TemplateKind) -> Self {
+        Self::from_template_with_seed(kind, 0)
+    }
+
+    /// Construct from a preset with an explicit seed for template-time
+    /// randomisation. Deterministic presets ignore the seed.
+    pub fn from_template_with_seed(kind: TemplateKind, seed: u64) -> Self {
+        let template = kind.build(seed);
+        let named = instantiate(&template);
+        let mut sys = Self::new(Vec::new());
+        sys.add_named_bodies(named);
+        sys
+    }
+
+    /// String-keyed variant of [`from_template`] for config-file and
+    /// plugin use. Returns [`UnknownTemplate`] with the list of valid
+    /// names when the input does not match any preset.
+    ///
+    /// In Rust code, prefer [`from_template`](Self::from_template) for
+    /// type-safe autocomplete and compile-time typo rejection.
+    pub fn from_template_str(name: &str) -> Result<Self, UnknownTemplate> {
+        Ok(Self::from_template(TemplateKind::from_name(name)?))
     }
 
     fn with_force_model_inner(
