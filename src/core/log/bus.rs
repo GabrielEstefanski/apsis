@@ -136,38 +136,52 @@ mod tests {
     use super::super::event::{Event, Level, Source};
     use super::*;
 
+    // The event bus is a process-global singleton; unit tests run in
+    // parallel by default and all share it. To keep test-to-test
+    // isolation, each test filters inbound events by a unique marker
+    // string baked into `event.message`. Unrelated traffic from other
+    // tests is ignored by the `.starts_with` guard.
+
     #[test]
     fn subscribe_receives_published_events() {
+        const MARKER: &str = "bus_test_sub::";
         let received: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
         let sink = received.clone();
         let id = subscribe(move |event: &Event| {
-            sink.lock().unwrap().push(event.message.to_string());
+            if event.message.starts_with(MARKER) {
+                sink.lock().unwrap().push(event.message.to_string());
+            }
         });
 
-        publish(Event::new(Level::Info, Source::System, "first"));
-        publish(Event::new(Level::Warn, Source::System, "second"));
+        publish(Event::new(Level::Info, Source::System, "bus_test_sub::first"));
+        publish(Event::new(Level::Warn, Source::System, "bus_test_sub::second"));
 
-        // The default stderr subscriber also fires but does not
-        // touch our `received` vector, so the assertion stays clean.
         let seen = received.lock().unwrap().clone();
-        assert!(seen.contains(&"first".to_string()));
-        assert!(seen.contains(&"second".to_string()));
+        assert!(seen.contains(&"bus_test_sub::first".to_string()));
+        assert!(seen.contains(&"bus_test_sub::second".to_string()));
 
         unsubscribe(id);
     }
 
     #[test]
     fn unsubscribe_stops_delivery() {
+        const MARKER: &str = "bus_test_unsub::";
         let received: Arc<Mutex<u32>> = Arc::new(Mutex::new(0));
         let sink = received.clone();
-        let id = subscribe(move |_event: &Event| {
-            *sink.lock().unwrap() += 1;
+        let id = subscribe(move |event: &Event| {
+            if event.message.starts_with(MARKER) {
+                *sink.lock().unwrap() += 1;
+            }
         });
 
-        publish(Event::new(Level::Info, Source::System, "a"));
+        publish(Event::new(Level::Info, Source::System, "bus_test_unsub::a"));
         unsubscribe(id);
-        publish(Event::new(Level::Info, Source::System, "b"));
+        publish(Event::new(Level::Info, Source::System, "bus_test_unsub::b"));
 
-        assert_eq!(*received.lock().unwrap(), 1, "only the first event should have been counted");
+        assert_eq!(
+            *received.lock().unwrap(),
+            1,
+            "only the first event should have been counted (tagged by marker)"
+        );
     }
 }
