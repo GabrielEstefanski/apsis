@@ -50,6 +50,15 @@ pub const PAUSE: &str = reg::PAUSE;
 pub const RESET: &str = reg::ARROW_COUNTER_CLOCKWISE;
 pub const STEP: &str = reg::SKIP_FORWARD;
 
+// ── Precision run controls ───────────────────────────────────────────────────
+
+pub const PRECISION_START: &str = reg::PLAY;
+pub const PRECISION_PAUSE: &str = reg::PAUSE;
+pub const PRECISION_RESUME: &str = reg::PLAY;
+pub const PRECISION_ABORT: &str = reg::STOP;
+pub const PRECISION_COMMIT: &str = reg::CHECK;
+pub const PRECISION_CLOSE: &str = reg::X;
+
 // ── Toggles ──────────────────────────────────────────────────────────────────
 
 pub const CHECK_ON: &str = fill::CHECK_SQUARE;
