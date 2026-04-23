@@ -5,7 +5,24 @@ use crate::core::hooks::HookRegistry;
 use crate::core::system::System;
 use crate::domain::body::Body;
 use crate::physics::gravity::BarnesHutEngine;
+use crate::physics::integrator::traits::ExecutionProfile;
 use crate::physics::integrator::{ForceModel, Integrator, IntegratorKind, make_integrator};
+
+/// Threshold above which selecting a [`ExecutionProfile::Precision`]
+/// integrator on the current system emits a scale advisory through
+/// `warn_diag!`.
+///
+/// The value is a soft hint — the call still proceeds. It exists
+/// because IAS15's per-step wall time grows quickly with body count,
+/// and by the time the user notices the interactive stutter, the
+/// cascade may already be hundreds of substeps deep. The advisory
+/// gives a cheaper signal.
+///
+/// 200 is at the low end of the regime where IAS15+direct becomes
+/// uncomfortably slow for a 60 Hz render loop (direct O(N²) at N=200
+/// is ~40 000 pair-evaluations per force call, ~50 µs typical, and
+/// IAS15 does ~14 force calls per accepted substep).
+pub const PRECISION_BODY_SOFT_WARN: usize = 200;
 
 impl System {
     /// Immutable slice of all bodies in the simulation.
@@ -112,12 +129,22 @@ impl System {
     /// rebuild violates that invariant and, at large N, cascades into
     /// controller rejections and `dt` collapse.
     ///
-    /// This method is the **single enforcement point** for that rule:
-    /// if the new integrator requires a deterministic force and the
-    /// current force model is not configured deterministically, the
-    /// force model is auto-reconfigured (exact threshold raised so BH
-    /// is bypassed) and a warning is emitted to stderr. Downstream
-    /// code (physics thread, UI) never needs to re-check the pairing.
+    /// This method is the **single enforcement point** for that rule.
+    /// Two diagnostic hooks fire here:
+    ///
+    /// * **Compatibility auto-correction** — if the new integrator
+    ///   requires a deterministic force and the current force model
+    ///   is not configured deterministically, the force model is
+    ///   auto-reconfigured (exact threshold raised so BH is bypassed)
+    ///   and a `warn_diag!` event is emitted. Downstream code
+    ///   (physics thread, UI) never needs to re-check the pairing.
+    ///
+    /// * **Scale advisory for Precision-profile integrators** — if
+    ///   the new integrator's execution profile is `Precision` and
+    ///   the current body count is above
+    ///   [`PRECISION_BODY_SOFT_WARN`], a second event is emitted
+    ///   warning that interactive playback will not be real-time.
+    ///   This is a hint, not a block — the caller may proceed.
     pub fn set_integrator(&mut self, kind: IntegratorKind) {
         let integrator = make_integrator(kind);
 
@@ -125,19 +152,32 @@ impl System {
             && !self.force_model.is_deterministic()
         {
             let prev_threshold = self.force_model.exact_threshold();
-            // 10_000 is the engine's clamp ceiling; `usize::MAX`
-            // saturates to it and guarantees the BH branch is
-            // unreachable for any practical N.
+            // `usize::MAX` saturates to the engine's clamp ceiling,
+            // which is the canonical "direct mode" threshold. See
+            // `BarnesHutEngine::is_direct_mode`.
             self.force_model.set_exact_threshold(usize::MAX);
-            eprintln!(
-                "[gravity-sim] WARN: integrator {:?} requires deterministic \
-                 force; switching force model to direct O(N²) \
-                 (exact_threshold {} → {}). Expect slower wall-time per \
-                 step at high N. Select Velocity Verlet or Yoshida 4 for \
-                 real-time playback.",
-                kind,
-                prev_threshold,
-                self.force_model.exact_threshold(),
+            let new_threshold = self.force_model.exact_threshold();
+            let kind_label = kind.slug();
+            crate::warn_diag!(
+                "integrator requires deterministic force; switching force model to direct O(N²)",
+                integrator = kind_label,
+                exact_threshold_before = prev_threshold,
+                exact_threshold_after = new_threshold,
+                hint = "select velocity_verlet or yoshida4 for real-time playback",
+            );
+        }
+
+        if integrator.execution_profile() == ExecutionProfile::Precision
+            && self.bodies.len() > PRECISION_BODY_SOFT_WARN
+        {
+            let kind_label = kind.slug();
+            let n = self.bodies.len();
+            crate::warn_diag!(
+                "Precision-profile integrator selected with many bodies; per-step wall time may spike",
+                integrator = kind_label,
+                n_bodies = n,
+                soft_warn_threshold = PRECISION_BODY_SOFT_WARN,
+                hint = "consider yoshida4 for interactive playback; IAS15 is designed for offline precision runs",
             );
         }
 
