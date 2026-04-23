@@ -21,6 +21,7 @@ use crate::app::theme::{
     ACCENT, BORDER, DANGER, SUCCESS, SURFACE_CARD, TEXT_DIM, TEXT_PRI, TEXT_SEC, section,
 };
 use crate::app::ui::{PanelTab, SelectionForm, SimulationApp};
+use crate::physics::integrator::IntegratorKind;
 use eframe::egui::text::{LayoutJob, TextFormat};
 use eframe::egui::{self, Align, Color32, FontId, RichText, Stroke};
 
@@ -101,14 +102,22 @@ impl SimulationApp {
             );
         }
 
-        // ── Solver ─────────────────────────────────────────────────────────── //
         section(ui, "SOLVER");
         kv(ui, "dt", &format!("{:.3e}", m.dt));
-        kv(ui, "θ (opening)", &format!("{:.3}", m.theta));
+        if m.force_is_direct {
+            kv(ui, "force", "direct O(N²)");
+        } else {
+            kv(ui, "θ (opening)", &format!("{:.3}", m.theta));
+        }
         kv(ui, "steps", &format!("{}", m.steps));
         kv(ui, "vmax", &format!("{:.3e}", m.max_vel));
         kv(ui, "amax", &format!("{:.3e}", m.max_acc));
-        if let Some(rec) = m.recommended_dt {
+        // `recommended_dt` is a Power/Aarseth heuristic for fixed-step
+        // schemes. IAS15 chooses dt from its own ε-controller, so the
+        // heuristic is a distraction rather than guidance there.
+        if let Some(rec) = m.recommended_dt
+            && m.integrator_kind != IntegratorKind::Ias15
+        {
             let ratio = m.dt / rec;
             let col = if ratio <= 2.0 {
                 TEXT_DIM
