@@ -66,6 +66,7 @@ impl SimulationApp {
             (ctrl.state(), ctrl.telemetry().clone(), self.system.t())
         };
         let pending = self.system.pending_edits_count();
+        let force_is_direct = self.system.metrics().force_is_direct;
 
         let mut intent = ControlIntent::None;
         let duration_ref = &mut self.precision_run_duration;
@@ -83,7 +84,14 @@ impl SimulationApp {
             .resizable(false)
             .show(ctx, |ui| match state {
                 RunState::Idle => {
-                    setup_content(ui, duration_ref, t_sim_now, pending, &mut intent);
+                    setup_content(
+                        ui,
+                        duration_ref,
+                        t_sim_now,
+                        pending,
+                        force_is_direct,
+                        &mut intent,
+                    );
                 }
                 _ => {
                     run_content(ui, state, &telemetry, t_sim_now, pending, &mut intent);
@@ -141,6 +149,7 @@ fn setup_content(
     duration: &mut f64,
     t_sim_now: f64,
     pending: usize,
+    force_is_direct: bool,
     intent: &mut ControlIntent,
 ) {
     ui.spacing_mut().item_spacing.y = 6.0;
@@ -163,11 +172,20 @@ fn setup_content(
                 .color(ACCENT)
                 .strong(),
         );
-        ui.label(
-            RichText::new("— select a target simulation time and press Start")
-                .size(10.0)
-                .color(TEXT_SEC),
-        );
+        if force_is_direct {
+            ui.label(RichText::new("·").size(10.0).color(TEXT_DIM));
+            ui.label(
+                RichText::new("force: direct O(N²) required for deterministic physics")
+                    .size(10.0)
+                    .color(TEXT_SEC),
+            );
+        } else {
+            ui.label(
+                RichText::new("— select a target simulation time and press Start")
+                    .size(10.0)
+                    .color(TEXT_SEC),
+            );
+        }
 
         if pending > 0 {
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
