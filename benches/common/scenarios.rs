@@ -227,9 +227,38 @@ pub fn solar_n641() -> ScenarioSpec {
     const N_TEST: usize = 640; // + 1 central body = 641 total
     const M_CENTRAL: f64 = 1.0;
     const M_TEST: f64 = 1e-10;
-    const R_INNER: f64 = 0.5;
-    const R_OUTER: f64 = 5.0;
-    const SOFTENING: f64 = 0.01;
+    // Annulus chosen to approximate the interactive app's
+    // `solar_system` preset asteroid belt ([2.2, 3.2] AU), with a bit
+    // of margin on each side so the controller exercises a range of
+    // dynamical periods rather than a single narrow shell.
+    //
+    // ## On the regime and its limits
+    //
+    // Even at this reduced spread and with softening = 0.05,
+    // N=640 random-uniform test particles in a thin annulus concentrate
+    // some pairs below the softening length. The adaptive dt therefore
+    // shrinks toward DT_MIN around close-encounter events, yielding a
+    // baseline `peak_energy_err` of order 10⁻⁴ — NOT representative of
+    // IAS15's machine-precision regime.
+    //
+    // This is a deliberate *regime stress test*, not a quality
+    // benchmark. It was introduced to reproduce the stutter reported
+    // in the interactive app's 641-body preset and to make the
+    // rejection cascade (pre-RMS-norm-fix: 194% rejection rate)
+    // measurable. The stress test served its purpose — the RMS-norm
+    // fix documented in `docs/experiments/
+    // 2026-04-22-solar-system-stutter-diagnosis.md` reduced rejections
+    // by 36% and wall time by 23% on this scenario. A separate
+    // controlled-quality scenario at N=641 (e.g. structured rings or
+    // a well-spaced Keplerian disk) is future work.
+    //
+    // Because the scenario sits outside IAS15's efficient regime,
+    // `gate_on_baseline` is set to `false`: metric shifts are
+    // expected across algorithmic changes and should be reviewed as
+    // advisories, not treated as regressions.
+    const R_INNER: f64 = 1.5;
+    const R_OUTER: f64 = 3.5;
+    const SOFTENING: f64 = 0.05;
     const SEED: u64 = 0x501a5; // "solaš"
 
     let mut rng = SmallRng::seed_from_u64(SEED);
@@ -240,10 +269,6 @@ pub fn solar_n641() -> ScenarioSpec {
 
     for _ in 0..N_TEST {
         // Uniform in [R_INNER, R_OUTER] via rejection-free sampling.
-        // Linear-in-U gives concentration at small r; for a disk
-        // benchmark it's fine because the inner bodies stress the
-        // controller more than the outer ones (tighter orbital
-        // periods → smaller effective dt).
         let r = R_INNER + (R_OUTER - R_INNER) * rng.random::<f64>();
         let theta = rng.random::<f64>() * std::f64::consts::TAU;
         let x = r * theta.cos();
