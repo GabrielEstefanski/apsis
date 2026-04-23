@@ -34,7 +34,7 @@ use crate::io::snapshot::SimSnapshot;
 use crate::core::system::System;
 use crate::physics::integrator::IntegratorKind;
 use crate::physics::orbital::OrbitalElements;
-use crate::render::trail::{TrailSampler, TrailSamplerKind};
+use crate::core::trail::{TrailSampler, TrailSamplerKind};
 
 // ── Render state ──────────────────────────────────────────────────────────────
 
@@ -54,14 +54,14 @@ pub struct RenderState {
     /// Zero until the first measurement completes.
     pub sim_rate: f64,
     /// Accumulated world-space COM translation (render units) since the last
-    /// frame. The render-side [`TrailRecorder`](crate::render::TrailRecorder)
+    /// frame. The render-side [`TrailRecorder`](crate::core::trail::TrailRecorder)
     /// reads and clears this each tick to keep trail positions aligned with
     /// the shifted body coordinate system.
     pub pending_com_shift: (f32, f32),
     /// Body-position columns sampled this tick by the trail sampler, in the
     /// order they were produced. Each entry has length `bodies.len()`. The
     /// UI thread drains this vector every sync and feeds it to the
-    /// [`TrailRecorder`](crate::render::TrailRecorder).
+    /// [`TrailRecorder`](crate::core::trail::TrailRecorder).
     pub trail_samples: Vec<Vec<[f32; 2]>>,
     /// Gravitational accelerations from the last completed physics step,
     /// published so the render-side
@@ -222,7 +222,7 @@ impl PhysicsHandle {
 
     /// Returns and resets the accumulated COM shift since the last sync.
     ///
-    /// Forwarded to [`crate::render::TrailRecorder::apply_com_shift`] each frame.
+    /// Forwarded to [`crate::core::trail::TrailRecorder::apply_com_shift`] each frame.
     pub fn take_pending_com_shift(&mut self) -> (f32, f32) {
         std::mem::replace(&mut self.pending_com_shift, (0.0, 0.0))
     }
@@ -231,7 +231,7 @@ impl PhysicsHandle {
     ///
     /// Each returned column is a `Vec<[f32; 2]>` of length `bodies.len()`
     /// produced by the physics-thread's sampler. Consumed by
-    /// [`TrailRecorder::ingest`](crate::render::TrailRecorder::ingest).
+    /// [`TrailRecorder::ingest`](crate::core::trail::TrailRecorder::ingest).
     pub fn take_trail_samples(&mut self) -> Vec<Vec<[f32; 2]>> {
         std::mem::take(&mut self.pending_trail_samples)
     }

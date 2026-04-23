@@ -1,8 +1,8 @@
-//! [`TrailRecorder`] — render-side owner of the trail ring buffer.
+//! [`TrailRecorder`] — owner of the trail ring buffer.
 //!
 //! The recorder is a **pure consumer** of sample columns produced by the
 //! physics thread. Sampling cadence decisions live inside the physics
-//! thread's [`TrailSampler`](crate::render::trail::sampler::TrailSampler) —
+//! thread's [`TrailSampler`](crate::core::trail::sampler::TrailSampler) —
 //! they must happen at physics-step granularity so that fast orbits never
 //! alias to polygons and high-SPF runs never starve the trail.
 //!
@@ -17,17 +17,17 @@
 //! | Snapshot save/restore             | [`to_snapshot`] / [`restore_from_snapshot`] |
 //! | Sampler config (for physics)      | [`sampler_kind`]            |
 
+use crate::core::trail::buffer::{TrailBuffer, adaptive_capacity};
+use crate::core::trail::sampler::TrailSamplerKind;
 use crate::domain::body::Body;
 use crate::io::snapshot::TrailSnapshot;
-use crate::render::trail::sampler::TrailSamplerKind;
-use crate::render::trail_buffer::{TrailBuffer, adaptive_capacity};
 
 /// Baseline arc-length trigger: a body must traverse ~2 % of the scene scale
 /// before a new sample is recorded. Yields ~314 samples per orbital period
 /// for a circular orbit — above the eye's polygonal-aliasing threshold.
 const BASE_THRESHOLD_FRAC: f32 = 0.02;
 
-/// Render-side trail recorder.
+/// Core-side trail recorder.
 ///
 /// Owns the ring buffer. The sampling strategy itself lives in the physics
 /// thread; this struct only exposes the *config* that drives it so the UI

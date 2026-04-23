@@ -308,7 +308,7 @@ impl System {
     /// Takes (and clears) the accumulated COM translation since the last call.
     ///
     /// The physics-side COM recentering shifts all body positions; the
-    /// render-side [`TrailRecorder`](crate::render::TrailRecorder) must apply
+    /// [`TrailRecorder`](crate::core::trail::TrailRecorder) must apply
     /// the same shift to stored trail positions to keep them aligned.
     pub fn take_com_shift(&mut self) -> (f32, f32) {
         std::mem::replace(&mut self.pending_com_shift, (0.0, 0.0))

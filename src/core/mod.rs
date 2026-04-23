@@ -24,3 +24,4 @@ pub mod metrics;
 pub mod physics_thread;
 pub mod precision_run;
 pub mod system;
+pub mod trail;
