@@ -35,6 +35,7 @@ impl System {
             integrator_kind: self.integrator.kind(),
             g_factor: self.g_factor,
             theta: self.force_model.theta(),
+            force_is_direct: self.force_model.is_deterministic(),
             dt: self.current_dt,
             user_dt: self.user_dt,
             dt_mode: self.dt_mode,
