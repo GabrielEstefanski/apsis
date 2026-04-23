@@ -594,7 +594,23 @@ impl SimulationApp {
         // panel → right inspector → central canvas. See `panel/mod.rs` for the
         // layout diagram.
         self.draw_toolbar(&ctx);
-        self.draw_playbar(&ctx);
+        // Bottom strip: the Precision Run panel replaces the playbar for the
+        // full run lifecycle (Running / Pausing / Paused / Aborting /
+        // Completed). The playbar returns once the user acknowledges the
+        // completed run and the controller is back in `Idle`.
+        let precision_active = {
+            let ctrl = self.system.precision_controller();
+            let guard = ctrl.lock().unwrap();
+            !matches!(
+                guard.state(),
+                crate::core::precision_run::RunState::Idle
+            )
+        };
+        if precision_active {
+            self.draw_precision_panel(&ctx);
+        } else {
+            self.draw_playbar(&ctx);
+        }
         self.draw_tool_rail(&ctx);
         if !self.sidebar_collapsed {
             self.draw_panel(&ctx);

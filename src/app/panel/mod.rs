@@ -25,6 +25,7 @@
 mod inspector;
 mod metrics;
 mod playbar;
+mod precision_panel;
 mod save_modal;
 mod settings_modal;
 mod shortcuts_modal;
