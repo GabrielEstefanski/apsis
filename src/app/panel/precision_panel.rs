@@ -42,9 +42,6 @@ use eframe::egui::{self, Align, Color32, Layout, RichText, Stroke};
 /// resize when the run starts.
 pub const PRECISION_PANEL_HEIGHT: f32 = 96.0;
 
-/// Intent produced by the controls row. Applied after the egui
-/// borrow on `self` is released so we do not hold a double
-/// mutable borrow across the panel body.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum ControlIntent {
     None,
@@ -53,7 +50,6 @@ enum ControlIntent {
     Resume,
     Abort,
     Acknowledge,
-    ClearQueue,
 }
 
 impl SimulationApp {
@@ -66,7 +62,6 @@ impl SimulationApp {
             let ctrl = ctrl_arc.lock().unwrap();
             (ctrl.state(), ctrl.telemetry().clone(), self.system.t())
         };
-        let pending = self.system.pending_edits_count();
         let force_is_direct = self.system.metrics().force_is_direct;
 
         let mut intent = ControlIntent::None;
@@ -85,17 +80,10 @@ impl SimulationApp {
             .resizable(false)
             .show(ctx, |ui| match state {
                 RunState::Idle => {
-                    setup_content(
-                        ui,
-                        duration_ref,
-                        t_sim_now,
-                        pending,
-                        force_is_direct,
-                        &mut intent,
-                    );
+                    setup_content(ui, duration_ref, t_sim_now, force_is_direct, &mut intent);
                 }
                 _ => {
-                    run_content(ui, state, &telemetry, t_sim_now, pending, &mut intent);
+                    run_content(ui, state, &telemetry, t_sim_now, &mut intent);
                 }
             });
 
@@ -106,39 +94,18 @@ impl SimulationApp {
     }
 
     fn apply_precision_intent(&mut self, intent: ControlIntent, t_sim_now: f64) {
+        let ctrl_arc = self.system.precision_controller();
+        let mut ctrl = ctrl_arc.lock().unwrap();
         match intent {
             ControlIntent::None => {}
             ControlIntent::Start => {
-                let ctrl_arc = self.system.precision_controller();
-                let mut ctrl = ctrl_arc.lock().unwrap();
                 let t_target = t_sim_now + self.precision_run_duration.max(0.0);
                 ctrl.start(t_target, t_sim_now);
             }
-            ControlIntent::Pause => self.system.precision_controller().lock().unwrap().request_pause(),
-            ControlIntent::Resume => self.system.precision_controller().lock().unwrap().resume(),
-            ControlIntent::Abort => self.system.precision_controller().lock().unwrap().request_abort(),
-            ControlIntent::Acknowledge => {
-                // Acknowledge bridges the Completed state back to
-                // Idle; the outcome decides what happens with the
-                // edits the user queued during the run.
-                let outcome = {
-                    let ctrl_arc = self.system.precision_controller();
-                    let ctrl = ctrl_arc.lock().unwrap();
-                    match ctrl.state() {
-                        RunState::Completed { outcome } => Some(outcome),
-                        _ => None,
-                    }
-                };
-                match outcome {
-                    Some(RunOutcome::Reached) => self.system.commit_pending_edits(),
-                    Some(RunOutcome::UserAborted) | Some(RunOutcome::Errored) => {
-                        self.system.clear_pending_edits();
-                    }
-                    None => {}
-                }
-                self.system.precision_controller().lock().unwrap().acknowledge();
-            }
-            ControlIntent::ClearQueue => self.system.clear_pending_edits(),
+            ControlIntent::Pause => ctrl.request_pause(),
+            ControlIntent::Resume => ctrl.resume(),
+            ControlIntent::Abort => ctrl.request_abort(),
+            ControlIntent::Acknowledge => ctrl.acknowledge(),
         }
     }
 }
@@ -149,7 +116,6 @@ fn setup_content(
     ui: &mut egui::Ui,
     duration: &mut f64,
     t_sim_now: f64,
-    pending: usize,
     force_is_direct: bool,
     intent: &mut ControlIntent,
 ) {
@@ -188,25 +154,6 @@ fn setup_content(
             );
         }
 
-        if pending > 0 {
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                let clear = egui::Button::new(
-                    RichText::new("Clear").size(10.0).color(TEXT_SEC),
-                )
-                .fill(Color32::TRANSPARENT)
-                .stroke(Stroke::new(0.5, BORDER))
-                .min_size(egui::vec2(54.0, 20.0));
-                if ui.add(clear).clicked() {
-                    *intent = ControlIntent::ClearQueue;
-                }
-                ui.add_space(6.0);
-                ui.label(
-                    RichText::new(format!("{} queued edit{}", pending, if pending == 1 { "" } else { "s" }))
-                        .size(10.0)
-                        .color(ACCENT),
-                );
-            });
-        }
     });
 
     ui.horizontal(|ui| {
@@ -271,13 +218,12 @@ fn run_content(
     state: RunState,
     telemetry: &Telemetry,
     t_sim_now: f64,
-    pending: usize,
     intent: &mut ControlIntent,
 ) {
     ui.spacing_mut().item_spacing.y = 4.0;
 
     draw_progress_row(ui, state, telemetry, t_sim_now);
-    draw_metrics_row(ui, state, telemetry, pending);
+    draw_metrics_row(ui, state, telemetry);
     draw_controls_row(ui, state, intent);
 }
 
@@ -324,7 +270,7 @@ fn draw_progress_row(
     });
 }
 
-fn draw_metrics_row(ui: &mut egui::Ui, state: RunState, telemetry: &Telemetry, pending: usize) {
+fn draw_metrics_row(ui: &mut egui::Ui, state: RunState, telemetry: &Telemetry) {
     ui.horizontal(|ui| {
         let (label_text, label_color) = state_tag(state);
         ui.label(RichText::new("STATE").size(9.0).color(TEXT_DIM).strong());
@@ -369,10 +315,6 @@ fn draw_metrics_row(ui: &mut egui::Ui, state: RunState, telemetry: &Telemetry, p
                 DANGER,
             );
         }
-
-        if pending > 0 {
-            metric_inline_colored(ui, "queued", &format!("{}", pending), ACCENT);
-        }
     });
 }
 
@@ -416,7 +358,7 @@ fn draw_controls_row(ui: &mut egui::Ui, state: RunState, intent: &mut ControlInt
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             match state {
                 RunState::Completed { outcome: RunOutcome::Reached } => {
-                    if control_btn(ui, icons::PRECISION_COMMIT, "Commit", true, false).clicked() {
+                    if control_btn(ui, icons::PRECISION_DONE, "Done", true, false).clicked() {
                         *intent = ControlIntent::Acknowledge;
                     }
                 }
@@ -426,7 +368,7 @@ fn draw_controls_row(ui: &mut egui::Ui, state: RunState, intent: &mut ControlInt
                     }
                 }
                 _ => {
-                    control_btn(ui, icons::PRECISION_COMMIT, "Commit", false, false);
+                    control_btn(ui, icons::PRECISION_CLOSE, "Done", false, false);
                 }
             }
         });

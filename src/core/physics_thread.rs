@@ -160,16 +160,6 @@ pub struct PhysicsHandle {
     /// substep boundaries. See [`core::precision_run`](crate::core::precision_run).
     precision: Arc<Mutex<PrecisionRunController>>,
 
-    /// Edits queued while a Precision Run is active. The handle's
-    /// write methods route eligible commands here instead of the
-    /// physics channel so the user can prepare the next scenario
-    /// (add bodies, tweak parameters) without perturbing the
-    /// in-flight run. Drained via
-    /// [`commit_pending_edits`](Self::commit_pending_edits) on
-    /// successful completion and dropped via
-    /// [`clear_pending_edits`](Self::clear_pending_edits) on abort.
-    pending_edits: Arc<Mutex<Vec<PhysicsCmd>>>,
-
     _thread: thread::JoinHandle<()>,
 }
 
@@ -327,17 +317,17 @@ impl PhysicsHandle {
     // ── Write methods — tunnel through command channel ────────────────────
 
     fn send(&self, cmd: PhysicsCmd) {
-        // During a Precision Run, mutations that would alter the
-        // in-flight trajectory are queued rather than applied
-        // immediately — the user can prepare the next scenario
-        // (add bodies, adjust parameters) without perturbing
-        // determinism. Cosmetic / render-only / lifecycle commands
-        // still pass straight through (see `cmd_is_queueable`).
-        if self.is_precision_run_active() && cmd_is_queueable(&cmd) {
-            self.pending_edits.lock().unwrap().push(cmd);
-        } else {
-            let _ = self.cmd_tx.send(cmd);
+        // During an active Precision Run, physics-state mutations are
+        // dropped rather than applied — the UI surfaces should be
+        // disabled in this state so this backstop rarely fires, but
+        // silently ignoring stray commands keeps the integration
+        // deterministic even if a code path slips through. This
+        // matches the REBOUND script model: while `reb_integrate` is
+        // running, nothing external perturbs the system.
+        if self.is_precision_run_active() && cmd_blocks_during_precision(&cmd) {
+            return;
         }
+        let _ = self.cmd_tx.send(cmd);
     }
 
     fn is_precision_run_active(&self) -> bool {
@@ -345,32 +335,6 @@ impl PhysicsHandle {
             self.precision.lock().unwrap().state(),
             crate::core::precision_run::RunState::Idle
         )
-    }
-
-    /// Number of edits currently waiting to be applied when the
-    /// active Precision Run finishes. The UI displays this as a
-    /// "N pending" chip so the user knows something will land on
-    /// commit.
-    pub fn pending_edits_count(&self) -> usize {
-        self.pending_edits.lock().unwrap().len()
-    }
-
-    /// Drain every queued edit into the physics channel in FIFO
-    /// order. Invoked by the UI when acknowledging a completed
-    /// run (outcome Reached).
-    pub fn commit_pending_edits(&self) {
-        let drained: Vec<PhysicsCmd> = self.pending_edits.lock().unwrap().drain(..).collect();
-        for cmd in drained {
-            let _ = self.cmd_tx.send(cmd);
-        }
-    }
-
-    /// Drop every queued edit without applying any. Invoked when
-    /// acknowledging an aborted run: the simulation has been
-    /// restored to its pre-run baseline, so queued changes no
-    /// longer make sense.
-    pub fn clear_pending_edits(&self) {
-        self.pending_edits.lock().unwrap().clear();
     }
 
     pub fn set_paused(&self, paused: bool) {
@@ -554,7 +518,6 @@ pub fn spawn(mut system: System, paused: bool) -> PhysicsHandle {
         step_snapshot: None,
         t_render: 0.0,
         precision,
-        pending_edits: Arc::new(Mutex::new(Vec::new())),
         _thread: thread,
     }
 }
@@ -604,14 +567,13 @@ fn publish_full(
 
 // ── Command dispatch ──────────────────────────────────────────────────────────
 
-/// Whether a command must be held back while a Precision Run is
-/// active. The rule is: mutations that alter physics state
-/// (bodies, integrator configuration, force-model parameters)
-/// queue; render-side, lifecycle, and cosmetic commands pass
-/// through unchanged.
-fn cmd_is_queueable(cmd: &PhysicsCmd) -> bool {
+/// Whether a command must be ignored while a Precision Run is
+/// active. Matches the REBOUND mental model: during
+/// `reb_integrate`, the simulation is not externally perturbable.
+/// Physics-state mutations are blocked; render-only / cosmetic /
+/// lifecycle commands still pass through.
+fn cmd_blocks_during_precision(cmd: &PhysicsCmd) -> bool {
     match cmd {
-        // Queue: physics-state mutations.
         PhysicsCmd::SetDt(_)
         | PhysicsCmd::SetIas15Epsilon(_)
         | PhysicsCmd::SetExactThreshold(_)
@@ -632,7 +594,6 @@ fn cmd_is_queueable(cmd: &PhysicsCmd) -> bool {
         | PhysicsCmd::ZeroComVelocity
         | PhysicsCmd::RestoreSnapshot(_) => true,
 
-        // Pass through: render-only, cosmetic, lifecycle.
         PhysicsCmd::SetPaused(_)
         | PhysicsCmd::SetSimRateTarget(_)
         | PhysicsCmd::SetName(_, _)
