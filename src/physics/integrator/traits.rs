@@ -49,6 +49,22 @@ impl IntegratorKind {
         }
     }
 
+    /// Execution profile without constructing an integrator instance.
+    ///
+    /// Provides the UI with a cheap way to ask "is this a precision
+    /// integrator?" before deciding whether to show the Precision
+    /// Run panel, the setup modal, or the confirmation dialog.
+    /// Mirrors the value that [`Integrator::execution_profile`]
+    /// returns on the constructed instance.
+    pub fn execution_profile(self) -> ExecutionProfile {
+        match self {
+            Self::Ias15 => ExecutionProfile::Precision,
+            Self::VelocityVerlet | Self::Yoshida4 | Self::WisdomHolman => {
+                ExecutionProfile::Realtime
+            }
+        }
+    }
+
     /// Formal convergence order in the time step.
     pub fn order(self) -> u32 {
         match self {

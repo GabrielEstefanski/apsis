@@ -145,17 +145,23 @@ mod macro_tests {
 
     #[test]
     fn warn_diag_with_fields_round_trips_through_bus() {
+        // Filter by a unique marker so concurrent tests that share the
+        // process-global bus do not race. See the isolation note in
+        // `core::log::bus::tests`.
+        const MARKER: &str = "macro_test::warn_diag";
         let captured: Arc<Mutex<Option<Event>>> = Arc::new(Mutex::new(None));
         let sink = captured.clone();
         let id = subscribe(move |event: &Event| {
-            *sink.lock().unwrap() = Some(event.clone());
+            if event.message == MARKER {
+                *sink.lock().unwrap() = Some(event.clone());
+            }
         });
 
         let dt: f64 = 1.5e-12;
         let count: u64 = 7;
         crate::warn_diag!(
             Source::Integrator,
-            "unit test — floor reached",
+            "macro_test::warn_diag",
             dt = dt,
             count = count,
         );
@@ -163,7 +169,7 @@ mod macro_tests {
         let got = captured.lock().unwrap().clone().expect("event should have been captured");
         assert_eq!(got.level, Level::Warn);
         assert_eq!(got.source, Source::Integrator);
-        assert_eq!(got.message, "unit test — floor reached");
+        assert_eq!(got.message, MARKER);
         assert_eq!(got.fields.len(), 2);
         assert_eq!(got.fields[0].0, "dt");
         assert_eq!(got.fields[1].0, "count");
