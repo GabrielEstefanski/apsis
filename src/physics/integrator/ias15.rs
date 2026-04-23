@@ -104,6 +104,40 @@ pub mod profile {
         pub residual_compute: PhaseEntry,
         pub snapshot_capture: PhaseEntry,
         pub snapshot_restore: PhaseEntry,
+        /// Cost of `let a0 = acc.clone();` at the top of `step()`.
+        /// Allocates a fresh `Vec<(f64, f64)>` of length N per sub-step
+        /// — an alloc path entirely independent of the persistent
+        /// rollback snapshot and therefore not caught by
+        /// `snapshot_capture`. Called out because at large N it
+        /// becomes a non-trivial fraction of per-sub-step work, and
+        /// is an obvious candidate for persistent-buffer reuse.
+        pub a0_clone: PhaseEntry,
+        /// Cost of constructing the `DenseSnapshot` on the accept
+        /// path — the 4 `Vec::clone()` calls that copy x/v/a0/b into
+        /// a fresh owned snapshot for downstream consumers (renderer
+        /// interpolation). At N=641 this is ~100 KB of alloc+memcpy
+        /// per accepted sub-step; at the accept rate the IAS15
+        /// controller typically runs, this is the dominant source
+        /// of allocator pressure visible as render-thread stutter.
+        pub dense_snapshot_build: PhaseEntry,
+
+        /// Wall time of Barnes-Hut **tree construction** specifically.
+        /// Set from inside `GravityForceModel::compute` when the
+        /// `ias15-profile` feature is compiled into the force model.
+        /// Paired with `tree_traverse` it decomposes the `evaluate`
+        /// phase into its two structural halves — answering whether
+        /// the per-call cost at large N is dominated by rebuilding
+        /// the tree (fixable by caching across Picard iterations)
+        /// or by traversing it (requires traversal-level SIMD).
+        pub tree_build: PhaseEntry,
+
+        /// Wall time of Barnes-Hut **tree traversal** (the force
+        /// accumulation itself). Complements `tree_build`; the two
+        /// together approximately reconstruct `evaluate` — the gap
+        /// between `evaluate - (build + traverse)` is the per-call
+        /// function-dispatch / bookkeeping overhead and should be
+        /// small.
+        pub tree_traverse: PhaseEntry,
     }
 
     thread_local! {
@@ -121,6 +155,29 @@ pub mod profile {
     /// so each scenario's breakdown is reported independently.
     pub fn reset() {
         TIMINGS.with(|t| *t.borrow_mut() = PhaseTimings::default());
+    }
+
+    /// Record a Barnes-Hut tree-build sample. Invoked from inside
+    /// `GravityForceModel::compute` (i.e. crossing out of
+    /// `ias15.rs`), so it needs a free-function entry point rather
+    /// than the `time_phase!` macro which is scoped to this file.
+    pub fn record_tree_build(elapsed: std::time::Duration) {
+        TIMINGS.with(|t| {
+            let mut s = t.borrow_mut();
+            s.tree_build.total += elapsed;
+            s.tree_build.count += 1;
+        });
+    }
+
+    /// Record a Barnes-Hut tree-traversal sample. Paired with
+    /// [`record_tree_build`] across `GravityForceModel::compute`
+    /// to split the `evaluate` phase.
+    pub fn record_tree_traverse(elapsed: std::time::Duration) {
+        TIMINGS.with(|t| {
+            let mut s = t.borrow_mut();
+            s.tree_traverse.total += elapsed;
+            s.tree_traverse.count += 1;
+        });
     }
 }
 
@@ -741,7 +798,9 @@ impl Integrator for Ias15 {
         });
         scale_acc_and_pe(acc, ctx.g_factor, raw_pe);
         apply_perturbations(bodies, acc, ctx.perturbations);
-        let a0: Vec<(f64, f64)> = acc.clone();
+        let a0: Vec<(f64, f64)> = time_phase!(a0_clone, {
+            acc.clone()
+        });
 
         // ── Rejection retry loop ─────────────────────────────────────────
         //
@@ -810,15 +869,17 @@ impl Integrator for Ias15 {
                     // `self.b` is not further modified on the accept
                     // path). The caller (`System::step`) fills in the
                     // absolute `t0` as `system.t() - consumed_dt`.
-                    let step_snapshot = DenseSnapshot {
-                        t0: 0.0,
-                        dt: dt_try,
-                        x0: self.snap_x.clone(),
-                        v0: self.snap_v.clone(),
-                        a0: a0.clone(),
-                        b: self.b.clone(),
-                        kind: IntegratorKind::Ias15,
-                    };
+                    let step_snapshot = time_phase!(dense_snapshot_build, {
+                        DenseSnapshot {
+                            t0: 0.0,
+                            dt: dt_try,
+                            x0: self.snap_x.clone(),
+                            v0: self.snap_v.clone(),
+                            a0: a0.clone(),
+                            b: self.b.clone(),
+                            kind: IntegratorKind::Ias15,
+                        }
+                    });
 
                     time_phase!(advance_state, {
                         self.advance_state(bodies, &a0, dt_try);
@@ -981,18 +1042,56 @@ impl Ias15 {
                 });
             }
 
-            // Residual = max‖Δb₆‖ / max‖a₀‖ (vector norms; per-body).
+            // Residual: RMS over per-body relative convergence ratios
+            // `||Δb₆[i]|| / ||a₀[i]||`, rather than the ratio of the
+            // two maxes across bodies.
+            //
+            // ## Why per-body, why RMS
+            //
+            // The previous formulation `max||Δb₆|| / max||a₀||` mixed
+            // two maxes over potentially different bodies. At N≈2
+            // this is harmless (a single body dominates both). At
+            // N≈641 the numerator picks up one body's convergence
+            // noise outlier while the denominator picks up a
+            // completely different body's acceleration magnitude —
+            // the ratio is *not* a convergence criterion any more,
+            // it is a noise-to-signal floor that grows with body
+            // count. Solar_system-class scenarios then cascade into
+            // truncation rejections (measured: 3878 rejections over
+            // 2001 accepted sub-steps at N=641 before this change)
+            // because the reported residual is artificially high.
+            //
+            // Per-body ratio keeps each body's convergence
+            // self-referential (numerator and denominator are the
+            // same body). RMS aggregation is O(N) like max but
+            // scales gracefully: a single noisy body contributes
+            // 1/√N to the total, so the floor shrinks as N grows
+            // rather than staying pinned to the worst outlier.
+            // This is the criterion REBOUND's IAS15 uses in spirit:
+            // evaluate convergence per degree of freedom, not on
+            // the extremal degree of freedom.
+            //
+            // Bodies with `||a₀[i]|| == 0` are degenerate and
+            // skipped (they do not constrain Picard convergence).
+            // If every body has zero acceleration the system is
+            // gravity-free and any `b` satisfies the ansatz — we
+            // return zero residual rather than an undefined
+            // quantity.
             let residual = time_phase!(residual_compute, {
-                let mut max_db6 = 0.0_f64;
-                let mut max_a = 0.0_f64;
+                let mut sum_sq = 0.0_f64;
+                let mut count: usize = 0;
                 for i in 0..n {
                     let db6x = self.b[i][6].0 - b6_old[i].0;
                     let db6y = self.b[i][6].1 - b6_old[i].1;
-                    max_db6 = max_db6.max((db6x * db6x + db6y * db6y).sqrt());
+                    let db6 = (db6x * db6x + db6y * db6y).sqrt();
                     let a_mag = (a0[i].0 * a0[i].0 + a0[i].1 * a0[i].1).sqrt();
-                    max_a = max_a.max(a_mag);
+                    if a_mag > 0.0 {
+                        let rel = db6 / a_mag;
+                        sum_sq += rel * rel;
+                        count += 1;
+                    }
                 }
-                if max_a > 0.0 { max_db6 / max_a } else { max_db6 }
+                if count > 0 { (sum_sq / count as f64).sqrt() } else { 0.0 }
             });
 
             if residual < PICARD_TOL {
@@ -1098,18 +1197,46 @@ impl Ias15 {
     }
 
     /// Estimate of the dominant truncation error term, normalised by
-    /// the acceleration magnitude: err = max‖b₆‖ / max‖a₀‖. For a
-    /// 15th-order method this is the correct leading term since b₆
-    /// multiplies u⁷ ≈ 1 at the end of the step.
+    /// the acceleration magnitude: per-body ‖b₆[i]‖ / ‖a₀[i]‖
+    /// aggregated as an RMS across bodies. For a 15th-order method
+    /// this is the correct leading term since b₆ multiplies u⁷ ≈ 1
+    /// at the end of the step.
+    ///
+    /// ## Why per-body RMS and not max-max
+    ///
+    /// This must use the *same* norm as the Picard convergence check
+    /// in `picard_loop_inner`. The two measurements interact through
+    /// the outer controller: convergence decides whether b was
+    /// computed correctly, truncation decides whether b's magnitude
+    /// is acceptable physics. If they use different norms, a step
+    /// can "converge" under one definition while "failing truncation"
+    /// under the other — producing a cascade of rejections with no
+    /// physical cause.
+    ///
+    /// Empirically this showed up at solar_system-class N (≈641
+    /// bodies) as a 194% rejection rate (3878 rejections over 2001
+    /// accepted sub-steps), nearly all via `RejectTruncation`. The
+    /// original max-max formula treated outliers as if they were
+    /// representative of the whole system: `max||b₆||` picked up the
+    /// one body whose `b₆` had the largest round-off noise,
+    /// `max||a₀||` picked up the Sun's dominant acceleration,
+    /// producing a ratio that was a noise-to-signal measurement
+    /// rather than a truncation estimate. See the diagnostic write-
+    /// up referenced in `picard_loop_inner`.
     fn truncation_error(&self, a0: &[(f64, f64)]) -> f64 {
-        let mut max_b6 = 0.0_f64;
-        let mut max_a = 0.0_f64;
+        let mut sum_sq = 0.0_f64;
+        let mut count: usize = 0;
         for (i, row) in self.b.iter().enumerate() {
             let b = row[6];
-            max_b6 = max_b6.max((b.0 * b.0 + b.1 * b.1).sqrt());
-            max_a = max_a.max((a0[i].0 * a0[i].0 + a0[i].1 * a0[i].1).sqrt());
+            let b6 = (b.0 * b.0 + b.1 * b.1).sqrt();
+            let a_mag = (a0[i].0 * a0[i].0 + a0[i].1 * a0[i].1).sqrt();
+            if a_mag > 0.0 {
+                let rel = b6 / a_mag;
+                sum_sq += rel * rel;
+                count += 1;
+            }
         }
-        if max_a > 0.0 { max_b6 / max_a } else { 0.0 }
+        if count > 0 { (sum_sq / count as f64).sqrt() } else { 0.0 }
     }
 
     /// Compute the optimal Δt for the next attempt given the current
