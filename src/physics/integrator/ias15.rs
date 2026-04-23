@@ -860,6 +860,33 @@ impl Integrator for Ias15 {
                     self.substeps_total = self.substeps_total.saturating_add(1);
                     if step_degraded {
                         self.degraded_total = self.degraded_total.saturating_add(1);
+                        // Distinguish the two causes reported by `decide_dt`:
+                        // `dt_try <= DT_MIN` means the adaptive controller
+                        // wanted to shrink further but saturated the floor,
+                        // which is a **scenario stiffness signal** — the
+                        // close-encounter geometry is beyond what IAS15 can
+                        // resolve at f64 precision. Worth logging because
+                        // the user chose IAS15 consciously (it is not the
+                        // real-time default) and expects signal when the
+                        // integrator gives up on local truncation.
+                        //
+                        // The deadline branch (cooperative budget exhausted)
+                        // is expected in interactive precision runs and is
+                        // not a scenario indictment — left silent here; the
+                        // cumulative counter in `AdaptiveStats` still tracks
+                        // it.
+                        if dt_try <= DT_MIN {
+                            eprintln!(
+                                "[gravity-sim] WARN: IAS15 dt floor reached (dt={:.3e} ≤ {:.3e}); \
+                                 controller accepted degraded step #{}. Scenario may be stiff \
+                                 (close-encounter geometry below softening, N too large for \
+                                 controller to resolve). Consider increasing softening, reducing \
+                                 N, or relaxing ε.",
+                                dt_try,
+                                DT_MIN,
+                                self.degraded_total,
+                            );
+                        }
                     }
 
                     // Accept path ──────────────────────────────────────
@@ -943,6 +970,20 @@ impl Integrator for Ias15 {
             picard_iters: self.picard_iters_total,
             degraded: self.degraded_total,
         })
+    }
+
+    fn execution_profile(&self) -> super::traits::ExecutionProfile {
+        // Adaptive Gauss-Radau with unbounded shrinking toward DT_MIN in
+        // stiff regimes; per-step wall time is not bounded by N alone.
+        super::traits::ExecutionProfile::Precision
+    }
+
+    fn requires_deterministic_force(&self) -> bool {
+        // Picard predictor-corrector reaches its fixed point only when
+        // f(x, v, t) is bit-reproducible across iterations. BH tree
+        // rebuilds are position-dependent and break this; direct O(N²)
+        // satisfies it.
+        true
     }
 }
 

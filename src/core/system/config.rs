@@ -103,8 +103,45 @@ impl System {
     }
 
     /// Switch the integration algorithm. Takes effect on the next `step()`.
+    ///
+    /// ## Integrator–force compatibility
+    ///
+    /// Some integrators (IAS15) require the force model to be a
+    /// deterministic function of state — bit-reproducible across
+    /// Picard iterations. Barnes-Hut's position-dependent tree
+    /// rebuild violates that invariant and, at large N, cascades into
+    /// controller rejections and `dt` collapse.
+    ///
+    /// This method is the **single enforcement point** for that rule:
+    /// if the new integrator requires a deterministic force and the
+    /// current force model is not configured deterministically, the
+    /// force model is auto-reconfigured (exact threshold raised so BH
+    /// is bypassed) and a warning is emitted to stderr. Downstream
+    /// code (physics thread, UI) never needs to re-check the pairing.
     pub fn set_integrator(&mut self, kind: IntegratorKind) {
-        self.integrator = make_integrator(kind);
+        let integrator = make_integrator(kind);
+
+        if integrator.requires_deterministic_force()
+            && !self.force_model.is_deterministic()
+        {
+            let prev_threshold = self.force_model.exact_threshold();
+            // 10_000 is the engine's clamp ceiling; `usize::MAX`
+            // saturates to it and guarantees the BH branch is
+            // unreachable for any practical N.
+            self.force_model.set_exact_threshold(usize::MAX);
+            eprintln!(
+                "[gravity-sim] WARN: integrator {:?} requires deterministic \
+                 force; switching force model to direct O(N²) \
+                 (exact_threshold {} → {}). Expect slower wall-time per \
+                 step at high N. Select Velocity Verlet or Yoshida 4 for \
+                 real-time playback.",
+                kind,
+                prev_threshold,
+                self.force_model.exact_threshold(),
+            );
+        }
+
+        self.integrator = integrator;
     }
 
     /// Set the IAS15 error tolerance. No-op for other integrators.

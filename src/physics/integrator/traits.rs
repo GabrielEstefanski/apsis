@@ -221,6 +221,45 @@ pub struct StepResult {
     pub degraded: bool,
 }
 
+// ── ExecutionProfile ──────────────────────────────────────────────────────────
+
+/// How an integrator expects to be driven.
+///
+/// This is part of the *contract* an integrator advertises — not a hint.
+/// Consumers (physics thread, UI, benchmark) read it to choose their
+/// execution discipline and to adapt their feedback to the user.
+///
+/// Two profiles are recognised today:
+///
+/// * [`Realtime`](ExecutionProfile::Realtime) — per-step wall time is
+///   bounded by the force evaluation cost (O(N) or O(N log N) per step)
+///   and the user-facing `dt`. Safe to drive from a render loop at
+///   60 Hz. Fixed-step integrators (Velocity Verlet, Yoshida 4,
+///   Wisdom–Holman) fall here.
+///
+/// * [`Precision`](ExecutionProfile::Precision) — per-step wall time is
+///   unbounded in the adversarial case. IAS15's adaptive controller can
+///   shrink `dt` arbitrarily in a stiff regime, spending seconds to
+///   minutes on a single visible frame. These integrators must be run
+///   off the render thread to completion ("precision run" UI), with a
+///   progress indicator rather than a frame budget.
+///
+/// New integrators should default to `Realtime` unless their
+/// algorithmic structure makes per-step wall time unbounded.
+///
+/// # Future evolution
+///
+/// Two values is enough today. If a future integrator sits between
+/// these (e.g. FMM with amortised per-step cost that spikes on
+/// reorganisation), extend this enum rather than adding parallel flags.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExecutionProfile {
+    /// Bounded per-step wall time; drive from a real-time loop.
+    Realtime,
+    /// Unbounded per-step wall time; run to completion off-thread.
+    Precision,
+}
+
 // ── Integrator trait ──────────────────────────────────────────────────────────
 
 /// A symplectic (or general) N-body integrator.
@@ -272,6 +311,50 @@ pub trait Integrator: Send {
     /// See [`AdaptiveStats`] for field semantics.
     fn adaptive_stats(&self) -> Option<AdaptiveStats> {
         None
+    }
+
+    /// Execution discipline this integrator requires of its caller.
+    /// Default is [`Realtime`](ExecutionProfile::Realtime); adaptive /
+    /// implicit schemes whose per-step wall time is unbounded should
+    /// return [`Precision`](ExecutionProfile::Precision).
+    fn execution_profile(&self) -> ExecutionProfile {
+        ExecutionProfile::Realtime
+    }
+
+    /// Whether this integrator requires the force model to be a
+    /// deterministic function of state — i.e. `f(x, v, t)` bit-reproducible
+    /// across calls with the same `(x, v, t)` to within f64 ULP.
+    ///
+    /// **Why this matters.** High-order implicit methods (IAS15) solve
+    /// an implicit system by Picard iteration within each sub-step.
+    /// Any non-determinism between iterations — including the
+    /// position-dependent cell-boundary discontinuities of an approximate
+    /// tree code like Barnes-Hut — prevents the fixed point from being
+    /// reached and is interpreted by the error controller as truncation
+    /// error, cascading `dt` toward the floor. REBOUND's IAS15 pairs
+    /// exclusively with direct O(N²) summation for this reason.
+    ///
+    /// Low-order explicit / symplectic schemes (Verlet, Yoshida) tolerate
+    /// non-deterministic forces because their per-step error bound
+    /// absorbs the tree-noise at O(dt²) or better. They return `false`
+    /// and may be paired with any force model.
+    ///
+    /// `System::set_integrator` reads this and the force model's
+    /// [`is_deterministic`](crate::physics::integrator::force_model::ForceModel::is_deterministic)
+    /// to enforce compatibility — auto-correcting the force-model
+    /// configuration with an audible `eprintln!` warning if they
+    /// conflict.
+    ///
+    /// # Future evolution
+    ///
+    /// Returning a boolean here will eventually be upgraded to a
+    /// required `DeterminismLevel` (`Strict` / `Approximate { bound }`
+    /// / `Nondeterministic`), once a second non-trivial force model
+    /// (FMM with bounded multipole error, GPU kernel with reduction
+    /// noise) makes the distinction load-bearing. Until then the
+    /// boolean is sufficient and does not encode spurious precision.
+    fn requires_deterministic_force(&self) -> bool {
+        false
     }
 }
 

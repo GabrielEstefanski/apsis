@@ -56,7 +56,9 @@ pub struct PhysicsConfig {
 impl Default for PhysicsConfig {
     fn default() -> Self {
         Self {
-            integrator: IntegratorKind::VelocityVerlet,
+            // Matches `System::new`. See the ADR on integrator execution
+            // profile for why Yoshida 4 is the real-time default.
+            integrator: IntegratorKind::Yoshida4,
             exact_threshold: 64,
             seed: 0,
             theta: 0.5,
