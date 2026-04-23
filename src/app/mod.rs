@@ -1,6 +1,7 @@
 pub mod canvas;
 pub mod config;
 pub mod icons;
+pub mod notifications;
 pub mod panel;
 pub mod render_hints;
 pub mod render_params;
