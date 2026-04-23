@@ -58,6 +58,24 @@ impl System {
         &self.scratch_acc
     }
 
+    /// Lightweight accessor for adaptive-integrator counters. Avoids
+    /// the full [`Metrics`] assembly when the caller only needs the
+    /// adaptive state — useful inside the physics thread's hot loop
+    /// (e.g. Precision Run telemetry updates) where rebuilding every
+    /// observable every tick is wasteful.
+    pub fn adaptive_stats(
+        &self,
+    ) -> Option<crate::physics::integrator::traits::AdaptiveStats> {
+        self.integrator.adaptive_stats()
+    }
+
+    /// Current relative energy error `δE/E₀` (signed). The same value
+    /// is available via [`Metrics::rel_energy_error`] but this
+    /// accessor avoids the allocation-cost of a full metrics build.
+    pub fn rel_energy_error(&self) -> f64 {
+        self.rel_energy_error
+    }
+
     /// Physics-justified recommended timestep from the current system state.
     ///
     /// Uses two criteria (Power et al. 2003 acceleration + Aarseth jerk).
