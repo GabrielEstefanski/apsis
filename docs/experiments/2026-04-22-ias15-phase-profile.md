@@ -535,3 +535,104 @@ wired at the right granularity.
 the natural first attempt — smallest risk, measurable signal,
 unblocks target B by freeing enough wall time for its signal to
 be visible above the Criterion variance floor.*
+
+---
+
+## Addendum (2026-04-22 evening) — Large-N scenario reorders priorities
+
+Added `cluster_n50` to the harness: 50 equal-mass bodies uniformly
+sampled in a unit disk with seeded RNG, circular velocities around
+the centre of mass, softening 0.02. N=50 sits just below the
+Barnes-Hut crossover (`EXACT_THRESHOLD = 64`), so the force path
+is pure O(N²) and the scenario isolates `evaluate`'s pair-loop
+scaling from any tree-build overhead.
+
+Bit-determinism holds across 10 runs: all metrics recorded with
+`tol_factor = 1.0` / `tol_abs = 0`.
+
+### Phase breakdown at N=50
+
+| Phase | Total (ms) | Calls | ns / call | % total |
+|-------|-----------:|------:|----------:|--------:|
+| **evaluate** | **148.508** | 28 889 | 5 140.6 | **87.04%** |
+| **update_g_and_b** | **20.426** | 27 055 | 755.0 | **11.97%** |
+| advance_state | 0.508 | 917 | 553.4 | 0.30% |
+| residual_compute | 0.446 | 3 865 | 115.4 | 0.26% |
+| snapshot_capture | 0.271 | 917 | 295.2 | 0.16% |
+| recompute_g_from_b | 0.259 | 963 | 269.4 | 0.15% |
+| warmstart_b | 0.185 | 959 | 192.7 | 0.11% |
+| snapshot_restore | 0.017 | 46 | 360.9 | 0.01% |
+
+### The "update\_g\_and\_b will dominate at larger N" speculation was wrong
+
+§4.2 proposed that the phase ordering crossover at N=3 would
+continue — `update_g_and_b` overtaking `evaluate` as N grew —
+and that this motivated SIMD/SoA work on `update_g_and_b` as a
+future optimisation target (§5 target C). The data refutes that
+prediction unambiguously.
+
+Per-call cost scaling from N=2 (kepler\_e09 data) to N=50:
+
+| Phase | N=2 ns/call | N=50 ns/call | Ratio | Expected from algorithmic O(·) |
+|-------|------------:|-------------:|------:|-------------------------------|
+| evaluate | 54.0 | 5 140.6 | **95.2×** | O(N²) ⇒ 625× if pure pair-loop |
+| update\_g\_and\_b | 46.3 | 755.0 | **16.3×** | O(N) ⇒ 25× if pure body-loop |
+
+`evaluate`'s 95× is below the 625× ideal because the per-call
+overhead (function dispatch, bounds setup, softening branch) was
+dominating at N=2. Once the pair loop itself dominates at N=50,
+the O(N²) scaling asserts and evaluate consumes 87% of everything.
+`update_g_and_b`'s 16× is below its 25× ideal, suggesting
+auto-vectorisation is already kicking in for its larger loops
+on the current Rust/LLVM stack.
+
+Total share:
+* `evaluate`: 50% (N=2) → 44% (N=3) → **87%** (N=50). The
+  crossover was a short-lived N=3 artefact, not a trend.
+* `update_g_and_b`: 37% (N=2) → 47% (N=3) → **12%** (N=50). The
+  largest absolute loss-share.
+
+### Reordered target list
+
+With this data, the priority order from §5 becomes:
+
+1. **(B) PE elision inside Picard** — promoted to #1.
+   At N=50, 87% of total wall time is in `evaluate`. If the
+   potential-energy accumulation is ~30% of `evaluate`'s cost
+   (a reasonable first estimate — PE does an extra `log`-like
+   softening term and an accumulator add per pair), eliding it
+   on the 7 per-iteration Picard calls saves 0.3 × 7/9 ≈ 23% of
+   `evaluate`'s work ≈ **20% of total wall time at N=50**.
+   At N=2 the same elision saves ~12% of total. Both scales win.
+
+2. **(E) `evaluate` pair-loop SIMD** — new target, N-scenario-only.
+   The 5.1 µs per call at N=50 is 1225 pairs × ~4 ns/pair —
+   already tight, but a tuned SIMD pair-loop could push the
+   per-pair cost down to ~1.5–2 ns. Would save 40–60% of
+   `evaluate` at N=50 ≈ **35–50% of total wall time**. Requires
+   isolating the force engine's inner loop and re-testing with
+   the scalar path remaining correct. High effort, high reward —
+   but the ceiling only exists at large N.
+
+3. **(C) `update_g_and_b` SoA/SIMD** — deprioritised.
+   Ceiling is 12% of wall time at N=50 (less above the
+   Barnes-Hut crossover). Implementation cost is large (layout
+   change, compensated-summation reformulation). Poor ROI
+   versus the above two targets. Revisit only if (B) and (E)
+   have been exhausted and a regime emerges where this phase
+   dominates.
+
+### Takeaway
+
+The §4.2 extrapolation ("crossover will continue with N") was
+speculation from two data points. Adding a third point (N=50)
+falsified it. The cost of running the experiment was a single
+scenario addition (~80 lines of deterministic initial-condition
+generation); the benefit was a complete reprioritisation of the
+optimisation roadmap, avoiding what would have been weeks of
+work on `update_g_and_b` for a capped 12% payoff.
+
+This is exactly the failure mode the harness was built to
+prevent: decisions guided by data that spans the regimes we
+actually care about, not by intuition extrapolated from small
+test cases.
