@@ -860,6 +860,37 @@ impl Integrator for Ias15 {
                     self.substeps_total = self.substeps_total.saturating_add(1);
                     if step_degraded {
                         self.degraded_total = self.degraded_total.saturating_add(1);
+                        // Distinguish the two causes reported by `decide_dt`:
+                        // `dt_try <= DT_MIN` means the adaptive controller
+                        // wanted to shrink further but saturated the floor,
+                        // which is a **scenario stiffness signal** — the
+                        // close-encounter geometry is beyond what IAS15 can
+                        // resolve at f64 precision. The deadline branch
+                        // (cooperative budget exhausted) is expected in
+                        // interactive precision runs and is not a scenario
+                        // indictment — silenced here; the cumulative counter
+                        // in `AdaptiveStats` still tracks it.
+                        //
+                        // Log rate: first three occurrences verbatim, then
+                        // every power of two (4, 8, 16, 32, ...). Exponentially
+                        // thins the emission rate while keeping a running
+                        // `floor_hit_count` in every event. Avoids drowning
+                        // stderr when a pathological scene hits the floor
+                        // thousands of times, without losing the initial
+                        // signal.
+                        if dt_try <= DT_MIN {
+                            let c = self.degraded_total;
+                            if c <= 3 || c.is_power_of_two() {
+                                crate::warn_diag!(
+                                    "IAS15 dt floor reached; controller accepted degraded step",
+                                    dt = dt_try,
+                                    floor = DT_MIN,
+                                    floor_hit_count = c,
+                                    substep = self.substeps_total,
+                                    hint = "scenario may be stiff — consider increasing softening, reducing N, or relaxing epsilon",
+                                );
+                            }
+                        }
                     }
 
                     // Accept path ──────────────────────────────────────
@@ -943,6 +974,20 @@ impl Integrator for Ias15 {
             picard_iters: self.picard_iters_total,
             degraded: self.degraded_total,
         })
+    }
+
+    fn execution_profile(&self) -> super::traits::ExecutionProfile {
+        // Adaptive Gauss-Radau with unbounded shrinking toward DT_MIN in
+        // stiff regimes; per-step wall time is not bounded by N alone.
+        super::traits::ExecutionProfile::Precision
+    }
+
+    fn requires_deterministic_force(&self) -> bool {
+        // Picard predictor-corrector reaches its fixed point only when
+        // f(x, v, t) is bit-reproducible across iterations. BH tree
+        // rebuilds are position-dependent and break this; direct O(N²)
+        // satisfies it.
+        true
     }
 }
 
