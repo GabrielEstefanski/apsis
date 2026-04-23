@@ -9,7 +9,7 @@
 //! `TemplateBody` is intentionally a *descriptor*, not a `Body`. It holds only
 //! the quantities that the scenario author specifies explicitly; all derived
 //! physical properties (density, physical radius, softening)
-//! are computed by `Body::new` at instantiation time using the material model.
+//! are computed by `Body::of` at instantiation time using the material model.
 //!
 //! This separation means templates are:
 //! - **Compact** — no redundant derived fields.
@@ -36,7 +36,7 @@ use crate::domain::materials::Material;
 /// Descriptor for one body in a simulation template.
 ///
 /// All fields that can be derived from [`Material`] and mass are omitted here
-/// and computed at instantiation time by [`Body::new`].  Only the quantities
+/// and computed at instantiation time by [`Body::of`].  Only the quantities
 /// that cannot be derived — or that the scenario author wants to override —
 /// are present.
 ///

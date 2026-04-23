@@ -264,14 +264,9 @@ impl SimulationApp {
                 let f = self.selection_form.as_ref().unwrap();
                 let mass = f.mass.parse::<f64>().ok().filter(|&v| v > 0.0)?;
                 let density = f.density.parse::<f64>().ok().filter(|&v| v > 0.0)?;
-                let mut b = Body::new(
-                    f.x.parse().ok()?,
-                    f.y.parse().ok()?,
-                    f.vx.parse().ok()?,
-                    f.vy.parse().ok()?,
-                    mass,
-                    gravity_sim_core::domain::materials::Material::Rocky,
-                );
+                let mut b = Body::rocky(mass)
+                    .at(f.x.parse().ok()?, f.y.parse().ok()?)
+                    .with_velocity(f.vx.parse().ok()?, f.vy.parse().ok()?);
                 b.density = density;
                 b.sync_physical_properties();
                 b.softening = b.softening.max(b.physical_radius * 2.0);

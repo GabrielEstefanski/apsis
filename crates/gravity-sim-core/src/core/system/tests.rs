@@ -17,20 +17,20 @@ use crate::physics::integrator::IntegratorKind;
 
 fn two_body_circular_system(integrator: IntegratorKind, dt: f64) -> System {
     let bodies = vec![
-        Body::new(-1.0, 0.0, 0.0, -0.5, 1.0, Material::Rocky),
-        Body::new(1.0, 0.0, 0.0, 0.5, 1.0, Material::Rocky),
+        Body::rocky(1.0).at(-1.0, 0.0).with_velocity(0.0, -0.5),
+        Body::rocky(1.0).at(1.0, 0.0).with_velocity(0.0, 0.5),
     ];
-    let mut sys = System::new(bodies, 0.5, dt, 10, 1);
+    let mut sys = System::new(bodies).with_theta(0.5).with_dt(dt).with_max_depth(10);
     sys.set_integrator(integrator);
     sys
 }
 
 fn two_body_deterministic_system() -> System {
     let bodies = vec![
-        Body::new(-1.0, 0.0, 0.0, -0.5, 1.0, Material::Rocky),
-        Body::new(1.0, 0.0, 0.0, 0.5, 1.0, Material::Rocky),
+        Body::rocky(1.0).at(-1.0, 0.0).with_velocity(0.0, -0.5),
+        Body::rocky(1.0).at(1.0, 0.0).with_velocity(0.0, 0.5),
     ];
-    let mut sys = System::new(bodies, 0.5, 0.01, 10, 1);
+    let mut sys = System::new(bodies).with_theta(0.5).with_dt(0.01).with_max_depth(10);
     // Replay/determinism tests use a fixed-step, stateless integrator.
     // IAS15 (the project default) carries warm-start state (b, e, csb, dt_next)
     // that is intentionally not serialised in snapshots — reloading resets it
@@ -141,10 +141,10 @@ mod wh_guard {
     #[test]
     fn hierarchical_system_is_suitable() {
         let bodies = vec![
-            Body::new(0.0, 0.0, 0.0, 0.0, 1000.0, Material::Star),
-            Body::new(10.0, 0.0, 0.0, 10.0, 1.0, Material::Rocky),
+            Body::star(1000.0).at(0.0, 0.0).with_velocity(0.0, 0.0),
+            Body::rocky(1.0).at(10.0, 0.0).with_velocity(0.0, 10.0),
         ];
-        let mut sys = System::new(bodies, 0.5, 0.01, 10, 1);
+        let mut sys = System::new(bodies).with_theta(0.5).with_dt(0.01).with_max_depth(10);
         sys.set_integrator(IntegratorKind::WisdomHolman);
         assert!(sys.is_wh_suitable());
     }
@@ -152,10 +152,10 @@ mod wh_guard {
     #[test]
     fn equal_mass_system_is_not_suitable() {
         let bodies = vec![
-            Body::new(-1.0, 0.0, 0.0, -0.5, 1.0, Material::Rocky),
-            Body::new(1.0, 0.0, 0.0, 0.5, 1.0, Material::Rocky),
+            Body::rocky(1.0).at(-1.0, 0.0).with_velocity(0.0, -0.5),
+            Body::rocky(1.0).at(1.0, 0.0).with_velocity(0.0, 0.5),
         ];
-        let mut sys = System::new(bodies, 0.5, 0.01, 10, 1);
+        let mut sys = System::new(bodies).with_theta(0.5).with_dt(0.01).with_max_depth(10);
         sys.set_integrator(IntegratorKind::WisdomHolman);
         assert!(!sys.is_wh_suitable());
     }
@@ -163,11 +163,11 @@ mod wh_guard {
     #[test]
     fn three_equal_mass_is_not_suitable() {
         let bodies = vec![
-            Body::new(-1.0, 0.0, 0.0, -0.5, 1.0, Material::Rocky),
-            Body::new(1.0, 0.0, 0.0, 0.5, 1.0, Material::Rocky),
-            Body::new(0.0, 1.0, 0.5, 0.0, 1.0, Material::Rocky),
+            Body::rocky(1.0).at(-1.0, 0.0).with_velocity(0.0, -0.5),
+            Body::rocky(1.0).at(1.0, 0.0).with_velocity(0.0, 0.5),
+            Body::rocky(1.0).at(0.0, 1.0).with_velocity(0.5, 0.0),
         ];
-        let mut sys = System::new(bodies, 0.5, 0.01, 10, 1);
+        let mut sys = System::new(bodies).with_theta(0.5).with_dt(0.01).with_max_depth(10);
         sys.set_integrator(IntegratorKind::WisdomHolman);
         assert!(!sys.is_wh_suitable());
     }
@@ -175,34 +175,34 @@ mod wh_guard {
     #[test]
     fn boundary_at_exactly_10x_is_suitable() {
         let bodies = vec![
-            Body::new(0.0, 0.0, 0.0, 0.0, 10.0, Material::Star),
-            Body::new(10.0, 0.0, 0.0, 1.0, 1.0, Material::Rocky),
+            Body::star(10.0).at(0.0, 0.0).with_velocity(0.0, 0.0),
+            Body::rocky(1.0).at(10.0, 0.0).with_velocity(0.0, 1.0),
         ];
-        assert!(System::new(bodies, 0.5, 0.01, 10, 1).is_wh_suitable());
+        assert!(System::new(bodies).with_theta(0.5).with_dt(0.01).with_max_depth(10).is_wh_suitable());
     }
 
     #[test]
     fn boundary_below_10x_is_not_suitable() {
         let bodies = vec![
-            Body::new(0.0, 0.0, 0.0, 0.0, 9.9, Material::Star),
-            Body::new(10.0, 0.0, 0.0, 1.0, 1.0, Material::Rocky),
+            Body::star(9.9).at(0.0, 0.0).with_velocity(0.0, 0.0),
+            Body::rocky(1.0).at(10.0, 0.0).with_velocity(0.0, 1.0),
         ];
-        assert!(!System::new(bodies, 0.5, 0.01, 10, 1).is_wh_suitable());
+        assert!(!System::new(bodies).with_theta(0.5).with_dt(0.01).with_max_depth(10).is_wh_suitable());
     }
 
     #[test]
     fn single_body_is_not_suitable() {
-        let bodies = vec![Body::new(0.0, 0.0, 0.0, 0.0, 1.0, Material::Rocky)];
-        assert!(!System::new(bodies, 0.5, 0.01, 10, 1).is_wh_suitable());
+        let bodies = vec![Body::rocky(1.0).at(0.0, 0.0).with_velocity(0.0, 0.0)];
+        assert!(!System::new(bodies).with_theta(0.5).with_dt(0.01).with_max_depth(10).is_wh_suitable());
     }
 
     #[test]
     fn non_hierarchical_does_not_panic_and_stays_finite() {
         let bodies = vec![
-            Body::new(-1.0, 0.0, 0.0, -0.5, 1.0, Material::Rocky),
-            Body::new(1.0, 0.0, 0.0, 0.5, 1.0, Material::Rocky),
+            Body::rocky(1.0).at(-1.0, 0.0).with_velocity(0.0, -0.5),
+            Body::rocky(1.0).at(1.0, 0.0).with_velocity(0.0, 0.5),
         ];
-        let mut sys = System::new(bodies, 0.5, 0.01, 10, 1);
+        let mut sys = System::new(bodies).with_theta(0.5).with_dt(0.01).with_max_depth(10);
         sys.set_integrator(IntegratorKind::WisdomHolman);
         for _ in 0..100 {
             sys.step();
@@ -216,12 +216,12 @@ mod wh_guard {
     #[test]
     fn fallback_energy_matches_yoshida4_directly() {
         let bodies = vec![
-            Body::new(-1.0, 0.0, 0.0, -0.5, 1.0, Material::Rocky),
-            Body::new(1.0, 0.0, 0.0, 0.5, 1.0, Material::Rocky),
+            Body::rocky(1.0).at(-1.0, 0.0).with_velocity(0.0, -0.5),
+            Body::rocky(1.0).at(1.0, 0.0).with_velocity(0.0, 0.5),
         ];
-        let mut sys_wh = System::new(bodies.clone(), 0.5, 0.01, 10, 1);
+        let mut sys_wh = System::new(bodies.clone()).with_theta(0.5).with_dt(0.01).with_max_depth(10);
         sys_wh.set_integrator(IntegratorKind::WisdomHolman);
-        let mut sys_y4 = System::new(bodies, 0.5, 0.01, 10, 1);
+        let mut sys_y4 = System::new(bodies).with_theta(0.5).with_dt(0.01).with_max_depth(10);
         sys_y4.set_integrator(IntegratorKind::Yoshida4);
 
         for _ in 0..100 {
@@ -279,12 +279,12 @@ mod benchmarks {
         let r_peri = A * (1.0 - E);
         let v_peri = (MU * (1.0 + E) / (A * (1.0 - E))).sqrt();
 
-        let mut b1 = Body::new(-r_peri / 2.0, 0.0, 0.0, -v_peri / 2.0, 1.0, Material::Rocky);
+        let mut b1 = Body::rocky(1.0).at(-r_peri / 2.0, 0.0).with_velocity(0.0, -v_peri / 2.0);
         b1.softening = 0.0;
-        let mut b2 = Body::new(r_peri / 2.0, 0.0, 0.0, v_peri / 2.0, 1.0, Material::Rocky);
+        let mut b2 = Body::rocky(1.0).at(r_peri / 2.0, 0.0).with_velocity(0.0, v_peri / 2.0);
         b2.softening = 0.0;
 
-        let mut sys = System::new(vec![b1, b2], 0.5, dt, 10, 1);
+        let mut sys = System::new(vec![b1, b2]).with_theta(0.5).with_dt(dt).with_max_depth(10);
         sys.set_integrator(integrator);
         for _ in 0..n_steps { sys.step(); }
         let t = n_steps as f64 * dt;
@@ -342,12 +342,12 @@ mod benchmarks {
         let bodies = FIGURE8_IC
             .iter()
             .map(|&(x, y, vx, vy)| {
-                let mut b = Body::new(x, y, vx, vy, 1.0, Material::Rocky);
+                let mut b = Body::rocky(1.0).at(x, y).with_velocity(vx, vy);
                 b.softening = 0.0;
                 b
             })
             .collect();
-        let mut sys = System::new(bodies, 0.5, DT, 10, 1);
+        let mut sys = System::new(bodies).with_theta(0.5).with_dt(DT).with_max_depth(10);
         sys.set_integrator(IntegratorKind::Yoshida4);
         for _ in 0..STEPS { sys.step(); }
 
@@ -376,12 +376,12 @@ mod benchmarks {
             let bodies = FIGURE8_IC
                 .iter()
                 .map(|&(x, y, vx, vy)| {
-                    let mut b = Body::new(x, y, vx, vy, 1.0, Material::Rocky);
+                    let mut b = Body::rocky(1.0).at(x, y).with_velocity(vx, vy);
                     b.softening = 0.0;
                     b
                 })
                 .collect();
-            let mut sys = System::new(bodies, 0.5, dt, 10, 1);
+            let mut sys = System::new(bodies).with_theta(0.5).with_dt(dt).with_max_depth(10);
             sys.set_integrator(integrator);
             for _ in 0..steps { sys.step(); }
             println!("{label}  t={:.6}  T={FIGURE8_T:.6}", steps as f64 * dt);
@@ -408,12 +408,12 @@ mod benchmarks {
 
     fn pythagorean_system(dt: f64) -> System {
         let mut bodies = [
-            Body::new( 1.0,  3.0, 0.0, 0.0, 3.0, Material::Rocky),
-            Body::new(-2.0, -1.0, 0.0, 0.0, 4.0, Material::Rocky),
-            Body::new( 1.0, -1.0, 0.0, 0.0, 5.0, Material::Rocky),
+            Body::rocky(3.0).at(1.0, 3.0).with_velocity(0.0, 0.0),
+            Body::rocky(4.0).at(-2.0, -1.0).with_velocity(0.0, 0.0),
+            Body::rocky(5.0).at(1.0, -1.0).with_velocity(0.0, 0.0),
         ];
         for b in &mut bodies { b.softening = 0.0; }
-        let mut sys = System::new(bodies.to_vec(), 0.5, dt, 10, 1);
+        let mut sys = System::new(bodies.to_vec()).with_theta(0.5).with_dt(dt).with_max_depth(10);
         sys.set_integrator(IntegratorKind::Yoshida4);
         sys
     }
@@ -697,10 +697,12 @@ mod integrator_force_compat {
         let bodies: Vec<Body> = (0..80)
             .map(|i| {
                 let theta = i as f64 * 0.1;
-                Body::new(theta.cos(), theta.sin(), 0.0, 0.0, 1.0, Material::Rocky)
+                Body::rocky(1.0)
+                    .at(theta.cos(), theta.sin())
+                    .with_velocity(0.0, 0.0)
             })
             .collect();
-        System::new(bodies, 0.5, 0.01, 10, 1)
+        System::new(bodies).with_theta(0.5).with_dt(0.01).with_max_depth(10)
     }
 
     #[test]
@@ -774,10 +776,10 @@ mod integrator_force_compat {
         // The check guards that we do not accidentally *decrease* the
         // threshold in that regime.
         let bodies = vec![
-            Body::new(-1.0, 0.0, 0.0, -0.5, 1.0, Material::Rocky),
-            Body::new(1.0, 0.0, 0.0, 0.5, 1.0, Material::Rocky),
+            Body::rocky(1.0).at(-1.0, 0.0).with_velocity(0.0, -0.5),
+            Body::rocky(1.0).at(1.0, 0.0).with_velocity(0.0, 0.5),
         ];
-        let mut sys = System::new(bodies, 0.5, 0.01, 10, 1);
+        let mut sys = System::new(bodies).with_theta(0.5).with_dt(0.01).with_max_depth(10);
 
         sys.set_integrator(IntegratorKind::Ias15);
 

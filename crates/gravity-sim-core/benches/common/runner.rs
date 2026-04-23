@@ -212,13 +212,10 @@ fn expected_substeps_upper_bound(spec: &ScenarioSpec) -> usize {
 }
 
 fn build_system(spec: &ScenarioSpec) -> System {
-    let mut sys = System::new(
-        spec.bodies.clone(),
-        THETA,
-        spec.dt_budget,
-        MAX_DEPTH,
-        /* trail_every */ 1,
-    );
+    let mut sys = System::new(spec.bodies.clone())
+        .with_theta(THETA)
+        .with_dt(spec.dt_budget)
+        .with_max_depth(MAX_DEPTH);
     sys.set_integrator(IntegratorKind::Ias15);
     sys
 }

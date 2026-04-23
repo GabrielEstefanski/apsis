@@ -264,6 +264,41 @@ impl System {
             self.add_named_bodies(additions);
         }
     }
+
+    // ── High-level run methods ────────────────────────────────────────────────
+
+    /// Advance the simulation by `duration` time units.
+    ///
+    /// Steps until `self.t` has advanced by at least `duration` relative to
+    /// its value at the start of the call. Uses the currently configured
+    /// timestep (`self.current_dt`) — so adaptive integrators (IAS15) decide
+    /// their own sub-cadence within each logical step, while fixed-step
+    /// integrators (Yoshida, Verlet) take exactly `ceil(duration / dt)` steps.
+    ///
+    /// Respects [`stop_requested`](crate::core::system::System::stop_requested)
+    /// and exits early if set — callers who want unconditional progress
+    /// should call [`clear_stop_request`](crate::core::system::System::clear_stop_request)
+    /// first.
+    ///
+    /// Returns the number of `step()` calls actually performed.
+    pub fn integrate_for(&mut self, duration: f64) -> u64 {
+        let t_end = self.t + duration;
+        self.integrate_until(t_end)
+    }
+
+    /// Advance the simulation until `self.t >= t_end`.
+    ///
+    /// No-op if `t_end <= self.t`. Uses the currently configured timestep
+    /// (`self.current_dt`). Respects `stop_requested` and exits early.
+    ///
+    /// Returns the number of `step()` calls actually performed.
+    pub fn integrate_until(&mut self, t_end: f64) -> u64 {
+        let start_steps = self.steps;
+        while self.t < t_end && !self.stop_requested {
+            self.step();
+        }
+        self.steps - start_steps
+    }
 }
 
 // ── Hook borrow helpers ───────────────────────────────────────────────────────

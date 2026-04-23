@@ -34,8 +34,9 @@ pub fn instantiate_at(template: &Template, cx: f64, cy: f64) -> Vec<NamedBody> {
         .map(|t| {
             let [px, py] = t.position.unwrap_or([0.0, 0.0]);
 
-            let mut b =
-                Body::new(px + dx, py + dy, t.velocity[0], t.velocity[1], t.mass, t.material);
+            let mut b = Body::of(t.mass, t.material)
+                .at(px + dx, py + dy)
+                .with_velocity(t.velocity[0], t.velocity[1]);
 
             NamedBody { body: b, name: t.name.map(str::to_owned) }
         })

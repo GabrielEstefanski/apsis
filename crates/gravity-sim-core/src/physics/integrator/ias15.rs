@@ -1456,12 +1456,12 @@ mod tests {
         // driver artificially inflates the number of `step()` calls.
         let dt_budget = period / 20.0;
 
-        let mut b1 = Body::new(-r_peri / 2.0, 0.0, 0.0, -v_peri / 2.0, 1.0, Material::Rocky);
+        let mut b1 = Body::rocky(1.0).at(-r_peri / 2.0, 0.0).with_velocity(0.0, -v_peri / 2.0);
         b1.softening = 0.0;
-        let mut b2 = Body::new(r_peri / 2.0, 0.0, 0.0, v_peri / 2.0, 1.0, Material::Rocky);
+        let mut b2 = Body::rocky(1.0).at(r_peri / 2.0, 0.0).with_velocity(0.0, v_peri / 2.0);
         b2.softening = 0.0;
 
-        let mut sys = System::new(vec![b1, b2], 0.5, dt_budget, 10, 1);
+        let mut sys = System::new(vec![b1, b2]).with_theta(0.5).with_dt(dt_budget).with_max_depth(10);
         sys.set_integrator(IntegratorKind::Ias15);
 
         let mut peak = 0.0_f64;
@@ -1543,12 +1543,12 @@ mod tests {
         let r_peri = A * (1.0 - E);
         let v_peri = (MU * (1.0 + E) / (A * (1.0 - E))).sqrt();
 
-        let mut b1 = Body::new(-r_peri / 2.0, 0.0, 0.0, -v_peri / 2.0, 1.0, Material::Rocky);
+        let mut b1 = Body::rocky(1.0).at(-r_peri / 2.0, 0.0).with_velocity(0.0, -v_peri / 2.0);
         b1.softening = 0.0;
-        let mut b2 = Body::new(r_peri / 2.0, 0.0, 0.0, v_peri / 2.0, 1.0, Material::Rocky);
+        let mut b2 = Body::rocky(1.0).at(r_peri / 2.0, 0.0).with_velocity(0.0, v_peri / 2.0);
         b2.softening = 0.0;
 
-        let mut sys = System::new(vec![b1, b2], 0.5, DT, 10, 1);
+        let mut sys = System::new(vec![b1, b2]).with_theta(0.5).with_dt(DT).with_max_depth(10);
         sys.set_integrator(IntegratorKind::Ias15);
 
         let period = 2.0 * std::f64::consts::PI * (A.powi(3) / MU).sqrt();
@@ -1591,15 +1591,15 @@ mod tests {
         const PEAK_TOL: f64 = 1e-11;
 
         let mut bodies = vec![
-            Body::new(1.0, 3.0, 0.0, 0.0, 3.0, Material::Rocky),
-            Body::new(-2.0, -1.0, 0.0, 0.0, 4.0, Material::Rocky),
-            Body::new(1.0, -1.0, 0.0, 0.0, 5.0, Material::Rocky),
+            Body::rocky(3.0).at(1.0, 3.0).with_velocity(0.0, 0.0),
+            Body::rocky(4.0).at(-2.0, -1.0).with_velocity(0.0, 0.0),
+            Body::rocky(5.0).at(1.0, -1.0).with_velocity(0.0, 0.0),
         ];
         for b in &mut bodies {
             b.softening = 0.0;
         }
 
-        let mut sys = System::new(bodies, 0.5, DT, 10, 1);
+        let mut sys = System::new(bodies).with_theta(0.5).with_dt(DT).with_max_depth(10);
         sys.set_integrator(IntegratorKind::Ias15);
 
         let n_steps = (T_END / DT).ceil() as u64;
@@ -1648,12 +1648,12 @@ mod tests {
         let period = 2.0 * std::f64::consts::PI * (A.powi(3) / MU).sqrt();
         let dt_budget = period;
 
-        let mut b1 = Body::new(-r_peri / 2.0, 0.0, 0.0, -v_peri / 2.0, 1.0, Material::Rocky);
+        let mut b1 = Body::rocky(1.0).at(-r_peri / 2.0, 0.0).with_velocity(0.0, -v_peri / 2.0);
         b1.softening = 0.0;
-        let mut b2 = Body::new(r_peri / 2.0, 0.0, 0.0, v_peri / 2.0, 1.0, Material::Rocky);
+        let mut b2 = Body::rocky(1.0).at(r_peri / 2.0, 0.0).with_velocity(0.0, v_peri / 2.0);
         b2.softening = 0.0;
 
-        let mut sys = System::new(vec![b1, b2], 0.5, dt_budget, 10, 1);
+        let mut sys = System::new(vec![b1, b2]).with_theta(0.5).with_dt(dt_budget).with_max_depth(10);
         sys.set_integrator(IntegratorKind::Ias15);
 
         let t0 = sys.t();

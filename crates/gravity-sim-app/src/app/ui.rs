@@ -140,14 +140,9 @@ impl BodyForm {
     pub fn try_build(&self) -> Option<Body> {
         let mass: f64 = self.mass.parse().ok().filter(|&v| v > 0.0)?;
         let density: f64 = self.density.parse().ok().filter(|&v| v > 0.0)?;
-        let mut b = Body::new(
-            self.x.parse().ok()?,
-            self.y.parse().ok()?,
-            self.vx.parse().ok()?,
-            self.vy.parse().ok()?,
-            mass,
-            gravity_sim_core::domain::materials::Material::Rocky,
-        );
+        let mut b = Body::rocky(mass)
+            .at(self.x.parse().ok()?, self.y.parse().ok()?)
+            .with_velocity(self.vx.parse().ok()?, self.vy.parse().ok()?);
 
         b.density = density;
         b.sync_physical_properties();

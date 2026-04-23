@@ -196,7 +196,7 @@ mod tests {
     use crate::domain::materials::Material;
 
     fn body_at(x: f64, y: f64) -> Body {
-        Body::new(x, y, 0.0, 0.0, 1.0, Material::Rocky)
+        Body::rocky(1.0).at(x, y).with_velocity(0.0, 0.0)
     }
 
     #[test]

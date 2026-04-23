@@ -38,12 +38,10 @@ pub fn run() {
     }
 
     // ── Interactive GUI mode ───────────────────────────────────────────────
-    let theta = 0.6;
-    let dt = 1e-4;
-    let max_depth = 32;
-    let trail_every = 1;
-
-    let system = System::new(vec![], theta, dt, max_depth, trail_every);
+    let system = System::new(vec![])
+        .with_theta(0.6)
+        .with_dt(1e-4)
+        .with_max_depth(32);
 
     let app = SimulationApp::new(system);
 

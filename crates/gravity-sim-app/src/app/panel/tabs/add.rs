@@ -474,7 +474,7 @@ impl SimulationApp {
                     let vx = -v * angle.sin();
                     let vy = v * angle.cos();
                     let mut b =
-                        Body::new(x, y, vx, vy, self.spawn_ring_mass, self.spawn_ring_material);
+                        Body::of(self.spawn_ring_mass, self.spawn_ring_material).at(x, y).with_velocity(vx, vy);
                     b.density = ring_density;
                     b.sync_physical_properties();
                     self.system.add_body(b);
@@ -610,14 +610,9 @@ impl SimulationApp {
                     let y = center.com_y + r * theta.sin();
                     let vx = (rng.random::<f64>() - 0.5) * self.spawn_cluster_vel_disp * 2.0;
                     let vy = (rng.random::<f64>() - 0.5) * self.spawn_cluster_vel_disp * 2.0;
-                    let mut b = Body::new(
-                        x,
-                        y,
-                        vx,
-                        vy,
-                        self.spawn_cluster_mass,
-                        self.spawn_cluster_material,
-                    );
+                    let mut b = Body::of(self.spawn_cluster_mass, self.spawn_cluster_material)
+                        .at(x, y)
+                        .with_velocity(vx, vy);
                     b.density = clust_density;
                     b.sync_physical_properties();
                     self.system.add_body(b);

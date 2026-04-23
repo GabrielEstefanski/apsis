@@ -464,7 +464,7 @@ mod tests {
 
     const G: f64 = 1.0;
     fn body(x: f64, y: f64, vx: f64, vy: f64, mass: f64) -> Body {
-        Body::new(x, y, vx, vy, mass, Material::Rocky)
+        Body::rocky(mass).at(x, y).with_velocity(vx, vy)
     }
 
     /// Órbita circular perfeita ao redor da origem.
