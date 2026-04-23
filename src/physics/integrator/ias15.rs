@@ -421,6 +421,20 @@ fn decide_dt(
 /// is the coefficient order; the pair is (x-component, y-component).
 type BodyCoeffs = [(f64, f64); 7];
 
+// Layout guard: the snapshot path uses `copy_from_slice` for tight
+// memcpy semantics and would silently copy padding if a future
+// refactor (e.g. adding a third component for 3D, or re-typing
+// the tuple) broke the tight 7·16-byte packing. Caught at compile
+// time — zero runtime cost.
+const _: () = {
+    assert!(
+        std::mem::size_of::<BodyCoeffs>() == 7 * 16,
+        "BodyCoeffs layout changed — verify snapshot copy_from_slice still hits \
+         the intended byte range"
+    );
+    assert!(std::mem::align_of::<BodyCoeffs>() == 8);
+};
+
 pub struct Ias15 {
     /// Target relative error on the dominant truncation term.
     epsilon: f64,
@@ -494,6 +508,42 @@ pub struct Ias15 {
     pic_x0: Vec<(f64, f64)>,
     pic_v0: Vec<(f64, f64)>,
     pic_b6_old: Vec<(f64, f64)>,
+
+    // ── Rejection-rollback snapshot buffers ──────────────────────────
+    //
+    // Before the rollback refactor this was a stack-allocated `Attempt`
+    // struct that cloned seven `Vec`s per sub-step. Phase profiling
+    // (see docs/experiments/2026-04-22-ias15-phase-profile.md) showed
+    // 4–8% of total wall time spent in those clones while >99% of
+    // sub-steps never reject, making the allocation/memcpy/drop cycle
+    // pure waste.
+    //
+    // Each buffer here is sized to `n` exactly once per body-count
+    // change in [`Self::ensure_capacity`]; `capture_snapshot` and
+    // `restore_snapshot` then move data via `copy_from_slice` /
+    // explicit fills with no further allocation. The
+    // [`Self::snapshot_valid`] flag guards the lifecycle: a
+    // `restore_snapshot` call without a prior `capture_snapshot`
+    // (e.g. after `ensure_capacity` resets buffers) is a programmer
+    // error and panics in debug builds rather than silently restoring
+    // stale data.
+    //
+    // `snap_csx` / `snap_csv` are retained despite the invariant that
+    // rejections never touch the live `csx`/`csv` (only `advance_state`
+    // on the accept path writes them). Keeping them in the snapshot
+    // means future code that violates that invariant — e.g. a hook
+    // that runs during a rejected attempt — still gets correct
+    // rollback semantics without silently corrupting compensated-
+    // summation carries. Cost is 32 bytes of memcpy per sub-step at
+    // N=2, well inside the wash of the bigger `b`/`e`/`csb` copies.
+    snap_x: Vec<(f64, f64)>,
+    snap_v: Vec<(f64, f64)>,
+    snap_b: Vec<BodyCoeffs>,
+    snap_e: Vec<BodyCoeffs>,
+    snap_csb: Vec<BodyCoeffs>,
+    snap_csx: Vec<(f64, f64)>,
+    snap_csv: Vec<(f64, f64)>,
+    snapshot_valid: bool,
 }
 
 impl Default for Ias15 {
@@ -522,6 +572,14 @@ impl Ias15 {
             pic_x0: Vec::new(),
             pic_v0: Vec::new(),
             pic_b6_old: Vec::new(),
+            snap_x: Vec::new(),
+            snap_v: Vec::new(),
+            snap_b: Vec::new(),
+            snap_e: Vec::new(),
+            snap_csb: Vec::new(),
+            snap_csx: Vec::new(),
+            snap_csv: Vec::new(),
+            snapshot_valid: false,
         }
     }
 
@@ -553,54 +611,80 @@ impl Ias15 {
             // The `if self.dt_next <= 0.0` guard in `step()` re-seeds from
             // the caller's budget on the next entry.
             self.dt_next = 0.0;
-        }
-    }
-}
 
-// ── State snapshot for rejection rollback ────────────────────────────────────
-
-/// Immutable snapshot of everything we must rewind if an attempt is
-/// rejected. Rolling back positions / velocities alone is not enough:
-/// the `b`, `e`, and compensated-summation arrays carry information
-/// from the rejected attempt that would otherwise bias the next try.
-struct Attempt {
-    x: Vec<(f64, f64)>,
-    v: Vec<(f64, f64)>,
-    b: Vec<BodyCoeffs>,
-    e: Vec<BodyCoeffs>,
-    csb: Vec<BodyCoeffs>,
-    csx: Vec<(f64, f64)>,
-    csv: Vec<(f64, f64)>,
-}
-
-impl Attempt {
-    fn snapshot(bodies: &[Body], ias: &Ias15) -> Self {
-        Self {
-            x: bodies.iter().map(|b| (b.x, b.y)).collect(),
-            v: bodies.iter().map(|b| (b.vx, b.vy)).collect(),
-            b: ias.b.clone(),
-            e: ias.e.clone(),
-            csb: ias.csb.clone(),
-            csx: ias.csx.clone(),
-            csv: ias.csv.clone(),
+            // Snapshot buffers: size to exactly `n`. From this point on,
+            // `capture_snapshot` and `restore_snapshot` use length-stable
+            // `copy_from_slice` and element-wise fills without reallocating.
+            // Invalidate until the first capture so a premature
+            // `restore_snapshot` is caught by the debug assertion.
+            self.snap_x = vec![(0.0, 0.0); n];
+            self.snap_v = vec![(0.0, 0.0); n];
+            self.snap_b = vec![[(0.0, 0.0); 7]; n];
+            self.snap_e = vec![[(0.0, 0.0); 7]; n];
+            self.snap_csb = vec![[(0.0, 0.0); 7]; n];
+            self.snap_csx = vec![(0.0, 0.0); n];
+            self.snap_csv = vec![(0.0, 0.0); n];
+            self.snapshot_valid = false;
         }
     }
 
-    /// Roll bodies and integrator state back to the start of the current
-    /// sub-step. Ref-based so a single snapshot can be reused across
-    /// multiple rejection retries within one `step()` call.
-    fn restore(&self, bodies: &mut [Body], ias: &mut Ias15) {
-        for (i, b) in bodies.iter_mut().enumerate() {
-            b.x = self.x[i].0;
-            b.y = self.x[i].1;
-            b.vx = self.v[i].0;
-            b.vy = self.v[i].1;
+    /// Populate the rollback snapshot buffers with the current state.
+    /// Called once per sub-step, before any `b`/`e`/`csb` modification.
+    /// After this returns, [`Self::restore_snapshot`] is allowed.
+    ///
+    /// Uses per-slot assignment for body-derived fields (which need a
+    /// tuple transformation from the `Body` struct) and `copy_from_slice`
+    /// for Ias15-internal fields (which are already `Vec<BodyCoeffs>` or
+    /// `Vec<(f64, f64)>`). Both paths are pure memcpy on the happy path
+    /// where the destination is already sized to `n` by
+    /// [`Self::ensure_capacity`].
+    fn capture_snapshot(&mut self, bodies: &[Body]) {
+        debug_assert_eq!(self.snap_x.len(), bodies.len(), "snapshot buffer size mismatch");
+
+        for (dst, src) in self.snap_x.iter_mut().zip(bodies.iter()) {
+            *dst = (src.x, src.y);
         }
-        ias.b.clone_from(&self.b);
-        ias.e.clone_from(&self.e);
-        ias.csb.clone_from(&self.csb);
-        ias.csx.clone_from(&self.csx);
-        ias.csv.clone_from(&self.csv);
+        for (dst, src) in self.snap_v.iter_mut().zip(bodies.iter()) {
+            *dst = (src.vx, src.vy);
+        }
+        self.snap_b.copy_from_slice(&self.b);
+        self.snap_e.copy_from_slice(&self.e);
+        self.snap_csb.copy_from_slice(&self.csb);
+        self.snap_csx.copy_from_slice(&self.csx);
+        self.snap_csv.copy_from_slice(&self.csv);
+
+        self.snapshot_valid = true;
+    }
+
+    /// Roll `bodies` and the integrator state back to the last
+    /// [`Self::capture_snapshot`]. Called on rejection branches.
+    ///
+    /// Debug-asserts the snapshot has actually been captured —
+    /// calling `restore` without a prior `capture` (e.g. immediately
+    /// after `ensure_capacity`'s buffer reset) is a programmer error
+    /// that previously would have silently restored all-zero state;
+    /// this fails loud in debug builds and is a single branch-predicted
+    /// check in release.
+    fn restore_snapshot(&mut self, bodies: &mut [Body]) {
+        debug_assert!(
+            self.snapshot_valid,
+            "restore_snapshot called without a prior capture_snapshot"
+        );
+        debug_assert_eq!(self.snap_x.len(), bodies.len(), "snapshot buffer size mismatch");
+
+        for (b, src) in bodies.iter_mut().zip(self.snap_x.iter()) {
+            b.x = src.0;
+            b.y = src.1;
+        }
+        for (b, src) in bodies.iter_mut().zip(self.snap_v.iter()) {
+            b.vx = src.0;
+            b.vy = src.1;
+        }
+        self.b.copy_from_slice(&self.snap_b);
+        self.e.copy_from_slice(&self.snap_e);
+        self.csb.copy_from_slice(&self.snap_csb);
+        self.csx.copy_from_slice(&self.snap_csx);
+        self.csv.copy_from_slice(&self.snap_csv);
     }
 }
 
@@ -643,8 +727,13 @@ impl Integrator for Ias15 {
         // snapshot restores positions, so we evaluate it only once —
         // saving up to `max_picard_iter × n_rejects` force calls per
         // sub-step compared to re-evaluating inside the retry loop.
-        let snapshot = time_phase!(snapshot_capture, {
-            Attempt::snapshot(bodies, self)
+        //
+        // The snapshot lives in persistent `snap_*` fields (sized in
+        // `ensure_capacity`), so this call path is pure memcpy — no
+        // per-sub-step allocation. See the field comments on `snap_*`
+        // for the lifecycle contract that `snapshot_valid` enforces.
+        time_phase!(snapshot_capture, {
+            self.capture_snapshot(bodies);
         });
 
         let raw_pe = time_phase!(evaluate, {
@@ -690,7 +779,7 @@ impl Integrator for Ias15 {
                 DtDecision::RejectPicard => {
                     self.rejections_picard_total = self.rejections_picard_total.saturating_add(1);
                     time_phase!(snapshot_restore, {
-                        snapshot.restore(bodies, self);
+                        self.restore_snapshot(bodies);
                     });
                     // Fixed halving (REBOUND convention): divergence
                     // means the step exceeds the local Lipschitz bound;
@@ -702,7 +791,7 @@ impl Integrator for Ias15 {
                     self.rejections_truncation_total =
                         self.rejections_truncation_total.saturating_add(1);
                     time_phase!(snapshot_restore, {
-                        snapshot.restore(bodies, self);
+                        self.restore_snapshot(bodies);
                     });
                     // Standard controller: dt · safety · (ε/err)^(1/7).
                     dt_try = self.optimal_dt(dt_try, trunc_err).max(DT_MIN).min(dt_cap);
@@ -724,8 +813,8 @@ impl Integrator for Ias15 {
                     let step_snapshot = DenseSnapshot {
                         t0: 0.0,
                         dt: dt_try,
-                        x0: snapshot.x.clone(),
-                        v0: snapshot.v.clone(),
+                        x0: self.snap_x.clone(),
+                        v0: self.snap_v.clone(),
                         a0: a0.clone(),
                         b: self.b.clone(),
                         kind: IntegratorKind::Ias15,
