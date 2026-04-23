@@ -65,7 +65,7 @@ pub fn pair_eps2(eps_i: f64, eps_j: f64) -> f64 {
 ///
 /// Formula: **a** = G mⱼ Δ**r** / (|Δ**r**|² + ε²)^(3/2)
 #[inline]
-pub fn plummer_acc(dx: f64, dy: f64, mass_j: f64, eps2: f64) -> (f64, f64) {
+pub(crate) fn plummer_acc(dx: f64, dy: f64, mass_j: f64, eps2: f64) -> (f64, f64) {
     let d2 = dx * dx + dy * dy + eps2;
     let inv_r = d2.sqrt().recip();
     let fac = G * mass_j * inv_r * inv_r * inv_r;
@@ -81,24 +81,9 @@ pub fn plummer_acc(dx: f64, dy: f64, mass_j: f64, eps2: f64) -> (f64, f64) {
 /// Always negative for positive mass; finite at r = 0: `Φᵢⱼ(0) = −G mⱼ / ε`.
 /// To obtain the total pair energy, multiply by mᵢ: `Eᵢⱼ = mᵢ Φᵢⱼ`.
 #[inline]
-pub fn plummer_phi(dx: f64, dy: f64, mass_j: f64, eps2: f64) -> f64 {
+pub(crate) fn plummer_phi(dx: f64, dy: f64, mass_j: f64, eps2: f64) -> f64 {
     let d2 = dx * dx + dy * dy + eps2;
     -G * mass_j * d2.sqrt().recip()
-}
-
-/// Newtonian potential (no softening) at body i due to body j.
-/// `Φᵢⱼ = −G mⱼ / r` where `r = √(dx² + dy²)`.
-///
-/// Singular at r = 0, so use with care.
-///
-/// Provided for testing and comparison with the Plummer kernel.
-/// Not used in the main simulation to avoid accidental singularities.
-///
-/// Returns negative for positive mass; diverges to −∞ at r = 0.
-#[inline]
-pub fn newtonian_phi(dx: f64, dy: f64, mass_j: f64) -> f64 {
-    let r = (dx * dx + dy * dy).sqrt();
-    -G * mass_j / r
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────── //

@@ -6,7 +6,7 @@ use crate::core::system::System;
 use crate::domain::body::Body;
 use crate::physics::gravity::BarnesHutEngine;
 use crate::physics::integrator::traits::ExecutionProfile;
-use crate::physics::integrator::{ForceModel, Integrator, IntegratorKind, make_integrator};
+use crate::physics::integrator::{ForceModel, IntegratorKind, make_integrator};
 
 /// Threshold above which selecting a [`ExecutionProfile::Precision`]
 /// integrator on the current system emits a scale advisory through
@@ -22,7 +22,7 @@ use crate::physics::integrator::{ForceModel, Integrator, IntegratorKind, make_in
 /// uncomfortably slow for a 60 Hz render loop (direct O(N²) at N=200
 /// is ~40 000 pair-evaluations per force call, ~50 µs typical, and
 /// IAS15 does ~14 force calls per accepted substep).
-pub const PRECISION_BODY_SOFT_WARN: usize = 200;
+pub(crate) const PRECISION_BODY_SOFT_WARN: usize = 200;
 
 impl System {
     /// Immutable slice of all bodies in the simulation.

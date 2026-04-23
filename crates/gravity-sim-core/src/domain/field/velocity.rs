@@ -2,7 +2,7 @@
 
 use super::body_field::{BodyField, FieldContext};
 
-pub struct VelocityMagnitudeField;
+pub(crate) struct VelocityMagnitudeField;
 
 impl BodyField for VelocityMagnitudeField {
     fn id(&self) -> &'static str {

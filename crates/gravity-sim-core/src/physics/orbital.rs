@@ -457,7 +457,7 @@ pub fn compute_all(bodies: &[Body], g_factor: f64) -> Vec<Option<OrbitalElements
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{body::Body, materials::Material};
+    use crate::domain::body::Body;
     use std::f64::consts::{PI, TAU};
 
     // ── Helpers ───────────────────────────────────────────────────────────────

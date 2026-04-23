@@ -5,6 +5,11 @@ use std::f64::consts::PI;
 /// Per-body softening scales as `EPS_BASE * mass^(1/3)`, so each body's
 /// softening volume is proportional to its mass — physically motivated by
 /// the Plummer-equivalent equal-mass softening criterion.
+///
+/// Exposed as `#[doc(hidden)] pub` so calibration and softening-scaling
+/// tools can read the baseline without committing it as a stable API
+/// constant — future calibration work may change the numeric value.
+#[doc(hidden)]
 pub const EPS_BASE: f64 = 0.02;
 
 #[derive(Clone, Copy, Debug)]

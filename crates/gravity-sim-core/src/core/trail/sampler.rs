@@ -193,7 +193,6 @@ impl Default for TrailSamplerKind {
 mod tests {
     use super::*;
     use crate::domain::body::Body;
-    use crate::domain::materials::Material;
 
     fn body_at(x: f64, y: f64) -> Body {
         Body::rocky(1.0).at(x, y).with_velocity(0.0, 0.0)
