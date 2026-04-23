@@ -325,25 +325,52 @@ pub trait Integrator: Send {
     /// deterministic function of state — i.e. `f(x, v, t)` bit-reproducible
     /// across calls with the same `(x, v, t)` to within f64 ULP.
     ///
-    /// **Why this matters.** High-order implicit methods (IAS15) solve
-    /// an implicit system by Picard iteration within each sub-step.
-    /// Any non-determinism between iterations — including the
-    /// position-dependent cell-boundary discontinuities of an approximate
-    /// tree code like Barnes-Hut — prevents the fixed point from being
-    /// reached and is interpreted by the error controller as truncation
-    /// error, cascading `dt` toward the floor. REBOUND's IAS15 pairs
-    /// exclusively with direct O(N²) summation for this reason.
+    /// # Why this matters — Picard continuity
     ///
-    /// Low-order explicit / symplectic schemes (Verlet, Yoshida) tolerate
-    /// non-deterministic forces because their per-step error bound
-    /// absorbs the tree-noise at O(dt²) or better. They return `false`
-    /// and may be paired with any force model.
+    /// High-order implicit methods (IAS15 in particular) solve an
+    /// implicit system by **Picard predictor–corrector iteration**
+    /// within each adaptive sub-step. The iteration converges iff its
+    /// operator is a contraction, which requires the force function
+    /// to be *continuous and deterministic in state across
+    /// iterations*:
     ///
-    /// `System::set_integrator` reads this and the force model's
-    /// [`is_deterministic`](crate::physics::integrator::force_model::ForceModel::is_deterministic)
-    /// to enforce compatibility — auto-correcting the force-model
-    /// configuration with an audible `eprintln!` warning if they
-    /// conflict.
+    /// 1. Between iterations, body positions drift by a small amount —
+    ///    that is the point of the corrector.
+    /// 2. The corrector consults `ForceModel::compute` on the
+    ///    perturbed state.
+    /// 3. If the force function has position-dependent *topological*
+    ///    discontinuities (e.g. Barnes-Hut: a body near a cell
+    ///    boundary crosses leaves in response to sub-ULP drift → the
+    ///    multipole approximation for that body's far-field changes
+    ///    discretely), the Picard operator is not a contraction. The
+    ///    iteration oscillates at the discontinuity scale; the outer
+    ///    controller reads the oscillation as truncation error,
+    ///    rejects the step, shrinks `dt`, and cascades toward
+    ///    `DT_MIN` — regardless of how physically benign the scenario
+    ///    actually is.
+    ///
+    /// This is why REBOUND pairs IAS15 exclusively with direct O(N²)
+    /// summation. The pairing is a mathematical prerequisite of the
+    /// method, not an implementation shortcut.
+    ///
+    /// # Why other integrators do not need this
+    ///
+    /// Low-order explicit / symplectic schemes (Verlet, Yoshida,
+    /// WHFast) do not solve an implicit system. Their per-step error
+    /// bound absorbs force-evaluation noise at O(dt²) or better, so
+    /// Barnes-Hut's tree-rebuild variation is invisible at the
+    /// trajectory level. They return `false` and may be paired with
+    /// any force model.
+    ///
+    /// # Enforcement
+    ///
+    /// `System::set_integrator` reads this together with the force
+    /// model's [`is_deterministic`](crate::physics::integrator::force_model::ForceModel::is_deterministic)
+    /// and auto-reconfigures the force model (raises the exact
+    /// threshold so BH is bypassed) when they conflict. The
+    /// auto-correction emits a structured
+    /// [`warn_diag!`](crate::warn_diag) event so the user sees
+    /// exactly what changed and why.
     ///
     /// # Future evolution
     ///

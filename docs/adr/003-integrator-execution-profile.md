@@ -99,18 +99,19 @@ properties and enforced in exactly one place.
   the new integrator requires deterministic forces and the current
   force model is not deterministic, the force model is
   auto-reconfigured (exact threshold raised so the BH branch is
-  unreachable) and an `eprintln!` WARN is emitted. No silent
+  unreachable) and a structured `warn_diag!` event is emitted on
+  stderr. No silent
   behaviour change: the user sees exactly what was corrected and
   why.
 
 ### Integrator overrides
 
-| Integrator | Execution profile | Requires deterministic force |
-|---|---|---|
-| Velocity Verlet | Realtime | false |
-| Yoshida 4 | Realtime | false |
-| Wisdom–Holman | Realtime | false |
-| IAS15 | **Precision** | **true** |
+| Integrator      | Execution profile | Requires deterministic force |
+| --------------- | ----------------- | ---------------------------- |
+| Velocity Verlet | Realtime          | false                        |
+| Yoshida 4       | Realtime          | false                        |
+| Wisdom–Holman   | Realtime          | false                        |
+| IAS15           | **Precision**     | **true**                     |
 
 ### Default integrator
 
@@ -161,7 +162,8 @@ silent by design; they are not a scenario indictment.
 
 ## Consequences
 
-**Good**
+### Good
+
 * Interactive playback regains its contract: the default integrator
   has bounded per-step cost. `fine` preset at N=1400+ becomes
   tractable again because it no longer runs an unbounded-cost
@@ -178,7 +180,8 @@ silent by design; they are not a scenario indictment.
   running IAS15 on a pathological scenario now sees it as a log
   event the moment it happens.
 
-**Neutral**
+### Neutral
+
 * The UI combo box still lists IAS15. Users who select it
   consciously accept the stutter; callers of `set_integrator` see
   the auto-correction warning.
@@ -187,7 +190,8 @@ silent by design; they are not a scenario indictment.
   are unaffected — the pairing is now automatic via the enforcement
   in `set_integrator`.
 
-**Watch out**
+### Watch out
+
 * Precision-run UI chrome (banner, progress bar, disable
   interactive perturbations) is follow-up work and not part of this
   ADR's scope. Today, selecting IAS15 in the UI drops the user into
