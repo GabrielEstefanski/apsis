@@ -24,6 +24,7 @@
 
 mod inspector;
 mod metrics;
+mod notifications_panel;
 mod playbar;
 mod precision_confirmation_modal;
 mod precision_panel;

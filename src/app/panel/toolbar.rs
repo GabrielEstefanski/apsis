@@ -99,6 +99,51 @@ impl SimulationApp {
                     self.show_shortcuts_modal = !self.show_shortcuts_modal;
                 }
 
+                // Notification bell with unread badge.
+                let (unread, total) = {
+                    let store = self.notifications.lock().unwrap();
+                    (store.unread_count(), store.len())
+                };
+                let bell_icon = if unread > 0 { icons::BELL_ON } else { icons::BELL };
+                let bell_color = if unread > 0 { ACCENT } else { TEXT_DIM };
+                let bell_btn = ui
+                    .add(
+                        egui::Button::new(RichText::new(bell_icon).size(13.0).color(bell_color))
+                            .fill(BTN_BG)
+                            .stroke(Stroke::new(0.5, BORDER))
+                            .min_size(egui::vec2(24.0, TOOLBAR_ROW_H))
+                            .corner_radius(3.0),
+                    )
+                    .on_hover_text(if unread > 0 {
+                        format!("Notifications — {} unread / {} total", unread, total)
+                    } else if total > 0 {
+                        format!("Notifications — {} total", total)
+                    } else {
+                        "Notifications".into()
+                    });
+                if bell_btn.clicked() {
+                    self.show_notifications_panel = !self.show_notifications_panel;
+                    if self.show_notifications_panel {
+                        self.notifications.lock().unwrap().mark_all_read();
+                    }
+                }
+                if unread > 0 {
+                    // Small badge glyph overlaid on the bell corner
+                    // via an inline count label next to it. Kept as
+                    // a sibling so egui layout handles wrapping; no
+                    // absolute positioning.
+                    ui.label(
+                        RichText::new(if unread > 99 {
+                            "99+".to_string()
+                        } else {
+                            format!("{}", unread)
+                        })
+                        .size(9.0)
+                        .monospace()
+                        .color(ACCENT),
+                    );
+                }
+
                 vsep(ui);
 
                 // CSV record indicator

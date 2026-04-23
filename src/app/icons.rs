@@ -34,6 +34,14 @@ pub const RECORD: &str = reg::RECORD;
 pub const SAVE: &str = reg::FLOPPY_DISK;
 pub const LOAD: &str = reg::FOLDER_OPEN;
 pub const CLEAR: &str = reg::TRASH;
+pub const BELL: &str = reg::BELL;
+pub const BELL_ON: &str = fill::BELL;
+
+// ── Notification levels ──────────────────────────────────────────────────────
+
+pub const LEVEL_INFO: &str = reg::INFO;
+pub const LEVEL_WARN: &str = reg::WARNING;
+pub const LEVEL_ERROR: &str = reg::X_CIRCLE;
 
 // ── Playbar ──────────────────────────────────────────────────────────────────
 
