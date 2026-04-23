@@ -252,7 +252,7 @@ pub struct SimulationApp {
     /// concrete [`crate::render::TrailStyle`] pushed to the backend.
     pub(super) trail_style_preset: crate::render::TrailStylePreset,
     /// Render-side trail recorder. Owns the ring buffer and sampling policy.
-    pub(super) trail_recorder: crate::render::TrailRecorder,
+    pub(super) trail_recorder: crate::core::trail::TrailRecorder,
     /// Minimum body-mass / dominant-mass ratio required to show a trail.
     /// Bodies below this threshold have their trail alpha zeroed out.
     /// Default 1e-6 suppresses asteroid-mass bodies automatically.
@@ -470,7 +470,7 @@ impl SimulationApp {
             show_belts: false,
             trail_width: 1.5,
             trail_style_preset: crate::render::TrailStylePreset::UniverseSandbox,
-            trail_recorder: crate::render::TrailRecorder::new(),
+            trail_recorder: crate::core::trail::TrailRecorder::new(),
             trail_min_mass_ratio: 1e-7,
             place_material: Material::Rocky,
             trail: None,
