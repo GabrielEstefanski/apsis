@@ -84,10 +84,23 @@ fn run_validation_mode() {
                 println!("[validation] {}: OK", spec.name);
             }
             Err(diff) => {
-                any_failed = true;
-                eprintln!("\n[validation] {}: REGRESSION", diff.scenario);
-                for failure in &diff.failures {
-                    eprintln!("  {}: {}", failure.metric, failure.reason);
+                if spec.gate_on_baseline {
+                    any_failed = true;
+                    eprintln!("\n[validation] {}: REGRESSION", diff.scenario);
+                    for failure in &diff.failures {
+                        eprintln!("  {}: {}", failure.metric, failure.reason);
+                    }
+                } else {
+                    // Scenario is in diagnostic mode: metrics are
+                    // expected to shift across runs as the investigation
+                    // proceeds. Report the deltas for awareness but
+                    // don't flip any_failed. Flipping `gate_on_baseline`
+                    // back to `true` is the explicit action that
+                    // re-arms the regression gate.
+                    println!("\n[validation] {}: advisory (gate_on_baseline = false)", spec.name);
+                    for failure in &diff.failures {
+                        println!("  {}: {}", failure.metric, failure.reason);
+                    }
                 }
             }
         }
@@ -167,7 +180,7 @@ fn bench_full_system(c: &mut Criterion) {
     // adaptive step sizes.
     group.throughput(criterion::Throughput::Elements(runner::STEPS_PER_ITER as u64));
 
-    for spec in scenarios::all() {
+    for spec in scenarios::all().into_iter().filter(|s| s.criterion_bench) {
         group.bench_function(spec.name, |b| {
             b.iter_batched_ref(
                 || runner::bench_setup(&spec),

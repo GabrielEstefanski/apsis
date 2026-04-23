@@ -103,17 +103,20 @@ fn print_phase_profile(scenario_name: &str) {
 
     // Collect (name, entry) in a stable display order. This order
     // reflects the nesting within a sub-step: outermost setup first
-    // (snapshot/warmstart/recompute_g), then the inner Picard hot
+    // (snapshot/a0/warmstart/recompute_g), then the inner Picard hot
     // loop (update_g_and_b + evaluate + residual), then accept-path
-    // work (advance_state + snapshot_restore for rejections).
+    // work (advance_state + dense_snapshot_build + snapshot_restore
+    // for rejections).
     let rows: &[(&str, PhaseEntry)] = &[
         ("snapshot_capture", snap.snapshot_capture),
+        ("a0_clone", snap.a0_clone),
         ("warmstart_b", snap.warmstart_b),
         ("recompute_g_from_b", snap.recompute_g_from_b),
         ("evaluate", snap.evaluate),
         ("update_g_and_b", snap.update_g_and_b),
         ("residual_compute", snap.residual_compute),
         ("advance_state", snap.advance_state),
+        ("dense_snapshot_build", snap.dense_snapshot_build),
         ("snapshot_restore", snap.snapshot_restore),
     ];
 
