@@ -120,6 +120,24 @@ pub mod profile {
         /// controller typically runs, this is the dominant source
         /// of allocator pressure visible as render-thread stutter.
         pub dense_snapshot_build: PhaseEntry,
+
+        /// Wall time of Barnes-Hut **tree construction** specifically.
+        /// Set from inside `GravityForceModel::compute` when the
+        /// `ias15-profile` feature is compiled into the force model.
+        /// Paired with `tree_traverse` it decomposes the `evaluate`
+        /// phase into its two structural halves — answering whether
+        /// the per-call cost at large N is dominated by rebuilding
+        /// the tree (fixable by caching across Picard iterations)
+        /// or by traversing it (requires traversal-level SIMD).
+        pub tree_build: PhaseEntry,
+
+        /// Wall time of Barnes-Hut **tree traversal** (the force
+        /// accumulation itself). Complements `tree_build`; the two
+        /// together approximately reconstruct `evaluate` — the gap
+        /// between `evaluate - (build + traverse)` is the per-call
+        /// function-dispatch / bookkeeping overhead and should be
+        /// small.
+        pub tree_traverse: PhaseEntry,
     }
 
     thread_local! {
@@ -137,6 +155,29 @@ pub mod profile {
     /// so each scenario's breakdown is reported independently.
     pub fn reset() {
         TIMINGS.with(|t| *t.borrow_mut() = PhaseTimings::default());
+    }
+
+    /// Record a Barnes-Hut tree-build sample. Invoked from inside
+    /// `GravityForceModel::compute` (i.e. crossing out of
+    /// `ias15.rs`), so it needs a free-function entry point rather
+    /// than the `time_phase!` macro which is scoped to this file.
+    pub fn record_tree_build(elapsed: std::time::Duration) {
+        TIMINGS.with(|t| {
+            let mut s = t.borrow_mut();
+            s.tree_build.total += elapsed;
+            s.tree_build.count += 1;
+        });
+    }
+
+    /// Record a Barnes-Hut tree-traversal sample. Paired with
+    /// [`record_tree_build`] across `GravityForceModel::compute`
+    /// to split the `evaluate` phase.
+    pub fn record_tree_traverse(elapsed: std::time::Duration) {
+        TIMINGS.with(|t| {
+            let mut s = t.borrow_mut();
+            s.tree_traverse.total += elapsed;
+            s.tree_traverse.count += 1;
+        });
     }
 }
 
