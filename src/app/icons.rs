@@ -34,6 +34,14 @@ pub const RECORD: &str = reg::RECORD;
 pub const SAVE: &str = reg::FLOPPY_DISK;
 pub const LOAD: &str = reg::FOLDER_OPEN;
 pub const CLEAR: &str = reg::TRASH;
+pub const BELL: &str = reg::BELL;
+pub const BELL_ON: &str = fill::BELL;
+
+// ── Notification levels ──────────────────────────────────────────────────────
+
+pub const LEVEL_INFO: &str = reg::INFO;
+pub const LEVEL_WARN: &str = reg::WARNING;
+pub const LEVEL_ERROR: &str = reg::X_CIRCLE;
 
 // ── Playbar ──────────────────────────────────────────────────────────────────
 
@@ -41,6 +49,15 @@ pub const PLAY: &str = reg::PLAY;
 pub const PAUSE: &str = reg::PAUSE;
 pub const RESET: &str = reg::ARROW_COUNTER_CLOCKWISE;
 pub const STEP: &str = reg::SKIP_FORWARD;
+
+// ── Precision run controls ───────────────────────────────────────────────────
+
+pub const PRECISION_START: &str = reg::PLAY;
+pub const PRECISION_PAUSE: &str = reg::PAUSE;
+pub const PRECISION_RESUME: &str = reg::PLAY;
+pub const PRECISION_ABORT: &str = reg::STOP;
+pub const PRECISION_COMMIT: &str = reg::CHECK;
+pub const PRECISION_CLOSE: &str = reg::X;
 
 // ── Toggles ──────────────────────────────────────────────────────────────────
 
