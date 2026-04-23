@@ -304,10 +304,122 @@ pub fn solar_n641() -> ScenarioSpec {
     }
 }
 
-/// Ordered list of all scenarios. The order determines the order of
+/// Central body + 640 test particles arranged as 20 concentric rings of
+/// 32 bodies each — structured, well-separated geometry intended to
+/// exercise IAS15 at solar-system-class N without the close-encounter
+/// cascade that `solar_n641` exhibits.
+///
+/// ## Status: kept out of the default catalog
+///
+/// This scenario is **not** registered in [`all`]. Building it landed
+/// an unrelated architectural finding instead: IAS15 paired with
+/// Barnes-Hut cascades at large N regardless of the scenario's
+/// scenario-level quality, because BH's tree approximation is not a
+/// deterministic function of state across Picard iterations. After
+/// that finding, the integrator/force pairing became a first-class
+/// concern (see `System::set_integrator` and the integrator
+/// execution-profile ADR), and the app's default integrator moved
+/// from IAS15 to Yoshida 4.
+///
+/// The function is kept because the scenario itself remains valuable:
+///
+///   * It is the cleanest N=641 stress the harness has — regular
+///     geometry, bounded pair separations, no birthday-problem close
+///     encounters. Useful for future work that wants to isolate
+///     integrator behaviour at high N from scenario stiffness.
+///   * Running it through the new pairing (IAS15 auto-switches to
+///     direct O(N²)) gives a clean reading of IAS15's in-regime
+///     quality at N=641 — paper-grade material.
+///   * Comparing its metrics between force models (direct vs a
+///     hypothetical smooth multipole method in the future) is
+///     exactly the experiment the scenario was designed for.
+///
+/// To use: call [`structured_rings_n641`] directly from a diagnostic
+/// script or add it temporarily to [`all`] for a one-off recording.
+///
+/// ## Geometry
+///
+/// * Radial range: R_INNER = 1.5, R_OUTER = 3.5 (matches
+///   `solar_n641` for an apples-to-apples comparison at N=641).
+/// * 20 rings, linearly spaced in `r` → Δr ≈ 0.105.
+/// * 32 equally-spaced bodies per ring → minimum intra-ring chord at
+///   R_INNER = 2·R·sin(π/32) ≈ 0.294.
+/// * Per-ring pseudo-random phase offset (seeded) to break radial
+///   alignment between rings without destroying their co-rotating
+///   structure.
+/// * Softening = 0.03 → intra-ring margin 9.8×, inter-ring margin
+///   3.5×. Co-rotating rings preserve intra-ring separation to
+///   leading order; radial ordering preserves inter-ring separation.
+///
+/// ## Expected in-regime targets (when IAS15+direct is used)
+///
+/// * `peak_energy_err` ≤ 1e-11 (machine-precision class at f64).
+/// * `degraded_total` = 0 (controller never saturates DT_MIN).
+/// * `dt_min` ≫ DT_MIN = 1e-12.
+/// * Rejection rate < 10% of accepted substeps.
+#[allow(dead_code)] // kept out of the default `all()` catalog on purpose — see doc.
+pub fn structured_rings_n641() -> ScenarioSpec {
+    const N_RINGS: usize = 20;
+    const BODIES_PER_RING: usize = 32;
+    const N_TEST: usize = N_RINGS * BODIES_PER_RING; // 640
+    const M_CENTRAL: f64 = 1.0;
+    const M_TEST: f64 = 1e-10;
+    const R_INNER: f64 = 1.5;
+    const R_OUTER: f64 = 3.5;
+    const SOFTENING: f64 = 0.03;
+    const SEED: u64 = 0x1166_5EED; // "rings seed"
 
-/// Ordered list of all scenarios. The order determines the order of
-/// sections in the baseline file.
+    let mut rng = SmallRng::seed_from_u64(SEED);
+    let mut bodies = Vec::with_capacity(N_TEST + 1);
+
+    bodies.push(Body::new(0.0, 0.0, 0.0, 0.0, M_CENTRAL, Material::Star));
+
+    let dr = (R_OUTER - R_INNER) / (N_RINGS as f64 - 1.0);
+    let dtheta = std::f64::consts::TAU / BODIES_PER_RING as f64;
+
+    for k in 0..N_RINGS {
+        let r = R_INNER + dr * k as f64;
+        // Per-ring phase offset breaks radial alignment between rings
+        // while preserving uniform angular spacing within each ring.
+        let phase = rng.random::<f64>() * std::f64::consts::TAU;
+        let v_circ = (M_CENTRAL / r).sqrt();
+
+        for j in 0..BODIES_PER_RING {
+            let theta = phase + j as f64 * dtheta;
+            let x = r * theta.cos();
+            let y = r * theta.sin();
+            let vx = -v_circ * theta.sin();
+            let vy = v_circ * theta.cos();
+
+            let mut b = Body::new(x, y, vx, vy, M_TEST, Material::Asteroid);
+            b.softening = SOFTENING;
+            bodies.push(b);
+        }
+    }
+
+    ScenarioSpec {
+        name: "structured_rings_n641",
+        bodies,
+        // Budget generous — the controller's natural dt at this scale
+        // is set by the innermost orbit (T_inner ≈ 11.5); budget acts
+        // only as an upper cap during warm-up.
+        dt_budget: 0.1,
+        // ~half the innermost orbital period (T_inner/2 ≈ 5.77) —
+        // long enough for the controller to settle and for a credible
+        // `energy_drift_slope` fit.
+        duration: 6.0,
+        criterion_bench: false,
+        gate_on_baseline: false,
+    }
+}
+
+/// Ordered list of scenarios registered in the default bench catalog.
+/// The order determines the order of sections in the baseline file.
+///
+/// Scenarios defined in this module but *not* included here
+/// (currently: [`structured_rings_n641`]) are kept for ad-hoc
+/// diagnostic runs and future investigations — they remain callable
+/// directly by name from scripts or temporary additions to this list.
 pub fn all() -> Vec<ScenarioSpec> {
     vec![
         kepler_e05(),
