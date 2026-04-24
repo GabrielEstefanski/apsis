@@ -21,16 +21,21 @@ bibliography: paper.bib
 `apsis` is a Rust library providing verified extension contracts for
 gravitational N-body simulation. Physical preconditions of perturbation
 forces — for example, whether a correction assumes an unsoftened `1/r`
-potential — are promoted from informal documentation to type-level
-declarations, checked at extension registration and enforced through an
-out-of-tree companion crate whose compilation runs as a
-continuous-integration gate. The mechanism is demonstrated end-to-end
-by `apsis-1pn`, which implements the first-post-Newtonian Schwarzschild
-correction; as evidence that the integrator stack resolves 1PN-scale
-effects at the accuracy the verification claim requires, the
-demonstration reproduces Mercury's perihelion precession to within
-4.4×10⁻⁶ of the general-relativistic prediction over 500 orbital
-periods.
+potential or a smooth Hamiltonian required by symplectic integration —
+are promoted from informal documentation to type-level declarations,
+checked at extension registration and enforced through an out-of-tree
+companion crate whose compilation runs as a continuous-integration
+gate. The mechanism is demonstrated end-to-end by `apsis-1pn`, which
+implements the first-post-Newtonian Schwarzschild correction; as
+evidence that the integrator stack resolves 1PN-scale effects at the
+accuracy the verification claim requires, the demonstration reproduces
+Mercury's perihelion precession to within 4.4×10⁻⁶ of the
+general-relativistic prediction over 500 orbital periods. The same
+match mechanism catches a distinct invariant-class violation (a
+discontinuous kernel) with an independent observable (impulsive
+energy-error events in one-to-one correspondence with cutoff-radius
+crossings), demonstrating that the contract is compositional rather
+than specialised to softening.
 
 The solver provides four integration schemes — second-order Velocity
 Verlet, fourth-order Yoshida composition, Wisdom–Holman mixed-variable,
@@ -95,51 +100,117 @@ simulation platform with verification deferred to later work.
 # Design and validation
 
 The library rests on two design commitments. First, the physical
-preconditions of a perturbation force are part of that force's *type*,
-not of its prose documentation. The public trait `PerturbationForce`
-carries an optional method `requires_exact_gravity()` whose return
-value tells the library whether the Newtonian base must be a bit-exact
-`1/r` potential for the perturbation to produce a meaningful result.
-Second, the public API boundary is a *buildable* contract rather than
-a documented one. The companion crate `apsis-1pn` lives beside the
+preconditions of an extension are part of that extension's *type*, not
+of its prose documentation. Two extension points exercise this pattern:
+a perturbation force declares, via `PerturbationForce::kernel_requirements`,
+the invariants the gravitational kernel must satisfy for the perturbation's
+derivation to be meaningful; a kernel implementation declares, via
+`Kernel::properties`, the invariants it in fact satisfies for the current
+bodies. Second, the public API boundary is a *buildable* contract rather
+than a documented one. The companion crate `apsis-1pn` lives beside the
 library in the Cargo workspace and imports `apsis` only through its
 published interface, with no access to `pub(crate)` internals. The
 consequence is that any change to `apsis` that would break an external
 consumer's compilation fails the continuous-integration build of
 `apsis-1pn`, not a manual review.
 
-The precondition mechanism surfaces through the library's structured
-diagnostic channel. When `System::add_perturbation(force)` is invoked and
-`force.requires_exact_gravity()` returns `true`, the library counts
-registered bodies with non-zero Plummer softening and — if any are
-found — emits a warning that names the largest softening length in
-use. The caller dismisses the warning by invoking `Body::unsoftened()`
-per body or `System::with_exact_gravity()` for the whole system; both
-are no-ops when already satisfied and therefore safe to include
-unconditionally in research scripts.
+Let K: ℝ₊ → ℝ₊ denote the scalar kernel determining the pair potential
+U_ij = −G·m_i·m_j·K(r), where r = |x_i − x_j|. The library encodes two
+formal invariants of K. **Exactness**: a kernel is *Exact* if K(r) =
+1/r, *Softened* if K(r) = 1/√(r² + ε²) with non-trivial ε, and
+*Modified* otherwise. **Continuity**: a kernel is in Cⁿ if the force
+−dK/dr belongs to Cⁿ(ℝ₊), and *Smooth* if C^∞. A perturbation declares
+the minimum invariants it requires (typed as `KernelRequirements`); a
+kernel implementation declares the invariants it provides for the
+current body configuration (typed as `KernelProperties`); a mismatch
+on any field is identified at extension registration.
 
-The mechanism is validated against a configuration chosen for having
-both a closed-form relativistic prediction and a sharp counter-test:
-the 1PN Schwarzschild correction applied to Sun–Mercury. The
-`apsis-1pn` crate integrates this configuration for 500 orbital
-periods under IAS15 [@ReinSpiegel2015] and compares the accumulated
-longitude of periastron against the closed form `6πGM/(c²a(1-e²))`
-per orbit [@Will1993]. With both bodies unsoftened — the type-level
-precondition satisfied — the drift is 42.983 arcseconds per century
-against the predicted 43.000, a relative error of 4.4×10⁻⁶, stable
-over the integration window and monotonic in step count. With the
-library's default Plummer softening left in place — the precondition
-violated — the drift is −83 128 arcseconds per century, three orders
-of magnitude larger than the relativistic effect and of the wrong
-sign, while energy and angular momentum are conserved to machine
-precision throughout. The first result establishes that the integrator
-resolves 1PN-scale effects at the accuracy the mechanism requires; the
-second establishes that the type-level precondition catches a real
-and severe failure mode rather than a cosmetic check. Both are
-asserted as continuous-integration gates — 1 % tolerance on the GR
-agreement, a non-negotiable warning emission on the counter-test —
-and the full suite completes in under ten seconds on commodity
-hardware.
+These invariants are not ad-hoc labels. Exactness violation is a
+statement about the derivation: the 1PN correction is obtained by
+expanding the geodesic equation around the Newtonian Hamiltonian
+`H_N = p²/2m − GMm/r`, and substituting a softened potential invalidates
+the expansion itself — the observed apsidal drift is the signature of
+applying a Taylor series on top of a different unperturbed system, not
+a numerical artifact. Continuity violation is a statement about
+phase-space geometry: symplectic integration relies on the Hamiltonian
+flow preserving phase-space volume, which requires a smooth H; force
+discontinuities produce impulsive accelerations that cannot be
+represented within any symplectic splitting scheme, independent of
+integrator order or step control.
+
+The mechanism surfaces through the library's structured diagnostic
+channel. When `System::add_perturbation(force)` is invoked, the active
+kernel's properties are computed from the current bodies and matched
+field-by-field against `force.kernel_requirements()`; every invariant
+violation emits a `warn_diag!` event naming the specific invariant,
+the value required, and the value provided. A Plummer kernel with
+every body `.unsoftened()` reports Exactness::Exact dynamically, so
+a correctly configured run stays silent. `System::with_exact_gravity()`
+and per-body `Body::unsoftened()` are idempotent helpers safe to
+include unconditionally in research scripts.
+
+Two counter-tests exercise the two invariants separately. The **Exactness**
+counter-test is the Sun–Mercury configuration integrated for 500
+orbital periods under the adaptive Gauss–Radau IAS15 scheme
+[@ReinSpiegel2015]. With both bodies unsoftened — Exactness satisfied —
+the accumulated longitude of periastron drifts by 42.983 arcseconds
+per century against the closed-form general-relativistic prediction
+`6πGM/(c²a(1−e²))` = 43.000 arcseconds per century [@Will1993], a
+relative error of 4.4×10⁻⁶, stable over the integration window and
+monotonic in step count. With the library's default Plummer softening
+left in place — Exactness violated — the drift is −83 128 arcseconds
+per century: three orders of magnitude larger than the relativistic
+effect and of the wrong sign, while energy and angular momentum remain
+conserved to machine precision throughout.
+
+The **Continuity** counter-test is a distinct configuration designed
+to exercise the second invariant on a distinct observable. An
+equal-mass two-body orbit (a = 1, e = 0.5) is integrated under a
+truncated-Plummer kernel that matches the standard Plummer profile
+inside a cutoff radius R_c = 1 (semi-major-axis units) and switches
+to a scaled Plummer outside, with the outside scale α = 0.8 chosen so
+that K is continuous at R_c, the force −dK/dr has a finite jump of
+(1 − α)·R_c/(R_c² + ε²)^{3/2} = 0.2 there, and the trajectory remains
+reliably bound (the orbit's apoapse sits near r ≈ 2.06, well inside
+the marginal-binding threshold at α ≈ 0.5 for these parameters).
+Under fourth-order Yoshida composition at fixed timestep 10⁻³·T, the
+orbit crosses R_c eleven times over 60 simulation units and the
+integrator produces impulsive energy-error events of magnitude
+4.7×10⁻⁶ to 2.0×10⁻⁴ — in one-to-one correspondence with the
+crossings, each event temporally matched to its crossing within
+10·dt, and no events between crossings. A reference run with the
+smooth PlummerKernel on the same bodies exhibits no events above
+2.7×10⁻¹⁴ per step, separating the Continuity signature from the
+symplectic round-off floor by roughly eight orders of magnitude. The
+observed signature is a consequence of the continuity violation
+itself, not of the specific `TruncatedPlummerKernel` used to exhibit
+it: any kernel whose declared properties include `Continuity::C0`
+and whose orbital configuration places the discontinuity within the
+radial range of the trajectory produces the same class of observable.
+
+Both counter-tests are asserted as continuous-integration gates — 1 %
+relative-error tolerance on the GR agreement, exact bijection between
+crossing and spike events with 10·dt temporal matching on the
+continuity measurement, and non-negotiable warning-emission on both
+registrations. The full suite completes in under twenty seconds on
+commodity hardware.
+
+**Reproducibility.** All measurements correspond to: IAS15 with
+initial timestep 10⁻⁴·T and adaptivity enabled for the Exactness
+counter-test (Sun–Mercury standard orbital elements, ε = 0 for the
+satisfied case, ε ≈ 0.02 AU for the violated case, 500-period
+integration); fourth-order Yoshida at fixed dt = 10⁻³·T for the
+Continuity counter-test (equal-mass two-body a = 1, e = 0.5, both
+bodies unsoftened, R_c = 1, α = 0.8, 60 simulation-unit integration).
+Sources at `crates/apsis-1pn/tests/mercury_precession_gate.rs` and
+`crates/apsis-1pn/tests/kernel_continuity_counter_test.rs`; both
+reproduce on a clean checkout per the §Availability command.
+
+Two formally distinct invariants (Exactness, Continuity), when
+violated, produce two formally distinct and quantitatively separable
+observable signatures, each caught independently by the registration
+check. This — not empirical superiority in any numerical regime — is
+the claim the mechanism supports.
 
 # Availability and reproducibility
 
