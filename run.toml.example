@@ -1,5 +1,5 @@
 # Example run.toml — copy to run.toml and edit as needed.
-# Run with: gravity-sim --config run.toml
+# Run with: apsis --config run.toml
 
 # Template name (must match exactly one entry in the template catalog).
 # Available presets: Star, Brown Dwarf, Gas Giant, Rocky Planet,
