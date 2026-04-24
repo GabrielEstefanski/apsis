@@ -13,15 +13,27 @@
 //! ```
 //!
 //! Implementations encode a specific physical model (Plummer softening,
-//! exact 1/r, truncated compact support, etc.). Future commits will attach
-//! a `KernelProperties` record to each implementation that perturbations
-//! can match against at registration time.
+//! exact 1/r, truncated compact support, etc.) and report the formal
+//! invariants they satisfy via [`Kernel::properties`]; extensions match
+//! their [`KernelRequirements`] against those properties at registration
+//! time. The matching logic lives in [`super::properties`].
+
+use crate::domain::body::Body;
+
+use super::properties::KernelProperties;
 
 /// A scalar gravitational kernel.
 ///
-/// All methods take the squared separation `r_squared = |Δx|²` and the
-/// squared pairwise softening length `eps_squared`. Kernels that do not
-/// use softening ignore the second parameter.
+/// The numeric methods take the squared separation `r_squared = |Δx|²`
+/// and the squared pairwise softening length `eps_squared`. Kernels that
+/// do not use softening ignore the second parameter.
+///
+/// [`properties`](Self::properties) reports the physical invariants the
+/// kernel satisfies given the current body configuration; the caller
+/// (typically [`System::add_perturbation`](crate::core::system::System::add_perturbation))
+/// matches these against any
+/// [`KernelRequirements`](super::properties::KernelRequirements) declared
+/// by registered extensions.
 ///
 /// Implementations must be `Send + Sync` so that engines sharing a kernel
 /// through [`Arc`](std::sync::Arc) can be used under parallel traversal.
@@ -40,4 +52,15 @@ pub trait Kernel: Send + Sync {
     /// - Plummer:  f = 1/(r² + ε²)^{3/2}
     /// - Newton:   f = 1/(r²)^{3/2}       (ignores ε)
     fn acceleration_factor(&self, r_squared: f64, eps_squared: f64) -> f64;
+
+    /// Physical invariants this kernel provides given the current bodies.
+    ///
+    /// May depend on runtime state. [`PlummerKernel`](super::PlummerKernel)
+    /// dynamically reports
+    /// [`Exactness::Exact`](super::properties::Exactness::Exact) when every
+    /// body has softening length zero, and
+    /// [`Exactness::Softened`](super::properties::Exactness::Softened)
+    /// otherwise — a correctly unsoftened configuration is indistinguishable
+    /// from exact 1/r gravity at this level.
+    fn properties(&self, bodies: &[Body]) -> KernelProperties;
 }

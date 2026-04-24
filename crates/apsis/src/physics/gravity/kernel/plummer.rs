@@ -38,7 +38,10 @@
 //! - Plummer (1911). *Mon. Not. R. Astron. Soc.* 71, 460–470.
 //! - Dehnen & Read (2011). *Eur. Phys. J. Plus* 126, 55. (softening review)
 
+use crate::domain::body::Body;
+
 use super::Kernel;
+use super::properties::{Continuity, Exactness, KernelProperties};
 
 /// Default Plummer-softened kernel.
 ///
@@ -71,6 +74,24 @@ impl Kernel for PlummerKernel {
     fn acceleration_factor(&self, r_squared: f64, eps_squared: f64) -> f64 {
         let inv_r = (r_squared + eps_squared).sqrt().recip();
         inv_r * inv_r * inv_r
+    }
+
+    /// Reports [`Exactness::Exact`] when every body has softening length
+    /// zero, and [`Exactness::Softened`] otherwise.
+    ///
+    /// The rationale: a Plummer kernel multiplied by ε = 0 everywhere is
+    /// mathematically indistinguishable from K(r) = 1/r, so an
+    /// appropriately unsoftened configuration satisfies the Exactness
+    /// invariant required by 1PN and similar extensions.
+    ///
+    /// Continuity is always [`Continuity::Smooth`]: Plummer's
+    /// `1/√(r² + ε²)` is C^∞ on (0, ∞) regardless of ε.
+    fn properties(&self, bodies: &[Body]) -> KernelProperties {
+        let any_softened = bodies.iter().any(|b| b.softening > 0.0);
+        KernelProperties {
+            exactness: if any_softened { Exactness::Softened } else { Exactness::Exact },
+            continuity: Continuity::Smooth,
+        }
     }
 }
 
@@ -186,5 +207,66 @@ mod tests {
         let u = -G * m_i * m_j * k.potential(r_sq, eps2);
         let expected = -G * m_i * m_j / (r_sq + eps2).sqrt();
         assert!((u - expected).abs() < 1e-12);
+    }
+
+    // ── PlummerKernel::properties (dynamic, body-aware) ─────────────────── //
+
+    #[test]
+    fn properties_report_exact_for_empty_body_slice() {
+        let k = PlummerKernel::new();
+        let props = k.properties(&[]);
+        assert_eq!(props.exactness, super::super::properties::Exactness::Exact);
+        assert_eq!(
+            props.continuity,
+            super::super::properties::Continuity::Smooth
+        );
+    }
+
+    #[test]
+    fn properties_report_exact_when_all_bodies_unsoftened() {
+        use crate::domain::body::Body;
+        let k = PlummerKernel::new();
+        let bodies = [
+            Body::star(1.0).at(0.0, 0.0).unsoftened(),
+            Body::rocky(1e-6).at(1.0, 0.0).unsoftened(),
+        ];
+        let props = k.properties(&bodies);
+        assert_eq!(props.exactness, super::super::properties::Exactness::Exact);
+    }
+
+    #[test]
+    fn properties_report_softened_when_any_body_has_positive_softening() {
+        use crate::domain::body::Body;
+        let k = PlummerKernel::new();
+        let bodies = [
+            Body::star(1.0).at(0.0, 0.0).unsoftened(), // ε = 0
+            Body::rocky(1e-6).at(1.0, 0.0),            // default softening > 0
+        ];
+        let props = k.properties(&bodies);
+        assert_eq!(
+            props.exactness,
+            super::super::properties::Exactness::Softened
+        );
+    }
+
+    #[test]
+    fn properties_continuity_is_always_smooth() {
+        use crate::domain::body::Body;
+        let k = PlummerKernel::new();
+        for bodies in [
+            vec![],
+            vec![Body::rocky(1e-6).at(0.0, 0.0)],
+            vec![
+                Body::star(1.0).at(0.0, 0.0).unsoftened(),
+                Body::rocky(1e-6).at(1.0, 0.0),
+            ],
+        ] {
+            let props = k.properties(&bodies);
+            assert_eq!(
+                props.continuity,
+                super::super::properties::Continuity::Smooth,
+                "Plummer continuity should be Smooth regardless of body state"
+            );
+        }
     }
 }
