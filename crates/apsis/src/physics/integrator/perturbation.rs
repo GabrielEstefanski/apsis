@@ -9,8 +9,20 @@
 //!
 //! Implementations must **add** their contribution to `scratch_acc`, not
 //! overwrite it — multiple perturbations compose by accumulation.
+//!
+//! # Kernel preconditions
+//!
+//! Perturbations whose derivation depends on structural invariants of the
+//! gravitational kernel (exact 1/r base, smoothness, etc.) declare those
+//! requirements through [`PerturbationForce::kernel_requirements`]. The
+//! system checks the declared requirements against the active kernel's
+//! [`KernelProperties`](crate::physics::gravity::kernel::KernelProperties)
+//! at
+//! [`System::add_perturbation`](crate::core::system::System::add_perturbation)
+//! and emits a structured diagnostic for every invariant violation.
 
 use crate::domain::body::Body;
+use crate::physics::gravity::kernel::{Exactness, KernelRequirements};
 
 pub trait PerturbationForce: Send + Sync {
     /// Accumulates non-gravitational accelerations into `scratch_acc`.
@@ -35,29 +47,55 @@ pub trait PerturbationForce: Send + Sync {
         self.accumulate(bodies, scratch_acc);
     }
 
-    /// Declares whether this perturbation needs the underlying gravity to be
-    /// the exact `1/r` potential (no Plummer softening) to produce a
-    /// physically meaningful result.
+    /// Kernel invariants this perturbation's derivation relies on.
     ///
-    /// Default: `false`. Perturbations whose magnitude is dominated by the
-    /// Newtonian-force baseline (radiation pressure, drag, external fields
-    /// on fuzzy N-body clusters) return `false` and are unaffected by
-    /// softening.
+    /// Default: [`KernelRequirements::none`] — no constraints on the
+    /// active kernel. Perturbations whose derivation assumes specific
+    /// structural properties of K(r) should override this.
     ///
-    /// Corrections that measure *deviations* from `1/r` — general-relativistic
-    /// post-Newtonian terms, frame-dragging, J2 oblateness — should return
-    /// `true`. The simulator's default material-scaled softening (ε on the
-    /// order of 10⁻² AU for a solar-mass body) introduces a purely numerical
-    /// apsidal precession that, for Mercury, is ~2 × 10³ larger than the
-    /// 43 arcsec/century GR effect. Registering a perturbation with
-    /// `requires_exact_gravity() == true` into a system where any body still
-    /// carries nonzero softening emits a diagnostic via
-    /// [`crate::warn_diag!`] — the symptom would otherwise be silent.
+    /// A few representative cases:
     ///
-    /// Call [`System::with_exact_gravity`](crate::core::system::System::with_exact_gravity)
-    /// or [`Body::unsoftened`](crate::domain::body::Body::unsoftened) to
-    /// silence the warning and make the perturbation measurement honest.
+    /// - A general-relativistic 1PN correction is derived from the
+    ///   Newtonian Hamiltonian `H_N = p²/2m − GMm/r` and substituting a
+    ///   softened potential invalidates the expansion itself; declare
+    ///   [`KernelRequirements::exact_and_smooth`] (or at least
+    ///   `required_exactness = Some(Exactness::Exact)`).
+    /// - A perturbation whose derivation relies on smoothness of the
+    ///   force (symplectic splitting schemes assume a smooth Hamiltonian)
+    ///   but tolerates softening should declare only
+    ///   `min_continuity = Some(Continuity::Smooth)`.
+    /// - A perturbation that is physically meaningful against any
+    ///   short-range force model (radiation pressure, Poynting-Robertson
+    ///   drag, external fields on fuzzy N-body clusters) leaves the
+    ///   default [`KernelRequirements::none`] in place.
+    ///
+    /// Registering a perturbation whose requirements the active kernel
+    /// cannot satisfy emits one structured [`warn_diag!`](crate::warn_diag)
+    /// per violated invariant, identifying the specific invariant, the
+    /// value required, and the value the kernel provides. Dismiss the
+    /// warning by adjusting the system configuration — for example,
+    /// [`System::with_exact_gravity`](crate::core::system::System::with_exact_gravity)
+    /// or per-body
+    /// [`Body::unsoftened`](crate::domain::body::Body::unsoftened) for
+    /// an exactness violation against the default Plummer kernel.
+    fn kernel_requirements(&self) -> KernelRequirements {
+        KernelRequirements::none()
+    }
+
+    /// Legacy shorthand: whether the perturbation requires exact 1/r
+    /// gravity.
+    ///
+    /// **Deprecated.** Declare kernel preconditions through
+    /// [`kernel_requirements`](Self::kernel_requirements) instead — the
+    /// richer record carries enough information to catch violations on
+    /// invariants beyond Exactness (Continuity, etc.) and to emit
+    /// diagnostics that name the specific invariant violated.
+    ///
+    /// Default implementation derives the answer from
+    /// `kernel_requirements()` so that perturbations migrated to the new
+    /// API continue to answer legacy callers correctly.
+    #[deprecated(note = "override `kernel_requirements()` instead")]
     fn requires_exact_gravity(&self) -> bool {
-        false
+        self.kernel_requirements().required_exactness == Some(Exactness::Exact)
     }
 }

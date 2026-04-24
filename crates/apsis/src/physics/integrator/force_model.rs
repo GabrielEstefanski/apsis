@@ -8,8 +8,10 @@
 //! [`GravityForceModel`] is the default implementation, wrapping a
 //! [`BarnesHutEngine`] with a fixed opening angle θ.
 
+use std::sync::Arc;
+
 use crate::domain::body::Body;
-use crate::physics::gravity::BarnesHutEngine;
+use crate::physics::gravity::{BarnesHutEngine, Kernel, PlummerKernel};
 
 // ── Trait ─────────────────────────────────────────────────────────────────────
 
@@ -66,6 +68,16 @@ pub trait ForceModel: Send {
         None
     }
 
+    /// Handle to the gravitational kernel this force model dispatches through.
+    ///
+    /// The default returns [`PlummerKernel`] for force models that do not
+    /// have an explicit kernel concept — preserving the simulator's
+    /// canonical Plummer-softened semantics for consumers that query
+    /// kernel properties via [`Kernel::properties`].
+    fn kernel(&self) -> Arc<dyn Kernel> {
+        Arc::new(PlummerKernel::new())
+    }
+
     /// Whether this force model is a deterministic function of state
     /// — i.e. `compute(bodies)` returns the same accelerations (to
     /// within f64 ULP) on two calls with identical `bodies`.
@@ -115,6 +127,10 @@ impl GravityForceModel {
 }
 
 impl ForceModel for GravityForceModel {
+    fn kernel(&self) -> Arc<dyn Kernel> {
+        self.engine.kernel()
+    }
+
     fn compute(&mut self, bodies: &[Body], acc: &mut [(f64, f64)]) -> f64 {
         // Phase-split instrumentation for the IAS15 diagnostic harness:
         // separate the tree-build half from the traversal half of the

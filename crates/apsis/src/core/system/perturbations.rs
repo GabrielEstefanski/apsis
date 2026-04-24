@@ -2,6 +2,7 @@
 
 use crate::core::log::Source;
 use crate::core::system::System;
+use crate::physics::gravity::kernel::RequirementViolation;
 use crate::physics::integrator::PerturbationForce;
 
 impl System {
@@ -10,18 +11,25 @@ impl System {
     /// Applied at every subsequent integration step, additively with other
     /// registered perturbations. Remove with [`clear_perturbations`].
     ///
-    /// # Softening-compatibility check
+    /// # Kernel-precondition check
     ///
-    /// If `p.requires_exact_gravity()` returns `true` (declared by the
-    /// perturbation author — e.g. `PostNewtonian1PN` does) and any body in
-    /// the system currently carries nonzero Plummer softening, this method
-    /// emits a [`warn_diag!`](crate::warn_diag) diagnostic. The simulator's
-    /// default softening (`EPS_BASE · mass^(1/3)`, ε ≈ 0.02 AU on the Sun)
-    /// introduces a numerical apsidal precession that can silently dominate
-    /// the perturbation's physical signal by orders of magnitude.
+    /// The perturbation's declared
+    /// [`kernel_requirements`](PerturbationForce::kernel_requirements) are
+    /// matched against the active kernel's
+    /// [`KernelProperties`](crate::physics::gravity::kernel::KernelProperties)
+    /// computed from the current bodies. Every invariant violation emits a
+    /// structured [`warn_diag!`](crate::warn_diag) naming the invariant,
+    /// the value required, and the value the kernel provides.
     ///
-    /// Dismiss the warning by unsoftening the relevant bodies before or
-    /// after this call:
+    /// For the canonical case — a 1PN correction declaring
+    /// `required_exactness = Exact` against a Plummer kernel with any
+    /// softened body — the simulator emits an Exactness-violation warning
+    /// that also carries the legacy `softened_bodies` / `max_softening`
+    /// fields used by downstream log consumers. The numerical apsidal
+    /// precession from Plummer softening would otherwise silently dominate
+    /// the physical signal by orders of magnitude.
+    ///
+    /// Dismiss the warning by adjusting the configuration:
     ///
     /// ```ignore
     /// sys = sys.with_exact_gravity();                  // whole system
@@ -29,9 +37,21 @@ impl System {
     /// let sun = Body::star(1.0).unsoftened();
     /// ```
     pub fn add_perturbation(&mut self, p: Box<dyn PerturbationForce>) {
-        if p.requires_exact_gravity() {
-            let softened = self.bodies.iter().filter(|b| b.softening != 0.0).count();
-            if softened > 0 {
+        let kernel = self.force_model.kernel();
+        let props = kernel.properties(&self.bodies);
+        let violations = p.kernel_requirements().check_against(&props);
+
+        for v in &violations {
+            self.emit_kernel_requirement_violation(v);
+        }
+
+        self.perturbations.push(p);
+    }
+
+    fn emit_kernel_requirement_violation(&self, v: &RequirementViolation) {
+        match v {
+            RequirementViolation::Exactness { required, provided } => {
+                let softened = self.bodies.iter().filter(|b| b.softening != 0.0).count();
                 let max_softening =
                     self.bodies.iter().map(|b| b.softening.abs()).fold(0.0_f64, f64::max);
                 crate::warn_diag!(
@@ -42,10 +62,25 @@ impl System {
                     softened_bodies = softened,
                     total_bodies = self.bodies.len(),
                     max_softening = max_softening,
+                    violated_invariant = "Exactness",
+                    kernel_exactness = format!("{provided:?}"),
+                    required_exactness = format!("{required:?}"),
+                );
+            }
+            RequirementViolation::Continuity { required, provided } => {
+                crate::warn_diag!(
+                    Source::System,
+                    "perturbation requires a smooth kernel but the active kernel has \
+                     force discontinuities — force discontinuities violate the smooth \
+                     Hamiltonian assumption underlying symplectic integration and will \
+                     produce impulsive energy-error events wherever the trajectory \
+                     crosses the discontinuity",
+                    violated_invariant = "Continuity",
+                    kernel_continuity = format!("{provided:?}"),
+                    required_continuity = format!("{required:?}"),
                 );
             }
         }
-        self.perturbations.push(p);
     }
 
     /// Remove all registered perturbation forces.
