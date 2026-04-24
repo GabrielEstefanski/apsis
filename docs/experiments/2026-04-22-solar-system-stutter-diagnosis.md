@@ -1,7 +1,7 @@
 # Solar-System-Class Stutter in IAS15: A Three-Hypothesis Diagnostic Walk
 
 **Date:** 2026-04-22
-**Subject:** Interactive-app stutter at N≈641 with IAS15 in `gravity-sim`
+**Subject:** Interactive-app stutter at N≈641 with IAS15 in `apsis`
 **Baseline before:** `ec66e05` (persistent snapshot buffers merged)
 **Branch:** `diag/ias15-solar-system-stutter`
 **Outcome:** Two hypotheses refuted, one identified and fixed; the fix is REBOUND-style per-body RMS convergence and truncation estimation. One scenario-design insight documented.
@@ -10,7 +10,7 @@
 
 ## Abstract
 
-Interactive playback of the `gravity-sim` app's `solar_system` preset
+Interactive playback of the `apsis` app's `solar_system` preset
 (641 bodies) and `jupiter_trojans` preset (802 bodies) under IAS15
 showed a reproducible "stutters every few frames" pattern that Yoshida
 and Velocity Verlet did not exhibit. Yoshida and Verlet run smoothly at
@@ -383,7 +383,7 @@ IAS15_BENCH_MULTITHREAD=1 cargo bench --features ias15-profile --bench ias15
 IAS15_BENCH_UPDATE_BASELINE=1 cargo bench --bench ias15
 ```
 
-The RMS-norm change is in `crates/gravity-sim-core/src/physics/integrator/ias15.rs`
+The RMS-norm change is in `crates/apsis/src/physics/integrator/ias15.rs`
 (two functions: the `residual` computation in `picard_loop_inner`,
 and `truncation_error`). No external API change; `ForceModel` trait
 unchanged; `Integrator` trait unchanged.

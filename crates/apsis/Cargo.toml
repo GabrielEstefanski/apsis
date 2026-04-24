@@ -1,0 +1,56 @@
+[package]
+name = "apsis"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+rust-version.workspace = true
+description = "A Rust N-body gravitational simulation library with an adaptive IAS15-style integrator and compiler-enforced extension contracts."
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }
+rand = { workspace = true }
+rayon = { workspace = true }
+bytemuck = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+approx = { workspace = true }
+pretty_assertions = { workspace = true }
+insta = { workspace = true }
+criterion = { workspace = true }
+
+# ── Features ──────────────────────────────────────────────────────────────────
+#
+# ias15-profile: compiles in per-phase wall-time accumulation inside the IAS15
+# integrator. Invisible in normal builds (macros expand to identity). Used
+# exclusively from the benchmark harness via
+#
+#     IAS15_BENCH_PROFILE_PHASES=1 cargo bench --features ias15-profile
+#
+# which prints per-phase time + call count after each scenario's validation
+# run. See docs/experiments/ for usage notes.
+
+[features]
+ias15-profile = []
+
+# ── Benchmarks ────────────────────────────────────────────────────────────────
+#
+# `harness = false` disables libtest so `benches/ias15.rs` can provide its own
+# `fn main()`. The custom main enforces single-thread determinism and runs a
+# baseline-validation phase *before* handing control to Criterion — both are
+# impossible with the default harness.
+
+[[bench]]
+name = "ias15"
+harness = false

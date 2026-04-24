@@ -1,0 +1,38 @@
+[package]
+name = "apsis-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+rust-version.workspace = true
+description = "Interactive egui/wgpu shell for the APSIS N-body library. Optional; not part of the library's validated public surface."
+
+[[bin]]
+name = "apsis"
+path = "src/main.rs"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+apsis = { path = "../apsis" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }
+eframe = { workspace = true }
+egui = { workspace = true }
+egui-phosphor = { workspace = true }
+rand = { workspace = true }
+rayon = { workspace = true }
+wgpu = { workspace = true }
+winit = { workspace = true }
+pollster = { workspace = true }
+bytemuck = { workspace = true }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }
+insta = { workspace = true }

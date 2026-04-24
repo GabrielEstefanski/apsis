@@ -1,9 +1,9 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/gravity-sim-core",
-    "crates/gravity-sim-app",
-    "crates/gravity-sim-1pn",
+    "crates/apsis",
+    "crates/apsis-app",
+    "crates/apsis-1pn",
 ]
 
 [workspace.package]
@@ -13,8 +13,8 @@ license = "Apache-2.0"
 authors = ["Gabriel Braga Estefanski <gabrielbragaestefanski@gmail.com>"]
 rust-version = "1.85"
 readme = "README.md"
-repository = "https://github.com/gabrielbragaestefanski/gravity-sim"
-homepage = "https://github.com/gabrielbragaestefanski/gravity-sim"
+repository = "https://github.com/gabrielbragaestefanski/apsis"
+homepage = "https://github.com/gabrielbragaestefanski/apsis"
 keywords = ["n-body", "astrophysics", "simulation", "ias15", "post-newtonian"]
 categories = ["science", "simulation", "science::simulation"]
 

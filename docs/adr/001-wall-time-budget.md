@@ -119,5 +119,5 @@ than before).
 
 - REBOUND: `reb_integrate(sim, tmax)` — integrates until a simulation time,
   not until N steps.
-- [`crates/gravity-sim-core/src/core/physics_thread.rs`](../../crates/gravity-sim-core/src/core/physics_thread.rs) — current batch loop + `MAX_BATCH_WALL_MS`.
-- [`crates/gravity-sim-app/src/app/panel/playbar.rs`](../../crates/gravity-sim-app/src/app/panel/playbar.rs) — current speed slider.
+- [`crates/apsis/src/core/physics_thread.rs`](../../crates/apsis/src/core/physics_thread.rs) — current batch loop + `MAX_BATCH_WALL_MS`.
+- [`crates/apsis-app/src/app/panel/playbar.rs`](../../crates/apsis-app/src/app/panel/playbar.rs) — current speed slider.
