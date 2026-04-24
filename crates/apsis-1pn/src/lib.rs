@@ -61,6 +61,7 @@
 #![allow(clippy::needless_range_loop)]
 
 use apsis::domain::body::Body;
+use apsis::physics::gravity::kernel::KernelRequirements;
 use apsis::physics::integrator::PerturbationForce;
 
 /// Speed of light expressed in the simulator's canonical solar-system units:
@@ -126,12 +127,21 @@ impl PostNewtonian1PN {
 }
 
 impl PerturbationForce for PostNewtonian1PN {
-    /// 1PN precession measures *deviations* from the 1/r potential, so the
-    /// underlying gravity must be exact — Plummer softening would inject a
-    /// numerical apsidal precession ~2 × 10³ larger than the signal for a
-    /// Mercury-like orbit.
-    fn requires_exact_gravity(&self) -> bool {
-        true
+    /// The 1PN correction is derived by expanding the geodesic equation
+    /// around the Newtonian Hamiltonian `H_N = p²/2m − GMm/r`. The
+    /// expansion therefore requires:
+    ///
+    /// - **Exactness::Exact** — the unperturbed base must be the bit-exact
+    ///   1/r potential. Plummer softening would substitute a different
+    ///   unperturbed system whose apsidal precession alone is ~2 × 10³
+    ///   larger than the 1PN signal for a Mercury-like orbit, swamping
+    ///   the physical effect and inverting its sign.
+    /// - **Continuity::Smooth** — symplectic integration of the correction
+    ///   relies on a smooth Hamiltonian flow; force discontinuities cannot
+    ///   be represented within any symplectic splitting scheme regardless
+    ///   of integrator order.
+    fn kernel_requirements(&self) -> KernelRequirements {
+        KernelRequirements::exact_and_smooth()
     }
 
     fn accumulate(&self, bodies: &[Body], scratch_acc: &mut [(f64, f64)]) {
@@ -301,12 +311,18 @@ mod tests {
         );
     }
 
-    /// The 1PN perturbation must declare it needs exact 1/r gravity.
-    /// This is what triggers the softening-compatibility diagnostic
-    /// inside `System::add_perturbation`.
+    /// The 1PN perturbation must declare that it requires the exact 1/r
+    /// Newtonian base (Exactness) and a smooth kernel (Continuity). This
+    /// is what the kernel-requirement check inside
+    /// `System::add_perturbation` matches against the active kernel's
+    /// properties.
     #[test]
-    fn requires_exact_gravity_is_true() {
-        assert!(PostNewtonian1PN::solar_units().requires_exact_gravity());
+    fn kernel_requirements_are_exact_and_smooth() {
+        use apsis::physics::gravity::kernel::{Continuity, Exactness, KernelRequirements};
+        let req = PostNewtonian1PN::solar_units().kernel_requirements();
+        assert_eq!(req, KernelRequirements::exact_and_smooth());
+        assert_eq!(req.required_exactness, Some(Exactness::Exact));
+        assert_eq!(req.min_continuity, Some(Continuity::Smooth));
     }
 
     /// Order-of-magnitude check: Mercury at perihelion sees a 1PN
