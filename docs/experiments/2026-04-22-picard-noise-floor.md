@@ -361,7 +361,7 @@ Iteration count is not the optimisation target. The hot path in IAS15 at
 **Toolchain:** Rust stable (as of 2026-04-22), edition 2024.
 **Code state:**
 * Baseline `develop` HEAD: `ffc3489` (drift metrics merged).
-* Experimental diff: two insertions in `src/physics/integrator/ias15.rs`
+* Experimental diff: two insertions in `crates/gravity-sim-core/src/physics/integrator/ias15.rs`
   (one constant, one `if` block) — reproduced verbatim in §4.1.
 
 **Invocation:**

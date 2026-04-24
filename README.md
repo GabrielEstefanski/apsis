@@ -205,21 +205,22 @@ normally cites only in passing — reviewers and users who want the
 decisions and the failed experiments behind a number can follow the
 trail directly:
 
-- [`docs/overview.md`](docs/overview.md), [`docs/integrator.md`](docs/integrator.md),
-  [`docs/forces.md`](docs/forces.md), [`docs/softening.md`](docs/softening.md),
-  [`docs/stability.md`](docs/stability.md) — domain-level documentation of
-  the physics stack and its regime of applicability.
+- [`docs/overview.md`](docs/overview.md) — the project's scope, physical
+  model, architecture, and known limitations in prose.
+- [`docs/integrator.md`](docs/integrator.md) — per-integrator contract:
+  execution profile, determinism requirement, selection rubric.
+- [`docs/softening.md`](docs/softening.md) — Plummer softening derivation,
+  per-body scaling rule, and the regime in which it is trustworthy.
 - [`docs/adr/`](docs/adr/) — architectural decision records.
   `001-wall-time-budget.md` on the interactive timestep model,
   `002-sim-rate-target.md` on frame-pacing, and
   `003-integrator-execution-profile.md` on why the default is
   Yoshida-4 rather than IAS15 for render-loop contexts.
 - [`docs/experiments/`](docs/experiments/) — lab-notebook entries for
-  reproducible experiments run during development, including the
-  IAS15 phase-profile breakdown, a null-result on the Picard noise
-  floor, and the solar-system stutter diagnosis that motivated the
+  reproducible experiments run during development: the IAS15
+  phase-profile breakdown, a null-result on the Picard noise floor,
+  and the solar-system stutter diagnosis that motivated the
   versioned baseline harness.
-- [`docs/references.md`](docs/references.md) — consolidated bibliography.
 
 ## License
 
