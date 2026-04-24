@@ -36,11 +36,13 @@
 //! Only cross-referencing against an analytic prediction reveals it.
 //!
 //! As of this release, registering a [`PerturbationForce`] whose
-//! [`requires_exact_gravity()`](apsis::physics::integrator::PerturbationForce::requires_exact_gravity)
-//! method returns `true` into a system with softened bodies emits a
-//! [`warn_diag!`](apsis::warn_diag) diagnostic. Dismiss the
-//! warning by calling [`Body::unsoftened`] or
-//! [`System::with_exact_gravity`] at construction — both shown below.
+//! [`kernel_requirements()`](apsis::physics::integrator::PerturbationForce::kernel_requirements)
+//! declare Exactness or Continuity constraints that the active kernel
+//! fails to satisfy (for example, a 1PN correction on top of a
+//! Plummer-softened system) emits a [`warn_diag!`](apsis::warn_diag)
+//! diagnostic naming the violated invariant. Dismiss the warning by
+//! calling [`Body::unsoftened`] or [`System::with_exact_gravity`] at
+//! construction — both shown below.
 
 use apsis::core::system::System;
 use apsis::domain::body::Body;
@@ -81,10 +83,11 @@ fn main() {
     // uses only the public API of `apsis`; `apsis-1pn` has
     // no other dependency on the workspace. This is the Phase 3 gate.
     //
-    // Because `PostNewtonian1PN::requires_exact_gravity()` returns `true`,
-    // registering this perturbation into a softened system would trigger a
-    // warn-level diagnostic. Since both bodies above are `.unsoftened()`,
-    // the warning stays silent and the measurement stays honest.
+    // `PostNewtonian1PN::kernel_requirements()` declares Exactness::Exact
+    // plus Continuity::Smooth; registering this perturbation into a
+    // softened system would fire an Exactness-violation warning. Since
+    // both bodies above are `.unsoftened()`, the active PlummerKernel
+    // reports Exactness::Exact dynamically and the check stays silent.
     sys.add_perturbation(Box::new(PostNewtonian1PN::solar_units()));
 
     // ── Reference state at t = 0 ────────────────────────────────────────────

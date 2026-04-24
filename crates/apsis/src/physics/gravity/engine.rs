@@ -79,6 +79,17 @@ impl BarnesHutEngine {
         }
     }
 
+    /// Handle to the kernel this engine dispatches through.
+    ///
+    /// Used by [`System::add_perturbation`](crate::core::system::System::add_perturbation)
+    /// to query the active kernel's
+    /// [`KernelProperties`](crate::physics::gravity::kernel::KernelProperties)
+    /// against each perturbation's
+    /// [`KernelRequirements`](crate::physics::gravity::kernel::KernelRequirements).
+    pub fn kernel(&self) -> Arc<dyn Kernel> {
+        Arc::clone(&self.kernel)
+    }
+
     /// Set the N threshold below which exact O(N²) evaluation is used.
     ///
     /// Range is clamped to `[1, DIRECT_MODE_THRESHOLD]`. Passing
