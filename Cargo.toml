@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/gravity-sim-core",
     "crates/gravity-sim-app",
+    "crates/gravity-sim-1pn",
 ]
 
 [workspace.package]
