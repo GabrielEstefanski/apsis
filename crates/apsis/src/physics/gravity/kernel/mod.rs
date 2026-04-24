@@ -40,12 +40,14 @@
 mod plummer;
 mod properties;
 mod trait_def;
+mod truncated;
 
 pub use plummer::PlummerKernel;
 pub use properties::{
     Continuity, Exactness, KernelProperties, KernelRequirements, RequirementViolation,
 };
 pub use trait_def::Kernel;
+pub use truncated::{DEFAULT_TRUNCATED_OUTSIDE_SCALE, TruncatedPlummerKernel};
 
 // ── Constants and helpers ─────────────────────────────────────────────────── //
 
