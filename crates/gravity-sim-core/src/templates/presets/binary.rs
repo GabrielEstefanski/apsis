@@ -11,7 +11,7 @@ pub fn binary_star(_seed: u64) -> Template {
 
     let v_body = v * 0.5;
 
-    let omega = v_body / r;
+    let _omega = v_body / r;
 
     Template {
         name: "Binary Stars",
@@ -61,7 +61,7 @@ pub fn star_companion(_seed: u64) -> Template {
     let v2 = v_orb * r2 / a;
 
     // rotações sincronizadas (tidal lock aproximado)
-    let omega = v_orb / a;
+    let _omega = v_orb / a;
 
     Template {
         name: "Star + Companion",

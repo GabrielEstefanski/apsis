@@ -13,19 +13,18 @@
 use gravity_sim_core::templates::TemplateKind;
 
 fn main() {
-    let mut rows: Vec<(TemplateKind, &'static str, &'static str, usize)> =
-        TemplateKind::all()
-            .iter()
-            .map(|&k| {
-                let tpl = k.build(0);
-                let category = match k.category() {
-                    gravity_sim_core::templates::TemplateCategory::Bodies => "body",
-                    gravity_sim_core::templates::TemplateCategory::Systems => "system",
-                    gravity_sim_core::templates::TemplateCategory::ThreeBodyProblems => "3-body",
-                };
-                (k, k.name(), category, tpl.bodies.len())
-            })
-            .collect();
+    let mut rows: Vec<(TemplateKind, &'static str, &'static str, usize)> = TemplateKind::all()
+        .iter()
+        .map(|&k| {
+            let tpl = k.build(0);
+            let category = match k.category() {
+                gravity_sim_core::templates::TemplateCategory::Bodies => "body",
+                gravity_sim_core::templates::TemplateCategory::Systems => "system",
+                gravity_sim_core::templates::TemplateCategory::ThreeBodyProblems => "3-body",
+            };
+            (k, k.name(), category, tpl.bodies.len())
+        })
+        .collect();
 
     // Stable display: group by category, alphabetical within.
     rows.sort_by_key(|(_, name, cat, _)| (*cat, *name));

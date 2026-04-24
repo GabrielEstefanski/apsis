@@ -114,11 +114,7 @@ impl Telemetry {
     /// have been attempted yet (division-by-zero guard).
     pub fn acceptance_rate(&self) -> f32 {
         let attempts = self.substeps + self.rejections_total();
-        if attempts == 0 {
-            1.0
-        } else {
-            (self.substeps as f32) / (attempts as f32)
-        }
+        if attempts == 0 { 1.0 } else { (self.substeps as f32) / (attempts as f32) }
     }
 }
 
@@ -143,25 +139,70 @@ impl TelemetryBuilder {
         Self::default()
     }
 
-    pub fn with_substeps(mut self, n: u64) -> Self { self.snapshot.substeps = n; self }
-    pub fn with_rejections_picard(mut self, n: u64) -> Self { self.snapshot.rejections_picard = n; self }
-    pub fn with_rejections_truncation(mut self, n: u64) -> Self { self.snapshot.rejections_truncation = n; self }
-    pub fn with_picard_iters(mut self, n: u64) -> Self { self.snapshot.picard_iters = n; self }
-    pub fn with_degraded(mut self, n: u64) -> Self { self.snapshot.degraded = n; self }
-    pub fn with_floor_hits(mut self, n: u64) -> Self { self.snapshot.floor_hits = n; self }
+    pub fn with_substeps(mut self, n: u64) -> Self {
+        self.snapshot.substeps = n;
+        self
+    }
+    pub fn with_rejections_picard(mut self, n: u64) -> Self {
+        self.snapshot.rejections_picard = n;
+        self
+    }
+    pub fn with_rejections_truncation(mut self, n: u64) -> Self {
+        self.snapshot.rejections_truncation = n;
+        self
+    }
+    pub fn with_picard_iters(mut self, n: u64) -> Self {
+        self.snapshot.picard_iters = n;
+        self
+    }
+    pub fn with_degraded(mut self, n: u64) -> Self {
+        self.snapshot.degraded = n;
+        self
+    }
+    pub fn with_floor_hits(mut self, n: u64) -> Self {
+        self.snapshot.floor_hits = n;
+        self
+    }
 
-    pub fn with_current_dt(mut self, dt: f64) -> Self { self.snapshot.current_dt = dt; self }
-    pub fn with_dt_p50(mut self, dt: f64) -> Self { self.snapshot.dt_p50 = dt; self }
-    pub fn with_dt_p95(mut self, dt: f64) -> Self { self.snapshot.dt_p95 = dt; self }
+    pub fn with_current_dt(mut self, dt: f64) -> Self {
+        self.snapshot.current_dt = dt;
+        self
+    }
+    pub fn with_dt_p50(mut self, dt: f64) -> Self {
+        self.snapshot.dt_p50 = dt;
+        self
+    }
+    pub fn with_dt_p95(mut self, dt: f64) -> Self {
+        self.snapshot.dt_p95 = dt;
+        self
+    }
 
-    pub fn with_peak_energy_err(mut self, err: f64) -> Self { self.snapshot.peak_energy_err = err; self }
-    pub fn with_current_energy_err(mut self, err: f64) -> Self { self.snapshot.current_energy_err = err; self }
+    pub fn with_peak_energy_err(mut self, err: f64) -> Self {
+        self.snapshot.peak_energy_err = err;
+        self
+    }
+    pub fn with_current_energy_err(mut self, err: f64) -> Self {
+        self.snapshot.current_energy_err = err;
+        self
+    }
 
-    pub fn with_substeps_per_second(mut self, rate: f64) -> Self { self.snapshot.substeps_per_second_window = rate; self }
-    pub fn with_sim_time_per_second(mut self, rate: f64) -> Self { self.snapshot.sim_time_per_second_window = rate; self }
+    pub fn with_substeps_per_second(mut self, rate: f64) -> Self {
+        self.snapshot.substeps_per_second_window = rate;
+        self
+    }
+    pub fn with_sim_time_per_second(mut self, rate: f64) -> Self {
+        self.snapshot.sim_time_per_second_window = rate;
+        self
+    }
 
-    pub fn with_progress_fraction(mut self, f: f32) -> Self { self.snapshot.last_progress_fraction = f; self }
-    pub fn with_wall_elapsed(mut self, d: Duration) -> Self { self.snapshot.wall_elapsed = d; self }
+    pub fn with_progress_fraction(mut self, f: f32) -> Self {
+        self.snapshot.last_progress_fraction = f;
+        self
+    }
+    pub fn with_wall_elapsed(mut self, d: Duration) -> Self {
+        self.snapshot.wall_elapsed = d;
+        self
+    }
 
     pub fn finish(self) -> Telemetry {
         self.snapshot

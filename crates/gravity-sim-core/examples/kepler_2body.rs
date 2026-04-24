@@ -20,9 +20,8 @@ fn main() {
     let sun = Body::star(1.0);
     let earth = Body::rocky(1.0).at(1.0, 0.0).with_velocity(0.0, 1.0);
 
-    let mut sys = System::new(vec![sun, earth])
-        .with_integrator(IntegratorKind::Ias15)
-        .with_dt(1e-3);
+    let mut sys =
+        System::new(vec![sun, earth]).with_integrator(IntegratorKind::Ias15).with_dt(1e-3);
 
     // Integrate for ~16 orbital periods (T = 2π).
     const T_END: f64 = 100.0;

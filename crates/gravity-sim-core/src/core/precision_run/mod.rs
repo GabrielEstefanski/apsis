@@ -70,31 +70,19 @@ pub enum RunState {
     /// simulation time at which the run began; `wall_start` is the
     /// wall-clock moment at which the physics thread started
     /// stepping. Progress percent is `(t_sim - t_start) / (t_target - t_start)`.
-    Running {
-        t_target: f64,
-        t_start: f64,
-        wall_start: Instant,
-    },
+    Running { t_target: f64, t_start: f64, wall_start: Instant },
 
     /// The UI has requested a pause; the physics thread will
     /// transition to [`Paused`](RunState::Paused) at the next
     /// substep boundary. Distinct from `Paused` so callers can
     /// render "Pausing…" while the request is in flight.
-    Pausing {
-        t_target: f64,
-        t_start: f64,
-        wall_elapsed: Duration,
-    },
+    Pausing { t_target: f64, t_start: f64, wall_elapsed: Duration },
 
     /// The run is paused at a clean substep boundary. No physics
     /// work is happening. `wall_elapsed` is the cumulative wall
     /// time spent *running* so far (pause time excluded) — used to
     /// keep throughput calculations honest when resuming.
-    Paused {
-        t_target: f64,
-        t_start: f64,
-        wall_elapsed: Duration,
-    },
+    Paused { t_target: f64, t_start: f64, wall_elapsed: Duration },
 
     /// The UI has requested an abort; the physics thread will
     /// transition to [`Completed`](RunState::Completed) with
@@ -132,10 +120,7 @@ impl PrecisionRunController {
     /// Construct a fresh controller in [`RunState::Idle`]. This is
     /// the only state in which `start` is legal.
     pub fn new() -> Self {
-        Self {
-            state: RunState::Idle,
-            telemetry: Telemetry::default(),
-        }
+        Self { state: RunState::Idle, telemetry: Telemetry::default() }
     }
 
     /// Current state. Cheap to read (copies a small enum); the UI
@@ -162,7 +147,7 @@ impl PrecisionRunController {
                 let span = (t_target - t_start).max(f64::MIN_POSITIVE);
                 let done = (t_sim - t_start).max(0.0);
                 ((done / span) as f32).clamp(0.0, 1.0)
-            }
+            },
             RunState::Idle => 0.0,
             RunState::Completed { outcome } => match outcome {
                 RunOutcome::Reached => 1.0,
@@ -172,7 +157,7 @@ impl PrecisionRunController {
                     // that want a different rendering can detect
                     // `RunOutcome::UserAborted` explicitly.
                     self.telemetry.last_progress_fraction
-                }
+                },
             },
         }
     }
@@ -187,11 +172,8 @@ impl PrecisionRunController {
             "start() requires Idle or Completed state; got {:?}",
             self.state
         );
-        self.state = RunState::Running {
-            t_target,
-            t_start: t_start_sim,
-            wall_start: Instant::now(),
-        };
+        self.state =
+            RunState::Running { t_target, t_start: t_start_sim, wall_start: Instant::now() };
         self.telemetry = Telemetry::default();
     }
 
@@ -201,11 +183,8 @@ impl PrecisionRunController {
     /// No-op if not currently `Running`.
     pub fn request_pause(&mut self) {
         if let RunState::Running { t_target, t_start, wall_start } = self.state {
-            self.state = RunState::Pausing {
-                t_target,
-                t_start,
-                wall_elapsed: wall_start.elapsed(),
-            };
+            self.state =
+                RunState::Pausing { t_target, t_start, wall_elapsed: wall_start.elapsed() };
         }
     }
 
@@ -225,11 +204,8 @@ impl PrecisionRunController {
         if let RunState::Paused { t_target, t_start, wall_elapsed } = self.state {
             // Reconstruct `wall_start` so `wall_start.elapsed()` again
             // yields the correct cumulative value.
-            self.state = RunState::Running {
-                t_target,
-                t_start,
-                wall_start: Instant::now() - wall_elapsed,
-            };
+            self.state =
+                RunState::Running { t_target, t_start, wall_start: Instant::now() - wall_elapsed };
         }
     }
 
@@ -336,7 +312,7 @@ mod tests {
                     wall_elapsed >= std::time::Duration::from_millis(3),
                     "wall_elapsed should carry across the pause transition"
                 );
-            }
+            },
             other => panic!("expected Paused, got {:?}", other),
         }
     }
@@ -358,10 +334,7 @@ mod tests {
         c.request_abort();
         assert!(matches!(c.state(), RunState::Aborting { .. }));
         c.mark_aborted();
-        assert_eq!(
-            c.state(),
-            RunState::Completed { outcome: RunOutcome::UserAborted }
-        );
+        assert_eq!(c.state(), RunState::Completed { outcome: RunOutcome::UserAborted });
     }
 
     #[test]
@@ -379,10 +352,7 @@ mod tests {
         let mut c = fresh();
         c.start(10.0, 0.0);
         c.mark_completed();
-        assert_eq!(
-            c.state(),
-            RunState::Completed { outcome: RunOutcome::Reached }
-        );
+        assert_eq!(c.state(), RunState::Completed { outcome: RunOutcome::Reached });
     }
 
     #[test]
@@ -413,10 +383,7 @@ mod tests {
     #[test]
     fn telemetry_is_reset_on_start() {
         let mut c = fresh();
-        c.update_telemetry(Telemetry {
-            substeps: 999,
-            ..Default::default()
-        });
+        c.update_telemetry(Telemetry { substeps: 999, ..Default::default() });
         c.start(10.0, 0.0);
         assert_eq!(c.telemetry().substeps, 0);
     }

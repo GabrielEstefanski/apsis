@@ -46,7 +46,6 @@
 //! - Fortney et al. (2007). *Planetary radii across five orders of magnitude.*
 //!   ApJ 659, 1661.
 
-
 // ── Material classification ───────────────────────────────────────────────────
 
 /// Astrophysical material class.
@@ -365,7 +364,6 @@ impl Material {
             _ => 0.0,
         }
     }
-
 }
 
 // ── Density function ──────────────────────────────────────────────────────────
@@ -565,7 +563,7 @@ mod tests {
         for &mat in Material::ALL {
             let q = mat.q_pr();
             assert!(
-                q >= 0.0 && q <= 2.0,
+                (0.0..=2.0).contains(&q),
                 "{}: Q_pr = {q} outside physical range [0, 2]",
                 mat.display_name()
             );

@@ -26,12 +26,7 @@ const LBL_W: f32 = 80.0;
 impl SimulationApp {
     pub(super) fn panel_tab_view(&mut self, ui: &mut egui::Ui) {
         ui.add_space(2.0);
-        ui.label(
-            RichText::new("Display")
-                .size(13.0)
-                .color(TEXT_PRI)
-                .strong(),
-        );
+        ui.label(RichText::new("Display").size(13.0).color(TEXT_PRI).strong());
         ui.label(
             RichText::new("Visual layers & colouring — no effect on physics.")
                 .size(10.0)
@@ -47,20 +42,15 @@ impl SimulationApp {
         if self.show_trails {
             ui.indent("trail_opts", |ui| {
                 // Trail width (presentation).
-                kv_drag(
-                    ui,
-                    "width",
-                    "Line width in pixels.",
-                    |ui| {
-                        ui.add(
-                            egui::DragValue::new(&mut self.trail_width)
-                                .speed(0.1)
-                                .range(0.5_f32..=20.0)
-                                .max_decimals(1)
-                                .suffix(" px"),
-                        );
-                    },
-                );
+                kv_drag(ui, "width", "Line width in pixels.", |ui| {
+                    ui.add(
+                        egui::DragValue::new(&mut self.trail_width)
+                            .speed(0.1)
+                            .range(0.5_f32..=20.0)
+                            .max_decimals(1)
+                            .suffix(" px"),
+                    );
+                });
 
                 // Sample density — physics-thread sampler config (arc-length
                 // threshold multiplier). Presented here because it's a
@@ -70,12 +60,8 @@ impl SimulationApp {
                     trigger events. 1 = max density; higher = sparser,\n\
                     longer-lived trails.";
                 let changed = kv_drag(ui, "sample every", te_tip, |ui| {
-                    ui.add(
-                        egui::DragValue::new(&mut trail_every)
-                            .speed(1)
-                            .range(1..=256usize),
-                    )
-                    .changed()
+                    ui.add(egui::DragValue::new(&mut trail_every).speed(1).range(1..=256usize))
+                        .changed()
                 });
                 if changed {
                     self.trail_recorder.set_interval_multiplier(trail_every);
@@ -116,10 +102,7 @@ impl SimulationApp {
                 kv_row(ui, "levels", lv_tip, |ui| {
                     let labels = ["L0", "L1", "L2", "L3+"];
                     for i in 0..4 {
-                        ui.add(egui::Checkbox::new(
-                            &mut self.orbit_visible_levels[i],
-                            labels[i],
-                        ));
+                        ui.add(egui::Checkbox::new(&mut self.orbit_visible_levels[i], labels[i]));
                     }
                 });
 
@@ -129,9 +112,7 @@ impl SimulationApp {
                     looking at tend to survive even when smaller.";
                 kv_drag(ui, "max shown", top_tip, |ui| {
                     ui.add(
-                        egui::DragValue::new(&mut self.orbit_top_n)
-                            .speed(1)
-                            .range(1..=512usize),
+                        egui::DragValue::new(&mut self.orbit_top_n).speed(1).range(1..=512usize),
                     );
                 });
 
@@ -140,12 +121,7 @@ impl SimulationApp {
                     * periapsis inside the primary's body radius.\n\
                     High-eccentricity comets (e = 0.95 – 0.99) stay\n\
                     visible.";
-                toggle_row(
-                    ui,
-                    &mut self.orbit_hide_degenerate,
-                    "hide degenerate",
-                    deg_tip,
-                );
+                toggle_row(ui, &mut self.orbit_hide_degenerate, "hide degenerate", deg_tip);
             });
         }
         // Pinned-orbits badge. Rendered outside the orbit-ellipses guard
@@ -219,14 +195,12 @@ impl SimulationApp {
         use crate::render::color::ColorViewSelection;
 
         let mut enabled = self.color_view.is_some();
-        let resp = ui.checkbox(
-            &mut enabled,
-            RichText::new("Colour by data").size(10.5).color(TEXT_PRI),
-        )
-        .on_hover_text(
-            "Enable data-driven colouring (SPLASH / yt-style).\n\
+        let resp = ui
+            .checkbox(&mut enabled, RichText::new("Colour by data").size(10.5).color(TEXT_PRI))
+            .on_hover_text(
+                "Enable data-driven colouring (SPLASH / yt-style).\n\
              Disabled: each body uses its material colour.",
-        );
+            );
         if resp.changed() {
             if enabled {
                 self.color_view = Some(ColorViewSelection::default_velocity());
@@ -243,12 +217,8 @@ impl SimulationApp {
         ui.add_space(2.0);
 
         // ── Field dropdown ───────────────────────────────────────────────
-        let current_field_name = self
-            .field_registry
-            .get(&sel.field_id)
-            .map(|f| f.name())
-            .unwrap_or("(?)")
-            .to_string();
+        let current_field_name =
+            self.field_registry.get(&sel.field_id).map(|f| f.name()).unwrap_or("(?)").to_string();
         let mut new_field_id: Option<String> = None;
         let mut new_prefers_log: Option<bool> = None;
         kv_combo(
@@ -278,11 +248,8 @@ impl SimulationApp {
         if let Some(id) = new_field_id {
             sel.field_id = id;
             // Auto-pick a sensible normalizer when the field changes.
-            sel.normalizer_id = if new_prefers_log.unwrap_or(false) {
-                "log".into()
-            } else {
-                "linear".into()
-            };
+            sel.normalizer_id =
+                if new_prefers_log.unwrap_or(false) { "log".into() } else { "linear".into() };
             sel.range = None;
         }
 
@@ -359,11 +326,7 @@ impl SimulationApp {
 
         // ── Range readout ─────────────────────────────────────────────────
         if let Some((lo, hi)) = self.color_view_range {
-            let unit = self
-                .field_registry
-                .get(&sel.field_id)
-                .map(|f| f.unit_label())
-                .unwrap_or("");
+            let unit = self.field_registry.get(&sel.field_id).map(|f| f.unit_label()).unwrap_or("");
             ui.add_space(2.0);
             ui.label(
                 RichText::new(format!("range {unit}: {lo:.3e} … {hi:.3e}"))
@@ -424,12 +387,7 @@ fn kv_drag<R>(
 /// Label on the left, arbitrary content on the right (full remaining width).
 /// Used when the right side hosts several widgets (e.g. a row of checkboxes)
 /// that would not fit in `kv_drag`'s reserved `DV_W` slot.
-fn kv_row<R>(
-    ui: &mut egui::Ui,
-    label: &str,
-    tip: &str,
-    add: impl FnOnce(&mut egui::Ui) -> R,
-) -> R {
+fn kv_row<R>(ui: &mut egui::Ui, label: &str, tip: &str, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
     ui.horizontal(|ui| {
         ui.add_sized(
             egui::vec2(LBL_W, 18.0),

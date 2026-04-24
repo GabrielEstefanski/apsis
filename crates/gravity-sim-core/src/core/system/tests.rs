@@ -44,8 +44,8 @@ fn two_body_deterministic_system() -> System {
 fn assert_bodies_bit_equal(a: &[Body], b: &[Body], context: &str) {
     assert_eq!(a.len(), b.len(), "{context}: body count differs");
     for (i, (ba, bb)) in a.iter().zip(b.iter()).enumerate() {
-        assert_eq!(ba.x.to_bits(),  bb.x.to_bits(),  "{context}: body {i} x differs");
-        assert_eq!(ba.y.to_bits(),  bb.y.to_bits(),  "{context}: body {i} y differs");
+        assert_eq!(ba.x.to_bits(), bb.x.to_bits(), "{context}: body {i} x differs");
+        assert_eq!(ba.y.to_bits(), bb.y.to_bits(), "{context}: body {i} y differs");
         assert_eq!(ba.vx.to_bits(), bb.vx.to_bits(), "{context}: body {i} vx differs");
         assert_eq!(ba.vy.to_bits(), bb.vy.to_bits(), "{context}: body {i} vy differs");
     }
@@ -91,7 +91,10 @@ mod energy {
             peak_err < TOLERANCE,
             "VelocityVerlet: peak |δE/E₀| = {:.3e} exceeds {:.0e} \
              after {} periods (dt = {}, T = 4π ≈ 12.566)",
-            peak_err, TOLERANCE, N_PERIODS, DT,
+            peak_err,
+            TOLERANCE,
+            N_PERIODS,
+            DT,
         );
     }
 
@@ -108,7 +111,10 @@ mod energy {
             peak_err < TOLERANCE,
             "Yoshida4: peak |δE/E₀| = {:.3e} exceeds {:.0e} \
              after {} periods (dt = {}, T = 4π ≈ 12.566)",
-            peak_err, TOLERANCE, N_PERIODS, DT,
+            peak_err,
+            TOLERANCE,
+            N_PERIODS,
+            DT,
         );
     }
 
@@ -177,7 +183,9 @@ mod wh_guard {
             Body::star(10.0).at(0.0, 0.0).with_velocity(0.0, 0.0),
             Body::rocky(1.0).at(10.0, 0.0).with_velocity(0.0, 1.0),
         ];
-        assert!(System::new(bodies).with_theta(0.5).with_dt(0.01).with_max_depth(10).is_wh_suitable());
+        assert!(
+            System::new(bodies).with_theta(0.5).with_dt(0.01).with_max_depth(10).is_wh_suitable()
+        );
     }
 
     #[test]
@@ -186,13 +194,17 @@ mod wh_guard {
             Body::star(9.9).at(0.0, 0.0).with_velocity(0.0, 0.0),
             Body::rocky(1.0).at(10.0, 0.0).with_velocity(0.0, 1.0),
         ];
-        assert!(!System::new(bodies).with_theta(0.5).with_dt(0.01).with_max_depth(10).is_wh_suitable());
+        assert!(
+            !System::new(bodies).with_theta(0.5).with_dt(0.01).with_max_depth(10).is_wh_suitable()
+        );
     }
 
     #[test]
     fn single_body_is_not_suitable() {
         let bodies = vec![Body::rocky(1.0).at(0.0, 0.0).with_velocity(0.0, 0.0)];
-        assert!(!System::new(bodies).with_theta(0.5).with_dt(0.01).with_max_depth(10).is_wh_suitable());
+        assert!(
+            !System::new(bodies).with_theta(0.5).with_dt(0.01).with_max_depth(10).is_wh_suitable()
+        );
     }
 
     #[test]
@@ -218,7 +230,8 @@ mod wh_guard {
             Body::rocky(1.0).at(-1.0, 0.0).with_velocity(0.0, -0.5),
             Body::rocky(1.0).at(1.0, 0.0).with_velocity(0.0, 0.5),
         ];
-        let mut sys_wh = System::new(bodies.clone()).with_theta(0.5).with_dt(0.01).with_max_depth(10);
+        let mut sys_wh =
+            System::new(bodies.clone()).with_theta(0.5).with_dt(0.01).with_max_depth(10);
         sys_wh.set_integrator(IntegratorKind::WisdomHolman);
         let mut sys_y4 = System::new(bodies).with_theta(0.5).with_dt(0.01).with_max_depth(10);
         sys_y4.set_integrator(IntegratorKind::Yoshida4);
@@ -259,7 +272,9 @@ mod benchmarks {
         for _ in 0..60 {
             let d = (mean_anomaly - ea + e * ea.sin()) / (1.0 - e * ea.cos());
             ea += d;
-            if d.abs() < 1e-14 { break; }
+            if d.abs() < 1e-14 {
+                break;
+            }
         }
         ea
     }
@@ -285,7 +300,9 @@ mod benchmarks {
 
         let mut sys = System::new(vec![b1, b2]).with_theta(0.5).with_dt(dt).with_max_depth(10);
         sys.set_integrator(integrator);
-        for _ in 0..n_steps { sys.step(); }
+        for _ in 0..n_steps {
+            sys.step();
+        }
         let t = n_steps as f64 * dt;
         let bodies = sys.bodies();
         let (rx, ry) = (bodies[1].x - bodies[0].x, bodies[1].y - bodies[0].y);
@@ -348,7 +365,9 @@ mod benchmarks {
             .collect();
         let mut sys = System::new(bodies).with_theta(0.5).with_dt(DT).with_max_depth(10);
         sys.set_integrator(IntegratorKind::Yoshida4);
-        for _ in 0..STEPS { sys.step(); }
+        for _ in 0..STEPS {
+            sys.step();
+        }
 
         let max_err = FIGURE8_IC
             .iter()
@@ -360,7 +379,9 @@ mod benchmarks {
             max_err < TOL,
             "Figure-8 (Y4, dt={DT}): max |Δr| = {:.3e} > {:.0e} \
              after {STEPS} steps (t={:.6}, T≈{FIGURE8_T:.6})",
-            max_err, TOL, STEPS as f64 * DT,
+            max_err,
+            TOL,
+            STEPS as f64 * DT,
         );
     }
 
@@ -382,9 +403,12 @@ mod benchmarks {
                 .collect();
             let mut sys = System::new(bodies).with_theta(0.5).with_dt(dt).with_max_depth(10);
             sys.set_integrator(integrator);
-            for _ in 0..steps { sys.step(); }
+            for _ in 0..steps {
+                sys.step();
+            }
             println!("{label}  t={:.6}  T={FIGURE8_T:.6}", steps as f64 * dt);
-            for (i, (&(x0, y0, _, _), b)) in FIGURE8_IC.iter().zip(sys.bodies().iter()).enumerate() {
+            for (i, (&(x0, y0, _, _), b)) in FIGURE8_IC.iter().zip(sys.bodies().iter()).enumerate()
+            {
                 let err = ((b.x - x0).powi(2) + (b.y - y0).powi(2)).sqrt();
                 println!("  body {i}: |Δr| = {err:.3e}");
             }
@@ -411,7 +435,9 @@ mod benchmarks {
             Body::rocky(4.0).at(-2.0, -1.0).with_velocity(0.0, 0.0),
             Body::rocky(5.0).at(1.0, -1.0).with_velocity(0.0, 0.0),
         ];
-        for b in &mut bodies { b.softening = 0.0; }
+        for b in &mut bodies {
+            b.softening = 0.0;
+        }
         let mut sys = System::new(bodies.to_vec()).with_theta(0.5).with_dt(dt).with_max_depth(10);
         sys.set_integrator(IntegratorKind::Yoshida4);
         sys
@@ -420,7 +446,7 @@ mod benchmarks {
     #[test]
     fn pythagorean_initial_geometry() {
         const POS: [(f64, f64); 3] = [(1.0, 3.0), (-2.0, -1.0), (1.0, -1.0)];
-        let d = |a: (f64, f64), b: (f64, f64)| ((a.0-b.0).powi(2) + (a.1-b.1).powi(2)).sqrt();
+        let d = |a: (f64, f64), b: (f64, f64)| ((a.0 - b.0).powi(2) + (a.1 - b.1).powi(2)).sqrt();
         assert!((d(POS[0], POS[1]) - 5.0).abs() < 1e-15, "r₁₂ ≠ 5");
         assert!((d(POS[0], POS[2]) - 4.0).abs() < 1e-15, "r₁₃ ≠ 4");
         assert!((d(POS[1], POS[2]) - 3.0).abs() < 1e-15, "r₂₃ ≠ 3");
@@ -455,7 +481,9 @@ mod benchmarks {
     fn pythagorean_angular_momentum_conserved() {
         const DT: f64 = 1e-3;
         let mut sys = pythagorean_system(DT);
-        for _ in 0..1_000 { sys.step(); }
+        for _ in 0..1_000 {
+            sys.step();
+        }
         let lz = sys.metrics().angular_momentum_z.abs();
         assert!(lz < 1e-12, "|L_z| = {lz:.3e} after t=1.0, expected < 1e-12");
     }
@@ -466,20 +494,23 @@ mod benchmarks {
         const TOL: f64 = 1e-6;
 
         let mut ref_sys = pythagorean_system(1e-4);
-        for _ in 0..(T_END / 1e-4) as usize { ref_sys.step(); }
+        for _ in 0..(T_END / 1e-4) as usize {
+            ref_sys.step();
+        }
 
         let mut sys = pythagorean_system(1e-3);
-        for _ in 0..(T_END / 1e-3) as usize { sys.step(); }
+        for _ in 0..(T_END / 1e-3) as usize {
+            sys.step();
+        }
 
-        let max_dr = ref_sys.bodies().iter()
+        let max_dr = ref_sys
+            .bodies()
+            .iter()
             .zip(sys.bodies().iter())
-            .map(|(r, t)| ((r.x-t.x).powi(2) + (r.y-t.y).powi(2)).sqrt())
+            .map(|(r, t)| ((r.x - t.x).powi(2) + (r.y - t.y).powi(2)).sqrt())
             .fold(0.0_f64, f64::max);
 
-        assert!(
-            max_dr < TOL,
-            "Y4 max |Δr| = {max_dr:.3e} > {TOL:.0e} at t=1 (dt=1e-3 vs dt=1e-4)"
-        );
+        assert!(max_dr < TOL, "Y4 max |Δr| = {max_dr:.3e} > {TOL:.0e} at t=1 (dt=1e-3 vs dt=1e-4)");
     }
 
     #[test]
@@ -495,7 +526,9 @@ mod benchmarks {
         let mut steps_done: usize = 0;
         for &t_snap in &[1.0_f64, 5.0, 10.0] {
             let target = (t_snap / DT).round() as usize;
-            for _ in steps_done..target { sys.step(); }
+            for _ in steps_done..target {
+                sys.step();
+            }
             steps_done = target;
             let m = sys.metrics();
             println!(
@@ -542,13 +575,19 @@ mod replay {
         const STEPS_AFTER: u64 = 300;
 
         let mut reference = two_body_deterministic_system();
-        for _ in 0..(STEPS_BEFORE + STEPS_AFTER) { reference.step(); }
+        for _ in 0..(STEPS_BEFORE + STEPS_AFTER) {
+            reference.step();
+        }
 
         let mut replayed = two_body_deterministic_system();
-        for _ in 0..STEPS_BEFORE { replayed.step(); }
+        for _ in 0..STEPS_BEFORE {
+            replayed.step();
+        }
         let snap = replayed.to_snapshot();
         replayed.restore_from_snapshot(&snap);
-        for _ in 0..STEPS_AFTER { replayed.step(); }
+        for _ in 0..STEPS_AFTER {
+            replayed.step();
+        }
 
         assert_bodies_bit_equal(reference.bodies(), replayed.bodies(), "snapshot replay");
     }
@@ -558,7 +597,9 @@ mod replay {
         use crate::io::snapshot::SimSnapshot;
 
         let mut sys = two_body_deterministic_system();
-        for _ in 0..100 { sys.step(); }
+        for _ in 0..100 {
+            sys.step();
+        }
 
         let mut snap = sys.to_snapshot();
         snap.sim_name = "roundtrip-test".to_owned();
@@ -569,17 +610,17 @@ mod replay {
         let loaded = SimSnapshot::load_from(&path).expect("snapshot load failed");
         std::fs::remove_file(&path).ok();
 
-        assert_eq!(loaded.t.to_bits(),  snap.t.to_bits(),  "t");
-        assert_eq!(loaded.steps,        snap.steps,         "steps");
-        assert_eq!(loaded.dt.to_bits(), snap.dt.to_bits(),  "dt");
-        assert_eq!(loaded.seed,         snap.seed,          "seed");
-        assert_eq!(loaded.sim_name,     snap.sim_name,      "sim_name");
-        assert_eq!(loaded.bodies.len(), snap.bodies.len(),  "body count");
+        assert_eq!(loaded.t.to_bits(), snap.t.to_bits(), "t");
+        assert_eq!(loaded.steps, snap.steps, "steps");
+        assert_eq!(loaded.dt.to_bits(), snap.dt.to_bits(), "dt");
+        assert_eq!(loaded.seed, snap.seed, "seed");
+        assert_eq!(loaded.sim_name, snap.sim_name, "sim_name");
+        assert_eq!(loaded.bodies.len(), snap.bodies.len(), "body count");
         for (i, (l, s)) in loaded.bodies.iter().zip(snap.bodies.iter()).enumerate() {
-            assert_eq!(l.x.to_bits(),    s.x.to_bits(),    "body {i} x roundtrip");
-            assert_eq!(l.y.to_bits(),    s.y.to_bits(),    "body {i} y roundtrip");
-            assert_eq!(l.vx.to_bits(),   s.vx.to_bits(),   "body {i} vx roundtrip");
-            assert_eq!(l.vy.to_bits(),   s.vy.to_bits(),   "body {i} vy roundtrip");
+            assert_eq!(l.x.to_bits(), s.x.to_bits(), "body {i} x roundtrip");
+            assert_eq!(l.y.to_bits(), s.y.to_bits(), "body {i} y roundtrip");
+            assert_eq!(l.vx.to_bits(), s.vx.to_bits(), "body {i} vx roundtrip");
+            assert_eq!(l.vy.to_bits(), s.vy.to_bits(), "body {i} vy roundtrip");
             assert_eq!(l.mass.to_bits(), s.mass.to_bits(), "body {i} mass roundtrip");
         }
     }
@@ -695,9 +736,7 @@ mod integrator_force_compat {
         let bodies: Vec<Body> = (0..80)
             .map(|i| {
                 let theta = i as f64 * 0.1;
-                Body::rocky(1.0)
-                    .at(theta.cos(), theta.sin())
-                    .with_velocity(0.0, 0.0)
+                Body::rocky(1.0).at(theta.cos(), theta.sin()).with_velocity(0.0, 0.0)
             })
             .collect();
         System::new(bodies).with_theta(0.5).with_dt(0.01).with_max_depth(10)

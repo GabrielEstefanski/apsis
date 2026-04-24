@@ -30,10 +30,6 @@ impl TemplateEntry {
 pub static TEMPLATES: LazyLock<Vec<TemplateEntry>> = LazyLock::new(|| {
     TemplateKind::all()
         .iter()
-        .map(|&kind| TemplateEntry {
-            name: kind.name(),
-            category: kind.category(),
-            kind,
-        })
+        .map(|&kind| TemplateEntry { name: kind.name(), category: kind.category(), kind })
         .collect()
 });

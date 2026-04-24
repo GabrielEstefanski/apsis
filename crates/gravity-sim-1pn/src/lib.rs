@@ -58,6 +58,7 @@
 //! ```
 
 #![deny(unsafe_code)]
+#![allow(clippy::needless_range_loop)]
 
 use gravity_sim_core::domain::body::Body;
 use gravity_sim_core::physics::integrator::PerturbationForce;
@@ -232,10 +233,8 @@ mod tests {
     /// Guards the "must add, not overwrite" clause of the trait contract.
     #[test]
     fn accumulate_is_additive() {
-        let bodies = vec![
-            Body::star(1.0),
-            Body::rocky(1e-6).at(0.5, 0.0).with_velocity(0.0, 1.414),
-        ];
+        let bodies =
+            vec![Body::star(1.0), Body::rocky(1e-6).at(0.5, 0.0).with_velocity(0.0, 1.414)];
         let pn = PostNewtonian1PN::solar_units();
 
         let mut once = vec![(0.0, 0.0); 2];
@@ -246,14 +245,8 @@ mod tests {
         pn.accumulate(&bodies, &mut twice);
 
         for i in 0..2 {
-            assert!(
-                (twice[i].0 - 2.0 * once[i].0).abs() < 1e-14,
-                "body {i} ax not additive"
-            );
-            assert!(
-                (twice[i].1 - 2.0 * once[i].1).abs() < 1e-14,
-                "body {i} ay not additive"
-            );
+            assert!((twice[i].0 - 2.0 * once[i].0).abs() < 1e-14, "body {i} ax not additive");
+            assert!((twice[i].1 - 2.0 * once[i].1).abs() < 1e-14, "body {i} ay not additive");
         }
     }
 
@@ -261,10 +254,8 @@ mod tests {
     /// This is the physical sanity check that the prefactor scales as 1/c².
     #[test]
     fn infinite_c_gives_zero_correction() {
-        let bodies = vec![
-            Body::star(1.0),
-            Body::rocky(1e-6).at(0.387, 0.0).with_velocity(0.0, 2.07),
-        ];
+        let bodies =
+            vec![Body::star(1.0), Body::rocky(1e-6).at(0.387, 0.0).with_velocity(0.0, 2.07)];
         let pn = PostNewtonian1PN::with_c(1e20);
         let mut acc = vec![(0.0, 0.0); 2];
         pn.accumulate(&bodies, &mut acc);
@@ -289,9 +280,7 @@ mod tests {
         let sun = Body::star(1.0);
         let r_peri = A_MERCURY * (1.0 - E_MERCURY);
         let v_peri = (2.0 / r_peri - 1.0 / A_MERCURY).sqrt();
-        let mercury = Body::rocky(M_MERCURY)
-            .at(r_peri, 0.0)
-            .with_velocity(0.0, v_peri);
+        let mercury = Body::rocky(M_MERCURY).at(r_peri, 0.0).with_velocity(0.0, v_peri);
 
         let bodies = vec![sun, mercury];
         let mut acc = vec![(0.0, 0.0); 2];
@@ -333,9 +322,7 @@ mod tests {
         let sun = Body::star(1.0);
         let r_peri = A_MERCURY * (1.0 - E_MERCURY);
         let v_peri = (2.0 / r_peri - 1.0 / A_MERCURY).sqrt(); // G M_sun = 1
-        let mercury = Body::rocky(M_MERCURY)
-            .at(r_peri, 0.0)
-            .with_velocity(0.0, v_peri);
+        let mercury = Body::rocky(M_MERCURY).at(r_peri, 0.0).with_velocity(0.0, v_peri);
 
         let bodies = vec![sun, mercury];
         let mut acc = vec![(0.0, 0.0); 2];

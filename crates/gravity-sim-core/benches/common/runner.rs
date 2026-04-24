@@ -1,4 +1,4 @@
-﻿//! The one place that instantiates `System` and drives it through a
+//! The one place that instantiates `System` and drives it through a
 //! scenario. Keeping the System/force-model/integrator wiring in a
 //! single module means scenarios stay data, metrics stay data, and
 //! there is exactly one code path to audit when runs disagree
@@ -135,8 +135,11 @@ fn print_phase_profile(scenario_name: &str) {
     // Total only covers top-level phases â€” nested rows are shown
     // against their parent, so including them in the denominator
     // would double-count evaluate's time.
-    let total_ns: u128 =
-        rows.iter().filter(|(_, _, parent)| parent.is_none()).map(|(_, e, _)| e.total.as_nanos()).sum();
+    let total_ns: u128 = rows
+        .iter()
+        .filter(|(_, _, parent)| parent.is_none())
+        .map(|(_, e, _)| e.total.as_nanos())
+        .sum();
     let total_divisor = total_ns.max(1);
 
     println!();
@@ -149,21 +152,17 @@ fn print_phase_profile(scenario_name: &str) {
     for (name, entry, parent) in rows {
         let ns = entry.total.as_nanos();
         let ms = entry.total.as_secs_f64() * 1000.0;
-        let ns_per_call = if entry.count == 0 {
-            0.0
-        } else {
-            ns as f64 / entry.count as f64
-        };
+        let ns_per_call = if entry.count == 0 { 0.0 } else { ns as f64 / entry.count as f64 };
         let (pct, pct_label) = match parent {
             None => {
                 let p = (ns * 100) as f64 / total_divisor as f64;
                 (p, "%")
-            }
+            },
             Some(parent_entry) => {
                 let parent_ns = parent_entry.total.as_nanos().max(1);
                 let p = (ns * 100) as f64 / parent_ns as f64;
                 (p, "% of â†‘")
-            }
+            },
         };
         println!(
             "  {:<20} {:>12.3} {:>10} {:>14.1} {:>7.2}{}",

@@ -90,15 +90,10 @@ fn main() {
 /// delta informs whether multi-thread contention explains the gap
 /// between bench numbers and real-app stutter reports.
 fn run_multithread_diagnostic() {
-    eprintln!(
-        "[diagnostic] multi-thread mode — rayon default workers, non-deterministic metrics"
-    );
+    eprintln!("[diagnostic] multi-thread mode — rayon default workers, non-deterministic metrics");
     eprintln!(
         "[diagnostic] running {} scenario(s) flagged criterion_bench=false",
-        scenarios::all()
-            .iter()
-            .filter(|s| !s.criterion_bench)
-            .count()
+        scenarios::all().iter().filter(|s| !s.criterion_bench).count()
     );
     eprintln!();
 
@@ -122,7 +117,7 @@ fn run_validation_mode() {
             eprintln!("If this is the first run, record an initial baseline with:");
             eprintln!("    {UPDATE_ENV_VAR}=1 cargo bench");
             std::process::exit(1);
-        }
+        },
     };
 
     let scenarios_list = scenarios::all();
@@ -133,7 +128,7 @@ fn run_validation_mode() {
         match baseline::check_scenario(&baseline, spec.name, &metrics) {
             Ok(()) => {
                 println!("[validation] {}: OK", spec.name);
-            }
+            },
             Err(diff) => {
                 if spec.gate_on_baseline {
                     any_failed = true;
@@ -153,7 +148,7 @@ fn run_validation_mode() {
                         println!("  {}: {}", failure.metric, failure.reason);
                     }
                 }
-            }
+            },
         }
     }
 
@@ -161,7 +156,9 @@ fn run_validation_mode() {
         eprintln!();
         eprintln!("Baseline validation failed. If the change is intentional, update with:");
         eprintln!("    {UPDATE_ENV_VAR}=1 cargo bench");
-        eprintln!("and commit the updated benches/baselines/ias15.toml alongside your code change.");
+        eprintln!(
+            "and commit the updated benches/baselines/ias15.toml alongside your code change."
+        );
         std::process::exit(2);
     }
 
@@ -235,7 +232,7 @@ fn bench_full_system(c: &mut Criterion) {
         group.bench_function(spec.name, |b| {
             b.iter_batched_ref(
                 || runner::bench_setup(&spec),
-                |sys| runner::step_batch(sys),
+                runner::step_batch,
                 criterion::BatchSize::SmallInput,
             )
         });
@@ -254,11 +251,8 @@ fn bench_full_system(c: &mut Criterion) {
 /// failures would indicate someone smuggled rayon into a lazy-static
 /// code path, which we want to hear about loudly.
 fn enforce_single_thread() {
-    rayon::ThreadPoolBuilder::new()
-        .num_threads(1)
-        .build_global()
-        .expect(
-            "rayon global thread pool already initialised before bench main; \
+    rayon::ThreadPoolBuilder::new().num_threads(1).build_global().expect(
+        "rayon global thread pool already initialised before bench main; \
              single-thread determinism cannot be guaranteed — aborting",
-        );
+    );
 }

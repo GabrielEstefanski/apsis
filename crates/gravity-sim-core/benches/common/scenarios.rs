@@ -1,4 +1,4 @@
-﻿//! Scenario specifications for the IAS15 benchmark harness.
+//! Scenario specifications for the IAS15 benchmark harness.
 //!
 //! Each builder returns a [`ScenarioSpec`] with fully-deterministic
 //! initial conditions and a fixed integration window. There is no
@@ -420,14 +420,7 @@ pub fn structured_rings_n641() -> ScenarioSpec {
 /// diagnostic runs and future investigations â€” they remain callable
 /// directly by name from scripts or temporary additions to this list.
 pub fn all() -> Vec<ScenarioSpec> {
-    vec![
-        kepler_e05(),
-        kepler_e09(),
-        kepler_e099(),
-        pythagorean(),
-        cluster_n50(),
-        solar_n641(),
-    ]
+    vec![kepler_e05(), kepler_e09(), kepler_e099(), pythagorean(), cluster_n50(), solar_n641()]
 }
 
 // â”€â”€ Internal helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -436,13 +429,7 @@ pub fn all() -> Vec<ScenarioSpec> {
 /// eccentricity, and total mass parameter Î¼. The bodies are placed on
 /// either side of the origin at pericenter with equal-magnitude opposite
 /// velocities (symmetric about the centre of momentum).
-fn kepler_two_body(
-    name: &'static str,
-    a: f64,
-    e: f64,
-    mu: f64,
-    n_orbits: u64,
-) -> ScenarioSpec {
+fn kepler_two_body(name: &'static str, a: f64, e: f64, mu: f64, n_orbits: u64) -> ScenarioSpec {
     let r_peri = a * (1.0 - e);
     let v_peri = (mu * (1.0 + e) / (a * (1.0 - e))).sqrt();
     let period = 2.0 * std::f64::consts::PI * (a.powi(3) / mu).sqrt();

@@ -15,8 +15,8 @@
 
 use std::f64::consts::TAU;
 
-use rand::{SeedableRng, RngExt};
 use rand::rngs::SmallRng;
+use rand::{RngExt, SeedableRng};
 
 use crate::domain::materials::Material;
 use crate::templates::{Template, TemplateBody, UnitSystem, builders::circular_orbit};
@@ -143,7 +143,8 @@ fn place_comet(
 // ── Template builder ──────────────────────────────────────────────────────────
 
 pub fn solar_system(seed: u64) -> Template {
-    let mut rng: SmallRng = if seed == 0 { rand::make_rng() } else { SmallRng::seed_from_u64(seed) };
+    let mut rng: SmallRng =
+        if seed == 0 { rand::make_rng() } else { SmallRng::seed_from_u64(seed) };
     let mut bodies = Vec::with_capacity(1 + PLANETS.len() + 1 + 600 + 30);
 
     // ── Sun ───────────────────────────────────────────────────────────────── //
@@ -218,7 +219,7 @@ pub fn solar_system(seed: u64) -> Template {
         // For simplicity we use the circular speed and apply an eccentricity
         // correction: v_tangential = v_circ * sqrt(1 + e·cos(ν) + ...) — here
         // we use the first-order approximation v ≈ v_circ · (1 + e·cos(phase)).
-        let (mut pos, mut vel) = circular_orbit(M_SUN, a, phase);
+        let (pos, mut vel) = circular_orbit(M_SUN, a, phase);
         let ecc_factor = 1.0 + e * phase.cos();
         vel[0] *= ecc_factor;
         vel[1] *= ecc_factor;

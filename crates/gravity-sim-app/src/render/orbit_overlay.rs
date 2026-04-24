@@ -24,8 +24,8 @@
 //! the z-axis; a later 3D camera will project (x, y, z) through a view
 //! matrix. Nothing else in the overlay changes.
 
-use gravity_sim_core::physics::orbital::OrbitalElements;
 use crate::render::wgpu_backend::WgpuBackend;
+use gravity_sim_core::physics::orbital::OrbitalElements;
 
 /// Visual style for one predicted-orbit polyline.
 #[derive(Debug, Clone, Copy)]

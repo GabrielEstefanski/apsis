@@ -191,10 +191,7 @@ impl TonemapPipeline {
                     binding: 1,
                     resource: wgpu::BindingResource::Sampler(&self.sampler),
                 },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: self.uniform_buf.as_entire_binding(),
-                },
+                wgpu::BindGroupEntry { binding: 2, resource: self.uniform_buf.as_entire_binding() },
             ],
         }));
         self.bound_generation = hdr.generation();

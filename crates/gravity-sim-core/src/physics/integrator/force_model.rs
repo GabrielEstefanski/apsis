@@ -108,14 +108,10 @@ impl GravityForceModel {
     ///
     /// - `theta`:     Barnes-Hut opening angle (controls accuracy vs speed).
     /// - `max_depth`: Maximum quadtree depth (16 is sufficient for all
-    ///                practical particle counts).
+    ///   practical particle counts).
     pub fn new(theta: f64, max_depth: usize) -> Self {
-        Self {
-            engine: BarnesHutEngine::new(max_depth),
-            theta,
-        }
+        Self { engine: BarnesHutEngine::new(max_depth), theta }
     }
-
 }
 
 impl ForceModel for GravityForceModel {
@@ -136,9 +132,7 @@ impl ForceModel for GravityForceModel {
         let traverse_start = std::time::Instant::now();
         let pe = self.engine.evaluate(bodies, self.theta, acc);
         #[cfg(feature = "ias15-profile")]
-        crate::physics::integrator::ias15::profile::record_tree_traverse(
-            traverse_start.elapsed(),
-        );
+        crate::physics::integrator::ias15::profile::record_tree_traverse(traverse_start.elapsed());
 
         pe
     }

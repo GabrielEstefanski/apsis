@@ -38,11 +38,7 @@ pub fn sample_stops(stops: &[(f32, [u8; 3])], t: f32) -> [u8; 3] {
         if t >= t0 && t <= t1 {
             let span = (t1 - t0).max(1e-6);
             let f = (t - t0) / span;
-            return [
-                lerp_u8(c0[0], c1[0], f),
-                lerp_u8(c0[1], c1[1], f),
-                lerp_u8(c0[2], c1[2], f),
-            ];
+            return [lerp_u8(c0[0], c1[0], f), lerp_u8(c0[1], c1[1], f), lerp_u8(c0[2], c1[2], f)];
         }
     }
     stops[stops.len() - 1].1

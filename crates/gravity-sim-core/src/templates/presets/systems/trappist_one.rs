@@ -1,12 +1,13 @@
-use rand::{SeedableRng, RngExt};
-use rand::rngs::SmallRng;
 use crate::{
     domain::materials::Material,
     templates::{Template, TemplateBody, UnitSystem, builders::circular_orbit},
 };
+use rand::rngs::SmallRng;
+use rand::{RngExt, SeedableRng};
 
 pub fn trappist_1(seed: u64) -> Template {
-    let mut rng: SmallRng = if seed == 0 { rand::make_rng() } else { SmallRng::seed_from_u64(seed) };
+    let mut rng: SmallRng =
+        if seed == 0 { rand::make_rng() } else { SmallRng::seed_from_u64(seed) };
     let mut bodies = Vec::with_capacity(8);
 
     // ── Star ───────────────────────────── //

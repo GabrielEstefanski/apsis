@@ -1,4 +1,4 @@
-﻿//! Scenario metrics: what a single run produces and how to classify it.
+//! Scenario metrics: what a single run produces and how to classify it.
 //!
 //! Metrics are split into two tiers that drive different baseline
 //! tolerance strategies:
@@ -196,11 +196,7 @@ pub fn assemble(
 
     let dt = dt_summary(&samples.dt);
 
-    let peak_energy_err = samples
-        .abs_energy_err
-        .iter()
-        .copied()
-        .fold(0.0_f64, f64::max);
+    let peak_energy_err = samples.abs_energy_err.iter().copied().fold(0.0_f64, f64::max);
     let rel_energy_err_rms = rms(&samples.abs_energy_err);
     let energy_drift_slope = linear_regression_slope(&samples.t, &samples.abs_energy_err);
 
@@ -238,14 +234,7 @@ struct DtSummary {
 /// will fail other baseline checks first.
 fn dt_summary(samples: &[f64]) -> DtSummary {
     if samples.is_empty() {
-        return DtSummary {
-            min: 0.0,
-            max: 0.0,
-            mean: 0.0,
-            p05: 0.0,
-            p50: 0.0,
-            p95: 0.0,
-        };
+        return DtSummary { min: 0.0, max: 0.0, mean: 0.0, p05: 0.0, p50: 0.0, p95: 0.0 };
     }
     let mut sorted: Vec<f64> = samples.to_vec();
     sorted.sort_by(|a, b| a.partial_cmp(b).expect("dt samples contain NaN"));

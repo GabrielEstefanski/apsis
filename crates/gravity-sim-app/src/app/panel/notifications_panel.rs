@@ -9,8 +9,8 @@ use crate::app::icons;
 use crate::app::notifications::{NotificationEntry, NotificationFilter};
 use crate::app::theme::{ACCENT, BORDER, DANGER, PANEL_BG, TEXT_DIM, TEXT_PRI, TEXT_SEC};
 use crate::app::ui::SimulationApp;
-use gravity_sim_core::core::log::{Level, Source};
 use eframe::egui::{self, Align, Color32, Layout, RichText, Stroke};
+use gravity_sim_core::core::log::{Level, Source};
 use std::time::SystemTime;
 
 impl SimulationApp {
@@ -56,12 +56,7 @@ impl SimulationApp {
                 ui.set_min_width(480.0);
 
                 ui.horizontal(|ui| {
-                    ui.label(
-                        RichText::new("NOTIFICATIONS")
-                            .size(10.0)
-                            .color(TEXT_DIM)
-                            .strong(),
-                    );
+                    ui.label(RichText::new("NOTIFICATIONS").size(10.0).color(TEXT_DIM).strong());
                     ui.label(
                         RichText::new(format!("· {} total", snapshot.len()))
                             .size(10.0)
@@ -102,59 +97,36 @@ impl SimulationApp {
 
                 ui.horizontal(|ui| {
                     filter_chip(ui, filter, NotificationFilter::All, "All", snapshot.len());
-                    filter_chip(
-                        ui,
-                        filter,
-                        NotificationFilter::Info,
-                        "Info",
-                        total_info,
-                    );
-                    filter_chip(
-                        ui,
-                        filter,
-                        NotificationFilter::Warn,
-                        "Warnings",
-                        total_warn,
-                    );
-                    filter_chip(
-                        ui,
-                        filter,
-                        NotificationFilter::Error,
-                        "Errors",
-                        total_error,
-                    );
+                    filter_chip(ui, filter, NotificationFilter::Info, "Info", total_info);
+                    filter_chip(ui, filter, NotificationFilter::Warn, "Warnings", total_warn);
+                    filter_chip(ui, filter, NotificationFilter::Error, "Errors", total_error);
                 });
 
                 ui.add_space(6.0);
                 ui.separator();
                 ui.add_space(4.0);
 
-                egui::ScrollArea::vertical()
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        let filtered: Vec<&NotificationEntry> = snapshot
-                            .iter()
-                            .rev()
-                            .filter(|e| filter.matches(e.event.level))
-                            .collect();
+                egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+                    let filtered: Vec<&NotificationEntry> =
+                        snapshot.iter().rev().filter(|e| filter.matches(e.event.level)).collect();
 
-                        if filtered.is_empty() {
-                            ui.add_space(40.0);
-                            ui.vertical_centered(|ui| {
-                                ui.label(
-                                    RichText::new("No notifications to show")
-                                        .size(11.0)
-                                        .color(TEXT_DIM)
-                                        .italics(),
-                                );
-                            });
-                            return;
-                        }
+                    if filtered.is_empty() {
+                        ui.add_space(40.0);
+                        ui.vertical_centered(|ui| {
+                            ui.label(
+                                RichText::new("No notifications to show")
+                                    .size(11.0)
+                                    .color(TEXT_DIM)
+                                    .italics(),
+                            );
+                        });
+                        return;
+                    }
 
-                        for entry in filtered {
-                            draw_entry(ui, entry);
-                        }
-                    });
+                    for entry in filtered {
+                        draw_entry(ui, entry);
+                    }
+                });
             });
 
         if clear_requested {
@@ -177,9 +149,7 @@ fn filter_chip(
     let text_color = if selected { TEXT_PRI } else { TEXT_SEC };
     let stroke = if selected { ACCENT } else { BORDER };
     let btn = egui::Button::new(
-        RichText::new(format!("{} · {}", label, count))
-            .size(10.0)
-            .color(text_color),
+        RichText::new(format!("{} · {}", label, count)).size(10.0).color(text_color),
     )
     .fill(Color32::TRANSPARENT)
     .stroke(Stroke::new(if selected { 1.0 } else { 0.5 }, stroke))
@@ -209,12 +179,7 @@ fn draw_entry(ui: &mut egui::Ui, entry: &NotificationEntry) {
 
         ui.vertical(|ui| {
             ui.horizontal(|ui| {
-                ui.label(
-                    RichText::new(entry.event.message)
-                        .size(11.5)
-                        .color(TEXT_PRI)
-                        .strong(),
-                );
+                ui.label(RichText::new(entry.event.message).size(11.5).color(TEXT_PRI).strong());
                 if entry.count > 1 {
                     ui.label(
                         RichText::new(format!("×{}", entry.count))
@@ -242,12 +207,7 @@ fn draw_entry(ui: &mut egui::Ui, entry: &NotificationEntry) {
                 );
                 if !entry.event.fields.is_empty() {
                     let preview = preview_fields(&entry.event.fields);
-                    ui.label(
-                        RichText::new(preview)
-                            .size(10.0)
-                            .monospace()
-                            .color(TEXT_SEC),
-                    );
+                    ui.label(RichText::new(preview).size(10.0).monospace().color(TEXT_SEC));
                 }
             });
         });
@@ -286,7 +246,7 @@ fn format_timestamp(t: SystemTime) -> String {
             let m = (secs / 60) % 60;
             let s = secs % 60;
             format!("{:02}:{:02}:{:02}", h, m, s)
-        }
+        },
         Err(_) => String::from("--:--:--"),
     }
 }

@@ -57,7 +57,13 @@ impl Integrator for Yoshida4 {
         let raw_pe = evaluate(bodies, ctx.force, acc);
         let pe = scale_acc_and_pe(acc, ctx.g_factor, raw_pe);
 
-        StepResult { consumed_dt: dt, potential_energy: pe, used_fallback: false, step_snapshot: None, degraded: false }
+        StepResult {
+            consumed_dt: dt,
+            potential_energy: pe,
+            used_fallback: false,
+            step_snapshot: None,
+            degraded: false,
+        }
     }
 
     fn kind(&self) -> IntegratorKind {

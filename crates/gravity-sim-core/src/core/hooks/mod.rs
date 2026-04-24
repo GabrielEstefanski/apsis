@@ -68,11 +68,7 @@ pub trait SimHook: Send {
     }
 
     /// Fired for each [`CollisionEvent`] detected after the step.
-    fn on_collision(
-        &mut self,
-        _event: &CollisionEvent,
-        _ctx: &HookContext<'_>,
-    ) -> Vec<Command> {
+    fn on_collision(&mut self, _event: &CollisionEvent, _ctx: &HookContext<'_>) -> Vec<Command> {
         Vec::new()
     }
 
@@ -98,16 +94,11 @@ pub struct HookEntry {
 ///
 /// Dispatch order within a phase is strictly by ascending `priority`. Insertion
 /// order breaks ties (stable).
+#[derive(Default)]
 pub struct HookRegistry {
     entries: Vec<HookEntry>,
     /// Step interval for heartbeat ticks. `0` disables heartbeats.
     pub heartbeat_interval: u64,
-}
-
-impl Default for HookRegistry {
-    fn default() -> Self {
-        Self { entries: Vec::new(), heartbeat_interval: 0 }
-    }
 }
 
 impl HookRegistry {
@@ -164,11 +155,7 @@ impl HookRegistry {
         out
     }
 
-    pub fn dispatch_escape(
-        &mut self,
-        event: &EscapeEvent,
-        ctx: &HookContext<'_>,
-    ) -> Vec<Command> {
+    pub fn dispatch_escape(&mut self, event: &EscapeEvent, ctx: &HookContext<'_>) -> Vec<Command> {
         let mut out = Vec::new();
         for entry in &mut self.entries {
             out.extend(entry.hook.on_escape(event, ctx));

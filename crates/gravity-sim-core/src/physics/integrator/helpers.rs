@@ -10,11 +10,7 @@ use crate::physics::integrator::perturbation::PerturbationForce;
 /// Ensure `acc` has the correct length, then evaluate forces via the model.
 ///
 /// Returns the raw (unscaled) potential energy.
-pub fn evaluate(
-    bodies: &[Body],
-    force: &mut dyn ForceModel,
-    acc: &mut Vec<(f64, f64)>,
-) -> f64 {
+pub fn evaluate(bodies: &[Body], force: &mut dyn ForceModel, acc: &mut Vec<(f64, f64)>) -> f64 {
     if acc.len() != bodies.len() {
         acc.resize(bodies.len(), (0.0, 0.0));
     }

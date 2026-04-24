@@ -132,10 +132,7 @@ pub fn predict_ias15(
         + b[5].1 * h6 / 56.0
         + b[6].1 * h7 / 72.0;
 
-    (
-        x0.0 + v0.0 * h * dt + h2 * dt2 * ax,
-        x0.1 + v0.1 * h * dt + h2 * dt2 * ay,
-    )
+    (x0.0 + v0.0 * h * dt + h2 * dt2 * ax, x0.1 + v0.1 * h * dt + h2 * dt2 * ay)
 }
 
 /// 2nd-order Taylor interpolation: `x₀ + v₀·h·dt + ½·a₀·(h·dt)²`.
@@ -151,8 +148,5 @@ pub fn predict_order2(
     dt: f64,
 ) -> (f64, f64) {
     let s = h * dt;
-    (
-        x0.0 + v0.0 * s + 0.5 * a0.0 * s * s,
-        x0.1 + v0.1 * s + 0.5 * a0.1 * s * s,
-    )
+    (x0.0 + v0.0 * s + 0.5 * a0.0 * s * s, x0.1 + v0.1 * s + 0.5 * a0.1 * s * s)
 }

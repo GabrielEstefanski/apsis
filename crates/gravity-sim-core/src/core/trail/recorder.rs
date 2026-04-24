@@ -43,11 +43,7 @@ pub struct TrailRecorder {
 
 impl TrailRecorder {
     pub fn new() -> Self {
-        Self {
-            buffer: TrailBuffer::new(0),
-            interval_multiplier: 1,
-            last_n_bodies: 0,
-        }
+        Self { buffer: TrailBuffer::new(0), interval_multiplier: 1, last_n_bodies: 0 }
     }
 
     // ── Frame ingest ──────────────────────────────────────────────────────────
