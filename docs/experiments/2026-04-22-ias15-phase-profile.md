@@ -79,7 +79,7 @@ cargo bench --features ias15-profile --bench ias15 -- --test
 
 ### 2.2 Thread-Local Accumulator
 
-In `src/physics/integrator/ias15.rs`:
+In `crates/gravity-sim-core/src/physics/integrator/ias15.rs`:
 
 ```rust
 #[cfg(feature = "ias15-profile")]

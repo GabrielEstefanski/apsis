@@ -383,7 +383,7 @@ IAS15_BENCH_MULTITHREAD=1 cargo bench --features ias15-profile --bench ias15
 IAS15_BENCH_UPDATE_BASELINE=1 cargo bench --bench ias15
 ```
 
-The RMS-norm change is in `src/physics/integrator/ias15.rs`
+The RMS-norm change is in `crates/gravity-sim-core/src/physics/integrator/ias15.rs`
 (two functions: the `residual` computation in `picard_loop_inner`,
 and `truncation_error`). No external API change; `ForceModel` trait
 unchanged; `Integrator` trait unchanged.
