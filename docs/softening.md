@@ -1,6 +1,6 @@
 # Plummer Softening — Technical Reference
 
-**Module:** `crates/gravity-sim-core/src/domain/body.rs`, `crates/gravity-sim-core/src/physics/gravity/kernel.rs`  
+**Module:** `crates/apsis/src/domain/body.rs`, `crates/apsis/src/physics/gravity/kernel.rs`  
 
 ---
 
@@ -43,7 +43,7 @@ softening is combined in quadrature (Plummer-equivalent equal-volume averaging):
 ε²_ij = (ε²_i + ε²_j) / 2
 ```
 
-Implementation: `crates/gravity-sim-core/src/physics/gravity/kernel.rs::pair_eps2`.
+Implementation: `crates/apsis/src/physics/gravity/kernel.rs::pair_eps2`.
 
 ---
 
@@ -56,7 +56,7 @@ bodies with equal density have softening proportional to their physical radius:
 ε_i = EPS_BASE · m_i^(1/3)     with EPS_BASE = 0.02
 ```
 
-Implementation: `crates/gravity-sim-core/src/domain/body.rs::default_softening`.
+Implementation: `crates/apsis/src/domain/body.rs::default_softening`.
 
 ### Physical motivation
 
@@ -159,13 +159,13 @@ For publication-quality runs, both should be tuned:
 
 | File | Role |
 |------|------|
-| `crates/gravity-sim-core/src/domain/body.rs` | `EPS_BASE`, `default_softening()`, `Body::softening` field |
-| `crates/gravity-sim-core/src/physics/gravity/kernel.rs` | `pair_eps2()`, `plummer_acc()`, `plummer_phi()` |
-| `crates/gravity-sim-core/src/physics/gravity/engine.rs` | Per-body softening used in BH and exact evaluations |
-| `crates/gravity-sim-core/src/core/system/config.rs` | `set_softening_scale()` |
-| `crates/gravity-sim-core/src/core/system/helpers.rs` | `compute_closeness()` (r_min tracking) |
-| `crates/gravity-sim-core/src/core/metrics.rs` | `Metrics::r_min`, `Metrics::softening_max` |
-| `crates/gravity-sim-app/src/app/panel/tabs/config.rs` | ε scale slider + real-time validity indicator |
+| `crates/apsis/src/domain/body.rs` | `EPS_BASE`, `default_softening()`, `Body::softening` field |
+| `crates/apsis/src/physics/gravity/kernel.rs` | `pair_eps2()`, `plummer_acc()`, `plummer_phi()` |
+| `crates/apsis/src/physics/gravity/engine.rs` | Per-body softening used in BH and exact evaluations |
+| `crates/apsis/src/core/system/config.rs` | `set_softening_scale()` |
+| `crates/apsis/src/core/system/helpers.rs` | `compute_closeness()` (r_min tracking) |
+| `crates/apsis/src/core/metrics.rs` | `Metrics::r_min`, `Metrics::softening_max` |
+| `crates/apsis-app/src/app/panel/tabs/config.rs` | ε scale slider + real-time validity indicator |
 
 ---
 

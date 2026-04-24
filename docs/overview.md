@@ -2,9 +2,9 @@
 
 ## 1. Purpose and scope
 
-`gravity-sim` is an open-source N-body gravitational simulator implemented
-in Rust. The project's published contribution is the `gravity-sim-core`
-library; the interactive visualisation shell `gravity-sim-app` is an
+`apsis` is an open-source N-body gravitational simulator implemented
+in Rust. The project's published contribution is the `apsis`
+library; the interactive visualisation shell `apsis-app` is an
 optional side consumer, not part of the library's validated public
 surface (see the workspace [`README.md`](../README.md) for the paper-level
 positioning).
@@ -26,13 +26,13 @@ first-post-Newtonian correction supplied by an out-of-tree plugin.
 - Universal gravitation (Newton's law of gravitation, `G = 1` in
   simulation units).
 - Isolated system boundary: no external forces beyond those registered
-  explicitly via the [`PerturbationForce`](../crates/gravity-sim-core/src/physics/integrator/perturbation.rs)
+  explicitly via the [`PerturbationForce`](../crates/apsis/src/physics/integrator/perturbation.rs)
   extension point.
 - Plummer-softened pairwise forces with per-body material-scaled
   softening length — see [`softening.md`](softening.md) for the
   derivation and the published convention this follows.
 - Relativistic corrections as an opt-in plugin (see
-  [`gravity-sim-1pn`](../crates/gravity-sim-1pn/)) — Schwarzschild
+  [`apsis-1pn`](../crates/apsis-1pn/)) — Schwarzschild
   test-particle 1PN, applied pairwise.
 
 **Not modelled:**
@@ -52,36 +52,36 @@ The project is a Cargo workspace of three crates, split by role:
 
 | crate | role |
 |---|---|
-| [`gravity-sim-core`](../crates/gravity-sim-core/) | The library: domain types, physics, integrators, public API. Resolves no UI dependency — enforced in CI. |
-| [`gravity-sim-1pn`](../crates/gravity-sim-1pn/) | Out-of-tree plugin demonstration: Einstein-Infeld-Hoffmann (Schwarzschild limit) 1PN correction. Depends only on `gravity-sim-core` through the public API. |
-| [`gravity-sim-app`](../crates/gravity-sim-app/) | Optional interactive shell: egui/wgpu event loop, camera, panels, and GPU-side rendering. Not part of the validated surface. |
+| [`apsis`](../crates/apsis/) | The library: domain types, physics, integrators, public API. Resolves no UI dependency — enforced in CI. |
+| [`apsis-1pn`](../crates/apsis-1pn/) | Out-of-tree plugin demonstration: Einstein-Infeld-Hoffmann (Schwarzschild limit) 1PN correction. Depends only on `apsis` through the public API. |
+| [`apsis-app`](../crates/apsis-app/) | Optional interactive shell: egui/wgpu event loop, camera, panels, and GPU-side rendering. Not part of the validated surface. |
 
-The read direction is `gravity-sim-app → gravity-sim-core`. The core
+The read direction is `apsis-app → apsis`. The core
 crate has no awareness of the app, and
-`cargo tree -p gravity-sim-core` resolves zero UI dependencies. A
+`cargo tree -p apsis` resolves zero UI dependencies. A
 CI job asserts this on every push.
 
 ### 3.1 Core subsystems
 
-Inside `gravity-sim-core`, the code is organised by responsibility:
+Inside `apsis`, the code is organised by responsibility:
 
-- [`domain/`](../crates/gravity-sim-core/src/domain/) — `Body`,
+- [`domain/`](../crates/apsis/src/domain/) — `Body`,
   `NamedBody`, `Material`, softening primitives, and the
   `BodyField` plugin trait used by the UI to surface scalar fields
   per body.
-- [`physics/`](../crates/gravity-sim-core/src/physics/) — force
+- [`physics/`](../crates/apsis/src/physics/) — force
   models (Barnes-Hut + Plummer kernel), integrators (Velocity
   Verlet, Yoshida 4, Wisdom-Holman, IAS15), orbital elements,
   energy and angular-momentum diagnostics, and the
   `PerturbationForce` extension trait.
-- [`core/`](../crates/gravity-sim-core/src/core/) — the `System`
+- [`core/`](../crates/apsis/src/core/) — the `System`
   orchestrator, adaptive dt/θ controllers, hook registry,
   structured diagnostic event bus, trail ring buffer, and
   metrics assembly.
-- [`io/`](../crates/gravity-sim-core/src/io/) — snapshot
+- [`io/`](../crates/apsis/src/io/) — snapshot
   serialisation (`.grav` binary format), CSV recorder, headless
   run configuration (`.toml`).
-- [`templates/`](../crates/gravity-sim-core/src/templates/) — the
+- [`templates/`](../crates/apsis/src/templates/) — the
   `TemplateKind` enum and builders for built-in presets (Solar
   System, TRAPPIST-1, figure-eight, etc.), consumed uniformly by
   the app, the headless runner, and test scripts.
@@ -91,7 +91,7 @@ Inside `gravity-sim-core`, the code is organised by responsibility:
 ## 4. Numerical integration
 
 Four integrators are available, each declared with an
-[`ExecutionProfile`](../crates/gravity-sim-core/src/physics/integrator/traits.rs)
+[`ExecutionProfile`](../crates/apsis/src/physics/integrator/traits.rs)
 that downstream code reads to decide how to drive them:
 
 | integrator | order | execution profile | primary use |
@@ -111,7 +111,7 @@ pairs IAS15 with direct-O(N²) gravity rather than Barnes-Hut; see
 ## 5. Validation
 
 The library's top-line validation is the Mercury perihelion precession
-test shipped by the `gravity-sim-1pn` crate:
+test shipped by the `apsis-1pn` crate:
 
 - 500 Mercury orbits under IAS15 + 1PN + unsoftened gravity.
 - Measured perihelion drift: `+42.983 arcsec / century`.
@@ -119,7 +119,7 @@ test shipped by the `gravity-sim-1pn` crate:
 - Relative error: `4.4 × 10⁻⁶` (≈ 4 parts per million).
 
 This number is asserted in CI via
-`cargo test --release -p gravity-sim-1pn -- --ignored`, so any
+`cargo test --release -p apsis-1pn -- --ignored`, so any
 regression that would invalidate the paper's headline figure fails
 the build.
 
