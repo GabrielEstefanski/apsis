@@ -34,4 +34,30 @@ pub trait PerturbationForce: Send + Sync {
         let _ = offset;
         self.accumulate(bodies, scratch_acc);
     }
+
+    /// Declares whether this perturbation needs the underlying gravity to be
+    /// the exact `1/r` potential (no Plummer softening) to produce a
+    /// physically meaningful result.
+    ///
+    /// Default: `false`. Perturbations whose magnitude is dominated by the
+    /// Newtonian-force baseline (radiation pressure, drag, external fields
+    /// on fuzzy N-body clusters) return `false` and are unaffected by
+    /// softening.
+    ///
+    /// Corrections that measure *deviations* from `1/r` — general-relativistic
+    /// post-Newtonian terms, frame-dragging, J2 oblateness — should return
+    /// `true`. The simulator's default material-scaled softening (ε on the
+    /// order of 10⁻² AU for a solar-mass body) introduces a purely numerical
+    /// apsidal precession that, for Mercury, is ~2 × 10³ larger than the
+    /// 43 arcsec/century GR effect. Registering a perturbation with
+    /// `requires_exact_gravity() == true` into a system where any body still
+    /// carries nonzero softening emits a diagnostic via
+    /// [`crate::warn_diag!`] — the symptom would otherwise be silent.
+    ///
+    /// Call [`System::with_exact_gravity`](crate::core::system::System::with_exact_gravity)
+    /// or [`Body::unsoftened`](crate::domain::body::Body::unsoftened) to
+    /// silence the warning and make the perturbation measurement honest.
+    fn requires_exact_gravity(&self) -> bool {
+        false
+    }
 }

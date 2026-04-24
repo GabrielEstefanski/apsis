@@ -200,6 +200,36 @@ impl Body {
         }
     }
 
+    /// Zero this body's Plummer softening length, producing the exact `1/r`
+    /// potential for every interaction involving it.
+    ///
+    /// The simulator defaults every body to a material-scaled Plummer
+    /// softening (`EPS_BASE · mass^(1/3)`). For a solar-mass body this
+    /// gives ε ≈ 0.02 AU — about 5 % of Mercury's perihelion distance —
+    /// which introduces a numerical apsidal precession that can easily
+    /// dominate a fine-physics signal (post-Newtonian precession, J2
+    /// oblateness, tidal dissipation). Call this when the body participates
+    /// in a measurement of such a deviation-from-Kepler effect.
+    ///
+    /// Equivalent to `body.softening = 0.0;` but expresses intent:
+    ///
+    /// ```ignore
+    /// let sun     = Body::star(1.0).unsoftened();
+    /// let mercury = Body::rocky(3e-6)
+    ///     .at(0.307, 0.0)
+    ///     .with_velocity(0.0, 1.98)
+    ///     .unsoftened();
+    /// ```
+    ///
+    /// See also [`System::with_exact_gravity`](crate::core::system::System::with_exact_gravity)
+    /// to unsoften the whole system in one call.
+    #[inline]
+    #[must_use]
+    pub fn unsoftened(mut self) -> Self {
+        self.softening = 0.0;
+        self
+    }
+
     // ── Mutators ──────────────────────────────────────────────────────────────
 
     /// Recompute physical-only quantities from the current mass and density.
@@ -370,6 +400,14 @@ mod tests {
     fn white_dwarf_typical_luminosity_in_range() {
         let l = white_dwarf_luminosity(0.01);
         assert!(l > 1e-4 && l < 0.1, "WD luminosity out of expected range: {l}");
+    }
+
+    #[test]
+    fn unsoftened_zeroes_softening() {
+        let b = Body::rocky(1.0);
+        assert!(b.softening > 0.0, "default softening should be nonzero");
+        let b = b.unsoftened();
+        assert_eq!(b.softening, 0.0);
     }
 
     #[test]
