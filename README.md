@@ -1,8 +1,10 @@
-# gravity-sim
+# APSIS
+
+*Verified Extension Contracts for N-Body Simulation in Rust*
 
 A Rust N-body gravitational simulation library with an adaptive IAS15-style
 integrator (in the sense of Rein & Spiegel, 2015) and a compiler-enforced
-public extension API. Validated by an out-of-tree plugin crate reproducing
+public extension API. Validated by an out-of-tree companion crate reproducing
 Mercury's perihelion precession to **4.4 parts per million** of the
 General-Relativistic prediction.
 
@@ -26,9 +28,9 @@ community validation. This library does not seek to replace them.
 It fills a narrower niche: **a Rust-native N-body library providing an
 adaptive IAS15-style integrator behind a public API whose invariants are
 promoted to type-level, CI-enforced contracts.** To the authors' knowledge,
-the specific combination — Rust, a validated IAS15 implementation, and a
-plugin contract enforced by compilation rather than convention — is not
-currently available elsewhere. Concretely, the claim means:
+the specific combination — Rust, a validated IAS15 implementation, and
+extension contracts enforced by compilation rather than convention — is
+not currently available elsewhere. Concretely, the claim means:
 
 - Physical preconditions (exact `1/r` gravity, determinism seed, softening
   contracts) are declared in code at the type of each extension point, not
@@ -40,7 +42,7 @@ currently available elsewhere. Concretely, the claim means:
   **compilation**, not convention.
 - Validation uses the canonical test physicists have reached for a century:
   the perihelion precession of Mercury. The out-of-tree
-  [`gravity-sim-1pn`](crates/gravity-sim-1pn/) crate reproduces the textbook
+  [`apsis-1pn`](crates/apsis-1pn/) crate reproduces the textbook
   43 arcsec/century result at 4.4 ppm relative error, on an isolated build
   that never touches the core's sources.
 
@@ -51,9 +53,9 @@ This is a **software-methods** contribution, not a new-physics contribution.
 Prerequisites: Rust 1.85+ (`rustup install stable`).
 
 ```bash
-git clone https://github.com/gabrielbragaestefanski/gravity-sim
-cd gravity-sim
-cargo run --release --example mercury_perihelion -p gravity-sim-1pn
+git clone https://github.com/gabrielbragaestefanski/apsis
+cd apsis
+cargo run --release --example mercury_perihelion -p apsis-1pn
 ```
 
 Expected output (abridged):
@@ -73,7 +75,7 @@ Mercury + Sun + 1PN @ IAS15
 The same number is asserted in CI, gate-style:
 
 ```bash
-cargo test --release -p gravity-sim-1pn --tests -- --ignored
+cargo test --release -p apsis-1pn --tests -- --ignored
 ```
 
 ## A researcher-first API
@@ -82,9 +84,9 @@ A script to integrate a preset system with explicit integrator choice reads
 in the terms a scientist uses to think about the simulation:
 
 ```rust
-use gravity_sim_core::core::system::System;
-use gravity_sim_core::physics::integrator::IntegratorKind;
-use gravity_sim_core::templates::TemplateKind;
+use apsis::core::system::System;
+use apsis::physics::integrator::IntegratorKind;
+use apsis::templates::TemplateKind;
 
 fn main() {
     let mut sys = System::from_template(TemplateKind::SolarSystem)
@@ -101,7 +103,7 @@ fn main() {
 Bodies are built the same way:
 
 ```rust
-use gravity_sim_core::domain::body::Body;
+use apsis::domain::body::Body;
 
 let sun     = Body::star(1.0);
 let mercury = Body::rocky(3e-6)
@@ -110,8 +112,8 @@ let mercury = Body::rocky(3e-6)
     .unsoftened();                    // see "Fine-physics" below
 ```
 
-See [`crates/gravity-sim-core/examples/`](crates/gravity-sim-core/examples/)
-and [`crates/gravity-sim-1pn/examples/`](crates/gravity-sim-1pn/examples/)
+See [`crates/apsis/examples/`](crates/apsis/examples/)
+and [`crates/apsis-1pn/examples/`](crates/apsis-1pn/examples/)
 for seven runnable examples covering Kepler 2-body, the solar system
 integrated long, the three-body figure-eight, the Pythagorean problem, the
 Mercury perihelion test, and preset enumeration.
@@ -122,11 +124,11 @@ The workspace is three crates deliberately split by role:
 
 | crate | role | dependencies |
 |---|---|---|
-| [`gravity-sim-core`](crates/gravity-sim-core/) | The library. Physics, integrators, public API. | Zero UI: `cargo tree -p gravity-sim-core` resolves no `egui`/`wgpu`/`eframe`. |
-| [`gravity-sim-1pn`](crates/gravity-sim-1pn/) | The out-of-tree plugin demonstration. 1PN correction via `PerturbationForce`. | **Only** `gravity-sim-core`. Reviewed as the paper's Phase-3 gate. |
-| [`gravity-sim-app`](crates/gravity-sim-app/) | Optional interactive egui/wgpu shell. **Not** part of the library's validated surface. | `egui`, `wgpu`, `eframe`. |
+| [`apsis`](crates/apsis/) | The library. Physics, integrators, public API. | Zero UI: `cargo tree -p apsis` resolves no `egui`/`wgpu`/`eframe`. |
+| [`apsis-1pn`](crates/apsis-1pn/) | Out-of-tree companion crate: 1PN correction via `PerturbationForce`. | **Only** `apsis`. Reviewed as the paper's Phase-3 gate. |
+| [`apsis-app`](crates/apsis-app/) | Optional interactive egui/wgpu shell. **Not** part of the library's validated surface. | `egui`, `wgpu`, `eframe`. |
 
-The direction is `gravity-sim-app` → `gravity-sim-core`; the core does not
+The direction is `apsis-app` → `apsis`; the core does not
 know the app exists. CI enforces the separation.
 
 ## Fine-physics guardrail
@@ -152,8 +154,8 @@ fn requires_exact_gravity(&self) -> bool { true }
 ```
 
 on the `PerturbationForce` trait. Registering such a perturbation into a
-system with softened bodies emits a `warn_diag!` diagnostic at plugin
-registration, with per-body softening statistics. Dismiss by
+system with softened bodies emits a `warn_diag!` diagnostic at registration
+time, with per-body softening statistics. Dismiss by
 
 ```rust
 let sun = Body::star(1.0).unsoftened();             // per body
@@ -192,10 +194,10 @@ What is verified in CI:
   (`mercury_precession_matches_gr_within_one_percent`,
   `baseline_newtonian_kepler_is_closed`), and 2 debug-mode contract
   (softened-system-warns, unsoftened-system-silent).
-- **Release-mode Phase-3 gate**: `cargo test --release -p gravity-sim-1pn
+- **Release-mode Phase-3 gate**: `cargo test --release -p apsis-1pn
   -- --ignored` asserts Mercury's precession within 1 % of GR over 300
   orbits. 4.4 ppm is the achieved figure.
-- **Workspace isolation**: `cargo build -p gravity-sim-core` resolves no
+- **Workspace isolation**: `cargo build -p apsis` resolves no
   UI dependency.
 
 ## Further reading

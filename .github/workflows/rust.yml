@@ -76,7 +76,7 @@ jobs:
   # ── Core crate isolation ─────────────────────────────────────────────────
   # The paper claim "zero UI dependencies in the core library" is enforced
   # by compilation. Any accidental leak of egui/wgpu/eframe/winit/pollster
-  # into gravity-sim-core fails this step.
+  # into apsis fails this step.
   core-isolation:
     name: core isolation (no UI deps)
     runs-on: ubuntu-latest
@@ -86,9 +86,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: cargo tree must not mention UI crates
         run: |
-          cargo tree -p gravity-sim-core --edges normal > /tmp/core-tree.txt
+          cargo tree -p apsis --edges normal > /tmp/core-tree.txt
           if grep -qE '\b(egui|wgpu|eframe|winit|pollster|egui-phosphor)\b' /tmp/core-tree.txt; then
-            echo "::error::UI dependency leaked into gravity-sim-core"
+            echo "::error::UI dependency leaked into apsis"
             cat /tmp/core-tree.txt
             exit 1
           fi
@@ -115,4 +115,4 @@ jobs:
       - name: cargo test --release (Mercury gate, --ignored)
         env:
           RUSTFLAGS: ""
-        run: cargo test --release -p gravity-sim-1pn --tests -- --ignored
+        run: cargo test --release -p apsis-1pn --tests -- --ignored
