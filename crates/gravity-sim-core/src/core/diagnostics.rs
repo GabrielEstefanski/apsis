@@ -12,6 +12,12 @@ pub struct DiagnosticsComputer {
     last_acc: Vec<(f64, f64)>,
 }
 
+impl Default for DiagnosticsComputer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DiagnosticsComputer {
     pub fn new() -> Self {
         Self { last_acc: Vec::new() }

@@ -2,8 +2,8 @@ use crate::{
     domain::materials::Material,
     templates::{Template, TemplateBody, UnitSystem},
 };
-use rand::{SeedableRng, RngExt};
 use rand::rngs::SmallRng;
+use rand::{RngExt, SeedableRng};
 
 pub fn hd_80606(seed: u64) -> Template {
     let mut bodies = Vec::with_capacity(2);
@@ -28,7 +28,8 @@ pub fn hd_80606(seed: u64) -> Template {
 
     let v_peri = (m_star * (1.0 + e) / r_peri).sqrt();
 
-    let mut rng: SmallRng = if seed == 0 { rand::make_rng() } else { SmallRng::seed_from_u64(seed) };
+    let mut rng: SmallRng =
+        if seed == 0 { rand::make_rng() } else { SmallRng::seed_from_u64(seed) };
     let phase = rng.random::<f64>() * std::f64::consts::TAU;
 
     let pos = [r_peri * phase.cos(), r_peri * phase.sin()];

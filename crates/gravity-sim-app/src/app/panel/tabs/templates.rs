@@ -1,9 +1,9 @@
 use crate::app::icons;
 use crate::app::theme::{BORDER, PANEL_BG, SURFACE_CARD, TEXT_DIM, TEXT_PRI, TEXT_SEC, section};
 use crate::app::ui::{SimulationApp, UndoRecord};
-use gravity_sim_core::templates::{TEMPLATES, TemplateCategory, instantiate_at};
 use eframe::egui::text::{LayoutJob, TextFormat};
 use eframe::egui::{self, Align, Color32, FontId, Frame, Margin, RichText, Stroke};
+use gravity_sim_core::templates::{TEMPLATES, TemplateCategory, instantiate_at};
 
 impl SimulationApp {
     // ── Sidebar tab ──────────────────────────────────────────────────────────
@@ -34,7 +34,7 @@ impl SimulationApp {
         let mut dragged: Option<usize> = None;
 
         for (global_idx, entry) in
-            TEMPLATES.iter().enumerate().filter(|(_, e)| FEATURED.iter().any(|&n| n == e.name))
+            TEMPLATES.iter().enumerate().filter(|(_, e)| FEATURED.contains(&e.name))
         {
             let (desc, count) = self.templates_meta[global_idx];
             let resp = small_card(ui, entry.name, desc, count);
@@ -177,8 +177,7 @@ impl SimulationApp {
                         TemplateCategory::Systems,
                         TemplateCategory::ThreeBodyProblems,
                     ] {
-                        let group: Vec<_> =
-                            visible.iter().filter(|(_, c, ..)| *c == cat).collect();
+                        let group: Vec<_> = visible.iter().filter(|(_, c, ..)| *c == cat).collect();
                         if group.is_empty() {
                             continue;
                         }

@@ -27,9 +27,9 @@
 
 use crate::app::theme::{ACCENT, ACCENT_DIM, BORDER, PANEL_BG, TEXT_DIM, TEXT_PRI, TEXT_SEC};
 use crate::app::ui::SimulationApp;
+use eframe::egui::{self, Color32, RichText, Stroke};
 use gravity_sim_core::physics::integrator::IntegratorKind;
 use gravity_sim_core::physics::integrator::traits::ExecutionProfile;
-use eframe::egui::{self, Color32, RichText, Stroke};
 
 impl SimulationApp {
     /// Central helper for any code path that wants to change the
@@ -87,12 +87,7 @@ impl SimulationApp {
             .show(ctx, |ui| {
                 ui.set_width(420.0);
 
-                ui.label(
-                    RichText::new("PRECISION MODE")
-                        .size(10.0)
-                        .color(TEXT_DIM)
-                        .strong(),
-                );
+                ui.label(RichText::new("PRECISION MODE").size(10.0).color(TEXT_DIM).strong());
                 ui.add_space(4.0);
                 ui.label(
                     RichText::new(format!("Switch to {}?", kind.label()))
@@ -134,30 +129,25 @@ impl SimulationApp {
                 ui.add_space(12.0);
                 ui.horizontal(|ui| {
                     // Cancel (secondary)
-                    let cancel = egui::Button::new(
-                        RichText::new("Cancel").size(11.5).color(TEXT_SEC),
-                    )
-                    .fill(Color32::TRANSPARENT)
-                    .stroke(Stroke::new(0.5, BORDER))
-                    .min_size(egui::vec2(90.0, 26.0));
+                    let cancel =
+                        egui::Button::new(RichText::new("Cancel").size(11.5).color(TEXT_SEC))
+                            .fill(Color32::TRANSPARENT)
+                            .stroke(Stroke::new(0.5, BORDER))
+                            .min_size(egui::vec2(90.0, 26.0));
                     if ui.add(cancel).clicked() {
                         clicked_cancel = true;
                     }
 
-                    ui.with_layout(
-                        egui::Layout::right_to_left(egui::Align::Center),
-                        |ui| {
-                            let cont = egui::Button::new(
-                                RichText::new("Continue").size(11.5).color(TEXT_PRI),
-                            )
-                            .fill(ACCENT_DIM)
-                            .stroke(Stroke::new(1.0, ACCENT))
-                            .min_size(egui::vec2(110.0, 26.0));
-                            if ui.add(cont).clicked() {
-                                clicked_continue = true;
-                            }
-                        },
-                    );
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let cont =
+                            egui::Button::new(RichText::new("Continue").size(11.5).color(TEXT_PRI))
+                                .fill(ACCENT_DIM)
+                                .stroke(Stroke::new(1.0, ACCENT))
+                                .min_size(egui::vec2(110.0, 26.0));
+                        if ui.add(cont).clicked() {
+                            clicked_continue = true;
+                        }
+                    });
                 });
             });
 

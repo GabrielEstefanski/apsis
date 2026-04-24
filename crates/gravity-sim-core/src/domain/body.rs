@@ -194,10 +194,7 @@ impl Body {
     #[inline]
     #[must_use]
     pub fn named(self, name: impl Into<String>) -> NamedBody {
-        NamedBody {
-            body: self,
-            name: Some(name.into()),
-        }
+        NamedBody { body: self, name: Some(name.into()) }
     }
 
     /// Zero this body's Plummer softening length, producing the exact `1/r`

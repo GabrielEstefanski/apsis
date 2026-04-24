@@ -198,9 +198,7 @@ macro_rules! time_phase {
 
 #[cfg(not(feature = "ias15-profile"))]
 macro_rules! time_phase {
-    ($field:ident, $block:block) => {{
-        $block
-    }};
+    ($field:ident, $block:block) => {{ $block }};
 }
 
 // ── Gauss-Radau node spacings ────────────────────────────────────────────────
@@ -213,13 +211,13 @@ macro_rules! time_phase {
 
 const H: [f64; 8] = [
     0.0,
-    0.056_262_560_536_922_146_465_652_191_031_8,
-    0.180_240_691_736_892_364_987_579_942_835_4,
-    0.352_624_717_113_169_637_373_907_770_280_6,
-    0.547_153_626_330_555_383_001_448_557_701_4,
-    0.734_210_177_215_410_531_523_210_621_826_2,
-    0.885_320_946_839_095_768_090_359_762_915_4,
-    0.977_520_613_561_287_501_891_174_500_440_5,
+    0.056_262_560_536_922_15,
+    0.180_240_691_736_892_36,
+    0.352_624_717_113_169_6,
+    0.547_153_626_330_555_4,
+    0.734_210_177_215_410_5,
+    0.885_320_946_839_095_8,
+    0.977_520_613_561_287_5,
 ];
 
 // ── Triangular b ↔ g conversion coefficients ─────────────────────────────────
@@ -239,8 +237,8 @@ const H: [f64; 8] = [
 
 const C_MAT: [[f64; 7]; 7] = [
     [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-    [-0.056_262_560_536_922_146, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-    [0.010_140_802_830_063_630, -0.236_503_252_273_814_5, 0.0, 0.0, 0.0, 0.0, 0.0],
+    [-0.056_262_560_536_922_15, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    [0.010_140_802_830_063_63, -0.236_503_252_273_814_5, 0.0, 0.0, 0.0, 0.0, 0.0],
     [
         -0.003_575_897_729_251_617,
         0.093_537_695_259_462_07,
@@ -263,16 +261,16 @@ const C_MAT: [[f64; 7]; 7] = [
         -0.001_436_530_236_370_892,
         0.042_158_527_721_268_71,
         -0.360_099_596_502_056_8,
-        1.250_150_711_840_691_0,
-        -1.870_491_772_932_950_1,
+        1.250_150_711_840_691,
+        -1.870_491_772_932_95,
         0.0,
         0.0,
     ],
     [
         0.001_271_790_309_026_868,
         -0.038_760_357_915_906_77,
-        0.360_962_243_452_846_0,
-        -1.466_884_208_400_426_9,
+        0.360_962_243_452_846,
+        -1.466_884_208_400_427,
         2.906_136_259_308_429_3,
         -2.755_812_719_772_045_8,
         0.0,
@@ -281,7 +279,7 @@ const C_MAT: [[f64; 7]; 7] = [
 
 const D_MAT: [[f64; 7]; 7] = [
     [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-    [0.056_262_560_536_922_146, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    [0.056_262_560_536_922_15, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
     [0.003_165_475_718_170_829, 0.236_503_252_273_814_5, 0.0, 0.0, 0.0, 0.0, 0.0],
     [
         0.000_178_097_769_221_743,
@@ -304,9 +302,9 @@ const D_MAT: [[f64; 7]; 7] = [
     [
         0.000_000_563_764_163_931_8,
         0.001_529_784_002_500_466,
-        0.097_834_236_532_444_00,
+        0.097_834_236_532_444,
         0.875_254_664_684_091_1,
-        1.870_491_772_932_950_1,
+        1.870_491_772_932_95,
         0.0,
         0.0,
     ],
@@ -315,7 +313,7 @@ const D_MAT: [[f64; 7]; 7] = [
         0.000_276_293_090_982_648,
         0.036_028_553_983_736_46,
         0.576_733_000_277_078_7,
-        2.248_588_760_769_159_8,
+        2.248_588_760_769_16,
         2.755_812_719_772_045_8,
         0.0,
     ],
@@ -793,14 +791,10 @@ impl Integrator for Ias15 {
             self.capture_snapshot(bodies);
         });
 
-        let raw_pe = time_phase!(evaluate, {
-            evaluate(bodies, ctx.force, acc)
-        });
+        let raw_pe = time_phase!(evaluate, { evaluate(bodies, ctx.force, acc) });
         scale_acc_and_pe(acc, ctx.g_factor, raw_pe);
         apply_perturbations(bodies, acc, ctx.perturbations);
-        let a0: Vec<(f64, f64)> = time_phase!(a0_clone, {
-            acc.clone()
-        });
+        let a0: Vec<(f64, f64)> = time_phase!(a0_clone, { acc.clone() });
 
         // ── Rejection retry loop ─────────────────────────────────────────
         //
@@ -921,9 +915,7 @@ impl Integrator for Ias15 {
                     // consistent with the final body positions, and
                     // returns the potential energy the caller will use
                     // for energy-conservation diagnostics.
-                    let raw_pe = time_phase!(evaluate, {
-                        evaluate(bodies, ctx.force, acc)
-                    });
+                    let raw_pe = time_phase!(evaluate, { evaluate(bodies, ctx.force, acc) });
                     let pe = scale_acc_and_pe(acc, ctx.g_factor, raw_pe);
                     apply_perturbations(bodies, acc, ctx.perturbations);
 
@@ -1076,9 +1068,7 @@ impl Ias15 {
                 }
 
                 // Evaluate acceleration at predicted positions.
-                let raw_pe = time_phase!(evaluate, {
-                    evaluate(bodies, ctx.force, acc)
-                });
+                let raw_pe = time_phase!(evaluate, { evaluate(bodies, ctx.force, acc) });
                 let _ = scale_acc_and_pe(acc, ctx.g_factor, raw_pe);
                 apply_perturbations(bodies, acc, ctx.perturbations);
 
@@ -1460,7 +1450,8 @@ mod tests {
         let mut b2 = Body::rocky(1.0).at(r_peri / 2.0, 0.0).with_velocity(0.0, v_peri / 2.0);
         b2.softening = 0.0;
 
-        let mut sys = System::new(vec![b1, b2]).with_theta(0.5).with_dt(dt_budget).with_max_depth(10);
+        let mut sys =
+            System::new(vec![b1, b2]).with_theta(0.5).with_dt(dt_budget).with_max_depth(10);
         sys.set_integrator(IntegratorKind::Ias15);
 
         let mut peak = 0.0_f64;
@@ -1652,7 +1643,8 @@ mod tests {
         let mut b2 = Body::rocky(1.0).at(r_peri / 2.0, 0.0).with_velocity(0.0, v_peri / 2.0);
         b2.softening = 0.0;
 
-        let mut sys = System::new(vec![b1, b2]).with_theta(0.5).with_dt(dt_budget).with_max_depth(10);
+        let mut sys =
+            System::new(vec![b1, b2]).with_theta(0.5).with_dt(dt_budget).with_max_depth(10);
         sys.set_integrator(IntegratorKind::Ias15);
 
         let t0 = sys.t();

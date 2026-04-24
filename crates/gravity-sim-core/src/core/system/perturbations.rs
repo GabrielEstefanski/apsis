@@ -32,11 +32,8 @@ impl System {
         if p.requires_exact_gravity() {
             let softened = self.bodies.iter().filter(|b| b.softening != 0.0).count();
             if softened > 0 {
-                let max_softening = self
-                    .bodies
-                    .iter()
-                    .map(|b| b.softening.abs())
-                    .fold(0.0_f64, f64::max);
+                let max_softening =
+                    self.bodies.iter().map(|b| b.softening.abs()).fold(0.0_f64, f64::max);
                 crate::warn_diag!(
                     Source::System,
                     "perturbation requires exact 1/r gravity but bodies are softened; \

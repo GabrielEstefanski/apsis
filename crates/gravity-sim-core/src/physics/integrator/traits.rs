@@ -61,7 +61,7 @@ impl IntegratorKind {
             Self::Ias15 => ExecutionProfile::Precision,
             Self::VelocityVerlet | Self::Yoshida4 | Self::WisdomHolman => {
                 ExecutionProfile::Realtime
-            }
+            },
         }
     }
 

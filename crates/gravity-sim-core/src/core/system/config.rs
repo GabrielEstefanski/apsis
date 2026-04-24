@@ -148,9 +148,7 @@ impl System {
     pub fn set_integrator(&mut self, kind: IntegratorKind) {
         let integrator = make_integrator(kind);
 
-        if integrator.requires_deterministic_force()
-            && !self.force_model.is_deterministic()
-        {
+        if integrator.requires_deterministic_force() && !self.force_model.is_deterministic() {
             let prev_threshold = self.force_model.exact_threshold();
             // `usize::MAX` saturates to the engine's clamp ceiling,
             // which is the canonical "direct mode" threshold. See

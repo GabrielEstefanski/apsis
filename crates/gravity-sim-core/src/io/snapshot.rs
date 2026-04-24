@@ -148,9 +148,8 @@ impl BodyRecord {
 
     /// Reconstruct a [`Body`] from this record.
     pub fn into_body(self) -> Body {
-        let mut b = Body::of(self.mass, self.material)
-            .at(self.x, self.y)
-            .with_velocity(self.vx, self.vy);
+        let mut b =
+            Body::of(self.mass, self.material).at(self.x, self.y).with_velocity(self.vx, self.vy);
         b.density = self.density;
         b.softening = self.softening;
         b.physical_radius = self.physical_radius;
@@ -462,7 +461,7 @@ impl SimSnapshot {
         }
 
         let ver = ru16(&mut r)?;
-        if ver < 1 || ver > SCHEMA_VERSION {
+        if !(1..=SCHEMA_VERSION).contains(&ver) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 format!("unsupported schema version {ver} (reader supports ≤{SCHEMA_VERSION})"),

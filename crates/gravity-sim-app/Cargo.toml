@@ -2,6 +2,14 @@
 name = "gravity-sim-app"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+rust-version.workspace = true
+description = "Interactive egui/wgpu shell for the gravity-sim-core N-body library. Optional; not part of the library's validated public surface."
 
 [[bin]]
 name = "gravity-sim"

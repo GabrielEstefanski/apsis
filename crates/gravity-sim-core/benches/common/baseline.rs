@@ -78,18 +78,14 @@ pub struct ToleranceSpec {
 impl ToleranceSpec {
     fn validate(&self) -> Result<(), String> {
         match (self.tol_abs, self.tol_factor) {
-            (Some(_), Some(_)) => {
-                Err("both tol_abs and tol_factor set; pick one".into())
-            }
-            (None, None) => {
-                Err("neither tol_abs nor tol_factor set; pick one".into())
-            }
+            (Some(_), Some(_)) => Err("both tol_abs and tol_factor set; pick one".into()),
+            (None, None) => Err("neither tol_abs nor tol_factor set; pick one".into()),
             (Some(a), _) if a < 0.0 || !a.is_finite() => {
                 Err(format!("tol_abs {a} must be finite and non-negative"))
-            }
+            },
             (_, Some(f)) if f < 1.0 || !f.is_finite() => {
                 Err(format!("tol_factor {f} must be finite and ≥ 1.0"))
-            }
+            },
             (_, Some(f)) if f > MAX_ALLOWED_TOL_FACTOR => Err(format!(
                 "tol_factor {f} exceeds cap {MAX_ALLOWED_TOL_FACTOR}; \
                  investigate the underlying fluctuation before relaxing further"
@@ -170,34 +166,25 @@ pub fn load() -> Result<BaselineFile, String> {
     let content = std::fs::read_to_string(&path)
         .map_err(|e| format!("failed to read {}: {e}", path.display()))?;
 
-    let value: toml::Value = toml::from_str(&content)
-        .map_err(|e| format!("failed to parse {}: {e}", path.display()))?;
+    let value: toml::Value =
+        toml::from_str(&content).map_err(|e| format!("failed to parse {}: {e}", path.display()))?;
 
-    let root_table = value
-        .as_table()
-        .ok_or_else(|| format!("{}: root must be a table", path.display()))?;
+    let root_table =
+        value.as_table().ok_or_else(|| format!("{}: root must be a table", path.display()))?;
 
     let mut scenarios: BTreeMap<String, ScenarioBaseline> = BTreeMap::new();
     for (scenario_name, scenario_val) in root_table {
         let metrics_table = scenario_val.as_table().ok_or_else(|| {
-            format!(
-                "{}: [{scenario_name}] must be a table of metric entries",
-                path.display()
-            )
+            format!("{}: [{scenario_name}] must be a table of metric entries", path.display())
         })?;
 
         let mut baseline: ScenarioBaseline = BTreeMap::new();
         for (metric_name, metric_val) in metrics_table {
-            let spec: ToleranceSpec =
-                metric_val.clone().try_into().map_err(|e| {
-                    format!(
-                        "{}: [{scenario_name}].{metric_name}: parse error — {e}",
-                        path.display()
-                    )
-                })?;
-            spec.validate().map_err(|e| {
-                format!("{}: [{scenario_name}].{metric_name}: {e}", path.display())
+            let spec: ToleranceSpec = metric_val.clone().try_into().map_err(|e| {
+                format!("{}: [{scenario_name}].{metric_name}: parse error — {e}", path.display())
             })?;
+            spec.validate()
+                .map_err(|e| format!("{}: [{scenario_name}].{metric_name}: {e}", path.display()))?;
             baseline.insert(metric_name.clone(), spec);
         }
 
@@ -228,18 +215,17 @@ pub fn save(baseline: &BaselineFile, context: &RecordContext) -> Result<(), Stri
     out.push_str(&format!("# Recorded at: {}\n", context.timestamp));
     out.push_str(&format!("# Git commit:  {}\n", context.commit));
     out.push_str(&format!("# Runs per scenario: {}\n", context.runs_per_scenario));
-    out.push_str("\n");
+    out.push('\n');
 
     for (scenario_name, scenario) in &baseline.scenarios {
         out.push_str(&format!("[{scenario_name}]\n"));
         for (metric_name, spec) in scenario {
             out.push_str(&format_tolerance_line(metric_name, spec));
         }
-        out.push_str("\n");
+        out.push('\n');
     }
 
-    std::fs::write(&path, out)
-        .map_err(|e| format!("failed to write {}: {e}", path.display()))?;
+    std::fs::write(&path, out).map_err(|e| format!("failed to write {}: {e}", path.display()))?;
     Ok(())
 }
 
@@ -282,7 +268,7 @@ pub fn check_scenario(
                     ),
                 }],
             });
-        }
+        },
     };
 
     let mut failures = Vec::new();
@@ -298,26 +284,20 @@ pub fn check_scenario(
                     ),
                 });
                 continue;
-            }
+            },
         };
         let measured_value = measured
             .get(metric_name)
             .expect("ScenarioMetrics::ALL and ScenarioMetrics::get must agree");
         if let Err(reason) = spec.check(measured_value) {
-            failures.push(MetricFailure {
-                metric: (*metric_name).into(),
-                reason,
-            });
+            failures.push(MetricFailure { metric: (*metric_name).into(), reason });
         }
     }
 
     if failures.is_empty() {
         Ok(())
     } else {
-        Err(ScenarioDiff {
-            scenario: scenario.into(),
-            failures,
-        })
+        Err(ScenarioDiff { scenario: scenario.into(), failures })
     }
 }
 
@@ -335,11 +315,7 @@ impl RecordContext {
     pub fn capture() -> Self {
         let timestamp = chrono_like_utc();
         let commit = git_head_hash().unwrap_or_else(|| "<unknown>".into());
-        Self {
-            timestamp,
-            commit,
-            runs_per_scenario: RECORD_RUNS,
-        }
+        Self { timestamp, commit, runs_per_scenario: RECORD_RUNS }
     }
 }
 
@@ -348,9 +324,7 @@ impl RecordContext {
 /// scenarios across multiple runs are expected to produce identical
 /// counter values (enforced here) and near-identical float values
 /// (absorbed into `tol_factor`).
-pub fn record(
-    runs: &BTreeMap<String, Vec<ScenarioMetrics>>,
-) -> Result<BaselineFile, String> {
+pub fn record(runs: &BTreeMap<String, Vec<ScenarioMetrics>>) -> Result<BaselineFile, String> {
     let mut file = BaselineFile::default();
 
     for (scenario_name, samples) in runs {
@@ -363,10 +337,8 @@ pub fn record(
 
         let mut scenario: ScenarioBaseline = BTreeMap::new();
         for (metric_name, tier) in ScenarioMetrics::ALL {
-            let values: Vec<f64> = samples
-                .iter()
-                .map(|m| m.get(metric_name).expect("metric exists"))
-                .collect();
+            let values: Vec<f64> =
+                samples.iter().map(|m| m.get(metric_name).expect("metric exists")).collect();
             let spec = derive_tolerance(metric_name, *tier, &values)?;
             scenario.insert((*metric_name).into(), spec);
         }
@@ -406,12 +378,8 @@ fn derive_tolerance(
                      before rerunning"
                 ));
             }
-            Ok(ToleranceSpec {
-                value,
-                tol_abs: Some(0.0),
-                tol_factor: None,
-            })
-        }
+            Ok(ToleranceSpec { value, tol_abs: Some(0.0), tol_factor: None })
+        },
         MetricTier::Float => {
             // Bit-identical across runs → tol_factor = 1.0 (still
             // asserts exact reproduction; ULP drift in future runs
@@ -423,12 +391,8 @@ fn derive_tolerance(
                 let rel_range = (max - min).abs() / mean.abs();
                 (1.0 + 2.0 * rel_range).min(MAX_ALLOWED_TOL_FACTOR)
             };
-            Ok(ToleranceSpec {
-                value,
-                tol_abs: None,
-                tol_factor: Some(tol_factor),
-            })
-        }
+            Ok(ToleranceSpec { value, tol_abs: None, tol_factor: Some(tol_factor) })
+        },
     }
 }
 
@@ -476,7 +440,7 @@ fn format_f64(x: f64) -> String {
         return format!("{x}");
     }
     let mag = x.abs();
-    if mag < 1e-3 || mag >= 1e6 {
+    if !(1e-3..1e6).contains(&mag) {
         format!("{x:e}")
     } else if x == x.trunc() {
         format!("{x:.1}")
@@ -500,10 +464,7 @@ fn baseline_path() -> PathBuf {
 /// as a dep just for a header comment. Second resolution is enough.
 fn chrono_like_utc() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
-    let secs = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
+    let secs = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
     // Minimal YYYY-MM-DDTHH:MM:SSZ from epoch seconds. Uses standard
     // civil-from-epoch arithmetic (Howard Hinnant).
     let (y, mo, d, h, mi, se) = epoch_to_ymdhms(secs as i64);
@@ -546,4 +507,3 @@ fn git_head_hash() -> Option<String> {
     let hash = String::from_utf8(output.stdout).ok()?;
     Some(hash.trim().to_string())
 }
-

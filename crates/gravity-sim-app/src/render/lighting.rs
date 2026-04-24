@@ -110,13 +110,7 @@ pub struct SceneLighting {
 
 impl Default for SceneLighting {
     fn default() -> Self {
-        Self {
-            lights: Vec::new(),
-            ambient_floor: 0.05,
-            r_ref: 1.0,
-            falloff_bias: 0.05,
-            wrap: 0.25,
-        }
+        Self { lights: Vec::new(), ambient_floor: 0.05, r_ref: 1.0, falloff_bias: 0.05, wrap: 0.25 }
     }
 }
 
@@ -190,17 +184,13 @@ impl LightingUniform {
         // (callers may rely on it for UI display, logging, etc.).
         let mut sorted: Vec<LightSpec> = scene.lights.clone();
         sorted.sort_by(|a, b| {
-            b.intensity
-                .partial_cmp(&a.intensity)
-                .unwrap_or(std::cmp::Ordering::Equal)
+            b.intensity.partial_cmp(&a.intensity).unwrap_or(std::cmp::Ordering::Equal)
         });
 
         let n = sorted.len().min(MAX_LIGHTS);
         for (i, src) in sorted.iter().take(n).enumerate() {
-            out.lights[i] = PackedLight {
-                world_pos: src.world_pos,
-                intensity: src.intensity.max(0.0),
-            };
+            out.lights[i] =
+                PackedLight { world_pos: src.world_pos, intensity: src.intensity.max(0.0) };
         }
         out.num_lights = n as u32;
         out
@@ -256,11 +246,7 @@ mod tests {
 
     #[test]
     fn pack_pre_squares_distances() {
-        let scene = SceneLighting {
-            r_ref: 4.0,
-            falloff_bias: 0.5,
-            ..Default::default()
-        };
+        let scene = SceneLighting { r_ref: 4.0, falloff_bias: 0.5, ..Default::default() };
         let u = LightingUniform::pack(&scene);
         assert!((u.r_ref_sq - 16.0).abs() < 1e-6);
         assert!((u.bias_sq - 0.25).abs() < 1e-6);
@@ -268,11 +254,7 @@ mod tests {
 
     #[test]
     fn pack_clamps_ambient_floor_and_wrap() {
-        let scene = SceneLighting {
-            ambient_floor: 1.5,
-            wrap: -0.3,
-            ..Default::default()
-        };
+        let scene = SceneLighting { ambient_floor: 1.5, wrap: -0.3, ..Default::default() };
         let u = LightingUniform::pack(&scene);
         assert_eq!(u.ambient_floor, 1.0);
         assert_eq!(u.wrap, 0.0);

@@ -42,11 +42,11 @@
 //! warning by calling [`Body::unsoftened`] or
 //! [`System::with_exact_gravity`] at construction — both shown below.
 
+use gravity_sim_1pn::PostNewtonian1PN;
 use gravity_sim_core::core::system::System;
 use gravity_sim_core::domain::body::Body;
 use gravity_sim_core::physics::integrator::IntegratorKind;
 use gravity_sim_core::physics::orbital::compute_elements;
-use gravity_sim_1pn::PostNewtonian1PN;
 
 use std::f64::consts::PI;
 
@@ -71,15 +71,11 @@ fn main() {
 
     let r_peri = A_MERCURY * (1.0 - E_MERCURY);
     let v_peri = (M_SUN * (2.0 / r_peri - 1.0 / A_MERCURY)).sqrt();
-    let mercury = Body::rocky(M_MERCURY)
-        .at(r_peri, 0.0)
-        .with_velocity(0.0, v_peri)
-        .unsoftened();
+    let mercury = Body::rocky(M_MERCURY).at(r_peri, 0.0).with_velocity(0.0, v_peri).unsoftened();
 
     // ── Build the simulation ────────────────────────────────────────────────
-    let mut sys = System::new(vec![sun, mercury])
-        .with_integrator(IntegratorKind::Ias15)
-        .with_dt(1e-4);
+    let mut sys =
+        System::new(vec![sun, mercury]).with_integrator(IntegratorKind::Ias15).with_dt(1e-4);
 
     // Attach the out-of-tree 1PN perturbation. Everything below this line
     // uses only the public API of `gravity-sim-core`; `gravity-sim-1pn` has

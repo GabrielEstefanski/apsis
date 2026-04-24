@@ -799,17 +799,11 @@ mod tests {
         let satellite = body(r_peri, 0.0, 0.0, v_peri, 1e-10);
         let el = elements(primary, satellite);
         let pts = el.sample_orbit([0.0, 0.0, 0.0], 256);
-        let dists: Vec<f64> = pts
-            .iter()
-            .map(|p| (p[0] * p[0] + p[1] * p[1]).sqrt())
-            .collect();
+        let dists: Vec<f64> = pts.iter().map(|p| (p[0] * p[0] + p[1] * p[1]).sqrt()).collect();
         let r_min = dists.iter().cloned().fold(f64::INFINITY, f64::min);
         let r_max = dists.iter().cloned().fold(0.0_f64, f64::max);
         let r_apo_expected = r_peri * (1.0 + e_target) / (1.0 - e_target); // 30
-        assert!(
-            (r_min - r_peri).abs() / r_peri < 1e-4,
-            "r_min = {r_min}, expected {r_peri}",
-        );
+        assert!((r_min - r_peri).abs() / r_peri < 1e-4, "r_min = {r_min}, expected {r_peri}",);
         assert!(
             (r_max - r_apo_expected).abs() / r_apo_expected < 1e-4,
             "r_max = {r_max}, expected {r_apo_expected}",
@@ -834,10 +828,8 @@ mod tests {
         let satellite = body(r_peri, 0.0, 0.0, v_peri, 1e-10);
         let el = elements(primary, satellite);
         let pts = el.sample_orbit([0.0, 0.0, 0.0], 128);
-        let r_min = pts
-            .iter()
-            .map(|p| (p[0] * p[0] + p[1] * p[1]).sqrt())
-            .fold(f64::INFINITY, f64::min);
+        let r_min =
+            pts.iter().map(|p| (p[0] * p[0] + p[1] * p[1]).sqrt()).fold(f64::INFINITY, f64::min);
         let a = el.a; // 20
         // Focus-centred: r_min = a(1-e) = 10.
         // Geometry-centred: r_min would be a(1-e) relative to geometric
@@ -1136,11 +1128,7 @@ mod tests {
         el.omega = 0.0;
         let pts = el.sample_orbit([0.0, 0.0, 0.0], 64);
         for pt in &pts {
-            assert!(
-                pt[1].abs() < 1e-6,
-                "y = {} should be 0 for orbit in xz-plane",
-                pt[1],
-            );
+            assert!(pt[1].abs() < 1e-6, "y = {} should be 0 for orbit in xz-plane", pt[1],);
         }
     }
 

@@ -281,12 +281,7 @@ impl TrailBuffer {
         debug_assert_eq!(rgb.len(), self.n_bodies as usize);
         for (i, c) in rgb.iter().enumerate() {
             let alpha = self.colors[i][3];
-            self.colors[i] = [
-                c[0] as f32 / 255.0,
-                c[1] as f32 / 255.0,
-                c[2] as f32 / 255.0,
-                alpha,
-            ];
+            self.colors[i] = [c[0] as f32 / 255.0, c[1] as f32 / 255.0, c[2] as f32 / 255.0, alpha];
         }
         self.colors_dirty = true;
     }
@@ -362,6 +357,11 @@ impl TrailBuffer {
     /// Number of valid columns stored so far.
     pub fn len(&self) -> u32 {
         self.len
+    }
+
+    /// `true` if no columns have been written yet.
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
     }
 
     /// Whether fewer than 2 valid columns are stored (no segments to render).

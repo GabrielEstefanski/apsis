@@ -27,14 +27,14 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use crate::core::adaptive::DtMode;
-use crate::domain::body::{Body, NamedBody};
 use crate::core::metrics::Metrics;
 use crate::core::precision_run::{PrecisionRunController, RunOutcome, RunState, TelemetryBuilder};
-use crate::io::snapshot::SimSnapshot;
 use crate::core::system::System;
+use crate::core::trail::{TrailSampler, TrailSamplerKind};
+use crate::domain::body::{Body, NamedBody};
+use crate::io::snapshot::SimSnapshot;
 use crate::physics::integrator::IntegratorKind;
 use crate::physics::orbital::OrbitalElements;
-use crate::core::trail::{TrailSampler, TrailSamplerKind};
 
 // ── Render state ──────────────────────────────────────────────────────────────
 
@@ -183,8 +183,7 @@ impl PhysicsHandle {
             rs.pending_com_shift = (0.0, 0.0);
             self.pending_com_shift = shift;
             // Drain accumulated trail samples (move; avoids allocation).
-            self.pending_trail_samples
-                .extend(rs.trail_samples.drain(..));
+            self.pending_trail_samples.append(&mut rs.trail_samples);
             // Pull latest dense-output snapshot.
             if rs.step_snapshot.is_some() {
                 self.step_snapshot = rs.step_snapshot.clone();
@@ -264,9 +263,7 @@ impl PhysicsHandle {
     /// controller — this is the single source of truth for the run
     /// lifecycle, shared between the physics thread and every UI
     /// subscriber.
-    pub fn precision_controller(
-        &self,
-    ) -> Arc<Mutex<PrecisionRunController>> {
+    pub fn precision_controller(&self) -> Arc<Mutex<PrecisionRunController>> {
         self.precision.clone()
     }
 
@@ -447,8 +444,8 @@ impl PhysicsHandle {
             integrator_kind: m.integrator_kind,
             trail_every: 1, // trail_every now owned by TrailRecorder; app sets on snapshot
             sim_name: String::new(), // set by caller
-            seed: 0,                 // set by caller
-            trail: None,             // set by caller
+            seed: 0,        // set by caller
+            trail: None,    // set by caller
             bodies: self.bodies.iter().map(BodyRecord::from_body).collect(),
             names: self.names.clone(),
         }
@@ -562,7 +559,7 @@ fn publish_full(
     rs.pending_com_shift.0 += com_shift_acc.0;
     rs.pending_com_shift.1 += com_shift_acc.1;
     // Hand off accumulated trail samples — move, don't copy.
-    rs.trail_samples.extend(trail_samples.drain(..));
+    rs.trail_samples.append(trail_samples);
 }
 
 // ── Command dispatch ──────────────────────────────────────────────────────────
@@ -757,9 +754,7 @@ fn physics_loop(
     // Orbital elements are O(N²) — update at full rate only when inspector is open.
     let orbital_fast = Duration::from_millis(16);
     let orbital_slow = Duration::from_secs(2);
-    let mut last_orbital = Instant::now()
-        .checked_sub(orbital_slow)
-        .unwrap_or_else(Instant::now);
+    let mut last_orbital = Instant::now().checked_sub(orbital_slow).unwrap_or_else(Instant::now);
 
     let pos_interval = Duration::from_millis(8);
     let mut last_pos = Instant::now();
@@ -862,7 +857,7 @@ fn physics_loop(
                         );
                         needs_full_publish = true;
                     }
-                }
+                },
                 RunState::Completed { outcome: RunOutcome::Reached } => {
                     precision_baseline = None;
                     crate::info_diag!(
@@ -871,7 +866,7 @@ fn physics_loop(
                         t = system.t(),
                         steps = system.steps(),
                     );
-                }
+                },
                 RunState::Completed { outcome: RunOutcome::Errored } => {
                     // Defensive: drop the baseline rather than leave
                     // stale state around. Today no producer emits
@@ -879,17 +874,12 @@ fn physics_loop(
                     // only; leaving it explicit keeps the state
                     // machine exhaustive.
                     precision_baseline = None;
-                }
-                _ => {}
+                },
+                _ => {},
             }
 
             if let Ok(mut rs) = render.try_lock() {
-                publish_full(
-                    &mut system,
-                    &mut rs,
-                    com_shift_acc,
-                    &mut trail_samples_pending,
-                );
+                publish_full(&mut system, &mut rs, com_shift_acc, &mut trail_samples_pending);
                 rs.sim_rate = current_sim_rate;
             }
             com_shift_acc = (0.0, 0.0);
@@ -904,10 +894,8 @@ fn physics_loop(
             // Compute the sim-time we want to reach this batch.
             // wall_delta is clamped to 200 ms to avoid a spiral-of-death on
             // slow frames: if physics fell behind, we don't try to catch up.
-            let wall_delta = prev_batch_start
-                .elapsed()
-                .min(Duration::from_millis(200))
-                .as_secs_f64();
+            let wall_delta =
+                prev_batch_start.elapsed().min(Duration::from_millis(200)).as_secs_f64();
             prev_batch_start = batch_start;
             let t_target = system.t() + sim_rate_target * wall_delta;
             let hard_deadline = batch_start + Duration::from_millis(MAX_BATCH_WALL_MS);
@@ -946,11 +934,8 @@ fn physics_loop(
                 if trail_samples_pending.len() < TRAIL_SAMPLES_PER_BATCH_MAX
                     && trail_sampler.should_sample(system.bodies())
                 {
-                    let col: Vec<[f32; 2]> = system
-                        .bodies()
-                        .iter()
-                        .map(|b| [b.x as f32, b.y as f32])
-                        .collect();
+                    let col: Vec<[f32; 2]> =
+                        system.bodies().iter().map(|b| [b.x as f32, b.y as f32]).collect();
                     trail_samples_pending.push(col);
                 }
 
@@ -1043,23 +1028,15 @@ fn physics_loop(
         let now = Instant::now();
 
         if needs_full_publish || (!paused && now.duration_since(last_full) >= full_interval) {
-            let orb_interval = if orbital_needed.load(Ordering::Relaxed) {
-                orbital_fast
-            } else {
-                orbital_slow
-            };
+            let orb_interval =
+                if orbital_needed.load(Ordering::Relaxed) { orbital_fast } else { orbital_slow };
             if now.duration_since(last_orbital) >= orb_interval {
                 system.update_orbital_elements();
                 last_orbital = now;
             }
 
             if let Ok(mut rs) = render.try_lock() {
-                publish_full(
-                    &mut system,
-                    &mut rs,
-                    com_shift_acc,
-                    &mut trail_samples_pending,
-                );
+                publish_full(&mut system, &mut rs, com_shift_acc, &mut trail_samples_pending);
                 rs.sim_rate = current_sim_rate;
             }
             com_shift_acc = (0.0, 0.0);
@@ -1107,10 +1084,7 @@ fn physics_loop(
 // currently in flight (none at entry) completes — i.e., at a clean
 // boundary. This preserves determinism: no state change ever lands
 // mid-Picard-iteration.
-fn step_precision_run_tick(
-    system: &mut System,
-    precision: &Arc<Mutex<PrecisionRunController>>,
-) {
+fn step_precision_run_tick(system: &mut System, precision: &Arc<Mutex<PrecisionRunController>>) {
     const TICK_BUDGET: Duration = Duration::from_millis(50);
 
     // Snapshot entry state. If we are in Pausing / Aborting, the "current
@@ -1123,15 +1097,15 @@ fn step_precision_run_tick(
                 drop(ctrl);
                 precision.lock().unwrap().mark_paused();
                 return;
-            }
+            },
             RunState::Aborting { .. } => {
                 drop(ctrl);
                 precision.lock().unwrap().mark_aborted();
                 return;
-            }
+            },
             RunState::Running { t_target, t_start, .. } => {
                 (t_target, t_start, ctrl.telemetry().peak_energy_err)
-            }
+            },
             // Defensive: caller (`physics_loop`) only invokes this while the
             // controller is in one of the above states. Any other state is a
             // benign race and we just return.
@@ -1144,25 +1118,23 @@ fn step_precision_run_tick(
     system.set_step_deadline(None);
 
     let tick_start = Instant::now();
-    let substeps_at_tick_start = system
-        .adaptive_stats()
-        .map(|s| s.substeps)
-        .unwrap_or_else(|| system.steps());
+    let substeps_at_tick_start =
+        system.adaptive_stats().map(|s| s.substeps).unwrap_or_else(|| system.steps());
     let mut running_peak_err = prev_peak_err;
 
     while system.t() < t_target && tick_start.elapsed() < TICK_BUDGET {
         // Poll intent between substeps. Lock is held only for the enum read;
         // the UI thread can request pause/abort concurrently.
         match precision.lock().unwrap().state() {
-            RunState::Running { .. } => {} // proceed
+            RunState::Running { .. } => {}, // proceed
             RunState::Pausing { .. } => {
                 precision.lock().unwrap().mark_paused();
                 break;
-            }
+            },
             RunState::Aborting { .. } => {
                 precision.lock().unwrap().mark_aborted();
                 break;
-            }
+            },
             _ => break,
         }
 
@@ -1176,10 +1148,8 @@ fn step_precision_run_tick(
 
     // Compute telemetry once per tick.
     let wall_delta = tick_start.elapsed().as_secs_f64().max(1e-9);
-    let substeps_now = system
-        .adaptive_stats()
-        .map(|s| s.substeps)
-        .unwrap_or_else(|| system.steps());
+    let substeps_now =
+        system.adaptive_stats().map(|s| s.substeps).unwrap_or_else(|| system.steps());
     let substeps_in_tick = substeps_now.saturating_sub(substeps_at_tick_start);
     let substeps_per_s = (substeps_in_tick as f64) / wall_delta;
     let current_dt = system.dt();

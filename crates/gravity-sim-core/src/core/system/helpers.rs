@@ -38,7 +38,6 @@ pub(crate) fn resolved_name(
         .unwrap_or_else(|| auto_name(material, existing))
 }
 
-
 /// Compute the minimum pairwise separation and maximum effective softening
 /// length over all body pairs.
 ///

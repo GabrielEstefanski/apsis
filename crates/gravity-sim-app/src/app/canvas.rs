@@ -1,14 +1,12 @@
 use crate::app::render_params::{RenderParams, compute_render_radius};
 use crate::app::ui::{SelectionForm, SemanticScaleMode, SimulationApp, UndoRecord};
-use gravity_sim_core::physics::orbital::{compute_elements, dominant_primary};
-use crate::render::lighting::{LightSpec, SceneLighting};
 use crate::render::CallbackFn;
-use crate::render::orbit_overlay::{
-    OrbitOverlayStyle, draw_orbit_apsides, draw_orbit_polyline,
-};
-use gravity_sim_core::templates::instantiate_at;
+use crate::render::lighting::{LightSpec, SceneLighting};
+use crate::render::orbit_overlay::{OrbitOverlayStyle, draw_orbit_apsides, draw_orbit_polyline};
 use eframe::egui::{self, Color32, FontId, Pos2, Stroke};
 use eframe::egui_wgpu;
+use gravity_sim_core::physics::orbital::{compute_elements, dominant_primary};
+use gravity_sim_core::templates::instantiate_at;
 
 // ── Tunables ──────────────────────────────────────────────────────────────────
 
@@ -273,14 +271,14 @@ impl SimulationApp {
             let r_ref = if let Some(primary) = lights.first() {
                 let lx = primary.world_pos[0] as f64;
                 let ly = primary.world_pos[1] as f64;
-                let (sum_sq, n) = bodies
-                    .iter()
-                    .filter(|b| !b.is_luminous())
-                    .fold((0.0_f64, 0usize), |(acc, k), b| {
+                let (sum_sq, n) = bodies.iter().filter(|b| !b.is_luminous()).fold(
+                    (0.0_f64, 0usize),
+                    |(acc, k), b| {
                         let dx = b.x - lx;
                         let dy = b.y - ly;
                         (acc + dx * dx + dy * dy, k + 1)
-                    });
+                    },
+                );
                 if n > 0 { (sum_sq / n as f64).sqrt().max(1e-3) as f32 } else { 1.0 }
             } else {
                 1.0
@@ -306,11 +304,7 @@ impl SimulationApp {
                 // Luminous bodies: self-lit disc (emissive carries the colour,
                 // albedo stays dark so the unlit side doesn't darken their
                 // surface). Non-luminous: pure albedo, no self-emission.
-                let base = [
-                    rgb[0] as f32 / 255.0,
-                    rgb[1] as f32 / 255.0,
-                    rgb[2] as f32 / 255.0,
-                ];
+                let base = [rgb[0] as f32 / 255.0, rgb[1] as f32 / 255.0, rgb[2] as f32 / 255.0];
                 let (albedo, emissive) = if b.is_luminous() {
                     ([0.0, 0.0, 0.0, 1.0], [base[0], base[1], base[2], 1.0])
                 } else {
@@ -337,8 +331,7 @@ impl SimulationApp {
                 let scale = self.scale;
                 let cx = center_after_pan.x;
                 let cy = center_after_pan.y;
-                let project =
-                    |p: [f64; 3]| [cx + p[0] as f32 * scale, cy + p[1] as f32 * scale];
+                let project = |p: [f64; 3]| [cx + p[0] as f32 * scale, cy + p[1] as f32 * scale];
 
                 self.orbit_hierarchy.tick(bodies, g_factor);
 
@@ -350,13 +343,16 @@ impl SimulationApp {
                 if self.show_orbit_ellipses {
                     let bg_style = OrbitOverlayStyle::background_default();
                     let vp_center = rect.center();
-                    let vp_half_diag =
-                        (rect.width().powi(2) + rect.height().powi(2)).sqrt() * 0.5;
+                    let vp_half_diag = (rect.width().powi(2) + rect.height().powi(2)).sqrt() * 0.5;
 
                     // Collect (idx, primary_idx, elements, influence) for
                     // every body that survives the filter pipeline.
-                    let mut candidates: Vec<(usize, usize, gravity_sim_core::physics::orbital::OrbitalElements, f32)> =
-                        Vec::with_capacity(bodies.len().min(self.orbit_top_n * 2));
+                    let mut candidates: Vec<(
+                        usize,
+                        usize,
+                        gravity_sim_core::physics::orbital::OrbitalElements,
+                        f32,
+                    )> = Vec::with_capacity(bodies.len().min(self.orbit_top_n * 2));
 
                     for i in 0..bodies.len() {
                         // Selected + pinned bodies draw in a dedicated
@@ -379,8 +375,7 @@ impl SimulationApp {
                         let Some(primary_idx) = self.orbit_hierarchy.primary(i) else {
                             continue;
                         };
-                        let Some(el) = compute_elements(bodies, i, primary_idx, g_factor)
-                        else {
+                        let Some(el) = compute_elements(bodies, i, primary_idx, g_factor) else {
                             continue;
                         };
                         if self.orbit_hide_degenerate
@@ -408,9 +403,8 @@ impl SimulationApp {
 
                     // Top-N by influence — partial_sort would be nicer
                     // but N is small and draws are the real cost.
-                    candidates.sort_by(|a, b| {
-                        b.3.partial_cmp(&a.3).unwrap_or(std::cmp::Ordering::Equal)
-                    });
+                    candidates
+                        .sort_by(|a, b| b.3.partial_cmp(&a.3).unwrap_or(std::cmp::Ordering::Equal));
                     if candidates.len() > self.orbit_top_n {
                         candidates.truncate(self.orbit_top_n);
                     }
@@ -434,15 +428,12 @@ impl SimulationApp {
                         if Some(i) == self.selected_body {
                             continue; // selected pass draws it
                         }
-                        let primary = self
-                            .orbit_hierarchy
-                            .primary(i)
-                            .or_else(|| dominant_primary(bodies, i));
+                        let primary =
+                            self.orbit_hierarchy.primary(i).or_else(|| dominant_primary(bodies, i));
                         let Some(primary_idx) = primary else {
                             continue;
                         };
-                        let Some(el) = compute_elements(bodies, i, primary_idx, g_factor)
-                        else {
+                        let Some(el) = compute_elements(bodies, i, primary_idx, g_factor) else {
                             continue;
                         };
                         let primary_b = &bodies[primary_idx];
@@ -465,19 +456,13 @@ impl SimulationApp {
                             .primary(idx)
                             .or_else(|| dominant_primary(bodies, idx));
                         if let Some(primary_idx) = primary {
-                            if let Some(el) =
-                                compute_elements(bodies, idx, primary_idx, g_factor)
-                            {
+                            if let Some(el) = compute_elements(bodies, idx, primary_idx, g_factor) {
                                 let primary = &bodies[primary_idx];
                                 let primary_pos = [primary.x, primary.y, 0.0];
                                 let sampled = el.sample_orbit(primary_pos, 128);
                                 let style = OrbitOverlayStyle::selected_default();
-                                draw_orbit_polyline(
-                                    &mut backend, &sampled, project, &style,
-                                );
-                                draw_orbit_apsides(
-                                    &mut backend, &el, primary_pos, project, &style,
-                                );
+                                draw_orbit_polyline(&mut backend, &sampled, project, &style);
+                                draw_orbit_apsides(&mut backend, &el, primary_pos, project, &style);
                             }
                         }
                     }
@@ -596,10 +581,12 @@ impl SimulationApp {
                             (0.0, 0.0)
                         };
 
-                        let mut body =
-                            gravity_sim_core::domain::body::Body::of(self.place_mass, self.place_material)
-                                .at(wx, wy)
-                                .with_velocity(vx, vy);
+                        let mut body = gravity_sim_core::domain::body::Body::of(
+                            self.place_mass,
+                            self.place_material,
+                        )
+                        .at(wx, wy)
+                        .with_velocity(vx, vy);
                         body.sync_physical_properties();
 
                         self.push_undo(UndoRecord::AddedBodies(1));
@@ -726,7 +713,6 @@ impl SimulationApp {
             self.draw_loading_overlay(ui, rect, time);
             ctx.request_repaint();
         }
-
     }
 
     // ── Overlay ───────────────────────────────────────────────────────────────
@@ -965,7 +951,6 @@ impl SimulationApp {
         Some(out.colors)
     }
 }
-
 
 // ── Spinner helpers ───────────────────────────────────────────────────────────
 

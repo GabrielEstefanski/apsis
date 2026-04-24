@@ -12,12 +12,14 @@ O sistema permite a simulação de múltiplos corpos interagindo gravitacionalme
 ## 2. Escopo e Premissas
 
 O modelo físico adotado assume:
+
 - Gravitação universal segundo a mecânica newtoniana
 - Sistema isolado (sem forças externas)
 - Corpos pontuais (sem volume ou colisão física explícita)
 - Uso de softening gravitacional para evitar singularidades numéricas
 
 Não são considerados:
+
 - Efeitos relativísticos
 - Interações não gravitacionais
 - Modelos de colisão ou fusão entre corpos
@@ -25,6 +27,7 @@ Não são considerados:
 ---
 
 ## 3. Arquitetura Geral
+
 O sistema é estruturado em três componentes principais:
 
 ### 3.1 Motor de Simulação (CPU)
@@ -42,7 +45,6 @@ Responsável por:
 - Conversão de coordenadas de mundo para espaço de tela
 - Renderização eficiente das trajetórias
 - Execução de shaders procedurais para construção geométrica
-
 
 ## 6. Propriedades do Sistema
 

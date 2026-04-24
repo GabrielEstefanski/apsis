@@ -35,10 +35,7 @@ impl ColormapRegistry {
     }
 
     pub fn get(&self, id: &str) -> Option<&dyn Colormap> {
-        self.entries
-            .iter()
-            .find(|c| c.id() == id)
-            .map(|c| c.as_ref())
+        self.entries.iter().find(|c| c.id() == id).map(|c| c.as_ref())
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &dyn Colormap> {
@@ -75,10 +72,7 @@ impl NormalizerRegistry {
     }
 
     pub fn get(&self, id: &str) -> Option<&dyn Normalizer> {
-        self.entries
-            .iter()
-            .find(|n| n.id() == id)
-            .map(|n| n.as_ref())
+        self.entries.iter().find(|n| n.id() == id).map(|n| n.as_ref())
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &dyn Normalizer> {

@@ -3,10 +3,10 @@ use crate::app::theme::{
     ACCENT, ACCENT_DIM, BORDER, DANGER, SUCCESS, SURFACE_STRIP, TEXT_DIM, TEXT_PRI, TEXT_SEC,
 };
 use crate::app::ui::{BodyForm, SimulationApp, SpawnTab, UndoRecord};
+use eframe::egui::{self, Color32, Frame, Margin, RichText, Stroke};
 use gravity_sim_core::domain::body::{Body, radius_from_density_mass};
 use gravity_sim_core::domain::materials::{Material, density};
 use gravity_sim_core::physics::gravity::G;
-use eframe::egui::{self, Color32, Frame, Margin, RichText, Stroke};
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -18,10 +18,7 @@ fn material_grid(ui: &mut egui::Ui, selected: &mut Material) -> bool {
     let cell_w = ((ui.available_width() - spacing_x) / cols as f32).max(96.0);
     let cell_h = 24.0;
 
-    egui::Grid::new(ui.id().with("mat_grid"))
-        .num_columns(cols)
-        .spacing([spacing_x, 4.0])
-        .show(
+    egui::Grid::new(ui.id().with("mat_grid")).num_columns(cols).spacing([spacing_x, 4.0]).show(
         ui,
         |ui| {
             for (i, &mat) in Material::ALL.iter().enumerate() {
@@ -90,17 +87,8 @@ fn material_grid(ui: &mut egui::Ui, selected: &mut Material) -> bool {
         .show(ui, |ui| {
             ui.horizontal(|ui| {
                 let [r, g, b] = mat.props().base_color;
-                ui.label(
-                    RichText::new("●")
-                        .size(11.0)
-                        .color(Color32::from_rgb(r, g, b)),
-                );
-                ui.label(
-                    RichText::new(mat.display_name())
-                        .size(10.5)
-                        .color(TEXT_PRI)
-                        .strong(),
-                );
+                ui.label(RichText::new("●").size(11.0).color(Color32::from_rgb(r, g, b)));
+                ui.label(RichText::new(mat.display_name()).size(10.5).color(TEXT_PRI).strong());
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.label(
                         RichText::new(format!("ρ₀ {:.3e}", nominal_density))
@@ -147,20 +135,18 @@ impl SimulationApp {
     pub(super) fn panel_tab_add(&mut self, ui: &mut egui::Ui) {
         if self.is_editing_locked() {
             ui.add_space(4.0);
-            ui.label(
-                RichText::new(self.editing_lock_hint())
-                    .size(10.5)
-                    .color(ACCENT),
-            );
+            ui.label(RichText::new(self.editing_lock_hint()).size(10.5).color(ACCENT));
             ui.add_space(8.0);
             ui.disable();
         }
 
         ui.add_space(4.0);
         ui.label(
-            RichText::new("Pick a spawn mode, configure mass and material, then place on the canvas.")
-                .size(10.5)
-                .color(TEXT_SEC),
+            RichText::new(
+                "Pick a spawn mode, configure mass and material, then place on the canvas.",
+            )
+            .size(10.5)
+            .color(TEXT_SEC),
         );
         ui.add_space(8.0);
         self.spawn_sub_tab_bar(ui);
@@ -473,8 +459,9 @@ impl SimulationApp {
                     let y = center.com_y + self.spawn_ring_radius * angle.sin();
                     let vx = -v * angle.sin();
                     let vy = v * angle.cos();
-                    let mut b =
-                        Body::of(self.spawn_ring_mass, self.spawn_ring_material).at(x, y).with_velocity(vx, vy);
+                    let mut b = Body::of(self.spawn_ring_mass, self.spawn_ring_material)
+                        .at(x, y)
+                        .with_velocity(vx, vy);
                     b.density = ring_density;
                     b.sync_physical_properties();
                     self.system.add_body(b);
@@ -595,14 +582,11 @@ impl SimulationApp {
                 let clust_density = density(self.spawn_cluster_material, self.spawn_cluster_mass);
 
                 self.push_undo(UndoRecord::AddedBodies(n));
-                use rand::{SeedableRng, RngExt};
                 use rand::rngs::SmallRng;
+                use rand::{RngExt, SeedableRng};
                 let seed = self.system.seed();
-                let mut rng: SmallRng = if seed == 0 {
-                    rand::make_rng()
-                } else {
-                    SmallRng::seed_from_u64(seed)
-                };
+                let mut rng: SmallRng =
+                    if seed == 0 { rand::make_rng() } else { SmallRng::seed_from_u64(seed) };
                 for _ in 0..n {
                     let r = self.spawn_cluster_radius * rng.random::<f64>().sqrt();
                     let theta = rng.random::<f64>() * std::f64::consts::TAU;

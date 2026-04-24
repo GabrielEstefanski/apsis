@@ -75,7 +75,7 @@ pub fn run(config: &RunConfig) -> Result<(), Box<dyn std::error::Error>> {
             softening_scale: system.softening_scale(),
             g_factor: system.g_factor(),
             record_interval: config.csv_interval,
-            units: template.units.clone(),
+            units: template.units,
         };
         Some(SimRecorder::create(&base_path, config.csv_interval, &meta)?)
     } else {
@@ -154,4 +154,3 @@ fn save_snapshot(
     let path = snap.save_to_dir(out_dir)?;
     Ok(path)
 }
-

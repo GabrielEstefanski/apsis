@@ -64,9 +64,7 @@ impl System {
     /// adaptive state — useful inside the physics thread's hot loop
     /// (e.g. Precision Run telemetry updates) where rebuilding every
     /// observable every tick is wasteful.
-    pub fn adaptive_stats(
-        &self,
-    ) -> Option<crate::physics::integrator::traits::AdaptiveStats> {
+    pub fn adaptive_stats(&self) -> Option<crate::physics::integrator::traits::AdaptiveStats> {
         self.integrator.adaptive_stats()
     }
 

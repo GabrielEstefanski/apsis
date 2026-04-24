@@ -21,9 +21,9 @@ use crate::app::theme::{
     ACCENT, BORDER, DANGER, SUCCESS, SURFACE_CARD, TEXT_DIM, TEXT_PRI, TEXT_SEC, section,
 };
 use crate::app::ui::{PanelTab, SelectionForm, SimulationApp};
-use gravity_sim_core::physics::integrator::IntegratorKind;
 use eframe::egui::text::{LayoutJob, TextFormat};
 use eframe::egui::{self, Align, Color32, FontId, RichText, Stroke};
+use gravity_sim_core::physics::integrator::IntegratorKind;
 
 const TOP_N: usize = 5;
 const SEARCH_LIMIT: usize = 50;
@@ -61,10 +61,7 @@ impl SimulationApp {
                     ui.label(RichText::new(yr_str).monospace().size(9.5).color(TEXT_DIM));
                     ui.label(RichText::new("·").size(9.0).color(TEXT_DIM));
                     ui.label(
-                        RichText::new(format!("T {:.3e}", t))
-                            .monospace()
-                            .size(9.5)
-                            .color(TEXT_SEC),
+                        RichText::new(format!("T {:.3e}", t)).monospace().size(9.5).color(TEXT_SEC),
                     );
                 });
             });
@@ -189,8 +186,7 @@ impl SimulationApp {
             (0..bodies.len())
                 .map(|i| {
                     let raw = self.system.name(i);
-                    let name =
-                        if raw.is_empty() { format!("body #{i}") } else { raw.to_owned() };
+                    let name = if raw.is_empty() { format!("body #{i}") } else { raw.to_owned() };
                     (i, name, bodies[i].mass)
                 })
                 .collect()
@@ -231,8 +227,7 @@ impl SimulationApp {
         if let Some(idx) = clicked_idx {
             self.selected_body = Some(idx);
             if let Some(b) = self.system.bodies().get(idx) {
-                self.selection_form =
-                    Some(SelectionForm::from_body(b, self.system.name(idx)));
+                self.selection_form = Some(SelectionForm::from_body(b, self.system.name(idx)));
             }
         }
 
@@ -265,10 +260,7 @@ impl SimulationApp {
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 ui.label(
-                    RichText::new("No bodies in this scene")
-                        .size(13.0)
-                        .color(TEXT_PRI)
-                        .strong(),
+                    RichText::new("No bodies in this scene").size(13.0).color(TEXT_PRI).strong(),
                 );
                 ui.add_space(4.0);
                 ui.label(
@@ -347,20 +339,12 @@ fn quick_start_card(
     job.append(
         &format!("  {subtitle}\n"),
         0.0,
-        TextFormat {
-            font_id: FontId::proportional(10.0),
-            color: TEXT_DIM,
-            ..Default::default()
-        },
+        TextFormat { font_id: FontId::proportional(10.0), color: TEXT_DIM, ..Default::default() },
     );
     job.append(
         &format!("  {hint}"),
         0.0,
-        TextFormat {
-            font_id: FontId::proportional(9.0),
-            color: TEXT_DIM,
-            ..Default::default()
-        },
+        TextFormat { font_id: FontId::proportional(9.0), color: TEXT_DIM, ..Default::default() },
     );
 
     ui.add(
@@ -468,9 +452,7 @@ fn body_row(
         ui.add_space(GAP);
         ui.add_sized(
             egui::vec2(MASS_COL, 20.0),
-            egui::Label::new(
-                RichText::new(sci(mass)).monospace().size(10.0).color(TEXT_DIM),
-            ),
+            egui::Label::new(RichText::new(sci(mass)).monospace().size(10.0).color(TEXT_DIM)),
         );
         resp
     })

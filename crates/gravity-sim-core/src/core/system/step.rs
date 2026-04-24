@@ -8,8 +8,8 @@ use crate::core::hooks::{
 use crate::core::system::System;
 use crate::core::system::helpers::compute_closeness;
 use crate::physics::energy::{angular_momentum_z, kinetic_energy, total_energy};
-use crate::physics::integrator::{DenseSnapshot, IntegratorKind};
 use crate::physics::integrator::IntegratorContext;
+use crate::physics::integrator::{DenseSnapshot, IntegratorKind};
 
 impl System {
     /// Advance the simulation by one time step using the configured integrator.
@@ -48,8 +48,8 @@ impl System {
         let pre_x0: Vec<(f64, f64)>;
         let pre_v0: Vec<(f64, f64)>;
         let pre_a0: Vec<(f64, f64)>;
-        let need_order2 = !self.scratch_acc.is_empty()
-            && self.integrator.kind() != IntegratorKind::Ias15;
+        let need_order2 =
+            !self.scratch_acc.is_empty() && self.integrator.kind() != IntegratorKind::Ias15;
         if need_order2 {
             pre_x0 = self.bodies.iter().map(|b| (b.x, b.y)).collect();
             pre_v0 = self.bodies.iter().map(|b| (b.vx, b.vy)).collect();
