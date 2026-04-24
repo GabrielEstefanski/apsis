@@ -1566,6 +1566,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "gravity-sim-1pn"
+version = "0.1.0"
+dependencies = [
+ "gravity-sim-core",
+]
+
+[[package]]
 name = "gravity-sim-app"
 version = "0.1.0"
 dependencies = [
