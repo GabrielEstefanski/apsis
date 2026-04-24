@@ -28,10 +28,12 @@
 //! - Barnes & Hut (1986). *Nature* 324, 446–449.
 //! - Dehnen (2014). *Comput. Astrophys. Cosmol.* 1, 1.
 
+use std::sync::Arc;
+
 use crate::domain::body::Body;
 use rayon::prelude::*;
 
-use super::kernel::{G, pair_eps2, plummer_acc, plummer_phi};
+use super::kernel::{G, Kernel, PlummerKernel, pair_eps2};
 use super::tree::{DIRECT_MODE_THRESHOLD, EXACT_THRESHOLD, NO_CHILD, Node, QuadTree};
 
 // ── BarnesHutEngine ───────────────────────────────────────────────────────── //
@@ -44,19 +46,37 @@ use super::tree::{DIRECT_MODE_THRESHOLD, EXACT_THRESHOLD, NO_CHILD, Node, QuadTr
 ///
 /// The engine contains no body state — it is safe to rebuild and re-evaluate
 /// every step without any carry-over from previous steps.
+///
+/// The pair potential is supplied by a [`Kernel`] held behind [`Arc`]; the
+/// default (from [`BarnesHutEngine::new`]) is [`PlummerKernel`], which
+/// reproduces the Plummer-softened force law used throughout the library.
 pub struct BarnesHutEngine {
     tree: QuadTree,
     /// N ≤ this → exact O(N²); N > this → Barnes-Hut traversal.
     exact_threshold: usize,
+    kernel: Arc<dyn Kernel>,
 }
 
 impl BarnesHutEngine {
-    /// Create a new engine.
+    /// Create a new engine with the default [`PlummerKernel`].
     ///
     /// `max_depth` bounds the quadtree depth; 16 is sufficient for all
     /// practical particle counts.
     pub fn new(max_depth: usize) -> Self {
-        Self { tree: QuadTree::new(max_depth), exact_threshold: EXACT_THRESHOLD }
+        Self::with_kernel(max_depth, Arc::new(PlummerKernel::new()))
+    }
+
+    /// Create a new engine with a caller-supplied [`Kernel`] implementation.
+    ///
+    /// Use this to run the BH traversal against a non-Plummer kernel — for
+    /// example, a kernel that demonstrates or tests a different Exactness
+    /// or Continuity class.
+    pub fn with_kernel(max_depth: usize, kernel: Arc<dyn Kernel>) -> Self {
+        Self {
+            tree: QuadTree::new(max_depth),
+            exact_threshold: EXACT_THRESHOLD,
+            kernel,
+        }
     }
 
     /// Set the N threshold below which exact O(N²) evaluation is used.
@@ -108,8 +128,10 @@ impl BarnesHutEngine {
             return 0.0;
         }
 
+        let kernel: &dyn Kernel = &*self.kernel;
+
         if n <= self.exact_threshold {
-            return exact_eval(bodies, acc);
+            return exact_eval(bodies, kernel, acc);
         }
 
         let nodes = self.tree.nodes();
@@ -118,7 +140,7 @@ impl BarnesHutEngine {
             .into_par_iter()
             .map(|i| {
                 let mut stack = Vec::with_capacity(128);
-                bh_eval_body(nodes, i, &bodies[i], bodies, theta, &mut stack)
+                bh_eval_body(nodes, i, &bodies[i], bodies, theta, kernel, &mut stack)
             })
             .collect();
 
@@ -280,7 +302,7 @@ impl BarnesHutEngine {
 /// evaluation, using pairwise softening ε²_ij = (ε²_i + ε²_j)/2.
 ///
 /// Returns the total gravitational potential energy PE = Σᵢ<ⱼ mᵢ Φᵢⱼ.
-fn exact_eval(bodies: &[Body], acc: &mut [(f64, f64)]) -> f64 {
+fn exact_eval(bodies: &[Body], kernel: &dyn Kernel, acc: &mut [(f64, f64)]) -> f64 {
     let n = bodies.len();
     let mut potential = 0.0_f64;
 
@@ -289,10 +311,10 @@ fn exact_eval(bodies: &[Body], acc: &mut [(f64, f64)]) -> f64 {
             let dx = bodies[j].x - bodies[i].x;
             let dy = bodies[j].y - bodies[i].y;
             let eps2 = pair_eps2(bodies[i].softening, bodies[j].softening);
+            let r_sq = dx * dx + dy * dy;
 
-            // Shared geometric factor: G / (r² + ε²)^(3/2)
-            let d2 = dx * dx + dy * dy + eps2;
-            let fac = G * d2.sqrt().recip().powi(3);
+            // Shared geometric factor: G · f(r², ε²) = G / (r² + ε²)^(3/2)
+            let fac = G * kernel.acceleration_factor(r_sq, eps2);
 
             // Newton's 3rd law: F_ij = −F_ji
             // acc_i += m_j · (dx, dy) · fac
@@ -302,8 +324,9 @@ fn exact_eval(bodies: &[Body], acc: &mut [(f64, f64)]) -> f64 {
             acc[j].0 -= bodies[i].mass * dx * fac;
             acc[j].1 -= bodies[i].mass * dy * fac;
 
-            // Pair potential energy: E_ij = m_i · Φ_ij
-            potential += bodies[i].mass * plummer_phi(dx, dy, bodies[j].mass, eps2);
+            // Pair potential energy: E_ij = m_i · Φ_ij,  Φ_ij = −G · m_j · K
+            let phi_ij = -G * bodies[j].mass * kernel.potential(r_sq, eps2);
+            potential += bodies[i].mass * phi_ij;
         }
     }
 
@@ -324,6 +347,7 @@ fn bh_eval_body(
     body: &Body,
     bodies: &[Body],
     theta: f64,
+    kernel: &dyn Kernel,
     stack: &mut Vec<u32>,
 ) -> (f64, f64, f64) {
     let mut ax = 0.0_f64;
@@ -352,11 +376,12 @@ fn bh_eval_body(
                 let dx = other.x - body.x;
                 let dy = other.y - body.y;
                 let eps2 = pair_eps2(body.softening, other.softening);
+                let r_sq = dx * dx + dy * dy;
 
-                let (dax, day) = plummer_acc(dx, dy, other.mass, eps2);
-                ax += dax;
-                ay += day;
-                phi += plummer_phi(dx, dy, other.mass, eps2);
+                let fac = G * other.mass * kernel.acceleration_factor(r_sq, eps2);
+                ax += dx * fac;
+                ay += dy * fac;
+                phi += -G * other.mass * kernel.potential(r_sq, eps2);
             }
             continue;
         }
@@ -368,10 +393,11 @@ fn bh_eval_body(
         let d = (dx * dx + dy * dy + eps2).sqrt();
 
         if node.size() / d < theta {
-            let (dax, day) = plummer_acc(dx, dy, node.mass, eps2);
-            ax += dax;
-            ay += day;
-            phi += plummer_phi(dx, dy, node.mass, eps2);
+            let r_sq = dx * dx + dy * dy;
+            let fac = G * node.mass * kernel.acceleration_factor(r_sq, eps2);
+            ax += dx * fac;
+            ay += dy * fac;
+            phi += -G * node.mass * kernel.potential(r_sq, eps2);
         } else {
             for &c in &node.children {
                 if c != NO_CHILD {

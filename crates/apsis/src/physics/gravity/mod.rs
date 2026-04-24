@@ -4,16 +4,13 @@
 //!
 //! | Sub-module | Responsibility |
 //! |---|---|
-//! | [`kernel`] | Pure Plummer-softened force/potential formulas (physics) |
+//! | [`kernel`] | [`Kernel`] trait and concrete implementations (Plummer default) |
 //! | [`tree`] | Barnes-Hut quadtree data structure (algorithm) |
 //! | [`engine`] | [`BarnesHutEngine`]: orchestrates tree + kernel (integration) |
-//!
-//! External code only needs to import [`G`] and [`BarnesHutEngine`]; the
-//! sub-modules are implementation details and not part of the public API.
 
 mod engine;
-mod kernel;
+pub mod kernel;
 mod tree;
 
 pub use engine::BarnesHutEngine;
-pub use kernel::{G, pair_eps2};
+pub use kernel::{G, Kernel, PlummerKernel, pair_eps2};
