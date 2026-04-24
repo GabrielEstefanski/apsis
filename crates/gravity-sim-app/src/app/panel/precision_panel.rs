@@ -32,10 +32,12 @@
 //!   called out below with `// TODO(Bn)` markers.
 
 use crate::app::icons;
-use crate::app::theme::{ACCENT, ACCENT_DIM, BORDER, DANGER, PANEL_BG, SUCCESS, TEXT_DIM, TEXT_PRI, TEXT_SEC};
+use crate::app::theme::{
+    ACCENT, ACCENT_DIM, BORDER, DANGER, PANEL_BG, SUCCESS, TEXT_DIM, TEXT_PRI, TEXT_SEC,
+};
 use crate::app::ui::SimulationApp;
-use gravity_sim_core::core::precision_run::{RunOutcome, RunState, Telemetry};
 use eframe::egui::{self, Align, Color32, Layout, RichText, Stroke};
+use gravity_sim_core::core::precision_run::{RunOutcome, RunState, Telemetry};
 
 /// Panel height when rendering the active-run layout. The Setup
 /// layout reuses the same height so the bottom strip does not
@@ -81,10 +83,10 @@ impl SimulationApp {
             .show(ctx, |ui| match state {
                 RunState::Idle => {
                     setup_content(ui, duration_ref, t_sim_now, force_is_direct, &mut intent);
-                }
+                },
                 _ => {
                     run_content(ui, state, &telemetry, t_sim_now, &mut intent);
-                }
+                },
             });
 
         // Apply intent.
@@ -97,11 +99,11 @@ impl SimulationApp {
         let ctrl_arc = self.system.precision_controller();
         let mut ctrl = ctrl_arc.lock().unwrap();
         match intent {
-            ControlIntent::None => {}
+            ControlIntent::None => {},
             ControlIntent::Start => {
                 let t_target = t_sim_now + self.precision_run_duration.max(0.0);
                 ctrl.start(t_target, t_sim_now);
-            }
+            },
             ControlIntent::Pause => ctrl.request_pause(),
             ControlIntent::Resume => ctrl.resume(),
             ControlIntent::Abort => ctrl.request_abort(),
@@ -122,23 +124,9 @@ fn setup_content(
     ui.spacing_mut().item_spacing.y = 6.0;
 
     ui.horizontal(|ui| {
-        ui.label(
-            RichText::new("PRECISION RUN")
-                .size(10.0)
-                .color(TEXT_DIM)
-                .strong(),
-        );
-        ui.label(
-            RichText::new("·")
-                .size(10.0)
-                .color(TEXT_DIM),
-        );
-        ui.label(
-            RichText::new("ready")
-                .size(11.0)
-                .color(ACCENT)
-                .strong(),
-        );
+        ui.label(RichText::new("PRECISION RUN").size(10.0).color(TEXT_DIM).strong());
+        ui.label(RichText::new("·").size(10.0).color(TEXT_DIM));
+        ui.label(RichText::new("ready").size(11.0).color(ACCENT).strong());
         if force_is_direct {
             ui.label(RichText::new("·").size(10.0).color(TEXT_DIM));
             ui.label(
@@ -153,7 +141,6 @@ fn setup_content(
                     .color(TEXT_SEC),
             );
         }
-
     });
 
     ui.horizontal(|ui| {
@@ -176,10 +163,7 @@ fn setup_content(
         ui.label(RichText::new("TARGET").size(9.0).color(TEXT_DIM).strong());
         let t_target = t_sim_now + *duration;
         ui.label(
-            RichText::new(format!("T = {:.3}", t_target))
-                .size(11.0)
-                .monospace()
-                .color(TEXT_PRI),
+            RichText::new(format!("T = {:.3}", t_target)).size(11.0).monospace().color(TEXT_PRI),
         );
         ui.label(
             RichText::new(format!("(from {:.3})", t_sim_now))
@@ -227,12 +211,7 @@ fn run_content(
     draw_controls_row(ui, state, intent);
 }
 
-fn draw_progress_row(
-    ui: &mut egui::Ui,
-    state: RunState,
-    telemetry: &Telemetry,
-    t_sim_now: f64,
-) {
+fn draw_progress_row(ui: &mut egui::Ui, state: RunState, telemetry: &Telemetry, t_sim_now: f64) {
     let (t_target, t_start) = run_bounds(state).unwrap_or((0.0, 0.0));
     let fraction = progress_fraction(state, telemetry, t_sim_now, t_target, t_start);
 
@@ -248,12 +227,7 @@ fn draw_progress_row(
         let fill_rect =
             egui::Rect::from_min_size(bar_rect.min, egui::vec2(fill_w, bar_rect.height()));
         painter.rect_filled(fill_rect, 2.0, progress_fill_color(state));
-        painter.rect_stroke(
-            bar_rect,
-            2.0,
-            Stroke::new(0.5, BORDER),
-            egui::StrokeKind::Inside,
-        );
+        painter.rect_stroke(bar_rect, 2.0, Stroke::new(0.5, BORDER), egui::StrokeKind::Inside);
 
         ui.add_space(8.0);
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -274,12 +248,7 @@ fn draw_metrics_row(ui: &mut egui::Ui, state: RunState, telemetry: &Telemetry) {
     ui.horizontal(|ui| {
         let (label_text, label_color) = state_tag(state);
         ui.label(RichText::new("STATE").size(9.0).color(TEXT_DIM).strong());
-        ui.label(
-            RichText::new(label_text)
-                .size(11.0)
-                .color(label_color)
-                .strong(),
-        );
+        ui.label(RichText::new(label_text).size(11.0).color(label_color).strong());
 
         ui.add_space(12.0);
         metric_inline(ui, "substeps", &format!("{}", telemetry.substeps));
@@ -289,11 +258,7 @@ fn draw_metrics_row(ui: &mut egui::Ui, state: RunState, telemetry: &Telemetry) {
             "throughput",
             &format!("{:.0} step/s", telemetry.substeps_per_second_window),
         );
-        metric_inline(
-            ui,
-            "sim rate",
-            &format!("{:.2e} t/s", telemetry.sim_time_per_second_window),
-        );
+        metric_inline(ui, "sim rate", &format!("{:.2e} t/s", telemetry.sim_time_per_second_window));
 
         if telemetry.substeps > 0 || telemetry.rejections_total() > 0 {
             let accept = telemetry.acceptance_rate() * 100.0;
@@ -308,12 +273,7 @@ fn draw_metrics_row(ui: &mut egui::Ui, state: RunState, telemetry: &Telemetry) {
         }
 
         if telemetry.degraded > 0 {
-            metric_inline_colored(
-                ui,
-                "floor",
-                &format!("×{}", telemetry.degraded),
-                DANGER,
-            );
+            metric_inline_colored(ui, "floor", &format!("×{}", telemetry.degraded), DANGER);
         }
     });
 }
@@ -343,34 +303,26 @@ fn draw_controls_row(ui: &mut egui::Ui, state: RunState, intent: &mut ControlInt
             *intent = produces;
         }
 
-        if control_btn(
-            ui,
-            icons::PRECISION_ABORT,
-            "Abort",
-            can_abort && !is_aborting,
-            true,
-        )
-        .clicked()
+        if control_btn(ui, icons::PRECISION_ABORT, "Abort", can_abort && !is_aborting, true)
+            .clicked()
         {
             *intent = ControlIntent::Abort;
         }
 
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            match state {
-                RunState::Completed { outcome: RunOutcome::Reached } => {
-                    if control_btn(ui, icons::PRECISION_DONE, "Done", true, false).clicked() {
-                        *intent = ControlIntent::Acknowledge;
-                    }
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| match state {
+            RunState::Completed { outcome: RunOutcome::Reached } => {
+                if control_btn(ui, icons::PRECISION_DONE, "Done", true, false).clicked() {
+                    *intent = ControlIntent::Acknowledge;
                 }
-                RunState::Completed { .. } => {
-                    if control_btn(ui, icons::PRECISION_CLOSE, "Close", true, false).clicked() {
-                        *intent = ControlIntent::Acknowledge;
-                    }
+            },
+            RunState::Completed { .. } => {
+                if control_btn(ui, icons::PRECISION_CLOSE, "Close", true, false).clicked() {
+                    *intent = ControlIntent::Acknowledge;
                 }
-                _ => {
-                    control_btn(ui, icons::PRECISION_CLOSE, "Done", false, false);
-                }
-            }
+            },
+            _ => {
+                control_btn(ui, icons::PRECISION_CLOSE, "Done", false, false);
+            },
         });
     });
 }
@@ -400,7 +352,7 @@ fn progress_fraction(
         _ => {
             let span = (t_target - t_start).max(f64::MIN_POSITIVE);
             (((t_sim_now - t_start) / span).clamp(0.0, 1.0)) as f32
-        }
+        },
     }
 }
 
@@ -432,7 +384,7 @@ fn progress_label(
             let span = (t_target - t_start).max(f64::MIN_POSITIVE);
             let pct = (((t_sim_now - t_start) / span).clamp(0.0, 1.0)) * 100.0;
             format!("{:.1}%   T = {:.3} / {:.3}", pct, t_sim_now, t_target)
-        }
+        },
     }
 }
 
@@ -453,12 +405,7 @@ fn metric_inline(ui: &mut egui::Ui, label: &str, value: &str) {
     metric_inline_colored(ui, label, value, TEXT_PRI);
 }
 
-fn metric_inline_colored(
-    ui: &mut egui::Ui,
-    label: &str,
-    value: &str,
-    value_color: Color32,
-) {
+fn metric_inline_colored(ui: &mut egui::Ui, label: &str, value: &str, value_color: Color32) {
     ui.label(RichText::new(label).size(9.0).color(TEXT_DIM).strong());
     ui.label(RichText::new(value).size(11.0).monospace().color(value_color));
     ui.add_space(4.0);
@@ -472,15 +419,9 @@ fn control_btn(
     danger: bool,
 ) -> egui::Response {
     let stroke_color = if danger { DANGER } else { BORDER };
-    let text_color = if enabled {
-        if danger { DANGER } else { TEXT_PRI }
-    } else {
-        TEXT_DIM
-    };
+    let text_color = if enabled { if danger { DANGER } else { TEXT_PRI } } else { TEXT_DIM };
     let btn = egui::Button::new(
-        RichText::new(format!("{}  {}", icon, label))
-            .size(11.0)
-            .color(text_color),
+        RichText::new(format!("{}  {}", icon, label)).size(11.0).color(text_color),
     )
     .fill(Color32::TRANSPARENT)
     .stroke(Stroke::new(0.5, stroke_color))

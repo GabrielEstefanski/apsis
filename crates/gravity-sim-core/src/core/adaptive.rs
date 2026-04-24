@@ -152,7 +152,7 @@ impl ThetaController {
         self.theta = theta.clamp(self.min_theta, self.max_theta);
     }
 
-    pub fn update(&mut self, e_theta: f64, dt: f64) -> f64 {
+    pub fn update(&mut self, e_theta: f64, _dt: f64) -> f64 {
         let current_theta = self.theta;
 
         let e_norm = e_theta / self.target_error;

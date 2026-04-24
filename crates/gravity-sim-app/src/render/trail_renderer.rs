@@ -1,8 +1,8 @@
 use bytemuck::{Pod, Zeroable};
 use std::mem::size_of;
 
-use gravity_sim_core::core::trail::TrailBuffer;
 use crate::render::trail::TrailStyle;
+use gravity_sim_core::core::trail::TrailBuffer;
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]

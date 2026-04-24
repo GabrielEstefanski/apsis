@@ -185,8 +185,8 @@ mod tests {
 
     #[test]
     fn coalesce_key_is_preserved() {
-        let e = Event::new(Level::Warn, Source::Integrator, "x")
-            .with_coalesce_key("ias15.floor_hit");
+        let e =
+            Event::new(Level::Warn, Source::Integrator, "x").with_coalesce_key("ias15.floor_hit");
         assert_eq!(e.coalesce_key, Some("ias15.floor_hit"));
     }
 }

@@ -4,24 +4,17 @@
 //! visual body-size multiplier, scale-mode semantics, and quick-view actions
 //! (fit, zero COM).
 
-use crate::app::theme::{BORDER, TEXT_DIM, TEXT_PRI, TEXT_SEC, primary_btn, section, secondary_btn};
+use crate::app::theme::{
+    BORDER, TEXT_DIM, TEXT_PRI, TEXT_SEC, primary_btn, secondary_btn, section,
+};
 use crate::app::ui::{SemanticScaleMode, SimulationApp};
 use eframe::egui::{self, RichText};
 
 impl SimulationApp {
     pub(super) fn panel_tab_camera(&mut self, ui: &mut egui::Ui) {
         ui.add_space(2.0);
-        ui.label(
-            RichText::new("Camera")
-                .size(13.0)
-                .color(TEXT_PRI)
-                .strong(),
-        );
-        ui.label(
-            RichText::new("Framing & scale. Purely visual.")
-                .size(10.0)
-                .color(TEXT_DIM),
-        );
+        ui.label(RichText::new("Camera").size(13.0).color(TEXT_PRI).strong());
+        ui.label(RichText::new("Framing & scale. Purely visual.").size(10.0).color(TEXT_DIM));
 
         section(ui, "ZOOM");
         ui.horizontal(|ui| {
@@ -55,20 +48,13 @@ impl SimulationApp {
         ] {
             let active = self.semantic_scale_mode == mode;
             let col = if active { TEXT_PRI } else { TEXT_SEC };
-            let fill = if active {
-                crate::app::theme::ACCENT_DIM
-            } else {
-                egui::Color32::TRANSPARENT
-            };
+            let fill =
+                if active { crate::app::theme::ACCENT_DIM } else { egui::Color32::TRANSPARENT };
             let resp = ui.add(
                 egui::Button::new(
-                    RichText::new(format!(
-                        "{}  {}",
-                        if active { "●" } else { "○" },
-                        mode.label()
-                    ))
-                    .size(11.0)
-                    .color(col),
+                    RichText::new(format!("{}  {}", if active { "●" } else { "○" }, mode.label()))
+                        .size(11.0)
+                        .color(col),
                 )
                 .fill(fill)
                 .stroke(egui::Stroke::new(0.5, BORDER))

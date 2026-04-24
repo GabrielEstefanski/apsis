@@ -1,3 +1,9 @@
+// `!(x > 0.0)` is preserved deliberately in this module — it matches
+// `x <= 0.0 || x.is_nan()`, which is the correct filter for a SOI radius
+// that may be NaN for degenerate geometry. Clippy's `partial_cmp` rewrite
+// loses the NaN branch; suppressed at file level rather than per-site.
+#![allow(clippy::neg_cmp_op_on_partial_ord)]
+
 //! Frame-coherent gravitational hierarchy.
 //!
 //! For each body, picks the single "primary" it orbits around and assigns
@@ -164,9 +170,8 @@ impl OrbitHierarchy {
     pub fn tick(&mut self, bodies: &[Body], g_factor: f64) -> bool {
         let topology_changed = self.last_body_count != bodies.len();
         let first_run = self.last_computed.is_none();
-        let due = self
-            .last_computed
-            .map_or(true, |t| Instant::now().duration_since(t) >= self.cadence);
+        let due =
+            self.last_computed.is_none_or(|t| Instant::now().duration_since(t) >= self.cadence);
         if first_run || topology_changed || due {
             self.recompute(bodies, g_factor);
             true
@@ -340,12 +345,7 @@ fn distance(a: &Body, b: &Body) -> Option<f64> {
 ///    (deepest layer). Ties on SOI are broken by smallest `ε`.
 ///
 /// Returns `Some((primary_idx, eps))` or `None` if no candidate is valid.
-fn pick_primary(
-    i: usize,
-    bodies: &[Body],
-    soi: &[f64],
-    g_factor: f64,
-) -> Option<(usize, f64)> {
+fn pick_primary(i: usize, bodies: &[Body], soi: &[f64], g_factor: f64) -> Option<(usize, f64)> {
     let mut best: Option<(usize, f64, f64)> = None; // (j, soi_j, eps)
     for j in 0..bodies.len() {
         if j == i {
@@ -380,7 +380,7 @@ fn pick_primary(
                 if soi_j < cur_soi || (soi_j == cur_soi && eps < cur_eps) {
                     best = Some((j, soi_j, eps));
                 }
-            }
+            },
         }
     }
     best.map(|(j, _soi, eps)| (j, eps))
@@ -433,11 +433,7 @@ fn apply_hysteresis(
     }
     // Use the previous frame's SOI for the comparison when available; if
     // the body set changed, fall back to current-frame SOI.
-    let reference_soi = prev_soi
-        .get(prev_j)
-        .copied()
-        .filter(|s| *s > 0.0)
-        .unwrap_or(prev_soi_val);
+    let reference_soi = prev_soi.get(prev_j).copied().filter(|s| *s > 0.0).unwrap_or(prev_soi_val);
     let winner_soi = soi.get(w_idx).copied().unwrap_or(f64::INFINITY);
     // Retain previous unless the winner is in a strictly deeper SOI layer
     // (smaller SOI by at least the margin fraction).
@@ -481,9 +477,9 @@ fn break_cycles(primary: &mut [Option<usize>], bodies: &[Body]) {
                         state[p] = 2;
                     }
                     break;
-                }
+                },
                 2 => break,
-                _ => {}
+                _ => {},
             }
             state[cur] = 1;
             path.push(cur);
@@ -550,11 +546,7 @@ mod tests {
         let mut h = OrbitHierarchy::new();
         h.recompute(&bodies, g);
 
-        assert_eq!(
-            h.class(0),
-            Some(OrbitClass::Bound { level: 0 }),
-            "star is the root primary",
-        );
+        assert_eq!(h.class(0), Some(OrbitClass::Bound { level: 0 }), "star is the root primary",);
         assert_eq!(
             h.class(1),
             Some(OrbitClass::Bound { level: 1 }),
@@ -578,7 +570,7 @@ mod tests {
         let rogue = body(10.0, 0.0, 1000.0, 0.0, 1.0);
 
         let mut h = OrbitHierarchy::new();
-        h.recompute(&vec![star, rogue], g);
+        h.recompute(&[star, rogue], g);
 
         assert_eq!(h.class(1), Some(OrbitClass::Free));
         assert_eq!(h.primary(1), None);
@@ -613,7 +605,7 @@ mod tests {
         let pa2 = body(100.01, 0.0, 0.0, 0.0, m_planet);
         let pb2 = body(100.0, 10.0, 0.0, 0.0, m_planet);
         let moon2 = body(100.0, 5.0, 0.0, 0.0, 1.0);
-        h.recompute(&vec![star2, pa2, pb2, moon2], g);
+        h.recompute(&[star2, pa2, pb2, moon2], g);
 
         assert_eq!(
             h.primary(3),
@@ -636,7 +628,7 @@ mod tests {
         let moon1 = body(100.0, 5.0, 0.0, 0.0, 1.0);
 
         let mut h = OrbitHierarchy::new();
-        h.recompute(&vec![star1, pa1, pb1, moon1], g);
+        h.recompute(&[star1, pa1, pb1, moon1], g);
         let initial = h.primary(3).unwrap();
 
         // Drop pb2 to a 10× smaller distance → SOI_B shrinks ~10× → new
@@ -645,7 +637,7 @@ mod tests {
         let pa2 = body(100.0, 0.0, 0.0, 0.0, m_planet);
         let pb2 = body(10.0, 1.0, 0.0, 0.0, m_planet);
         let moon2 = body(10.0, 1.1, 0.0, 0.0, 1.0);
-        h.recompute(&vec![star2, pa2, pb2, moon2], g);
+        h.recompute(&[star2, pa2, pb2, moon2], g);
 
         assert_ne!(
             h.primary(3),
@@ -663,15 +655,12 @@ mod tests {
         let mut h = OrbitHierarchy::new();
         h.cadence = Duration::from_secs(3600); // prevent normal ticks
 
-        assert!(h.tick(&vec![star, planet], g), "first tick always recomputes");
-        assert!(
-            !h.tick(&vec![star, planet], g),
-            "cadence should gate unchanged topology",
-        );
+        assert!(h.tick(&[star, planet], g), "first tick always recomputes");
+        assert!(!h.tick(&[star, planet], g), "cadence should gate unchanged topology",);
 
         let moon = body(101.0, 0.0, 0.0, circular(100.0, 1.0e6) + 1.0, 1.0);
         assert!(
-            h.tick(&vec![star, planet, moon], g),
+            h.tick(&[star, planet, moon], g),
             "a body-count change must force an immediate recompute",
         );
         assert_eq!(h.class(2), Some(OrbitClass::Bound { level: 2 }));
@@ -687,7 +676,7 @@ mod tests {
         let b = body(r, 0.0, 0.0, -100.0, m_b);
 
         let mut h = OrbitHierarchy::new();
-        h.recompute(&vec![a, b], g);
+        h.recompute(&[a, b], g);
 
         assert_eq!(h.class(0), Some(OrbitClass::Bound { level: 0 }));
         assert_eq!(h.class(1), Some(OrbitClass::Bound { level: 1 }));
@@ -702,7 +691,7 @@ mod tests {
         assert_eq!(h.primary(0), None);
 
         let lone = body(0.0, 0.0, 0.0, 0.0, 1.0);
-        h.recompute(&vec![lone], 1.0);
+        h.recompute(&[lone], 1.0);
         assert_eq!(h.class(0), Some(OrbitClass::Free));
     }
 }

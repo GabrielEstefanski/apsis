@@ -36,10 +36,7 @@ impl FieldRegistry {
     }
 
     pub fn get(&self, id: &str) -> Option<&dyn BodyField> {
-        self.entries
-            .iter()
-            .find(|f| f.id() == id)
-            .map(|f| f.as_ref())
+        self.entries.iter().find(|f| f.id() == id).map(|f| f.as_ref())
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &dyn BodyField> {

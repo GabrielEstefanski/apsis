@@ -1,7 +1,7 @@
 //! Save/load via [`SimSnapshot`].
 
-use crate::core::system::helpers::{auto_name, compute_closeness};
 use crate::core::system::System;
+use crate::core::system::helpers::{auto_name, compute_closeness};
 use crate::domain::body::Body;
 use crate::physics::integrator::make_integrator;
 

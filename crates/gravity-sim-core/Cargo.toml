@@ -2,6 +2,15 @@
 name = "gravity-sim-core"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+rust-version.workspace = true
+description = "A Rust N-body gravitational simulation library with a REBOUND-class IAS15 integrator and a compiler-enforced public extension API."
 
 [lib]
 path = "src/lib.rs"

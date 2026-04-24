@@ -53,10 +53,7 @@ pub(crate) struct EventBus {
 
 impl EventBus {
     fn new_with_default_subscribers() -> Self {
-        let bus = Self {
-            subscribers: Mutex::new(Vec::new()),
-            next_id: Mutex::new(0),
-        };
+        let bus = Self { subscribers: Mutex::new(Vec::new()), next_id: Mutex::new(0) };
         // Default subscriber: line-oriented stderr bridge. Matches
         // the pre-bus `eprintln!` output format for continuity with
         // bench log scrubbers and dev-loop terminals.
@@ -73,10 +70,7 @@ impl EventBus {
             *next = next.wrapping_add(1);
             id
         };
-        self.subscribers
-            .lock()
-            .unwrap()
-            .push(Subscriber { id, callback });
+        self.subscribers.lock().unwrap().push(Subscriber { id, callback });
         id
     }
 

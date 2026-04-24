@@ -78,10 +78,7 @@ impl SimulationApp {
                     if n > 0 {
                         ui.label(RichText::new("·").size(9.0).color(TEXT_DIM));
                         ui.label(
-                            RichText::new(format!("{n}"))
-                                .size(10.5)
-                                .monospace()
-                                .color(TEXT_SEC),
+                            RichText::new(format!("{n}")).size(10.5).monospace().color(TEXT_SEC),
                         );
                         ui.label(RichText::new("bodies").size(9.0).color(TEXT_DIM));
                     }
@@ -148,11 +145,8 @@ impl SimulationApp {
 
                 // CSV record indicator
                 let is_rec = self.recorder.is_some();
-                let pulse_alpha = if is_rec {
-                    (((time * 2.2).sin() * 0.25 + 0.55) * 255.0) as u8
-                } else {
-                    75
-                };
+                let pulse_alpha =
+                    if is_rec { (((time * 2.2).sin() * 0.25 + 0.55) * 255.0) as u8 } else { 75 };
                 let rec_col = Color32::from_rgba_unmultiplied(
                     DANGER.r(),
                     DANGER.g(),
@@ -161,16 +155,14 @@ impl SimulationApp {
                 );
                 let rec_btn = ui
                     .add(
-                        egui::Button::new(
-                            RichText::new(icons::RECORD).size(12.0).color(rec_col),
-                        )
-                        .fill(BTN_BG)
-                        .stroke(Stroke::new(
-                            0.5,
-                            if is_rec { DANGER.gamma_multiply(0.45) } else { BORDER },
-                        ))
-                        .min_size(egui::vec2(24.0, TOOLBAR_ROW_H))
-                        .corner_radius(3.0),
+                        egui::Button::new(RichText::new(icons::RECORD).size(12.0).color(rec_col))
+                            .fill(BTN_BG)
+                            .stroke(Stroke::new(
+                                0.5,
+                                if is_rec { DANGER.gamma_multiply(0.45) } else { BORDER },
+                            ))
+                            .min_size(egui::vec2(24.0, TOOLBAR_ROW_H))
+                            .corner_radius(3.0),
                     )
                     .on_hover_text(if is_rec {
                         "Recording CSV — click to stop"
@@ -193,20 +185,18 @@ impl SimulationApp {
                 // Precision Run. Save stays enabled — snapshotting the
                 // in-flight state is a read-only operation.
                 let edit_locked = self.is_editing_locked();
-                let clear_hint = if edit_locked {
-                    self.editing_lock_hint()
-                } else {
-                    "Clear all bodies"
-                };
-                let clear_btn = ui.add_enabled(
-                    !edit_locked,
-                    egui::Button::new(RichText::new(icons::CLEAR).size(13.0).color(TEXT_DIM))
-                        .fill(BTN_BG)
-                        .stroke(Stroke::new(0.5, BORDER))
-                        .min_size(egui::vec2(24.0, TOOLBAR_ROW_H))
-                        .corner_radius(3.0),
-                )
-                .on_hover_text(clear_hint);
+                let clear_hint =
+                    if edit_locked { self.editing_lock_hint() } else { "Clear all bodies" };
+                let clear_btn = ui
+                    .add_enabled(
+                        !edit_locked,
+                        egui::Button::new(RichText::new(icons::CLEAR).size(13.0).color(TEXT_DIM))
+                            .fill(BTN_BG)
+                            .stroke(Stroke::new(0.5, BORDER))
+                            .min_size(egui::vec2(24.0, TOOLBAR_ROW_H))
+                            .corner_radius(3.0),
+                    )
+                    .on_hover_text(clear_hint);
                 if clear_btn.clicked() {
                     self.system.load_bodies(vec![]);
                     self.paused = true;
@@ -216,20 +206,18 @@ impl SimulationApp {
                 if tb_icon_btn(ui, icons::SAVE, "Save  Ctrl+S").clicked() {
                     let _ = self.do_save();
                 }
-                let load_hint = if edit_locked {
-                    self.editing_lock_hint()
-                } else {
-                    "Load saved state"
-                };
-                let load_btn = ui.add_enabled(
-                    !edit_locked,
-                    egui::Button::new(RichText::new(icons::LOAD).size(13.0).color(TEXT_DIM))
-                        .fill(BTN_BG)
-                        .stroke(Stroke::new(0.5, BORDER))
-                        .min_size(egui::vec2(24.0, TOOLBAR_ROW_H))
-                        .corner_radius(3.0),
-                )
-                .on_hover_text(load_hint);
+                let load_hint =
+                    if edit_locked { self.editing_lock_hint() } else { "Load saved state" };
+                let load_btn = ui
+                    .add_enabled(
+                        !edit_locked,
+                        egui::Button::new(RichText::new(icons::LOAD).size(13.0).color(TEXT_DIM))
+                            .fill(BTN_BG)
+                            .stroke(Stroke::new(0.5, BORDER))
+                            .min_size(egui::vec2(24.0, TOOLBAR_ROW_H))
+                            .corner_radius(3.0),
+                    )
+                    .on_hover_text(load_hint);
                 if load_btn.clicked() {
                     self.open_save_modal();
                 }

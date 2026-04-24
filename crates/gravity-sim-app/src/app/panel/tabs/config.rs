@@ -65,12 +65,7 @@ impl SimulationApp {
     /// and a one-click reset to factory defaults.
     pub(super) fn panel_tab_config(&mut self, ui: &mut egui::Ui) {
         ui.add_space(2.0);
-        ui.label(
-            RichText::new("Physics")
-                .size(13.0)
-                .color(TEXT_PRI)
-                .strong(),
-        );
+        ui.label(RichText::new("Physics").size(13.0).color(TEXT_PRI).strong());
         ui.label(
             RichText::new("Force model, gravity & reproducibility — affects results.")
                 .size(10.0)
@@ -279,5 +274,4 @@ impl SimulationApp {
             self.physics_cfg = defaults;
         }
     }
-
 }

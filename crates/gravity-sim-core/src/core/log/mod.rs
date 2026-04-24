@@ -36,7 +36,7 @@
 pub mod bus;
 pub mod event;
 
-pub use bus::{publish, subscribe, unsubscribe, SubscriptionId};
+pub use bus::{SubscriptionId, publish, subscribe, unsubscribe};
 pub use event::{Event, Level, Source};
 
 // ── Producer macros ──────────────────────────────────────────────────────────
@@ -159,12 +159,7 @@ mod macro_tests {
 
         let dt: f64 = 1.5e-12;
         let count: u64 = 7;
-        crate::warn_diag!(
-            Source::Integrator,
-            "macro_test::warn_diag",
-            dt = dt,
-            count = count,
-        );
+        crate::warn_diag!(Source::Integrator, "macro_test::warn_diag", dt = dt, count = count,);
 
         let got = captured.lock().unwrap().clone().expect("event should have been captured");
         assert_eq!(got.level, Level::Warn);

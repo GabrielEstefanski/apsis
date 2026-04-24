@@ -471,10 +471,7 @@ impl WgpuBackend {
         // consistent with the reducer reading we observed *now*.
         if let Some(reducer) = self.luma_reducer.as_mut() {
             let now = Instant::now();
-            let dt = self
-                .last_exposure_tick
-                .map(|t| (now - t).as_secs_f32())
-                .unwrap_or(0.0);
+            let dt = self.last_exposure_tick.map(|t| (now - t).as_secs_f32()).unwrap_or(0.0);
             self.last_exposure_tick = Some(now);
 
             // `poll` returns the freshest reading that matured this frame;

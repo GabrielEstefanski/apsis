@@ -1,7 +1,7 @@
 use crate::app::theme::{ACCENT, BORDER, DANGER, SUCCESS, TEXT_DIM, TEXT_PRI, TEXT_SEC};
 use crate::app::ui::SimulationApp;
-use gravity_sim_core::io::recorder::{RecordMetadata, SimRecorder};
 use eframe::egui::{self, Color32, RichText, Stroke};
+use gravity_sim_core::io::recorder::{RecordMetadata, SimRecorder};
 use std::path::Path;
 
 impl SimulationApp {

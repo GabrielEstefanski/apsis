@@ -153,8 +153,8 @@ impl ExposureState {
 
         // Target scale this frame — what exposure would make
         // soft_max land exactly at target_luminance.
-        let raw_target = (self.target_luminance / measured_soft_max)
-            .clamp(self.min_scale, self.max_scale);
+        let raw_target =
+            (self.target_luminance / measured_soft_max).clamp(self.min_scale, self.max_scale);
 
         // EMA in log space. Half-life h → per-step alpha such that
         // applying (1-alpha)^n to the error halves it when n·dt = h:

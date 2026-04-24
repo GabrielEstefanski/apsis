@@ -80,12 +80,7 @@ pub struct NotificationEntry {
 impl NotificationEntry {
     fn new(event: Event) -> Self {
         let now = Instant::now();
-        Self {
-            event,
-            count: 1,
-            first_at: now,
-            last_at: now,
-        }
+        Self { event, count: 1, first_at: now, last_at: now }
     }
 }
 
@@ -96,10 +91,7 @@ pub struct NotificationStore {
 
 impl NotificationStore {
     pub fn new() -> Self {
-        Self {
-            entries: VecDeque::with_capacity(MAX_ENTRIES),
-            unread: 0,
-        }
+        Self { entries: VecDeque::with_capacity(MAX_ENTRIES), unread: 0 }
     }
 
     pub fn ingest(&mut self, event: Event) {
@@ -110,9 +102,7 @@ impl NotificationStore {
                 if now.duration_since(entry.last_at) > COALESCE_WINDOW {
                     break;
                 }
-                if entry.event.coalesce_key == Some(key)
-                    && entry.event.level == event.level
-                {
+                if entry.event.coalesce_key == Some(key) && entry.event.level == event.level {
                     entry.count = entry.count.saturating_add(1);
                     entry.last_at = now;
                     self.unread = self.unread.saturating_add(1);
@@ -172,7 +162,9 @@ impl Default for NotificationStore {
 /// event (the bus holds an `Arc` on the callback closure, which
 /// in turn holds this `Arc`, so the store survives as long as
 /// the bus callback does).
-pub fn attach_to_bus(store: Arc<Mutex<NotificationStore>>) -> gravity_sim_core::core::log::SubscriptionId {
+pub fn attach_to_bus(
+    store: Arc<Mutex<NotificationStore>>,
+) -> gravity_sim_core::core::log::SubscriptionId {
     gravity_sim_core::core::log::subscribe(move |event: &Event| {
         if let Ok(mut s) = store.lock() {
             s.ingest(event.clone());

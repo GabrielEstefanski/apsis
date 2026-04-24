@@ -1,6 +1,7 @@
 use crate::app::config::PhysicsConfig;
 use crate::app::render_hints::{BodyRenderHints, compute_render_hints};
 use crate::app::theme::{BG, apply_visuals};
+use crate::render::{TrailRenderer, WgpuBackend};
 use gravity_sim_core::core::physics_thread::{PhysicsHandle, spawn as spawn_physics};
 use gravity_sim_core::core::system::System;
 use gravity_sim_core::domain::body::Body;
@@ -8,7 +9,6 @@ use gravity_sim_core::domain::materials::Material;
 use gravity_sim_core::io::recorder::SimRecorder;
 use gravity_sim_core::io::snapshot::{SaveEntry, SimSnapshot, list_saves};
 use gravity_sim_core::physics::integrator::IntegratorKind;
-use crate::render::{TrailRenderer, WgpuBackend};
 use gravity_sim_core::templates::{Template, UnitSystem};
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
@@ -383,10 +383,7 @@ impl SimulationApp {
     pub(super) fn is_editing_locked(&self) -> bool {
         let ctrl = self.system.precision_controller();
         let guard = ctrl.lock().unwrap();
-        !matches!(
-            guard.state(),
-            gravity_sim_core::core::precision_run::RunState::Idle
-        )
+        !matches!(guard.state(), gravity_sim_core::core::precision_run::RunState::Idle)
     }
 
     /// Short hint shown on hover over disabled edit controls.
@@ -429,9 +426,8 @@ impl SimulationApp {
             precision_confirmation_pending: None,
             precision_confirmation_session_skip: false,
             notifications: {
-                let store = Arc::new(Mutex::new(
-                    crate::app::notifications::NotificationStore::new(),
-                ));
+                let store =
+                    Arc::new(Mutex::new(crate::app::notifications::NotificationStore::new()));
                 let _sub = crate::app::notifications::attach_to_bus(store.clone());
                 store
             },
@@ -512,7 +508,10 @@ impl SimulationApp {
             templates_search: String::new(),
             templates_meta: gravity_sim_core::templates::TEMPLATES
                 .iter()
-                .map(|e| { let t = e.build(0); (t.description, t.body_count()) })
+                .map(|e| {
+                    let t = e.build(0);
+                    (t.description, t.body_count())
+                })
                 .collect(),
 
             sim_name: String::new(),
@@ -549,9 +548,9 @@ impl SimulationApp {
             let ctrl = self.system.precision_controller();
             let guard = ctrl.lock().unwrap();
             match guard.state() {
-                RunState::Running { .. }
-                | RunState::Pausing { .. }
-                | RunState::Aborting { .. } => (true, self.system.sim_rate()),
+                RunState::Running { .. } | RunState::Pausing { .. } | RunState::Aborting { .. } => {
+                    (true, self.system.sim_rate())
+                },
                 RunState::Paused { .. } | RunState::Completed { .. } => (false, 0.0),
                 RunState::Idle => (!self.paused, self.sim_rate_target),
             }
@@ -676,10 +675,7 @@ impl SimulationApp {
         let run_in_flight = {
             let ctrl = self.system.precision_controller();
             let guard = ctrl.lock().unwrap();
-            !matches!(
-                guard.state(),
-                gravity_sim_core::core::precision_run::RunState::Idle
-            )
+            !matches!(guard.state(), gravity_sim_core::core::precision_run::RunState::Idle)
         };
         if integrator_is_precision || run_in_flight {
             self.draw_precision_panel(&ctx);

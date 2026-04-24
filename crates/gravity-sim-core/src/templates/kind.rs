@@ -68,11 +68,7 @@ impl std::fmt::Display for UnknownTemplate {
             f,
             "unknown template \"{}\"; known templates: {}",
             self.name,
-            TemplateKind::all()
-                .iter()
-                .map(|t| t.name())
-                .collect::<Vec<_>>()
-                .join(", ")
+            TemplateKind::all().iter().map(|t| t.name()).collect::<Vec<_>>().join(", ")
         )
     }
 }
@@ -249,8 +245,7 @@ mod tests {
         // Jupiter Trojans uses the seed for cluster layout; different seeds
         // must produce different first-body positions.
         let sys0 = System::from_template(TemplateKind::JupiterTrojans);
-        let sys1 =
-            System::from_template(TemplateKind::JupiterTrojans).with_seed(42);
+        let sys1 = System::from_template(TemplateKind::JupiterTrojans).with_seed(42);
 
         assert_eq!(sys0.bodies().len(), sys1.bodies().len());
         let any_differ = sys0

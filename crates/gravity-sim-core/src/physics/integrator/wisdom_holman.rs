@@ -38,11 +38,15 @@ pub struct WisdomHolman {
     fallback: Yoshida4,
 }
 
+impl Default for WisdomHolman {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl WisdomHolman {
     pub fn new() -> Self {
-        Self {
-            fallback: Yoshida4,
-        }
+        Self { fallback: Yoshida4 }
     }
 
     /// Returns `true` if `bodies[0]` dominates the system.
@@ -128,8 +132,7 @@ impl Integrator for WisdomHolman {
         let total_m0 = bodies[0].mass;
 
         // ── To heliocentric frame ────────────────────────────────────────
-        let (cx0, cy0, cvx0, cvy0) =
-            (bodies[0].x, bodies[0].y, bodies[0].vx, bodies[0].vy);
+        let (cx0, cy0, cvx0, cvy0) = (bodies[0].x, bodies[0].y, bodies[0].vx, bodies[0].vy);
         for b in &mut bodies[1..] {
             b.x -= cx0;
             b.y -= cy0;
@@ -143,8 +146,7 @@ impl Integrator for WisdomHolman {
         // ── Exact Keplerian drift ────────────────────────────────────────
         for i in 1..bodies.len() {
             let b = &bodies[i];
-            let (nx, ny, nvx, nvy) =
-                kepler_step(b.x, b.y, b.vx, b.vy, dt, mu);
+            let (nx, ny, nvx, nvy) = kepler_step(b.x, b.y, b.vx, b.vy, dt, mu);
             bodies[i].x = nx;
             bodies[i].y = ny;
             bodies[i].vx = nvx;
@@ -157,17 +159,14 @@ impl Integrator for WisdomHolman {
         // ── Back to inertial (barycentric) frame ─────────────────────────
         let (px, py) = bodies[1..]
             .iter()
-            .fold((0.0_f64, 0.0_f64), |(px, py), b| {
-                (px + b.mass * b.vx, py + b.mass * b.vy)
-            });
+            .fold((0.0_f64, 0.0_f64), |(px, py), b| (px + b.mass * b.vx, py + b.mass * b.vy));
 
         bodies[0].vx = -px / total_m0;
         bodies[0].vy = -py / total_m0;
         bodies[0].x += bodies[0].vx * dt;
         bodies[0].y += bodies[0].vy * dt;
 
-        let (cx1, cy1, cvx1, cvy1) =
-            (bodies[0].x, bodies[0].y, bodies[0].vx, bodies[0].vy);
+        let (cx1, cy1, cvx1, cvy1) = (bodies[0].x, bodies[0].y, bodies[0].vx, bodies[0].vy);
         for b in &mut bodies[1..] {
             b.x += cx1;
             b.y += cy1;

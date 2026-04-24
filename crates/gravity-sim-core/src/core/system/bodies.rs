@@ -2,10 +2,10 @@
 
 use crate::core::calibration;
 use crate::core::diagnostics::{DiagnosticsComputer, SimulationDiagnostics};
+use crate::core::system::System;
 use crate::core::system::helpers::{
     auto_name, compute_closeness, l_sun, mass_to_solar, radius_to_solar, resolved_name,
 };
-use crate::core::system::System;
 use crate::domain::body::{Body, NamedBody};
 
 impl System {

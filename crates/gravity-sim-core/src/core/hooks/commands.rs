@@ -26,4 +26,3 @@ pub enum Command {
     /// Stop the main loop after the current step completes.
     Stop,
 }
-

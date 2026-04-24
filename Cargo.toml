@@ -9,11 +9,19 @@ members = [
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
+license = "Apache-2.0"
+authors = ["Gabriel Braga Estefanski <gabrielbragaestefanski@gmail.com>"]
+rust-version = "1.85"
+readme = "README.md"
+repository = "https://github.com/gabrielbragaestefanski/gravity-sim"
+homepage = "https://github.com/gabrielbragaestefanski/gravity-sim"
+keywords = ["n-body", "astrophysics", "simulation", "ias15", "post-newtonian"]
+categories = ["science", "simulation", "science::simulation"]
 
 [workspace.dependencies]
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-toml = { version = "1.1.2+spec-1.1.0", default-features = false, features = ["parse", "display", "serde"] }
+toml = { version = "1.1.2", default-features = false, features = ["parse", "display", "serde"] }
 rand = "0.10.1"
 rayon = "1.12.0"
 bytemuck = { version = "1.14", features = ["derive"] }

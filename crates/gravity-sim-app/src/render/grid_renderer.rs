@@ -1,6 +1,6 @@
 use bytemuck::{Pod, Zeroable};
-use std::mem::size_of;
 use egui;
+use std::mem::size_of;
 
 // ── Uniform ───────────────────────────────────────────────────────────────────
 

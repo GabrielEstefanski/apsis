@@ -27,9 +27,7 @@ fn main() {
         b.softening = 0.0;
     }
 
-    let mut sys = System::new(bodies)
-        .with_integrator(IntegratorKind::Ias15)
-        .with_dt(0.1);
+    let mut sys = System::new(bodies).with_integrator(IntegratorKind::Ias15).with_dt(0.1);
 
     println!("Pythagorean 3-body @ IAS15 (unsoftened)");
     println!("  starting E  = {:+.6e}", sys.energy());
@@ -38,10 +36,6 @@ fn main() {
     const T_END: f64 = 10.0;
     for t_target in [1.0_f64, 2.0, 3.0, 4.0, 5.0, 6.0, 8.0, T_END] {
         sys.integrate_until(t_target);
-        println!(
-            "  t = {:>5.2}   dE/E = {:+.3e}",
-            sys.t(),
-            sys.energy_delta(),
-        );
+        println!("  t = {:>5.2}   dE/E = {:+.3e}", sys.t(), sys.energy_delta(),);
     }
 }
