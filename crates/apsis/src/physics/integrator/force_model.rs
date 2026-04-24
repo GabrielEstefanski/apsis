@@ -78,6 +78,13 @@ pub trait ForceModel: Send {
         Arc::new(PlummerKernel::new())
     }
 
+    /// Swap the active kernel.
+    ///
+    /// Default: no-op. Force models that carry a configurable kernel
+    /// (e.g., [`GravityForceModel`] with its Barnes-Hut engine) override
+    /// this to propagate the new kernel down.
+    fn set_kernel(&mut self, _kernel: Arc<dyn Kernel>) {}
+
     /// Whether this force model is a deterministic function of state
     /// — i.e. `compute(bodies)` returns the same accelerations (to
     /// within f64 ULP) on two calls with identical `bodies`.
@@ -129,6 +136,10 @@ impl GravityForceModel {
 impl ForceModel for GravityForceModel {
     fn kernel(&self) -> Arc<dyn Kernel> {
         self.engine.kernel()
+    }
+
+    fn set_kernel(&mut self, kernel: Arc<dyn Kernel>) {
+        self.engine.set_kernel(kernel);
     }
 
     fn compute(&mut self, bodies: &[Body], acc: &mut [(f64, f64)]) -> f64 {
