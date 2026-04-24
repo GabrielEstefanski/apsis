@@ -288,6 +288,16 @@ fn truncated_kernel_energy_spikes_are_in_bijection_with_r_cut_crossings() {
         crossings.len(),
         spikes.len()
     );
+    if !spikes.is_empty() {
+        let min_mag = spikes.iter().map(|s| s.magnitude).fold(f64::INFINITY, f64::min);
+        let max_mag = spikes.iter().map(|s| s.magnitude).fold(0.0_f64, f64::max);
+        eprintln!("[diag] spike magnitude range: [{min_mag:.3e}, {max_mag:.3e}]");
+    }
+    let worst_baseline_delta_dbg = baseline_samples
+        .windows(2)
+        .map(|w| (w[1].e - w[0].e).abs() / w[1].e.abs().max(1e-30))
+        .fold(0.0_f64, f64::max);
+    eprintln!("[diag] smooth worst step ΔE/E: {worst_baseline_delta_dbg:.3e}");
 
     assert!(
         crossings.len() >= 4,
