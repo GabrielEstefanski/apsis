@@ -16,8 +16,8 @@
 //! Floats are near-deterministic but may flutter by a few ULPs due to
 //! fused-multiply-add choices, compiler reassociation, or threshold
 //! crossings on the last digits. The recording pass observes the
-//! actual jitter across N runs and sizes `tol_factor` to 2Ã— observed
-//! â€” tight by default, but adaptive to real-world noise.
+//! actual jitter across N runs and sizes `tol_factor` to 2× observed
+//! — tight by default, but adaptive to real-world noise.
 
 /// Classification that determines the default tolerance strategy when
 /// recording a baseline. See the module-level docs for rationale.
@@ -32,17 +32,17 @@ pub enum MetricTier {
 }
 
 /// Snapshot of one scenario run. Field names are the stable keys used
-/// in the baseline file â€” renaming requires a baseline update.
+/// in the baseline file — renaming requires a baseline update.
 #[derive(Debug, Clone)]
 pub struct ScenarioMetrics {
-    // â”€â”€ Tier 1: controller counters â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Tier 1: controller counters ──────────────────────────────────
     pub substeps: u64,
     pub rejections_picard: u64,
     pub rejections_truncation: u64,
     pub picard_iters_total: u64,
     pub degraded_total: u64,
 
-    // â”€â”€ Tier 2: dt profile (controller behaviour) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Tier 2: dt profile (controller behaviour) ────────────────────
     //
     // Includes `dt_p05` in addition to the median (`dt_p50`) because a
     // controller that only subtly relaxes its lower-tail behaviour
@@ -57,20 +57,20 @@ pub struct ScenarioMetrics {
     pub dt_p50: f64,
     pub dt_p95: f64,
 
-    // â”€â”€ Tier 2: numerical quality â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Tier 2: numerical quality ────────────────────────────────────
     //
     // `peak_energy_err` catches gross blow-ups but is oscillatory in
-    // nature for well-behaved scenes â€” it can stay flat while energy
+    // nature for well-behaved scenes — it can stay flat while energy
     // silently drifts. The extra two metrics close that gap:
     //
-    //   * `rel_energy_err_rms`: sqrt(mean(errÂ²)) over all samples.
+    //   * `rel_energy_err_rms`: sqrt(mean(err²)) over all samples.
     //     Penalises *sustained* error rather than isolated spikes.
     //     Useful as a scalar summary of integration quality over the
     //     whole window.
     //   * `energy_drift_slope`: least-squares slope of |err(t)| vs t.
     //     > 0 means the absolute-error envelope is growing (secular
-    //     drift, bad). â‰ˆ 0 means the error is bounded / oscillatory
-    //     (good â€” what an adaptive high-order integrator should
+    //     drift, bad). ≈ 0 means the error is bounded / oscillatory
+    //     (good — what an adaptive high-order integrator should
     //     produce for non-chaotic scenes). We use |err| rather than
     //     signed err so an oscillation around zero can't mask drift
     //     as "zero slope".
@@ -86,7 +86,7 @@ pub struct ScenarioMetrics {
 impl ScenarioMetrics {
     /// Ordered list of `(name, tier)` for all metrics. The order here
     /// drives the order of entries written to the baseline TOML file.
-    /// Keep it stable â€” reordering would noise up diffs without any
+    /// Keep it stable — reordering would noise up diffs without any
     /// semantic change.
     pub const ALL: &'static [(&'static str, MetricTier)] = &[
         ("substeps", MetricTier::Counter),
@@ -95,7 +95,7 @@ impl ScenarioMetrics {
         ("picard_iters_total", MetricTier::Counter),
         ("degraded_total", MetricTier::Counter),
         // dt stats are floats by type but derive from a deterministic
-        // sequence of accepted sub-step sizes â€” treated as Tier 2 so
+        // sequence of accepted sub-step sizes — treated as Tier 2 so
         // the baseline captures per-run jitter (there should be none,
         // but we measure rather than assume).
         ("dt_min", MetricTier::Float),
@@ -115,7 +115,7 @@ impl ScenarioMetrics {
     ];
 
     /// Look up a metric by its stable name. Returns `None` only when
-    /// the caller has passed a typo â€” treat that as a programmer error.
+    /// the caller has passed a typo — treat that as a programmer error.
     pub fn get(&self, name: &str) -> Option<f64> {
         match name {
             "substeps" => Some(self.substeps as f64),
@@ -142,7 +142,7 @@ impl ScenarioMetrics {
 /// All three vectors are indexed by accepted sub-step: `t[i]` is the
 /// simulation time at which sub-step `i` ended, `dt[i]` its size, and
 /// `abs_energy_err[i]` the absolute relative energy error at that
-/// point. The three lengths must match â€” [`assemble`] asserts this
+/// point. The three lengths must match — [`assemble`] asserts this
 /// rather than silently aligning to the shorter one.
 #[derive(Debug, Default)]
 pub struct RunSamples {
@@ -218,7 +218,7 @@ pub fn assemble(
     }
 }
 
-// â”€â”€ Distribution helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Distribution helpers ─────────────────────────────────────────────────────
 
 struct DtSummary {
     min: f64,
@@ -230,7 +230,7 @@ struct DtSummary {
 }
 
 /// Summary stats for a slice of dt samples. Empty input returns all
-/// zeros â€” a scenario that produced zero substeps is degenerate and
+/// zeros — a scenario that produced zero substeps is degenerate and
 /// will fail other baseline checks first.
 fn dt_summary(samples: &[f64]) -> DtSummary {
     if samples.is_empty() {
@@ -250,7 +250,7 @@ fn dt_summary(samples: &[f64]) -> DtSummary {
 }
 
 /// Nearest-rank percentile on a pre-sorted slice. Coarser than linear
-/// interpolation but deterministic and monotonic in sample size â€”
+/// interpolation but deterministic and monotonic in sample size —
 /// which matters more than smoothness for regression detection.
 fn percentile(sorted: &[f64], q: f64) -> f64 {
     debug_assert!((0.0..=1.0).contains(&q));
@@ -258,9 +258,9 @@ fn percentile(sorted: &[f64], q: f64) -> f64 {
     sorted[idx]
 }
 
-// â”€â”€ Quality metric helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Quality metric helpers ───────────────────────────────────────────────────
 
-/// Root mean square of a slice: `sqrt(mean(xÂ²))`. Returns 0 for empty
+/// Root mean square of a slice: `sqrt(mean(x²))`. Returns 0 for empty
 /// input (as the other metrics do) so callers don't need per-call
 /// guards.
 fn rms(values: &[f64]) -> f64 {
@@ -271,9 +271,9 @@ fn rms(values: &[f64]) -> f64 {
     (sum_sq / values.len() as f64).sqrt()
 }
 
-/// Least-squares slope of `y(t)` â€” the `Î²` coefficient in `y = Î± + Î²t`
-/// â€” computed in the numerically stable `Î£((t - tÌ„)(y - È³))/Î£((t - tÌ„)Â²)`
-/// form rather than the textbook `Î£ty âˆ’ nÂ·tÌ„Â·È³` which loses precision
+/// Least-squares slope of `y(t)` — the `β` coefficient in `y = α + βt`
+/// — computed in the numerically stable `Σ((t - t̄)(y - ȳ))/Σ((t - t̄)²)`
+/// form rather than the textbook `Σty − n·t̄·ȳ` which loses precision
 /// when the centred covariance is small compared to the raw moments
 /// (the common case for drift near the round-off floor).
 ///
