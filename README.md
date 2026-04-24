@@ -1,10 +1,16 @@
 # gravity-sim
 
-A Rust N-body gravitational simulation library with a [REBOUND](https://rebound.readthedocs.io/)-class
-IAS15 integrator and a compiler-enforced public extension API.
-Validated by an out-of-tree plugin crate reproducing Mercury's perihelion
-precession to **4.4 parts per million** of the General-Relativistic prediction.
+A Rust N-body gravitational simulation library with an adaptive IAS15-style
+integrator (in the sense of Rein & Spiegel, 2015) and a compiler-enforced
+public extension API. Validated by an out-of-tree plugin crate reproducing
+Mercury's perihelion precession to **4.4 parts per million** of the
+General-Relativistic prediction.
 
+> **Scope.** The solver is currently 2D. 3D is a planned, deliberately
+> breaking change — the current surface is frozen at 2D so the API-contract
+> machinery can be exercised end-to-end against a real physical result
+> before the coordinate dimension changes.
+>
 > *Status: pre-release (`v0.1.0` alpha). Public API is stabilised but not yet
 > tagged; citation DOI pending first Zenodo release.*
 
@@ -17,9 +23,12 @@ a small number of mature C/Fortran codes — REBOUND (Rein & Spiegel, 2012),
 MERCURY (Chambers, 1999), NBODY6/7 (Aarseth, 2003) — each with decades of
 community validation. This library does not seek to replace them.
 
-It fills a narrower niche: **the first Rust-native N-body library providing a
-REBOUND-class IAS15 integrator behind a public API whose invariants are
-promoted to type-level, CI-enforced contracts.** Concretely, this means:
+It fills a narrower niche: **a Rust-native N-body library providing an
+adaptive IAS15-style integrator behind a public API whose invariants are
+promoted to type-level, CI-enforced contracts.** To the authors' knowledge,
+the specific combination — Rust, a validated IAS15 implementation, and a
+plugin contract enforced by compilation rather than convention — is not
+currently available elsewhere. Concretely, the claim means:
 
 - Physical preconditions (exact `1/r` gravity, determinism seed, softening
   contracts) are declared in code at the type of each extension point, not
@@ -127,6 +136,13 @@ introduces a numerical apsidal precession that is **≈ 2 × 10³ larger** than
 the 43 arcsec/century GR effect for Mercury. It is invisible at the
 integrator level — energy still conserves to machine precision.
 
+This class of error is otherwise difficult to detect: the standard
+conservation invariants (energy, angular momentum) remain satisfied bit-for-bit
+while the precession measurement diverges from the physics being modelled.
+The only upstream signal is a quantitative comparison against an analytic
+prediction — which is exactly the step a researcher is likely to skip when
+the simulator *looks* correct under every usual check.
+
 The library surfaces the trap at the type level. Perturbations whose signal
 measures a deviation from `1/r` (GR, J2 oblateness, tidal dissipation)
 override
@@ -156,8 +172,8 @@ Honest scope for reviewers. This library **does not** provide:
 - A hybrid close-encounter regime switcher (no MERCURIUS equivalent).
 - Stellar evolution, hydrodynamics, or collisionless large-N (no GADGET
   equivalent).
-- 3D integration (the solver is 2D; a 3D extension is a future breaking
-  change).
+- 3D integration (see the Scope note at the top — a planned breaking
+  change, not a regression).
 - Python bindings (possible via `pyo3` as future work; out of scope for v1).
 
 For any of the above, use REBOUND, MERCURY, or NBODY6. This library's
@@ -181,6 +197,29 @@ What is verified in CI:
   orbits. 4.4 ppm is the achieved figure.
 - **Workspace isolation**: `cargo build -p gravity-sim-core` resolves no
   UI dependency.
+
+## Further reading
+
+The repository carries the full methodological record a software paper
+normally cites only in passing — reviewers and users who want the
+decisions and the failed experiments behind a number can follow the
+trail directly:
+
+- [`docs/overview.md`](docs/overview.md), [`docs/integrator.md`](docs/integrator.md),
+  [`docs/forces.md`](docs/forces.md), [`docs/softening.md`](docs/softening.md),
+  [`docs/stability.md`](docs/stability.md) — domain-level documentation of
+  the physics stack and its regime of applicability.
+- [`docs/adr/`](docs/adr/) — architectural decision records.
+  `001-wall-time-budget.md` on the interactive timestep model,
+  `002-sim-rate-target.md` on frame-pacing, and
+  `003-integrator-execution-profile.md` on why the default is
+  Yoshida-4 rather than IAS15 for render-loop contexts.
+- [`docs/experiments/`](docs/experiments/) — lab-notebook entries for
+  reproducible experiments run during development, including the
+  IAS15 phase-profile breakdown, a null-result on the Picard noise
+  floor, and the solar-system stutter diagnosis that motivated the
+  versioned baseline harness.
+- [`docs/references.md`](docs/references.md) — consolidated bibliography.
 
 ## License
 
