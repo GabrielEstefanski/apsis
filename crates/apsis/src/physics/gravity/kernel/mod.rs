@@ -20,17 +20,31 @@
 //! implementations. The default is [`PlummerKernel`], which softens the
 //! 1/r singularity with a spherically-symmetric Plummer sphere.
 //!
+//! ## Extension contract
+//!
+//! Kernels declare the physical invariants they provide via
+//! [`KernelProperties`]; extensions (perturbations, integrators with
+//! kernel preconditions) declare the invariants they require via
+//! [`KernelRequirements`]. The match between the two is computed by
+//! [`KernelRequirements::check_against`] and surfaces as
+//! [`RequirementViolation`] records.
+//!
 //! ## Module layout
 //!
 //! | Sub-module | Responsibility |
 //! |---|---|
-//! | [`trait_def`] (private) | The [`Kernel`] trait definition |
-//! | [`plummer`] (private) | [`PlummerKernel`] — the default impl |
+//! | `trait_def` (private)   | The [`Kernel`] trait definition |
+//! | `plummer` (private)     | [`PlummerKernel`] — the default impl |
+//! | `properties` (private)  | Invariant types and matching logic |
 
 mod plummer;
+mod properties;
 mod trait_def;
 
 pub use plummer::PlummerKernel;
+pub use properties::{
+    Continuity, Exactness, KernelProperties, KernelRequirements, RequirementViolation,
+};
 pub use trait_def::Kernel;
 
 // ── Constants and helpers ─────────────────────────────────────────────────── //
