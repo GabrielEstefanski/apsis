@@ -1,8 +1,10 @@
 //! Non-gravitational perturbation force registration.
 
+use std::sync::Arc;
+
 use crate::core::log::Source;
 use crate::core::system::System;
-use crate::physics::gravity::kernel::RequirementViolation;
+use crate::physics::gravity::kernel::{Kernel, RequirementViolation};
 use crate::physics::integrator::PerturbationForce;
 
 impl System {
@@ -118,6 +120,27 @@ impl System {
             b.softening = 0.0;
         }
         self.softening_scale = 0.0;
+        self
+    }
+
+    /// Swap the gravitational kernel the system dispatches through.
+    ///
+    /// The default kernel is
+    /// [`PlummerKernel`](crate::physics::gravity::PlummerKernel).
+    /// Researchers use this builder to run experiments against
+    /// non-default kernels — for example, the
+    /// [`TruncatedPlummerKernel`](crate::physics::gravity::kernel::TruncatedPlummerKernel)
+    /// that demonstrates the `Continuity::C0` precondition violation.
+    ///
+    /// The kernel affects both the force evaluation and the properties
+    /// reported to the precondition-check inside
+    /// [`System::add_perturbation`]: a perturbation whose
+    /// [`KernelRequirements`](crate::physics::gravity::kernel::KernelRequirements)
+    /// the new kernel cannot satisfy will emit one structured diagnostic
+    /// per violated invariant.
+    #[must_use]
+    pub fn with_kernel(mut self, kernel: Arc<dyn Kernel>) -> Self {
+        self.force_model.set_kernel(kernel);
         self
     }
 }

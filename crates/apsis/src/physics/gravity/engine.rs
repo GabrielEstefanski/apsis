@@ -90,6 +90,17 @@ impl BarnesHutEngine {
         Arc::clone(&self.kernel)
     }
 
+    /// Swap the active kernel.
+    ///
+    /// Used by
+    /// [`System::with_kernel`](crate::core::system::System::with_kernel) to
+    /// let researchers configure a non-default kernel for experiments such
+    /// as the continuity counter-test (see
+    /// [`TruncatedPlummerKernel`](crate::physics::gravity::kernel::TruncatedPlummerKernel)).
+    pub fn set_kernel(&mut self, kernel: Arc<dyn Kernel>) {
+        self.kernel = kernel;
+    }
+
     /// Set the N threshold below which exact O(N²) evaluation is used.
     ///
     /// Range is clamped to `[1, DIRECT_MODE_THRESHOLD]`. Passing
