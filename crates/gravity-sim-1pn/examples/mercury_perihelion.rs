@@ -16,11 +16,31 @@
 //!
 //! which integrates to 43 arcseconds per century for the real Mercury.
 //!
-//! The softening length on both bodies is zeroed at construction: the
-//! default material-scaled Plummer softening introduces a spurious
-//! (non-GR) apsidal precession that swamps the 1PN signal by orders of
-//! magnitude. A test of a general-relativistic correction needs the
-//! exact 1/r potential as the baseline.
+//! # Formal note on Plummer softening
+//!
+//! The simulator's default body carries a material-scaled Plummer softening
+//! length `ε = EPS_BASE · mass^(1/3)`. For a solar-mass body this evaluates
+//! to ε ≈ 0.02 AU — about 5 % of Mercury's perihelion distance. The
+//! resulting deviation from a pure `1/r` potential introduces a *numerical*
+//! apsidal precession that, at Mercury's orbit, is roughly **2 × 10³ larger
+//! than the 43 arcsec/century GR effect the example is trying to measure**.
+//!
+//! This was caught on the first end-to-end run: with default softening the
+//! measured precession was −83 000 arcsec/century (wrong sign, wrong
+//! magnitude); zeroing softening recovered +43 arcsec/century within 4.4
+//! ppm of GR. Any future test of a fine gravitational effect — post-
+//! Newtonian, J2 oblateness, tidal dissipation — faces the same trap.
+//!
+//! The trap is *silent* at the simulator level: energy is still conserved to
+//! machine precision, angular momentum is still exact, nothing looks wrong.
+//! Only cross-referencing against an analytic prediction reveals it.
+//!
+//! As of this release, registering a [`PerturbationForce`] whose
+//! [`requires_exact_gravity()`](gravity_sim_core::physics::integrator::PerturbationForce::requires_exact_gravity)
+//! method returns `true` into a system with softened bodies emits a
+//! [`warn_diag!`](gravity_sim_core::warn_diag) diagnostic. Dismiss the
+//! warning by calling [`Body::unsoftened`] or
+//! [`System::with_exact_gravity`] at construction — both shown below.
 
 use gravity_sim_core::core::system::System;
 use gravity_sim_core::domain::body::Body;
@@ -43,15 +63,18 @@ const N_ORBITS: u64 = 500;
 
 fn main() {
     // ── Initial conditions ──────────────────────────────────────────────────
-    let mut sun = Body::star(M_SUN);
-    sun.softening = 0.0;
+    //
+    // `.unsoftened()` expresses intent (this body participates in a fine-
+    // physics measurement) rather than acting on a field directly — see the
+    // module-level note above for why it matters.
+    let sun = Body::star(M_SUN).unsoftened();
 
     let r_peri = A_MERCURY * (1.0 - E_MERCURY);
     let v_peri = (M_SUN * (2.0 / r_peri - 1.0 / A_MERCURY)).sqrt();
-    let mut mercury = Body::rocky(M_MERCURY)
+    let mercury = Body::rocky(M_MERCURY)
         .at(r_peri, 0.0)
-        .with_velocity(0.0, v_peri);
-    mercury.softening = 0.0;
+        .with_velocity(0.0, v_peri)
+        .unsoftened();
 
     // ── Build the simulation ────────────────────────────────────────────────
     let mut sys = System::new(vec![sun, mercury])
@@ -61,6 +84,11 @@ fn main() {
     // Attach the out-of-tree 1PN perturbation. Everything below this line
     // uses only the public API of `gravity-sim-core`; `gravity-sim-1pn` has
     // no other dependency on the workspace. This is the Phase 3 gate.
+    //
+    // Because `PostNewtonian1PN::requires_exact_gravity()` returns `true`,
+    // registering this perturbation into a softened system would trigger a
+    // warn-level diagnostic. Since both bodies above are `.unsoftened()`,
+    // the warning stays silent and the measurement stays honest.
     sys.add_perturbation(Box::new(PostNewtonian1PN::solar_units()));
 
     // ── Reference state at t = 0 ────────────────────────────────────────────

@@ -125,6 +125,14 @@ impl PostNewtonian1PN {
 }
 
 impl PerturbationForce for PostNewtonian1PN {
+    /// 1PN precession measures *deviations* from the 1/r potential, so the
+    /// underlying gravity must be exact — Plummer softening would inject a
+    /// numerical apsidal precession ~2 × 10³ larger than the signal for a
+    /// Mercury-like orbit.
+    fn requires_exact_gravity(&self) -> bool {
+        true
+    }
+
     fn accumulate(&self, bodies: &[Body], scratch_acc: &mut [(f64, f64)]) {
         debug_assert_eq!(
             bodies.len(),
@@ -302,6 +310,14 @@ mod tests {
             "ay should be ~0 at purely-tangential perihelion, got {}",
             acc[1].1,
         );
+    }
+
+    /// The 1PN perturbation must declare it needs exact 1/r gravity.
+    /// This is what triggers the softening-compatibility diagnostic
+    /// inside `System::add_perturbation`.
+    #[test]
+    fn requires_exact_gravity_is_true() {
+        assert!(PostNewtonian1PN::solar_units().requires_exact_gravity());
     }
 
     /// Order-of-magnitude check: Mercury at perihelion sees a 1PN

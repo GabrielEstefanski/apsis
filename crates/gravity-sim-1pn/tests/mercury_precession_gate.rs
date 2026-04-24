@@ -32,12 +32,13 @@ fn mercury_precession_matches_gr_within_one_percent() {
     const N_ORBITS: u64 = 300;
 
     // Softening zeroed so the Newtonian baseline is bit-exact Keplerian.
-    let mut sun = Body::star(1.0);
-    sun.softening = 0.0;
+    let sun = Body::star(1.0).unsoftened();
     let r_peri = A * (1.0 - E);
     let v_peri = (2.0 / r_peri - 1.0 / A).sqrt();
-    let mut mercury = Body::rocky(M_MERCURY).at(r_peri, 0.0).with_velocity(0.0, v_peri);
-    mercury.softening = 0.0;
+    let mercury = Body::rocky(M_MERCURY)
+        .at(r_peri, 0.0)
+        .with_velocity(0.0, v_peri)
+        .unsoftened();
 
     let mut sys = System::new(vec![sun, mercury])
         .with_integrator(IntegratorKind::Ias15)
@@ -66,6 +67,79 @@ fn mercury_precession_matches_gr_within_one_percent() {
     assert!(
         rel_err < 1e-2,
         "Mercury precession off by {rel_err:.3e} — measured {measured:.3e} rad vs predicted {predicted:.3e} rad"
+    );
+}
+
+/// Contract test — registering a 1PN perturbation into a softened
+/// system must raise a warn-level diagnostic on the log bus. This is
+/// the protection against the silent Plummer-swamps-GR failure mode
+/// that tripped up the first end-to-end run.
+#[test]
+fn softened_system_triggers_diagnostic() {
+    use gravity_sim_core::core::log::{subscribe, unsubscribe, Event, Level};
+    use std::sync::{Arc, Mutex};
+
+    const MARKER: &str = "perturbation requires exact 1/r gravity";
+
+    let captured: Arc<Mutex<Vec<Event>>> = Arc::new(Mutex::new(Vec::new()));
+    let sink = captured.clone();
+    let id = subscribe(move |event: &Event| {
+        if event.message.starts_with(MARKER) {
+            sink.lock().unwrap().push(event.clone());
+        }
+    });
+
+    // Default softening left in place — this is the trap.
+    let mut sys = System::new(vec![
+        Body::star(1.0),
+        Body::rocky(1e-7).at(0.4, 0.0).with_velocity(0.0, 1.5),
+    ])
+    .with_integrator(IntegratorKind::Ias15);
+    sys.add_perturbation(Box::new(PostNewtonian1PN::solar_units()));
+
+    let events = captured.lock().unwrap().clone();
+    unsubscribe(id);
+
+    assert_eq!(events.len(), 1, "exactly one warning expected");
+    assert_eq!(events[0].level, Level::Warn);
+    // Fields are present and describe the softening state.
+    let field_names: Vec<&str> = events[0].fields.iter().map(|(k, _)| *k).collect();
+    assert!(field_names.contains(&"softened_bodies"));
+    assert!(field_names.contains(&"max_softening"));
+}
+
+/// Counterpart of the above: when the system is properly unsoftened,
+/// registering the same perturbation must stay silent.
+#[test]
+fn exact_gravity_system_stays_silent() {
+    use gravity_sim_core::core::log::{subscribe, unsubscribe, Event};
+    use std::sync::{Arc, Mutex};
+
+    const MARKER: &str = "perturbation requires exact 1/r gravity";
+
+    let captured: Arc<Mutex<Vec<Event>>> = Arc::new(Mutex::new(Vec::new()));
+    let sink = captured.clone();
+    let id = subscribe(move |event: &Event| {
+        if event.message.starts_with(MARKER) {
+            sink.lock().unwrap().push(event.clone());
+        }
+    });
+
+    let mut sys = System::new(vec![
+        Body::star(1.0),
+        Body::rocky(1e-7).at(0.4, 0.0).with_velocity(0.0, 1.5),
+    ])
+    .with_exact_gravity()
+    .with_integrator(IntegratorKind::Ias15);
+    sys.add_perturbation(Box::new(PostNewtonian1PN::solar_units()));
+
+    let events = captured.lock().unwrap().clone();
+    unsubscribe(id);
+
+    assert!(
+        events.is_empty(),
+        "no warning expected for fully-unsoftened system, got {}",
+        events.len()
     );
 }
 
