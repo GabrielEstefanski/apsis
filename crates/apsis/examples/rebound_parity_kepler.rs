@@ -80,14 +80,10 @@ fn main() {
     let secondary_x = (M_PRIMARY / m_total) * r_peri;
     let secondary_vy = (M_PRIMARY / m_total) * v_peri;
 
-    let primary = Body::star(M_PRIMARY)
-        .at(primary_x, 0.0)
-        .with_velocity(0.0, primary_vy)
-        .unsoftened();
-    let secondary = Body::rocky(M_SECONDARY)
-        .at(secondary_x, 0.0)
-        .with_velocity(0.0, secondary_vy)
-        .unsoftened();
+    let primary =
+        Body::star(M_PRIMARY).at(primary_x, 0.0).with_velocity(0.0, primary_vy).unsoftened();
+    let secondary =
+        Body::rocky(M_SECONDARY).at(secondary_x, 0.0).with_velocity(0.0, secondary_vy).unsoftened();
 
     // ── Integrator setup ────────────────────────────────────────────────── //
     //
@@ -98,9 +94,8 @@ fn main() {
     let period = 2.0 * std::f64::consts::PI;
     let dt0 = period * DT_FRACTION_OF_PERIOD;
 
-    let mut sys = System::new(vec![primary, secondary])
-        .with_integrator(IntegratorKind::Ias15)
-        .with_dt(dt0);
+    let mut sys =
+        System::new(vec![primary, secondary]).with_integrator(IntegratorKind::Ias15).with_dt(dt0);
 
     // ── CSV output ──────────────────────────────────────────────────────── //
     //
@@ -114,16 +109,8 @@ fn main() {
     writeln!(w, "# protocol: docs/experiments/2026-04-25-rebound-parity-kepler.md").unwrap();
     writeln!(w, "# integrator: IAS15 (apsis)").unwrap();
     writeln!(w, "# units: canonical (G = 1)").unwrap();
-    writeln!(
-        w,
-        "# a={A}, e={E}, m_primary={M_PRIMARY}, m_secondary={M_SECONDARY:e}"
-    )
-    .unwrap();
-    writeln!(
-        w,
-        "# period={period:.18e}, dt0={dt0:.18e}, n_orbits={N_ORBITS}"
-    )
-    .unwrap();
+    writeln!(w, "# a={A}, e={E}, m_primary={M_PRIMARY}, m_secondary={M_SECONDARY:e}").unwrap();
+    writeln!(w, "# period={period:.18e}, dt0={dt0:.18e}, n_orbits={N_ORBITS}").unwrap();
     writeln!(w, "orbit,t,x0,y0,vx0,vy0,x1,y1,vx1,vy1,e_total").unwrap();
 
     write_sample(&mut w, 0, &sys);
@@ -169,10 +156,7 @@ fn write_sample(w: &mut BufWriter<File>, orbit: u64, sys: &System) {
 /// −Σᵢ<ⱼ G mᵢ mⱼ / rᵢⱼ, with G = 1 and no softening (verified by
 /// `Body::unsoftened()` on every body in this configuration).
 fn total_energy(bodies: &[Body]) -> f64 {
-    let ke: f64 = bodies
-        .iter()
-        .map(|b| 0.5 * b.mass * (b.vx * b.vx + b.vy * b.vy))
-        .sum();
+    let ke: f64 = bodies.iter().map(|b| 0.5 * b.mass * (b.vx * b.vx + b.vy * b.vy)).sum();
     let mut pe = 0.0;
     for i in 0..bodies.len() {
         for j in (i + 1)..bodies.len() {

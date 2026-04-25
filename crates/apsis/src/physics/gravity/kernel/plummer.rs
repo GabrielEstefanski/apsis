@@ -216,10 +216,7 @@ mod tests {
         let k = PlummerKernel::new();
         let props = k.properties(&[]);
         assert_eq!(props.exactness, super::super::properties::Exactness::Exact);
-        assert_eq!(
-            props.continuity,
-            super::super::properties::Continuity::Smooth
-        );
+        assert_eq!(props.continuity, super::super::properties::Continuity::Smooth);
     }
 
     #[test]
@@ -243,10 +240,7 @@ mod tests {
             Body::rocky(1e-6).at(1.0, 0.0),            // default softening > 0
         ];
         let props = k.properties(&bodies);
-        assert_eq!(
-            props.exactness,
-            super::super::properties::Exactness::Softened
-        );
+        assert_eq!(props.exactness, super::super::properties::Exactness::Softened);
     }
 
     #[test]
@@ -256,10 +250,7 @@ mod tests {
         for bodies in [
             vec![],
             vec![Body::rocky(1e-6).at(0.0, 0.0)],
-            vec![
-                Body::star(1.0).at(0.0, 0.0).unsoftened(),
-                Body::rocky(1e-6).at(1.0, 0.0),
-            ],
+            vec![Body::star(1.0).at(0.0, 0.0).unsoftened(), Body::rocky(1e-6).at(1.0, 0.0)],
         ] {
             let props = k.properties(&bodies);
             assert_eq!(

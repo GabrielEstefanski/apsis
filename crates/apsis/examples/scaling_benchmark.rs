@@ -97,8 +97,7 @@ fn measure(scenario: &Scenario, integrator: IntegratorKind, n: usize) -> Option<
         samples.push((wall_dt, sim_dt));
     }
 
-    let mut step_ms: Vec<f64> =
-        samples.iter().map(|(w, _)| w.as_secs_f64() * 1_000.0).collect();
+    let mut step_ms: Vec<f64> = samples.iter().map(|(w, _)| w.as_secs_f64() * 1_000.0).collect();
     step_ms.sort_by(|a, b| a.partial_cmp(b).unwrap());
     let median_ms = step_ms[step_ms.len() / 2];
     let p95_idx = ((step_ms.len() as f64) * 0.95) as usize;
@@ -185,7 +184,7 @@ fn run_integrator_sweep(scenario: &Scenario, kind: IntegratorKind) {
             None => {
                 print_infeasible(kind, n, (scenario.dt_hint)(n));
                 break;
-            }
+            },
         }
     }
 }
@@ -203,11 +202,8 @@ fn main() {
         MAX_PER_STEP.as_secs()
     );
 
-    let integrators = [
-        IntegratorKind::VelocityVerlet,
-        IntegratorKind::Yoshida4,
-        IntegratorKind::Ias15,
-    ];
+    let integrators =
+        [IntegratorKind::VelocityVerlet, IntegratorKind::Yoshida4, IntegratorKind::Ias15];
 
     for scenario in scenarios::all() {
         print_header(&scenario);

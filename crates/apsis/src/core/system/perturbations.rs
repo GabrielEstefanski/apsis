@@ -68,7 +68,7 @@ impl System {
                     kernel_exactness = format!("{provided:?}"),
                     required_exactness = format!("{required:?}"),
                 );
-            }
+            },
             RequirementViolation::Continuity { required, provided } => {
                 crate::warn_diag!(
                     Source::System,
@@ -81,7 +81,7 @@ impl System {
                     kernel_continuity = format!("{provided:?}"),
                     required_continuity = format!("{required:?}"),
                 );
-            }
+            },
         }
     }
 

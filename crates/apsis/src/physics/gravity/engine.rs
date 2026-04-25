@@ -72,11 +72,7 @@ impl BarnesHutEngine {
     /// example, a kernel that demonstrates or tests a different Exactness
     /// or Continuity class.
     pub fn with_kernel(max_depth: usize, kernel: Arc<dyn Kernel>) -> Self {
-        Self {
-            tree: QuadTree::new(max_depth),
-            exact_threshold: EXACT_THRESHOLD,
-            kernel,
-        }
+        Self { tree: QuadTree::new(max_depth), exact_threshold: EXACT_THRESHOLD, kernel }
     }
 
     /// Handle to the kernel this engine dispatches through.

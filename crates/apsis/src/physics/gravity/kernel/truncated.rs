@@ -117,18 +117,11 @@ impl Kernel for TruncatedPlummerKernel {
         let r_cut_sq = self.r_cut * self.r_cut;
         let inv_r = (r_squared + eps_squared).sqrt().recip();
         let f_plummer = inv_r * inv_r * inv_r;
-        if r_squared < r_cut_sq {
-            f_plummer
-        } else {
-            self.outside_scale * f_plummer
-        }
+        if r_squared < r_cut_sq { f_plummer } else { self.outside_scale * f_plummer }
     }
 
     fn properties(&self, _bodies: &[Body]) -> KernelProperties {
-        KernelProperties {
-            exactness: Exactness::Modified,
-            continuity: Continuity::C0,
-        }
+        KernelProperties { exactness: Exactness::Modified, continuity: Continuity::C0 }
     }
 }
 
@@ -203,10 +196,7 @@ mod tests {
         use crate::domain::body::Body;
         let k = TruncatedPlummerKernel::new(1.0);
         let props_empty = k.properties(&[]);
-        let props_with_bodies = k.properties(&[
-            Body::star(1.0).unsoftened(),
-            Body::rocky(1e-6),
-        ]);
+        let props_with_bodies = k.properties(&[Body::star(1.0).unsoftened(), Body::rocky(1e-6)]);
         assert_eq!(props_empty, props_with_bodies);
     }
 

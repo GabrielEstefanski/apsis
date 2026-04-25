@@ -213,11 +213,7 @@ pub fn build_clustered_substructure(n: usize, seed: u64) -> Vec<Body> {
         let theta_c = rng.random::<f64>() * TAU;
         let r_c = r_main * 0.5 * (1.0 + rng.random::<f64>());
         let (cx, cy) = (r_c * theta_c.cos(), r_c * theta_c.sin());
-        let members = if clump == k_sub - 1 {
-            n_sub_bodies - per_clump * clump
-        } else {
-            per_clump
-        };
+        let members = if clump == k_sub - 1 { n_sub_bodies - per_clump * clump } else { per_clump };
         for _ in 0..members {
             let theta = rng.random::<f64>() * TAU;
             let r = r_sub * rng.random::<f64>().sqrt();
