@@ -119,6 +119,3 @@ causes still accumulate into the unified `degraded` counter.
 * ADR-003: [`adr/003-integrator-execution-profile.md`](adr/003-integrator-execution-profile.md)
   — full rationale for the execution-profile and determinism
   contract.
-* Experiment notebook: [`experiments/2026-04-22-solar-system-stutter-diagnosis.md`](experiments/2026-04-22-solar-system-stutter-diagnosis.md)
-  — the three-round diagnostic that surfaced the IAS15+BH
-  incompatibility.

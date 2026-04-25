@@ -31,7 +31,7 @@ and identifies one previously-unappreciated target.
 
 These data, collected via opt-in compile-time instrumentation
 (`--features ias15-profile`), reorient future optimisation work away
-from items the team had been considering (controller tuning, Picard
+from previously-considered candidates (controller tuning, Picard
 iteration count) and toward concrete, measured hot paths.
 
 ---

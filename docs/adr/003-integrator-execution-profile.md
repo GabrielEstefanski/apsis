@@ -37,9 +37,8 @@ This was not a theoretical concern. Evidence:
 * **`solar_n641` stress test**: at N=641 with BH at θ=0.5, IAS15
   produced a 194% rejection rate (pre RMS-norm fix) and degenerated
   into tens of thousands of rejected evaluate calls per duration
-  unit. The RMS-norm fix
-  (`docs/experiments/2026-04-22-solar-system-stutter-diagnosis.md`)
-  dropped wall time 23.5% but did not eliminate the cascade.
+  unit. The RMS-norm fix dropped wall time 23.5% but did not
+  eliminate the cascade.
 
 * **`structured_rings_n641` diagnostic**: a scenario designed to be
   maximally friendly to IAS15 (N=641, regular geometry, pair
@@ -57,13 +56,14 @@ This was not a theoretical concern. Evidence:
   direct O(N²) summation. It is not an implementation shortcut but a
   consequence of the same determinism analysis.
 
-Further: the user's interactive experience confirmed the pathology
-in production. With the `solar_system` preset (641 bodies) the
-`fine` rendering preset would not run at all; `medium` stuttered
-visibly. REBOUND does not run IAS15 in real time — it is an offline
-script-driven tool for paper-quality trajectories. We were requiring
-of IAS15 something the algorithm does not provide at any scale:
-bounded per-step wall time.
+Further: interactive testing of the `solar_system` preset (641 bodies)
+confirmed the pathology under realistic loads. The `fine` rendering
+preset failed to maintain frame cadence, and `medium` exhibited
+sustained periodic hitches. REBOUND deliberately positions IAS15 as
+an offline integrator driven by `reb_integrate(sim, tmax)`, not as
+a render-loop integrator. The original `apsis` configuration imposed
+a constraint the algorithm does not satisfy at any scale: bounded
+per-step wall time.
 
 The original framing — "tune the scenario so IAS15 is happy" — was
 optimisation-of-symptom. The architectural frame — "IAS15 is a
