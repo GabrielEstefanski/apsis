@@ -1,7 +1,7 @@
 # Picard Noise-Floor Convergence: Experiment Log
 
 **Date:** 2026-04-22
-**Subject:** IAS15 integrator in `gravity-sim`
+**Subject:** IAS15 integrator in `apsis`
 **Baseline commit:** `ffc3489` (drift-metrics baseline merged into `develop`)
 **Experimental branch:** `perf/ias15-picard-noise-floor` (not merged; null result)
 **Outcome:** Hypothesis falsified. Change abandoned; documentation retained as design record.
@@ -38,7 +38,7 @@ work away from iteration-count reduction and toward **cost per iteration** — t
 ## 1. Motivation
 
 IAS15 (Rein & Spiegel 2015) is a 15th-order adaptive Gauss-Radau integrator used in
-`gravity-sim` as the high-fidelity integrator of choice for gravitational dynamics.
+`apsis` as the high-fidelity integrator of choice for gravitational dynamics.
 Its inner loop is a predictor–corrector Picard iteration that refines the power-series
 coefficients `b[0..6]` at each adaptive sub-step until a convergence criterion is met.
 
@@ -53,7 +53,7 @@ energy-conservation quality that IAS15 is chosen for.
 
 ## 2. Experimental Infrastructure
 
-All measurements were produced by the `gravity-sim` benchmark harness introduced in
+All measurements were produced by the `apsis` benchmark harness introduced in
 commits `f5e24e1` through `ffc3489`. Its design is a methodological contribution in its
 own right and is documented here as part of the experimental setup.
 
@@ -101,7 +101,7 @@ exactly which metrics moved and how much.
 
 ### 2.4 Scenarios
 
-Four scenarios cover the IAS15 regimes relevant to `gravity-sim`:
+Four scenarios cover the IAS15 regimes relevant to `apsis`:
 
 | Scenario | N | Description | Intended stress |
 |----------|---|-------------|-----------------|
@@ -304,7 +304,7 @@ better — the strict test catches that case first.
 ## 8. Implications for Future Work
 
 Iteration count is not the optimisation target. The hot path in IAS15 at
-`gravity-sim`'s current scenarios is **cost per iteration**, not iteration count:
+`apsis`'s current scenarios is **cost per iteration**, not iteration count:
 
 * **`update_g_and_b`** (7 stages × N bodies × compensated-summation updates to `b`)
   runs approximately 4 × 7 × N times per accepted sub-step. For N = 2 at
@@ -361,7 +361,7 @@ Iteration count is not the optimisation target. The hot path in IAS15 at
 **Toolchain:** Rust stable (as of 2026-04-22), edition 2024.
 **Code state:**
 * Baseline `develop` HEAD: `ffc3489` (drift metrics merged).
-* Experimental diff: two insertions in `src/physics/integrator/ias15.rs`
+* Experimental diff: two insertions in `crates/apsis/src/physics/integrator/ias15.rs`
   (one constant, one `if` block) — reproduced verbatim in §4.1.
 
 **Invocation:**
@@ -448,6 +448,6 @@ but valuable: they document which optimisation hypotheses are *not* productive,
 save future workers from re-running the same dead ends, and surface diagnostic
 insights (like §6 above) that would otherwise live only in tribal knowledge.
 
-The gravity-sim project treats this document as the permanent artefact of the
+The apsis project treats this document as the permanent artefact of the
 experiment. The code change itself was not merged; the methodology and
 numerical findings are what we keep.

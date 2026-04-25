@@ -2,7 +2,7 @@
 
 The simulator supports four integration schemes, chosen at runtime via
 `System::set_integrator` or the UI combo box. All share the same
-[`ForceModel`](../src/physics/integrator/force_model.rs) interface
+[`ForceModel`](../crates/apsis/src/physics/integrator/force_model.rs) interface
 and the same `IntegratorContext` plumbing — changing integrator
 never touches the force, perturbation, or diagnostic code.
 
@@ -27,7 +27,7 @@ at publication quality for bound orbits.
 ## Execution profile — real-time vs precision
 
 Every integrator declares an
-[`ExecutionProfile`](../src/physics/integrator/traits.rs) that
+[`ExecutionProfile`](../crates/apsis/src/physics/integrator/traits.rs) that
 downstream code (physics thread, UI) reads to decide how to drive
 it.
 
@@ -59,7 +59,7 @@ the same inputs to within f64 ULP.
 | IAS15           | **`true`**                     | Picard predictor–corrector diverges under non-deterministic forces. |
 
 Force models declare the dual property via
-[`ForceModel::is_deterministic`](../src/physics/integrator/force_model.rs).
+[`ForceModel::is_deterministic`](../crates/apsis/src/physics/integrator/force_model.rs).
 The default gravity engine returns `true` iff its
 `exact_threshold >= DIRECT_MODE_THRESHOLD` — i.e. the Barnes-Hut
 branch is unreachable for any practical N.
@@ -115,7 +115,7 @@ causes still accumulate into the unified `degraded` counter.
 
 ## Further reading
 
-* Source: [`src/physics/integrator/`](../src/physics/integrator/)
+* Source: [`crates/apsis/src/physics/integrator/`](../crates/apsis/src/physics/integrator/)
 * ADR-003: [`adr/003-integrator-execution-profile.md`](adr/003-integrator-execution-profile.md)
   — full rationale for the execution-profile and determinism
   contract.
