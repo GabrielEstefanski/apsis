@@ -167,11 +167,8 @@ fn print_header(scenario: &Scenario) {
 }
 
 fn print_row(row: &Row) {
-    let t_frac = if row.t_total_target > 0.0 {
-        row.t_total_actual / row.t_total_target
-    } else {
-        0.0
-    };
+    let t_frac =
+        if row.t_total_target > 0.0 { row.t_total_actual / row.t_total_target } else { 0.0 };
     let status = if row.aborted { "ABORTED" } else { "ok" };
     println!(
         "{:>12} {:>8} {:>11.3e} {:>9} {:>11.3e} {:>11.3e} {:>11.3e} {:>9.3} {:>7.2}  {}",
@@ -216,11 +213,8 @@ fn main() {
     println!("#   |dLz|    absolute L_z drift; use with |Lz_0| to read ratio when meaningful");
     println!("#   steps    steps taken during the integrated window (exclusive of warm-up)");
 
-    let integrators = [
-        IntegratorKind::VelocityVerlet,
-        IntegratorKind::Yoshida4,
-        IntegratorKind::Ias15,
-    ];
+    let integrators =
+        [IntegratorKind::VelocityVerlet, IntegratorKind::Yoshida4, IntegratorKind::Ias15];
 
     for scenario in scenarios::all() {
         print_header(&scenario);
