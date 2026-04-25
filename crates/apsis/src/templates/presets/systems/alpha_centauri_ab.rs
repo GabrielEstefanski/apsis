@@ -1,70 +1,55 @@
+//! Alpha Centauri AB binary system.
+//!
+//! The two main components of the closest stellar system to the Sun,
+//! both Sun-like (G2V and K1V), on a 79.91-year mutual orbit at high
+//! eccentricity (e ≈ 0.52, semi-major axis ≈ 23.4 AU).
+//!
+//! Proxima Centauri orbits the AB pair at ~8 700 AU with a period
+//! of ~547 000 years; including it in an interactive simulator
+//! produces motion indistinguishable from escape on any reasonable
+//! timescale, so this preset omits it.
+
 use crate::{
     domain::materials::Material,
     templates::{Template, TemplateBody, UnitSystem},
 };
 
 pub fn alpha_centauri_ab(_seed: u64) -> Template {
-    let mut bodies = Vec::with_capacity(3);
+    let m_a = 1.10_f64;
+    let m_b = 0.91_f64;
+    let a = 23.4_f64;
+    let e = 0.52_f64;
 
-    let m1: f64 = 1.10;
-    let m2: f64 = 0.91;
-    let m3: f64 = 0.12;
+    let m_total = m_a + m_b;
+    let r_peri = a * (1.0 - e);
+    let v_peri = (m_total * (1.0 + e) / r_peri).sqrt();
 
-    let total_mass_ab = m1 + m2;
-
-    let a_ab: f64 = 23.4;
-    let e_ab: f64 = 0.52;
-
-    let r_peri_ab = a_ab * (1.0 - e_ab);
-    let v_ab = (total_mass_ab * (1.0 + e_ab) / r_peri_ab).sqrt();
-
-    let r1 = r_peri_ab * (m2 / total_mass_ab);
-    let r2 = r_peri_ab * (m1 / total_mass_ab);
-
-    let v1 = v_ab * (m2 / total_mass_ab);
-    let v2 = v_ab * (m1 / total_mass_ab);
-
-    bodies.push(TemplateBody {
-        name: Some("Alpha Centauri A"),
-        mass: m1,
-        material: Material::Star,
-        position: Some([-r1, 0.0]),
-        velocity: [0.0, -v1],
-    });
-
-    bodies.push(TemplateBody {
-        name: Some("Alpha Centauri B"),
-        mass: m2,
-        material: Material::Star,
-        position: Some([r2, 0.0]),
-        velocity: [0.0, v2],
-    });
-
-    let a_p: f64 = 13000.0;
-    let e_p: f64 = 0.7;
-
-    let x = a_p * (1.0 - e_p);
-    let y = 2000.0;
-
-    let r = (x * x + y * y).sqrt();
-
-    let v = (total_mass_ab * (2.0 / r - 1.0 / a_p)).sqrt();
-
-    let vx = -y / r * v;
-    let vy = x / r * v;
-
-    bodies.push(TemplateBody {
-        name: Some("Proxima Centauri"),
-        mass: m3,
-        material: Material::Star,
-        position: Some([x, y]),
-        velocity: [vx, vy],
-    });
+    let r1 = r_peri * m_b / m_total;
+    let r2 = r_peri * m_a / m_total;
+    let v1 = v_peri * m_b / m_total;
+    let v2 = v_peri * m_a / m_total;
 
     Template {
-        name: "Alpha Centauri ABC",
-        description: "Triple system",
-        bodies,
+        name: "Alpha Centauri AB",
+        description: "The closest binary star system to the Sun: two Sun-like stars on a \
+                      79.91-year mutual orbit at eccentricity 0.52. Proxima omitted (period \
+                      too long for interactive playback).",
+        bodies: vec![
+            TemplateBody {
+                name: Some("Alpha Centauri A"),
+                mass: m_a,
+                position: Some([-r1, 0.0]),
+                velocity: [0.0, -v1],
+                material: Material::Star,
+            },
+            TemplateBody {
+                name: Some("Alpha Centauri B"),
+                mass: m_b,
+                position: Some([r2, 0.0]),
+                velocity: [0.0, v2],
+                material: Material::Star,
+            },
+        ],
         display_scale: 1.0,
         suggested_dt: Some(0.002),
         units: UnitSystem::solar_au(),
