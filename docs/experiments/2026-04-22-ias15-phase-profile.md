@@ -1,7 +1,7 @@
 # IAS15 Phase Profile: Where the Time Actually Goes
 
 **Date:** 2026-04-22
-**Subject:** IAS15 integrator hot-path decomposition in `gravity-sim`
+**Subject:** IAS15 integrator hot-path decomposition in `apsis`
 **Baseline commit:** `a36155a` (post-merge of Picard noise-floor null-result write-up)
 **Tooling:** feature-gated `time_phase!` macro with thread-local accumulator
 **Outcome:** Three actionable optimisation targets identified from measured data.
@@ -79,7 +79,7 @@ cargo bench --features ias15-profile --bench ias15 -- --test
 
 ### 2.2 Thread-Local Accumulator
 
-In `src/physics/integrator/ias15.rs`:
+In `crates/apsis/src/physics/integrator/ias15.rs`:
 
 ```rust
 #[cfg(feature = "ias15-profile")]
@@ -272,7 +272,7 @@ per-call overhead dominates its pair-loop body; at N=3 (three
 pairs) the pair loop catches up to `update_g_and_b`.
 
 **Implication:** optimisation target shifts with scenario size.
-For `gravity-sim`'s current use cases (Kepler / small-N close
+For `apsis`'s current use cases (Kepler / small-N close
 encounters), `evaluate` is the primary target. Once larger-N
 scenarios are added to the harness (a cluster of 100+ bodies),
 `update_g_and_b` will dominate and per-body SoA/SIMD becomes
