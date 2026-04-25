@@ -104,6 +104,7 @@ pub enum PhysicsCmd {
     UpdateBody(usize, Body),
     SetName(usize, String),
     LoadBodies(Vec<Body>),
+    LoadNamedBodies(Vec<NamedBody>),
     ZeroComVelocity,
     RestoreSnapshot(SimSnapshot),
     SetDtMode(DtMode),
@@ -403,6 +404,10 @@ impl PhysicsHandle {
         self.loading.store(true, Ordering::Relaxed);
         self.send(PhysicsCmd::LoadBodies(bodies));
     }
+    pub fn load_named_bodies(&self, bodies: Vec<NamedBody>) {
+        self.loading.store(true, Ordering::Relaxed);
+        self.send(PhysicsCmd::LoadNamedBodies(bodies));
+    }
     pub fn zero_com_velocity(&self) {
         self.send(PhysicsCmd::ZeroComVelocity);
     }
@@ -588,6 +593,7 @@ fn cmd_blocks_during_precision(cmd: &PhysicsCmd) -> bool {
         | PhysicsCmd::RemoveBody(_)
         | PhysicsCmd::UpdateBody(_, _)
         | PhysicsCmd::LoadBodies(_)
+        | PhysicsCmd::LoadNamedBodies(_)
         | PhysicsCmd::ZeroComVelocity
         | PhysicsCmd::RestoreSnapshot(_) => true,
 
@@ -687,6 +693,12 @@ fn apply_cmd(
         PhysicsCmd::LoadBodies(bodies) => {
             loading.store(true, Ordering::Relaxed);
             system.load_bodies(bodies);
+            loading.store(false, Ordering::Relaxed);
+            *needs_full_publish = true;
+        },
+        PhysicsCmd::LoadNamedBodies(bodies) => {
+            loading.store(true, Ordering::Relaxed);
+            system.load_named_bodies(bodies);
             loading.store(false, Ordering::Relaxed);
             *needs_full_publish = true;
         },

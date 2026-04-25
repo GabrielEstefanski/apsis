@@ -119,19 +119,35 @@ impl System {
     /// Replaces the entire set of bodies in the simulation.
     ///
     /// All previous state is cleared, the trail buffer is reset, and the
-    /// system is normalised to its COM rest frame.
+    /// system is normalised to its COM rest frame. Body names are auto-derived
+    /// from material; for explicit names use [`load_named_bodies`](Self::load_named_bodies).
     pub fn load_bodies(&mut self, bodies: Vec<Body>) {
+        self.load_named_bodies(
+            bodies.into_iter().map(|body| NamedBody { body, name: None }).collect(),
+        );
+    }
+
+    /// Replaces the entire set of bodies in the simulation, preserving any
+    /// explicit names attached to each body.
+    ///
+    /// Same state-reset semantics as [`load_bodies`](Self::load_bodies):
+    /// previous bodies, scratch buffers, energy baselines, and integrator
+    /// controllers are cleared, and the new system is normalised to its COM
+    /// rest frame.
+    pub fn load_named_bodies(&mut self, named_bodies: Vec<NamedBody>) {
         self.bodies.clear();
         self.scratch_acc.clear();
         self.names.clear();
         self.total_mass = 0.0;
 
-        for mut b in bodies {
-            b.sync_physical_properties();
-            b.update_luminosity(mass_to_solar(), radius_to_solar(), l_sun());
-            self.total_mass += b.mass;
-            self.names.push(auto_name(b.material, &self.names));
-            self.bodies.push(b);
+        for mut named in named_bodies {
+            let mut body = named.body;
+            body.sync_physical_properties();
+            body.update_luminosity(mass_to_solar(), radius_to_solar(), l_sun());
+            self.total_mass += body.mass;
+            let name = resolved_name(named.name.take(), body.material, &self.names);
+            self.names.push(name);
+            self.bodies.push(body);
         }
 
         self.initial_energy = None;
@@ -152,6 +168,7 @@ impl System {
         let (r_min, softening_max) = compute_closeness(&self.bodies);
         self.r_min = r_min;
         self.softening_max = softening_max;
+        self.template_source = None;
     }
 
     /// Removes the centre-of-mass velocity so the system is in its rest frame.
