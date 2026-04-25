@@ -2,7 +2,7 @@
 
 **Date:** 2026-04-25
 **Subject:** Numerical agreement between IAS15 (apsis) and IAS15 (REBOUND) on a canonical Kepler orbit
-**Baseline commit:** `354f82f` (with uncommitted experiment harness — see §Reproducibility)
+**Baseline commit:** `cc66c1b` (validation harness + this notebook)
 **Tooling:** apsis IAS15 (`crates/apsis/src/physics/integrator/ias15.rs`), REBOUND 4.6.0 via Python 3.10 (`reb.IAS15`)
 **Status:** *Single run executed 2026-04-25; protocol revised post-pilot when the original metric was found inadequate for adaptive integrators. All seven revised gated metrics pass at 1–10 ULP margins.*
 
@@ -226,8 +226,7 @@ The result places `apsis`'s IAS15 within the same numerical regime as REBOUND's 
 
 | Field                              | Value                                                               |
 | ---------------------------------- | ------------------------------------------------------------------- |
-| apsis baseline commit              | `354f82f` (HEAD as of run; experiment harness uncommitted — see below) |
-| Uncommitted at run time            | `crates/apsis/examples/rebound_parity_kepler.rs`, `validation/rebound-parity/kepler/{rebound_side.py, compare.py, run.py, requirements.txt, README.md}`, this notebook |
+| apsis canonical commit             | `cc66c1b` (introduces the harness, comparator, and this notebook)    |
 | REBOUND version                    | 4.6.0                                                               |
 | Python version                     | 3.10.0 (CPython, MSC v.1929 64-bit)                                 |
 | Rust toolchain                     | Apsis Cargo profile `release`; default FP semantics (no `--ffast-math`-equivalent) |
@@ -236,7 +235,7 @@ The result places `apsis`'s IAS15 within the same numerical regime as REBOUND's 
 | Harness                            | `validation/rebound-parity/kepler/run.py` (orchestrates Cargo example + REBOUND side + comparator) |
 | Raw outputs                        | `validation/rebound-parity/kepler/out/{apsis,rebound}.csv`, `out/comparison.json` |
 
-**Commit pinning:** when the experiment harness, comparator, and this notebook are committed, the `apsis baseline commit` field above will be replaced with the canonical hash that includes them. Until then, the working-tree state listed under "Uncommitted at run time" is the exact set of files whose content the result depends on.
+**Commit pinning:** the canonical hash `cc66c1b` includes the apsis-side Cargo example (`crates/apsis/examples/rebound_parity_kepler.rs`), the Python harness under `validation/rebound-parity/kepler/`, and this notebook. The harness is reproducible on a clean checkout of that commit with the dependencies pinned in `validation/rebound-parity/kepler/requirements.txt`.
 
 ---
 
