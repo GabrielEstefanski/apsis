@@ -216,6 +216,51 @@ dependencies = [
 ]
 
 [[package]]
+name = "apsis"
+version = "0.1.0"
+dependencies = [
+ "approx",
+ "bytemuck",
+ "criterion",
+ "insta",
+ "pretty_assertions",
+ "proptest",
+ "rand 0.10.1",
+ "rayon",
+ "serde",
+ "serde_json",
+ "toml",
+]
+
+[[package]]
+name = "apsis-1pn"
+version = "0.1.0"
+dependencies = [
+ "apsis",
+]
+
+[[package]]
+name = "apsis-app"
+version = "0.1.0"
+dependencies = [
+ "apsis",
+ "bytemuck",
+ "eframe",
+ "egui",
+ "egui-phosphor",
+ "insta",
+ "pollster",
+ "pretty_assertions",
+ "rand 0.10.1",
+ "rayon",
+ "serde",
+ "serde_json",
+ "toml",
+ "wgpu",
+ "winit",
+]
+
+[[package]]
 name = "arboard"
 version = "3.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1563,51 +1608,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fdf242682df893b86f33a73828fb09ca4b2d3bb6cc95249707fc684d27484b91"
 dependencies = [
  "bitflags 2.11.0",
-]
-
-[[package]]
-name = "gravity-sim-1pn"
-version = "0.1.0"
-dependencies = [
- "gravity-sim-core",
-]
-
-[[package]]
-name = "gravity-sim-app"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "eframe",
- "egui",
- "egui-phosphor",
- "gravity-sim-core",
- "insta",
- "pollster",
- "pretty_assertions",
- "rand 0.10.1",
- "rayon",
- "serde",
- "serde_json",
- "toml",
- "wgpu",
- "winit",
-]
-
-[[package]]
-name = "gravity-sim-core"
-version = "0.1.0"
-dependencies = [
- "approx",
- "bytemuck",
- "criterion",
- "insta",
- "pretty_assertions",
- "proptest",
- "rand 0.10.1",
- "rayon",
- "serde",
- "serde_json",
- "toml",
 ]
 
 [[package]]
