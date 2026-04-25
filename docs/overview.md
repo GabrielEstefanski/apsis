@@ -148,7 +148,7 @@ conservation-contract assertions on the public API.
   is intrinsic to an adaptive high-order integrator; driving
   IAS15 from a render loop at high N is not recommended. See
   [ADR-003](adr/003-integrator-execution-profile.md) for the
-  stutter-diagnosis that led to the execution-profile contract.
+  rationale that led to the execution-profile contract.
 
 ---
 
@@ -163,4 +163,3 @@ conservation-contract assertions on the public API.
 | Integrator execution profile & force-model compatibility | [`adr/003-integrator-execution-profile.md`](adr/003-integrator-execution-profile.md) |
 | IAS15 per-phase wall-time breakdown (experiment) | [`experiments/2026-04-22-ias15-phase-profile.md`](experiments/2026-04-22-ias15-phase-profile.md) |
 | Picard noise-floor null result (experiment) | [`experiments/2026-04-22-picard-noise-floor.md`](experiments/2026-04-22-picard-noise-floor.md) |
-| Solar-system stutter diagnosis (experiment) | [`experiments/2026-04-22-solar-system-stutter-diagnosis.md`](experiments/2026-04-22-solar-system-stutter-diagnosis.md) |
