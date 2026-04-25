@@ -636,6 +636,6 @@ pub fn list_saves(dir: &Path) -> Vec<SaveEntry> {
         .filter_map(|e| SimSnapshot::read_entry(&e.path()).ok())
         .collect();
 
-    entries.sort_by(|a, b| b.save_id.cmp(&a.save_id));
+    entries.sort_by_key(|b| std::cmp::Reverse(b.save_id));
     entries
 }
