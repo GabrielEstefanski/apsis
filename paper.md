@@ -200,7 +200,7 @@ continuity measurement, and non-negotiable warning-emission on both
 registrations. The full suite completes in under twenty seconds on
 commodity hardware.
 
-**Reproducibility.** All measurements correspond to: IAS15 with
+**Run configuration.** All measurements correspond to: IAS15 with
 initial timestep $10^{-4} \cdot T$ and adaptivity enabled for the
 Exactness counter-test (Sun–Mercury standard orbital elements,
 $\varepsilon = 0$ for the satisfied case, $\varepsilon \approx 0.02$ AU
