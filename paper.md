@@ -29,7 +29,7 @@ gate. The mechanism is demonstrated end-to-end by `apsis-1pn`, which
 implements the first-post-Newtonian Schwarzschild correction; as
 evidence that the integrator stack resolves 1PN-scale effects at the
 accuracy the verification claim requires, the demonstration reproduces
-Mercury's perihelion precession to within 4.4×10⁻⁶ of the
+Mercury's perihelion precession to within $4.4 \times 10^{-6}$ of the
 general-relativistic prediction over 500 orbital periods. The same
 match mechanism catches a distinct invariant-class violation (a
 discontinuous kernel) with an independent observable (impulsive
@@ -42,10 +42,11 @@ Verlet, fourth-order Yoshida composition, Wisdom–Holman mixed-variable,
 and the adaptive Gauss–Radau IAS15 scheme [@ReinSpiegel2015] — alongside
 stable public traits for user-registered force models and perturbations.
 The library's scope is narrow by intent: the solver is two-dimensional
-and targets small-to-medium body counts (N ≤ 10³). Large-N collisionless
-dynamics, stellar evolution, and hybrid close-encounter regimes — the
-domains of REBOUND [@ReinLiu2012], MERCURIUS [@ReinTamayoHernandezPapaloizou2019],
-and NBODY6/7 [@Aarseth2003] — remain outside the library's claims.
+and targets small-to-medium body counts ($N \le 10^3$). Large-N
+collisionless dynamics, stellar evolution, and hybrid close-encounter
+regimes — the domains of REBOUND [@ReinLiu2012], MERCURIUS
+[@ReinTamayoHernandezPapaloizou2019], and NBODY6/7 [@Aarseth2003] —
+remain outside the library's claims.
 
 # Statement of need
 
@@ -93,7 +94,7 @@ simulator rather than to the inventory of simulators. A research
 group already running REBOUND, MERCURIUS, or an equivalent production
 code is not served by replacing it with `apsis`; the claim of `apsis`
 is orthogonal to the claim those codes make. The narrow scope (2D,
-N ≤ 10³) is a deliberate trade: ship a verification infrastructure
+$N \le 10^3$) is a deliberate trade: ship a verification infrastructure
 with a complete physical demonstration, rather than a wider
 simulation platform with verification deferred to later work.
 
@@ -114,26 +115,28 @@ consequence is that any change to `apsis` that would break an external
 consumer's compilation fails the continuous-integration build of
 `apsis-1pn`, not a manual review.
 
-Let K: ℝ₊ → ℝ₊ denote the scalar kernel determining the pair potential
-U_ij = −G·m_i·m_j·K(r), where r = |x_i − x_j|. The library encodes two
-formal invariants of K. **Exactness**: a kernel is *Exact* if K(r) =
-1/r, *Softened* if K(r) = 1/√(r² + ε²) with non-trivial ε, and
-*Modified* otherwise. **Continuity**: a kernel is in Cⁿ if the force
-−dK/dr belongs to Cⁿ(ℝ₊), and *Smooth* if C^∞. A perturbation declares
-the minimum invariants it requires (typed as `KernelRequirements`); a
-kernel implementation declares the invariants it provides for the
-current body configuration (typed as `KernelProperties`); a mismatch
-on any field is identified at extension registration.
+Let $K: \mathbb{R}_+ \to \mathbb{R}_+$ denote the scalar kernel determining
+the pair potential $U_{ij} = -G \cdot m_i \cdot m_j \cdot K(r)$, where
+$r = |x_i - x_j|$. The library encodes two formal invariants of $K$.
+**Exactness**: a kernel is *Exact* if $K(r) = 1/r$, *Softened* if
+$K(r) = 1/\sqrt{r^2 + \varepsilon^2}$ with non-trivial $\varepsilon$, and
+*Modified* otherwise. **Continuity**: a kernel is in $C^n$ if the force
+$-dK/dr$ belongs to $C^n(\mathbb{R}_+)$, and *Smooth* if $C^\infty$. A
+perturbation declares the minimum invariants it requires (typed as
+`KernelRequirements`); a kernel implementation declares the invariants
+it provides for the current body configuration (typed as
+`KernelProperties`); a mismatch on any field is identified at extension
+registration.
 
 These invariants are not ad-hoc labels. Exactness violation is a
 statement about the derivation: the 1PN correction is obtained by
 expanding the geodesic equation around the Newtonian Hamiltonian
-`H_N = p²/2m − GMm/r`, and substituting a softened potential invalidates
+$H_N = p^2/2m - GMm/r$, and substituting a softened potential invalidates
 the expansion itself — the observed apsidal drift is the signature of
 applying a Taylor series on top of a different unperturbed system, not
 a numerical artifact. Continuity violation is a statement about
 phase-space geometry: symplectic integration relies on the Hamiltonian
-flow preserving phase-space volume, which requires a smooth H; force
+flow preserving phase-space volume, which requires a smooth $H$; force
 discontinuities produce impulsive accelerations that cannot be
 represented within any symplectic splitting scheme, independent of
 integrator order or step control.
@@ -155,54 +158,57 @@ orbital periods under the adaptive Gauss–Radau IAS15 scheme
 [@ReinSpiegel2015]. With both bodies unsoftened — Exactness satisfied —
 the accumulated longitude of periastron drifts by 42.983 arcseconds
 per century against the closed-form general-relativistic prediction
-`6πGM/(c²a(1−e²))` = 43.000 arcseconds per century [@Will1993], a
-relative error of 4.4×10⁻⁶, stable over the integration window and
-monotonic in step count. With the library's default Plummer softening
-left in place — Exactness violated — the drift is −83 128 arcseconds
-per century: three orders of magnitude larger than the relativistic
-effect and of the wrong sign, while energy and angular momentum remain
-conserved to machine precision throughout.
+$6\pi GM / (c^2 a (1 - e^2))$ = 43.000 arcseconds per century
+[@Will1993], a relative error of $4.4 \times 10^{-6}$, stable over the
+integration window and monotonic in step count. With the library's
+default Plummer softening left in place — Exactness violated — the
+drift is $-83\,128$ arcseconds per century: three orders of magnitude
+larger than the relativistic effect and of the wrong sign, while energy
+and angular momentum remain conserved to machine precision throughout.
 
 The **Continuity** counter-test is a distinct configuration designed
 to exercise the second invariant on a distinct observable. An
-equal-mass two-body orbit (a = 1, e = 0.5) is integrated under a
+equal-mass two-body orbit ($a = 1$, $e = 0.5$) is integrated under a
 truncated-Plummer kernel that matches the standard Plummer profile
-inside a cutoff radius R_c = 1 (semi-major-axis units) and switches
-to a scaled Plummer outside, with the outside scale α = 0.8 chosen so
-that K is continuous at R_c, the force −dK/dr has a finite jump of
-(1 − α)·R_c/(R_c² + ε²)^{3/2} = 0.2 there, and the trajectory remains
-reliably bound (the orbit's apoapse sits near r ≈ 2.06, well inside
-the marginal-binding threshold at α ≈ 0.5 for these parameters).
-Under fourth-order Yoshida composition at fixed timestep 10⁻³·T, the
-orbit crosses R_c eleven times over 60 simulation units and the
-integrator produces impulsive energy-error events of magnitude
-4.7×10⁻⁶ to 2.0×10⁻⁴ — in one-to-one correspondence with the
+inside a cutoff radius $R_c = 1$ (semi-major-axis units) and switches
+to a scaled Plummer outside, with the outside scale $\alpha = 0.8$
+chosen so that $K$ is continuous at $R_c$, the force $-dK/dr$ has a
+finite jump of $(1 - \alpha) \cdot R_c / (R_c^2 + \varepsilon^2)^{3/2} = 0.2$
+there, and the trajectory remains reliably bound (the orbit's apoapse
+sits near $r \approx 2.06$, well inside the marginal-binding threshold
+at $\alpha \approx 0.5$ for these parameters). Under fourth-order
+Yoshida composition at fixed timestep $10^{-3} \cdot T$, the orbit
+crosses $R_c$ eleven times over 60 simulation units and the integrator
+produces impulsive energy-error events of magnitude $4.7 \times 10^{-6}$
+to $2.0 \times 10^{-4}$ — in one-to-one correspondence with the
 crossings, each event temporally matched to its crossing within
-10·dt, and no events between crossings. A reference run with the
-smooth PlummerKernel on the same bodies exhibits no events above
-2.7×10⁻¹⁴ per step, separating the Continuity signature from the
-symplectic round-off floor by roughly eight orders of magnitude. The
-observed signature is a consequence of the continuity violation
-itself, not of the specific `TruncatedPlummerKernel` used to exhibit
-it: any kernel whose declared properties include `Continuity::C0`
-and whose orbital configuration places the discontinuity within the
-radial range of the trajectory produces the same class of observable.
+$10 \cdot dt$, and no events between crossings. A reference run with
+the smooth PlummerKernel on the same bodies exhibits no events above
+$2.7 \times 10^{-14}$ per step, separating the Continuity signature
+from the symplectic round-off floor by roughly eight orders of
+magnitude. The observed signature is a consequence of the continuity
+violation itself, not of the specific `TruncatedPlummerKernel` used
+to exhibit it: any kernel whose declared properties include
+`Continuity::C0` and whose orbital configuration places the
+discontinuity within the radial range of the trajectory produces the
+same class of observable.
 
 Both counter-tests are asserted as continuous-integration gates — 1 %
 relative-error tolerance on the GR agreement, exact bijection between
-crossing and spike events with 10·dt temporal matching on the
+crossing and spike events with $10 \cdot dt$ temporal matching on the
 continuity measurement, and non-negotiable warning-emission on both
 registrations. The full suite completes in under twenty seconds on
 commodity hardware.
 
 **Reproducibility.** All measurements correspond to: IAS15 with
-initial timestep 10⁻⁴·T and adaptivity enabled for the Exactness
-counter-test (Sun–Mercury standard orbital elements, ε = 0 for the
-satisfied case, ε ≈ 0.02 AU for the violated case, 500-period
-integration); fourth-order Yoshida at fixed dt = 10⁻³·T for the
-Continuity counter-test (equal-mass two-body a = 1, e = 0.5, both
-bodies unsoftened, R_c = 1, α = 0.8, 60 simulation-unit integration).
-Sources at `crates/apsis-1pn/tests/mercury_precession_gate.rs` and
+initial timestep $10^{-4} \cdot T$ and adaptivity enabled for the
+Exactness counter-test (Sun–Mercury standard orbital elements,
+$\varepsilon = 0$ for the satisfied case, $\varepsilon \approx 0.02$ AU
+for the violated case, 500-period integration); fourth-order Yoshida
+at fixed $dt = 10^{-3} \cdot T$ for the Continuity counter-test
+(equal-mass two-body $a = 1$, $e = 0.5$, both bodies unsoftened,
+$R_c = 1$, $\alpha = 0.8$, 60 simulation-unit integration). Sources
+at `crates/apsis-1pn/tests/mercury_precession_gate.rs` and
 `crates/apsis-1pn/tests/kernel_continuity_counter_test.rs`; both
 reproduce on a clean checkout per the §Availability command.
 
