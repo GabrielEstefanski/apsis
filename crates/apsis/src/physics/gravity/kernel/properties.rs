@@ -164,19 +164,13 @@ impl KernelRequirements {
         if let Some(required) = self.required_exactness
             && !props.exactness.satisfies(required)
         {
-            out.push(RequirementViolation::Exactness {
-                required,
-                provided: props.exactness,
-            });
+            out.push(RequirementViolation::Exactness { required, provided: props.exactness });
         }
 
         if let Some(required) = self.min_continuity
             && !props.continuity.satisfies(required)
         {
-            out.push(RequirementViolation::Continuity {
-                required,
-                provided: props.continuity,
-            });
+            out.push(RequirementViolation::Continuity { required, provided: props.continuity });
         }
 
         out
@@ -194,14 +188,12 @@ pub enum RequirementViolation {
 impl std::fmt::Display for RequirementViolation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Exactness { required, provided } => write!(
-                f,
-                "kernel exactness {provided:?} does not satisfy required {required:?}",
-            ),
-            Self::Continuity { required, provided } => write!(
-                f,
-                "kernel continuity {provided:?} does not satisfy minimum {required:?}",
-            ),
+            Self::Exactness { required, provided } => {
+                write!(f, "kernel exactness {provided:?} does not satisfy required {required:?}",)
+            },
+            Self::Continuity { required, provided } => {
+                write!(f, "kernel continuity {provided:?} does not satisfy minimum {required:?}",)
+            },
         }
     }
 }
@@ -279,30 +271,23 @@ mod tests {
     #[test]
     fn empty_requirements_never_violate() {
         let req = KernelRequirements::none();
-        let props = KernelProperties {
-            exactness: Exactness::Modified,
-            continuity: Continuity::C0,
-        };
+        let props = KernelProperties { exactness: Exactness::Modified, continuity: Continuity::C0 };
         assert!(req.check_against(&props).is_empty());
     }
 
     #[test]
     fn exact_smooth_requirements_satisfied_by_newton_smooth() {
         let req = KernelRequirements::exact_and_smooth();
-        let props = KernelProperties {
-            exactness: Exactness::Exact,
-            continuity: Continuity::Smooth,
-        };
+        let props =
+            KernelProperties { exactness: Exactness::Exact, continuity: Continuity::Smooth };
         assert!(req.check_against(&props).is_empty());
     }
 
     #[test]
     fn exact_smooth_requirements_report_exactness_violation_only() {
         let req = KernelRequirements::exact_and_smooth();
-        let props = KernelProperties {
-            exactness: Exactness::Softened,
-            continuity: Continuity::Smooth,
-        };
+        let props =
+            KernelProperties { exactness: Exactness::Softened, continuity: Continuity::Smooth };
         let violations = req.check_against(&props);
         assert_eq!(violations.len(), 1);
         assert!(matches!(
@@ -319,32 +304,18 @@ mod tests {
         // Representative of a future `TruncatedPlummerKernel`: modified
         // exactness, C0 continuity.
         let req = KernelRequirements::exact_and_smooth();
-        let props = KernelProperties {
-            exactness: Exactness::Modified,
-            continuity: Continuity::C0,
-        };
+        let props = KernelProperties { exactness: Exactness::Modified, continuity: Continuity::C0 };
         let violations = req.check_against(&props);
         assert_eq!(violations.len(), 2);
-        assert!(violations.iter().any(|v| matches!(
-            v,
-            RequirementViolation::Exactness { .. }
-        )));
-        assert!(violations.iter().any(|v| matches!(
-            v,
-            RequirementViolation::Continuity { .. }
-        )));
+        assert!(violations.iter().any(|v| matches!(v, RequirementViolation::Exactness { .. })));
+        assert!(violations.iter().any(|v| matches!(v, RequirementViolation::Continuity { .. })));
     }
 
     #[test]
     fn requirement_only_one_field_checked_independently() {
-        let req = KernelRequirements {
-            required_exactness: Some(Exactness::Exact),
-            min_continuity: None,
-        };
-        let props = KernelProperties {
-            exactness: Exactness::Exact,
-            continuity: Continuity::C0,
-        };
+        let req =
+            KernelRequirements { required_exactness: Some(Exactness::Exact), min_continuity: None };
+        let props = KernelProperties { exactness: Exactness::Exact, continuity: Continuity::C0 };
         assert!(req.check_against(&props).is_empty());
     }
 
