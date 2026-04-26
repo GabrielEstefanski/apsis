@@ -35,7 +35,7 @@
 //! - Murray & Dermott (1999). *Solar System Dynamics*. Cambridge.
 //! - Bate, Mueller & White (1971). *Fundamentals of Astrodynamics*. Dover.
 
-use std::f64::consts::TAU;
+use std::f64::consts::{PI, TAU};
 
 use crate::domain::body::Body;
 
@@ -364,75 +364,241 @@ pub fn dominant_primary(bodies: &[Body], idx: usize) -> Option<usize> {
 /// Compute osculating orbital elements for body `idx` relative to `primary_idx`.
 ///
 /// Returns `None` if the bodies are co-located (r < 1e-15) or have zero combined mass.
-pub fn compute_elements(
+/// Linear-in-state primitives from which all Keplerian elements derive.
+///
+/// Exposing these lets external code (e.g. the render-side osculating-element
+/// smoother in `apsis-app`) apply transformations *before* the non-linear
+/// reconstruction into (a, e, ω). EMA on (a, e, sin ω, cos ω) is dimensionally
+/// noisier than EMA on these four scalars: ε is linear in (v², 1/r), the
+/// Laplace–Runge–Lenz components (ex, ey) are linear in (r, v), and h is
+/// bilinear in (r, v). They have no angular wraparound and no singularity at
+/// the parabolic limit.
+#[derive(Debug, Clone, Copy)]
+pub struct OrbitInvariants {
+    /// Specific orbital energy ε = ½v² − GM/r.
+    pub energy: f64,
+    /// Specific angular momentum z-component h = r × v.
+    pub h: f64,
+    /// Laplace–Runge–Lenz vector x-component (eccentricity vector).
+    pub ex: f64,
+    /// Laplace–Runge–Lenz vector y-component (eccentricity vector).
+    pub ey: f64,
+}
+
+/// Computes the linear primitives (ε, h, ex, ey) for body `idx` relative to
+/// `primary_idx` under gravitational parameter `g_factor`.
+///
+/// Returns `None` for degenerate inputs (coincident bodies, zero GM).
+pub fn compute_invariants(
     bodies: &[Body],
     idx: usize,
     primary_idx: usize,
     g_factor: f64,
-) -> Option<OrbitalElements> {
+) -> Option<OrbitInvariants> {
     let b = &bodies[idx];
     let p = &bodies[primary_idx];
 
-    // Relative state vector
     let rx = b.x - p.x;
     let ry = b.y - p.y;
     let vrx = b.vx - p.vx;
     let vry = b.vy - p.vy;
 
     let r = (rx * rx + ry * ry).sqrt();
-    let v2 = vrx * vrx + vry * vry;
     let gm = g_factor * (b.mass + p.mass);
 
     if r < 1e-15 || gm < 1e-30 {
         return None;
     }
 
-    // Specific orbital energy  ε = ½v² − GM/r
+    let v2 = vrx * vrx + vry * vry;
     let energy = 0.5 * v2 - gm / r;
-
-    // Specific angular momentum (z-component)   h = r × v
     let h = rx * vry - ry * vrx;
-
-    // Eccentricity via Laplace–Runge–Lenz vector
-    //   e_vec = (v × h) / GM  −  r̂
-    // In 2D:  (v × h̄) = (vry·h,  −vrx·h)
     let ex = vry * h / gm - rx / r;
     let ey = -vrx * h / gm - ry / r;
-    let e = (ex * ex + ey * ey).sqrt();
 
-    // Argument of periapsis ω = angle of eccentricity vector
-    let omega = if e > 1e-6 { ey.atan2(ex) } else { 0.0 };
+    Some(OrbitInvariants { energy, h, ex, ey })
+}
 
-    // Semi-major axis and period
+/// Reconstructs `OrbitalElements` from the linear primitives plus the
+/// gravitational parameter and the chosen primary index.
+///
+/// Pure function — no body list lookup. This is the inverse of
+/// [`compute_invariants`]: `elements_from_invariants(compute_invariants(...).
+/// unwrap(), primary_idx, gm)` is equal (up to floating-point) to
+/// [`compute_elements`].
+pub fn elements_from_invariants(
+    inv: &OrbitInvariants,
+    primary_idx: usize,
+    gm: f64,
+) -> OrbitalElements {
+    let e = (inv.ex * inv.ex + inv.ey * inv.ey).sqrt();
+    let omega = if e > 1e-6 { inv.ey.atan2(inv.ex) } else { 0.0 };
+
     const ENERGY_THRESH: f64 = 1e-12;
 
-    let (a, period, orbit_type) = if energy < -ENERGY_THRESH {
-        // Bound elliptical:  a = −GM / (2ε)
-        let a = -gm / (2.0 * energy);
-        // Kepler III:  T = 2π √(a³/GM)
+    let (a, period, orbit_type) = if inv.energy < -ENERGY_THRESH {
+        let a = -gm / (2.0 * inv.energy);
         let period = TAU * (a * a * a / gm).sqrt();
         (a, period, OrbitType::Elliptical)
-    } else if energy < ENERGY_THRESH {
-        // Near-parabolic transition
+    } else if inv.energy < ENERGY_THRESH {
         (f64::INFINITY, f64::INFINITY, OrbitType::Parabolic)
     } else {
-        // Hyperbolic:  a is negative by convention (distance to focus)
-        let a = -gm / (2.0 * energy);
+        let a = -gm / (2.0 * inv.energy);
         (a, f64::INFINITY, OrbitType::Hyperbolic)
     };
 
-    Some(OrbitalElements {
+    OrbitalElements {
         primary_idx,
         a,
         e,
         period,
-        h,
-        energy,
+        h: inv.h,
+        energy: inv.energy,
         omega,
         inclination: 0.0,
         lon_ascending_node: 0.0,
         orbit_type,
-    })
+    }
+}
+
+pub fn compute_elements(
+    bodies: &[Body],
+    idx: usize,
+    primary_idx: usize,
+    g_factor: f64,
+) -> Option<OrbitalElements> {
+    let inv = compute_invariants(bodies, idx, primary_idx, g_factor)?;
+    let gm = g_factor * (bodies[idx].mass + bodies[primary_idx].mass);
+    Some(elements_from_invariants(&inv, primary_idx, gm))
+}
+
+/// Eccentricity below which [`elements_anchored_to_body`] skips the
+/// geometric anchor and returns the smoothed-direction ellipse instead.
+///
+/// At this threshold the body sits at most ~5% of `a` off the displayed
+/// orbit — sub-pixel at typical viewing zoom for solar-system-scale
+/// scenes — which is invisible compared to the angular wobble the
+/// anchor produces in the same regime.
+pub const ANCHOR_MIN_E: f64 = 0.05;
+
+/// Reconstructs `OrbitalElements` whose ellipse passes geometrically
+/// through the body's current position.
+///
+/// Uses the **smoothed** invariants for shape (a, e via energy, e_vec
+/// magnitude) but recomputes the argument of periapsis ω from the
+/// instantaneous (r⃗, v⃗) so the rendered ellipse contains the body
+/// exactly. This is the rendering contract the EMA smoother needs to
+/// preserve consistency between an averaged orbit shape and the body's
+/// instantaneous position.
+///
+/// # Algorithm
+///
+/// Given smoothed (a, e) and body's current state vector (r⃗, v⃗) in
+/// the primary's frame:
+///
+/// 1. From the focus-conic equation r = p / (1 + e·cos ν) with p = a(1−e²):
+///    `cos ν = (p/r − 1) / e`. Clamp to [−1, 1] to absorb cases where
+///    the body's distance falls slightly outside the smoothed ellipse's
+///    [a(1−e), a(1+e)] range — the body is then placed at the closer
+///    apsis of the displayed orbit, which is the safe fallback.
+///
+/// 2. Sign of sin ν from the analytic identity
+///    `r_x·ey − r_y·ex = −h·(r⃗·v⃗)/GM`, giving
+///    `sign(sin ν) = sign(h_inst · (r⃗·v⃗))`. This handles both prograde
+///    and retrograde orbits correctly. The factor `h_inst` is computed
+///    from the *current* state (orbit's observed chirality), not the
+///    smoothed h — the displayed orbit must match what the user is
+///    seeing right now.
+///
+/// 3. ω = atan2(r_y, r_x) − ν.
+///
+/// # Edge cases
+///
+/// * Hyperbolic / parabolic / unbound (`energy ≥ 0`): falls back to
+///   [`elements_from_invariants`]. The smoother already short-circuits
+///   these, but defensive.
+/// * Near-circular (`e < ANCHOR_MIN_E`): falls back to
+///   [`elements_from_invariants`]. Anchoring divides by e to recover ν,
+///   so a small smoothed residual `|δe_vec|` produces an angular wobble
+///   `δω ≈ |δe_vec|/e` that becomes visible as the orbit polyline
+///   "rotating" frame-to-frame. The smoothed eccentricity vector
+///   `atan2(ey, ex)` already gives a stable orientation; the body sits
+///   at most ~e·a off the displayed circle, which is sub-pixel for the
+///   regime this branch catches.
+/// * `r ≈ 0` (coincident with primary): falls back to non-anchored.
+pub fn elements_anchored_to_body(
+    inv: &OrbitInvariants,
+    primary_idx: usize,
+    gm: f64,
+    body: &Body,
+    primary: &Body,
+) -> OrbitalElements {
+    const ENERGY_THRESH: f64 = 1e-12;
+
+    // Unbound (or near-parabolic): no closed conic to anchor — defer.
+    if inv.energy >= -ENERGY_THRESH {
+        return elements_from_invariants(inv, primary_idx, gm);
+    }
+
+    let e = (inv.ex * inv.ex + inv.ey * inv.ey).sqrt();
+
+    // Near-circular: anchor's (p/r − 1)/e branch amplifies smoothed
+    // residual into visible ω jitter. Use the smoothed eccentricity
+    // vector's direction directly — stable, with at most ~e·a body
+    // offset from the displayed orbit (sub-pixel for e < this threshold).
+    if e < ANCHOR_MIN_E {
+        return elements_from_invariants(inv, primary_idx, gm);
+    }
+
+    let a = -gm / (2.0 * inv.energy);
+    let period = TAU * (a * a * a / gm).sqrt();
+
+    let rx = body.x - primary.x;
+    let ry = body.y - primary.y;
+    let r = (rx * rx + ry * ry).sqrt();
+    if r < 1e-15 {
+        return elements_from_invariants(inv, primary_idx, gm);
+    }
+    let vrx = body.vx - primary.vx;
+    let vry = body.vy - primary.vy;
+
+    // Solve focus-conic for cos ν, clamping to absorb body distances
+    // slightly outside the smoothed ellipse's apsidal range.
+    let p = a * (1.0 - e * e);
+    let cos_nu = ((p / r - 1.0) / e).clamp(-1.0, 1.0);
+
+    // sign(sin ν) = sign(h_inst · (r⃗·v⃗)). Both factors are needed:
+    // h_inst alone gives orbit chirality (prograde/retrograde);
+    // (r⃗·v⃗) alone is wrong for retrograde. The product encodes both
+    // the leg (outbound/inbound) and the chirality.
+    //
+    // Near peri/apo the (r⃗·v⃗) term passes through zero and its sign
+    // is FP-fragile, but sin ν ≈ 0 there too — both ν = +ε and ν = −ε
+    // map to nearly identical positions, so a flicker is sub-pixel.
+    let h_inst = rx * vry - ry * vrx;
+    let r_dot_v = rx * vrx + ry * vry;
+    let s = (h_inst * r_dot_v).signum();
+    // signum() returns 0 only when h·(r·v) = 0 exactly; pick +1 then.
+    let sin_nu_sign = if s == 0.0 { 1.0 } else { s };
+
+    let nu = sin_nu_sign * cos_nu.acos();
+    let theta_body = ry.atan2(rx);
+    let omega_raw = theta_body - nu;
+    // Wrap to [−π, π] to match the convention of elements_from_invariants.
+    let omega = (omega_raw + PI).rem_euclid(TAU) - PI;
+
+    OrbitalElements {
+        primary_idx,
+        a,
+        e,
+        period,
+        h: inv.h,
+        energy: inv.energy,
+        omega,
+        inclination: 0.0,
+        lon_ascending_node: 0.0,
+        orbit_type: OrbitType::Elliptical,
+    }
 }
 
 // ── Batch computation ─────────────────────────────────────────────────────────
@@ -481,6 +647,222 @@ mod tests {
     fn elements(primary: Body, satellite: Body) -> OrbitalElements {
         let bodies = vec![primary, satellite];
         compute_elements(&bodies, 1, 0, G).expect("elementos devem ser computáveis")
+    }
+
+    // ── 0. Refactor invariants (linear primitives) ───────────────────────────
+    //
+    // compute_elements is now defined as the composition
+    // elements_from_invariants ∘ compute_invariants. This must hold exactly
+    // (modulo floating-point fma differences) for every regime.
+
+    fn assert_elements_equiv(a: &OrbitalElements, b: &OrbitalElements, label: &str) {
+        let rel = |x: f64, y: f64| {
+            if x.is_finite() && y.is_finite() {
+                (x - y).abs() / x.abs().max(y.abs()).max(1e-30)
+            } else if x.is_infinite() && y.is_infinite() && x.signum() == y.signum() {
+                0.0
+            } else {
+                f64::INFINITY
+            }
+        };
+        let tol = 1e-12;
+        assert!(rel(a.a, b.a) < tol, "{label}: a {} vs {}", a.a, b.a);
+        assert!(rel(a.e, b.e) < tol, "{label}: e {} vs {}", a.e, b.e);
+        assert!(rel(a.energy, b.energy) < tol, "{label}: ε {} vs {}", a.energy, b.energy);
+        assert!(rel(a.h, b.h) < tol, "{label}: h {} vs {}", a.h, b.h);
+        assert!(rel(a.omega, b.omega) < tol || (a.e < 1e-6 && b.e < 1e-6),
+            "{label}: ω {} vs {}", a.omega, b.omega);
+        assert_eq!(a.orbit_type, b.orbit_type, "{label}: orbit_type");
+    }
+
+    #[test]
+    fn invariants_roundtrip_circular() {
+        let (p, s) = circular_orbit(10.0, 1e6);
+        let bodies = vec![p, s];
+        let direct = compute_elements(&bodies, 1, 0, G).unwrap();
+        let inv = compute_invariants(&bodies, 1, 0, G).unwrap();
+        let gm = G * (bodies[1].mass + bodies[0].mass);
+        let via_inv = elements_from_invariants(&inv, 0, gm);
+        assert_elements_equiv(&direct, &via_inv, "circular");
+    }
+
+    #[test]
+    fn invariants_roundtrip_eccentric() {
+        // e = 0.5 ellipse
+        let r_peri = 10.0;
+        let m = 1e6;
+        let gm = G * m;
+        let v_peri = (gm * 1.5 / r_peri).sqrt();
+        let primary = body(0.0, 0.0, 0.0, 0.0, m);
+        let satellite = body(r_peri, 0.0, 0.0, v_peri, 1e-10);
+        let bodies = vec![primary, satellite];
+        let direct = compute_elements(&bodies, 1, 0, G).unwrap();
+        let inv = compute_invariants(&bodies, 1, 0, G).unwrap();
+        let gm = G * (bodies[1].mass + bodies[0].mass);
+        let via_inv = elements_from_invariants(&inv, 0, gm);
+        assert_elements_equiv(&direct, &via_inv, "eccentric");
+    }
+
+    /// Anchoring through the body must produce an ellipse that contains
+    /// the body geometrically: at the body's azimuth from focus, the
+    /// orbit's r equals the body's |r| exactly.
+    #[test]
+    fn anchored_ellipse_contains_body_prograde() {
+        let r_peri = 10.0;
+        let m = 1e6;
+        let gm = G * m;
+        let v_peri = (gm * 1.5 / r_peri).sqrt();
+        let bodies =
+            vec![body(0.0, 0.0, 0.0, 0.0, m), body(r_peri, 0.0, 0.0, v_peri, 1e-10)];
+        let inv = compute_invariants(&bodies, 1, 0, G).unwrap();
+        let gm = G * (bodies[1].mass + bodies[0].mass);
+        let el = elements_anchored_to_body(&inv, 0, gm, &bodies[1], &bodies[0]);
+
+        let rx = bodies[1].x - bodies[0].x;
+        let ry = bodies[1].y - bodies[0].y;
+        let r = (rx * rx + ry * ry).sqrt();
+        let nu = ry.atan2(rx) - el.omega;
+        let r_orbit = el.a * (1.0 - el.e * el.e) / (1.0 + el.e * nu.cos());
+        assert!((r - r_orbit).abs() / r < 1e-12,
+            "body off orbit: r={r}, r_orbit={r_orbit}");
+    }
+
+    /// Retrograde body: sign(h·(r·v)) governs which side of the orbit
+    /// the body sits. The check is identical to prograde.
+    #[test]
+    fn anchored_ellipse_contains_body_retrograde() {
+        let r_peri = 10.0;
+        let m = 1e6;
+        let gm = G * m;
+        let v_peri = (gm * 1.5 / r_peri).sqrt();
+        // Sign of v_y inverted → retrograde
+        let bodies =
+            vec![body(0.0, 0.0, 0.0, 0.0, m), body(r_peri, 0.0, 0.0, -v_peri, 1e-10)];
+        let inv = compute_invariants(&bodies, 1, 0, G).unwrap();
+        let gm = G * (bodies[1].mass + bodies[0].mass);
+        let el = elements_anchored_to_body(&inv, 0, gm, &bodies[1], &bodies[0]);
+
+        let rx = bodies[1].x - bodies[0].x;
+        let ry = bodies[1].y - bodies[0].y;
+        let r = (rx * rx + ry * ry).sqrt();
+        let nu = ry.atan2(rx) - el.omega;
+        let r_orbit = el.a * (1.0 - el.e * el.e) / (1.0 + el.e * nu.cos());
+        assert!((r - r_orbit).abs() / r < 1e-12,
+            "retrograde body off orbit: r={r}, r_orbit={r_orbit}");
+    }
+
+    /// When fed *smoothed* invariants whose (a, e) drift slightly from
+    /// the body's instantaneous orbit, anchoring still places the body
+    /// exactly on the displayed ellipse — that is the whole point of
+    /// the anchor: shape is averaged, orientation is exact.
+    #[test]
+    fn anchored_ellipse_contains_body_under_invariant_drift() {
+        let r_peri = 10.0;
+        let m = 1e6;
+        let gm_kep = G * m;
+        let v_peri = (gm_kep * 1.5 / r_peri).sqrt();
+        let bodies =
+            vec![body(0.0, 0.0, 0.0, 0.0, m), body(r_peri, 0.0, 0.0, v_peri, 1e-10)];
+        // Real invariants of the body's orbit.
+        let inv_true = compute_invariants(&bodies, 1, 0, G).unwrap();
+        // Simulate smoothed invariants drifted by 1% in energy and h.
+        let inv_smooth = OrbitInvariants {
+            energy: inv_true.energy * 1.01,
+            h: inv_true.h * 0.99,
+            ex: inv_true.ex * 1.01,
+            ey: inv_true.ey * 0.99,
+        };
+        let gm = G * (bodies[1].mass + bodies[0].mass);
+        let el = elements_anchored_to_body(&inv_smooth, 0, gm, &bodies[1], &bodies[0]);
+
+        let rx = bodies[1].x - bodies[0].x;
+        let ry = bodies[1].y - bodies[0].y;
+        let r = (rx * rx + ry * ry).sqrt();
+        let nu = ry.atan2(rx) - el.omega;
+        let r_orbit = el.a * (1.0 - el.e * el.e) / (1.0 + el.e * nu.cos());
+        // Body should still lie on the (drifted-shape) ellipse to FP
+        // precision, because anchoring depends only on r and the
+        // smoothed (a, e) — it does not require the orbit to be the
+        // body's *true* orbit.
+        assert!((r - r_orbit).abs() / r < 1e-12,
+            "drifted-invariant anchored orbit: r={r}, r_orbit={r_orbit}");
+    }
+
+    /// Near-circular bypass: when e < ANCHOR_MIN_E, ω must depend only
+    /// on the smoothed eccentricity vector — *not* on the body's
+    /// instantaneous position. Moving the body around its orbit while
+    /// holding the smoothed invariants fixed must yield byte-identical
+    /// elements. This is the contract that kills the low-e wobble seen
+    /// on default-circular outer planets in the solar preset.
+    #[test]
+    fn anchor_low_e_omega_independent_of_body_position() {
+        let m = 1e6;
+        let r = 10.0;
+        let gm = G * m;
+        let v_c = (gm / r).sqrt();
+        // Slightly perturb a circular orbit to e ≈ 0.01 (well below
+        // ANCHOR_MIN_E = 0.05). Anchor must NOT engage here.
+        let v = 1.005 * v_c;
+        let primary = body(0.0, 0.0, 0.0, 0.0, m);
+        let bodies = vec![primary, body(r, 0.0, 0.0, v, 1e-10)];
+        let inv = compute_invariants(&bodies, 1, 0, G).unwrap();
+        assert!(
+            (inv.ex * inv.ex + inv.ey * inv.ey).sqrt() < ANCHOR_MIN_E,
+            "test setup: e must be below threshold to exercise the bypass"
+        );
+
+        let gm_pair = G * (bodies[1].mass + primary.mass);
+        let el_at_peri = elements_anchored_to_body(&inv, 0, gm_pair, &bodies[1], &primary);
+
+        // Move the body to a different point along its orbit (any
+        // arbitrary location); invariants stay the same since they are
+        // the *smoothed* state passed in, not recomputed from the body.
+        let displaced = body(0.0, r * 1.1, -v, 0.0, 1e-10);
+        let el_displaced = elements_anchored_to_body(&inv, 0, gm_pair, &displaced, &primary);
+
+        assert_eq!(el_at_peri.omega, el_displaced.omega,
+            "low-e bypass must produce constant ω across body positions");
+        assert_eq!(el_at_peri.a, el_displaced.a);
+        assert_eq!(el_at_peri.e, el_displaced.e);
+    }
+
+    /// Symmetric check: above the threshold, anchoring DOES engage and
+    /// ω moves with the body. Catches accidental over-broadening of the
+    /// bypass.
+    #[test]
+    fn anchor_high_e_omega_tracks_body_position() {
+        let m = 1e6;
+        let r = 10.0;
+        let gm = G * m;
+        let v_c = (gm / r).sqrt();
+        let v = 1.2 * v_c; // e ≈ 0.44, well above threshold
+        let primary = body(0.0, 0.0, 0.0, 0.0, m);
+        let bodies = vec![primary, body(r, 0.0, 0.0, v, 1e-10)];
+        let inv = compute_invariants(&bodies, 1, 0, G).unwrap();
+        let gm_pair = G * (bodies[1].mass + primary.mass);
+        let el_a = elements_anchored_to_body(&inv, 0, gm_pair, &bodies[1], &primary);
+
+        let displaced = body(0.0, r, -v, 0.0, 1e-10);
+        let el_b = elements_anchored_to_body(&inv, 0, gm_pair, &displaced, &primary);
+
+        assert_ne!(el_a.omega, el_b.omega,
+            "above threshold, anchor must rotate ω to keep body on orbit");
+    }
+
+    #[test]
+    fn invariants_roundtrip_hyperbolic() {
+        let r_peri = 10.0;
+        let m = 1e6;
+        let gm = G * m;
+        let v_peri = 1.5 * (2.0 * gm / r_peri).sqrt();
+        let primary = body(0.0, 0.0, 0.0, 0.0, m);
+        let satellite = body(r_peri, 0.0, 0.0, v_peri, 1e-10);
+        let bodies = vec![primary, satellite];
+        let direct = compute_elements(&bodies, 1, 0, G).unwrap();
+        let inv = compute_invariants(&bodies, 1, 0, G).unwrap();
+        let gm = G * (bodies[1].mass + bodies[0].mass);
+        let via_inv = elements_from_invariants(&inv, 0, gm);
+        assert_elements_equiv(&direct, &via_inv, "hyperbolic");
     }
 
     // ── 1. Órbita circular ────────────────────────────────────────────────────

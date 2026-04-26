@@ -180,6 +180,14 @@ pub struct SimulationApp {
     /// Frame-coherent gravitational hierarchy used by the orbit overlay
     /// filter pipeline. Not persisted — rebuilt from live state each tick.
     pub(super) orbit_hierarchy: apsis::physics::orbit_hierarchy::OrbitHierarchy,
+    /// EMA filter on osculating elements of overlay-drawn orbits. Removes
+    /// the high-frequency jitter induced by indirect N-body perturbations
+    /// without falsifying secular dynamics. State-only; no physics impact.
+    pub(super) orbit_smoother: crate::render::orbit_smoother::OrbitSmoother,
+    /// Simulation time at the previous render frame; used to compute
+    /// dt_sim for [`orbit_smoother`]. NaN sentinel = first frame; the
+    /// smoother snaps to current invariants in that case.
+    pub(super) orbit_smoother_last_t: f64,
     /// Bodies whose orbits are drawn unconditionally (bypass level, top-N
     /// and degeneracy filters). Pins are stored by body index; the canvas
     /// prunes out-of-range entries each frame so collision-merges don't
@@ -418,6 +426,8 @@ impl SimulationApp {
             orbit_top_n: 24,
             orbit_hide_degenerate: true,
             orbit_hierarchy: apsis::physics::orbit_hierarchy::OrbitHierarchy::new(),
+            orbit_smoother: crate::render::orbit_smoother::OrbitSmoother::new(),
+            orbit_smoother_last_t: f64::NAN,
             pinned_orbits: HashSet::new(),
             show_grid: true,
             show_vectors: false,
