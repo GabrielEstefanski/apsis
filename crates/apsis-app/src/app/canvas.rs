@@ -328,6 +328,7 @@ impl SimulationApp {
             // final foreground pass paints the selected body on top.
             {
                 let g_factor = self.system.g_factor();
+                let t_sim = self.system.t();
                 let scale = self.scale;
                 let cx = center_after_pan.x;
                 let cy = center_after_pan.y;
@@ -335,37 +336,64 @@ impl SimulationApp {
 
                 self.orbit_hierarchy.tick(bodies, g_factor);
 
+                // If sim time jumped backwards (snapshot restore, system
+                // reset), the cached invariants are stale: drop everything
+                // and let the smoother cold-start. NaN sentinel = first
+                // frame; skip the comparison.
+                if !self.orbit_smoother_last_t.is_nan()
+                    && t_sim < self.orbit_smoother_last_t - 1e-9
+                {
+                    self.orbit_smoother.clear();
+                }
+
                 // Prune stale pins (e.g. after a collision-merge swap_remove
                 // on the sim thread invalidated the index).
                 let n_bodies = bodies.len();
                 self.pinned_orbits.retain(|&i| i < n_bodies);
+
+                // Clone names once for the smoother (cache key is the body's
+                // stable name — survives swap_remove because index identity
+                // is meaningless across collisions).
+                let names_owned: Vec<String> = self.system.names().to_vec();
+
+                // Pre-compute siblings for every primary used as an overlay
+                // anchor, once per frame. The smoother re-uses these slices
+                // to compute the tidal-vector weighted τ; doing this once
+                // avoids re-scanning the body list per overlay candidate.
+                let mut siblings_by_primary: std::collections::HashMap<usize, Vec<usize>> =
+                    std::collections::HashMap::new();
+                for j in 0..bodies.len() {
+                    if let Some(p) = self.orbit_hierarchy.primary(j) {
+                        siblings_by_primary.entry(p).or_default().push(j);
+                    }
+                }
+                let empty_siblings: Vec<usize> = Vec::new();
+                let siblings_for = |p: usize| -> &[usize] {
+                    siblings_by_primary.get(&p).map(|v| v.as_slice()).unwrap_or(&empty_siblings)
+                };
 
                 if self.show_orbit_ellipses {
                     let bg_style = OrbitOverlayStyle::background_default();
                     let vp_center = rect.center();
                     let vp_half_diag = (rect.width().powi(2) + rect.height().powi(2)).sqrt() * 0.5;
 
-                    // Collect (idx, primary_idx, elements, influence) for
-                    // every body that survives the filter pipeline.
-                    let mut candidates: Vec<(
-                        usize,
-                        usize,
-                        apsis::physics::orbital::OrbitalElements,
-                        f32,
-                    )> = Vec::with_capacity(bodies.len().min(self.orbit_top_n * 2));
+                    // Filter pipeline runs on raw `compute_elements` because
+                    // the degeneracy gate is a binary geometry test (e ≈ 1
+                    // window, periapsis-inside-primary) and smoothing has
+                    // negligible effect on those classifications. Only the
+                    // top-N survivors get drawn through the smoother — a
+                    // body that wasn't shown last frame cold-starts on
+                    // first display, which is correct.
+                    let mut candidates: Vec<(usize, usize, f32)> =
+                        Vec::with_capacity(bodies.len().min(self.orbit_top_n * 2));
 
                     for i in 0..bodies.len() {
-                        // Selected + pinned bodies draw in a dedicated
-                        // foreground pass — skip here to avoid double-draw
-                        // and to exempt them from all filter gates.
                         if Some(i) == self.selected_body {
                             continue;
                         }
                         if self.pinned_orbits.contains(&i) {
                             continue;
                         }
-                        // Hierarchy must know i's primary; Free bodies
-                        // have no elliptical orbit to draw.
                         let Some(level) = self.orbit_hierarchy.level(i) else {
                             continue;
                         };
@@ -390,7 +418,6 @@ impl SimulationApp {
                         let dx = sp_x - vp_center.x;
                         let dy = sp_y - vp_center.y;
                         let d_norm = (dx * dx + dy * dy).sqrt() / vp_half_diag.max(1.0);
-                        // Bodies far beyond the viewport contribute nothing.
                         if d_norm > 2.0 {
                             continue;
                         }
@@ -398,42 +425,56 @@ impl SimulationApp {
                         let mass_factor = (1.0_f32 + b.mass as f32).ln().max(0.0);
                         let influence = mass_factor * viewport_weight;
 
-                        candidates.push((i, primary_idx, el, influence));
+                        candidates.push((i, primary_idx, influence));
                     }
 
-                    // Top-N by influence — partial_sort would be nicer
-                    // but N is small and draws are the real cost.
                     candidates
-                        .sort_by(|a, b| b.3.partial_cmp(&a.3).unwrap_or(std::cmp::Ordering::Equal));
+                        .sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
                     if candidates.len() > self.orbit_top_n {
                         candidates.truncate(self.orbit_top_n);
                     }
 
-                    for (_i, primary_idx, el, _infl) in &candidates {
+                    for (i, primary_idx, _) in &candidates {
+                        let Some(el) = self.orbit_smoother.smoothed(
+                            bodies,
+                            &names_owned,
+                            *i,
+                            *primary_idx,
+                            siblings_for(*primary_idx),
+                            g_factor,
+                            t_sim,
+                        ) else {
+                            continue;
+                        };
                         let primary = &bodies[*primary_idx];
                         let primary_pos = [primary.x, primary.y, 0.0];
                         let sampled = el.sample_orbit(primary_pos, 64);
                         draw_orbit_polyline(&mut backend, &sampled, project, &bg_style);
-                        draw_orbit_apsides(&mut backend, el, primary_pos, project, &bg_style);
+                        draw_orbit_apsides(&mut backend, &el, primary_pos, project, &bg_style);
                     }
                 }
 
-                // Pinned orbits — drawn unconditionally in the foreground
-                // (selected_default style). Intentionally placed outside the
-                // `show_orbit_ellipses` guard so a pin is a user commitment
-                // that overrides the global toggle too.
                 if !self.pinned_orbits.is_empty() {
                     let fg_style = OrbitOverlayStyle::selected_default();
-                    for &i in self.pinned_orbits.iter() {
+                    let pins: Vec<usize> = self.pinned_orbits.iter().copied().collect();
+                    for i in pins {
                         if Some(i) == self.selected_body {
-                            continue; // selected pass draws it
+                            continue;
                         }
                         let primary =
                             self.orbit_hierarchy.primary(i).or_else(|| dominant_primary(bodies, i));
                         let Some(primary_idx) = primary else {
                             continue;
                         };
-                        let Some(el) = compute_elements(bodies, i, primary_idx, g_factor) else {
+                        let Some(el) = self.orbit_smoother.smoothed(
+                            bodies,
+                            &names_owned,
+                            i,
+                            primary_idx,
+                            siblings_for(primary_idx),
+                            g_factor,
+                            t_sim,
+                        ) else {
                             continue;
                         };
                         let primary_b = &bodies[primary_idx];
@@ -446,17 +487,20 @@ impl SimulationApp {
 
                 if let Some(idx) = self.selected_body {
                     if idx < bodies.len() {
-                        // Foreground overlay uses the hierarchy's primary
-                        // when available; otherwise falls back to the raw
-                        // dominant-primary heuristic so the first click on
-                        // a body still shows its orbit before the
-                        // hierarchy has ticked for this topology.
                         let primary = self
                             .orbit_hierarchy
                             .primary(idx)
                             .or_else(|| dominant_primary(bodies, idx));
                         if let Some(primary_idx) = primary {
-                            if let Some(el) = compute_elements(bodies, idx, primary_idx, g_factor) {
+                            if let Some(el) = self.orbit_smoother.smoothed(
+                                bodies,
+                                &names_owned,
+                                idx,
+                                primary_idx,
+                                siblings_for(primary_idx),
+                                g_factor,
+                                t_sim,
+                            ) {
                                 let primary = &bodies[primary_idx];
                                 let primary_pos = [primary.x, primary.y, 0.0];
                                 let sampled = el.sample_orbit(primary_pos, 128);
@@ -467,6 +511,12 @@ impl SimulationApp {
                         }
                     }
                 }
+
+                // Drop cache entries for bodies removed since the last
+                // frame (collision merges, manual deletions). Cheap when
+                // the cache is empty / small.
+                self.orbit_smoother.prune(&names_owned);
+                self.orbit_smoother_last_t = t_sim;
             }
 
             backend.center = [center_after_pan.x, center_after_pan.y];
