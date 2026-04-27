@@ -1,0 +1,53 @@
+[package]
+name = "apsis-py"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+readme = "README.md"
+description = "Python bindings for the apsis N-body simulation library."
+
+# ── Crate layout ──────────────────────────────────────────────────────────────
+#
+# `cdylib` is the only crate type Python's import machinery can dlopen.
+# Maturin builds the resulting `.so` / `.pyd` as the extension module
+# `apsis._native`; the user-facing Python package `apsis` re-exports from
+# it through `python/apsis/__init__.py`. Keeping the Rust artefact
+# namespaced under `_native` (rather than directly as `apsis`) preserves
+# the option of mixing pure-Python helpers into the public surface
+# without conflicts.
+
+[lib]
+name = "apsis"
+crate-type = ["cdylib"]
+
+# ── Dependencies ──────────────────────────────────────────────────────────────
+#
+# The façade-only invariant of this crate (see `src/lib.rs` header) means
+# its dependency surface is tiny by design: PyO3 + numpy for the FFI
+# layer, and the `apsis` core crate as the source of truth for behaviour.
+# Anything else is a smell — if a feature here needs a third-party Rust
+# crate that the core does not, the feature probably belongs in the core.
+#
+# `abi3-py39`: build a single wheel against the stable Python ABI for
+# version 3.9+. One `cp39-abi3-…` wheel loads on every CPython 3.9
+# through (current). Drops the per-Python-version build matrix from
+# 4× to 1× without sacrificing compatibility for our subset of the
+# Python C API (no callbacks, no GIL release, no buffer protocol
+# customisation).
+
+[dependencies]
+apsis = { path = "../apsis" }
+pyo3 = { version = "0.23", features = ["extension-module", "abi3-py39"] }
+numpy = "0.23"
+
+# `maturin develop` and `cargo test -p apsis-py` both build the cdylib;
+# enabling the `extension-module` feature on PyO3 is what tells the
+# linker to leave `libpython` symbols undefined (Python provides them
+# at import time). Without this flag, builds fail on macOS and
+# Windows with "undefined reference to _PyArg_*". The feature is on
+# in [dependencies] above, not gated, because there is no other build
+# mode for this crate.
