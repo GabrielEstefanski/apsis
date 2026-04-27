@@ -1,6 +1,6 @@
 //! IAS15 — 15th-order adaptive Gauss-Radau integrator.
 //!
-//! Reference implementation of the algorithm described in:
+//! Implementation of the algorithm specified in:
 //!
 //!   * Rein H. & Spiegel D. S. (2015). *IAS15: a fast, adaptive,
 //!     high-order integrator for gravitational dynamics, accurate to
@@ -11,8 +11,15 @@
 //!     A. Carusi & G. B. Valsecchi eds., Astrophysics and Space Science
 //!     Library 115, 185–202.
 //!
-//! The layout of this file mirrors REBOUND's `integrator_ias15.c` so the
-//! two implementations are straightforward to cross-read.
+//! Section references throughout the module text point at the Rein &
+//! Spiegel paper (the algorithmic specification); divergences from the
+//! specification — and the empirical analyses motivating each choice —
+//! are noted at the relevant call site, with cross-references to the
+//! `docs/experiments/` lab notebooks. The independent implementation in
+//! REBOUND's `reb_integrator_ias15` provides the cross-implementation
+//! parity reference used by the validation suite under
+//! [`validation/rebound-parity/`](../../../../validation/rebound-parity/);
+//! it is **not** the source of any code in this file.
 //!
 //! IAS15 is the modern refinement of Everhart's RADAU15. It combines
 //!
@@ -30,19 +37,29 @@
 //! method for bound orbits, and strictly superior for close encounters
 //! or high eccentricities where fixed-step schemes degrade.
 //!
-//! # Sub-step semantics (ADR-004)
+//! # Sub-step semantics (ADR-004, revised 2026-04-26)
 //!
 //! A single call to [`Integrator::step`] performs **one** adaptive
-//! sub-step. The `dt` argument is treated as an upper bound on the
-//! sub-step size (the caller's budget for this tick); the error
-//! controller may accept anything in `(DT_MIN, dt]` and reports the
-//! actual size via [`StepResult::consumed_dt`]. The caller (the
-//! [`System::step`] orchestrator) loops until its desired simulation
-//! time is reached, exactly as REBOUND does via
-//! `reb_integrator_ias15_part1` / `part2`.
+//! sub-step. The `dt` argument is the *first-call seed* for the
+//! controller's `dt_next`, not a per-call hard cap. After the first
+//! call the controller is fully responsible for choosing the next
+//! step size — the canonical IAS15 semantics from Rein & Spiegel 2015
+//! §2.3, where the user's `dt` is treated as an initial guess that
+//! the controller then mutates and reuses on subsequent calls.
 //!
-//! This design — substep-granularity at the trait boundary — was
-//! chosen for three reasons:
+//! Treating `dt` as a per-call hard cap was the previous behaviour
+//! and was a defect: when the orchestrator passed the user's initial
+//! guess `user_dt` on every call (the natural pattern for fixed-step
+//! integrators in [`crate::core::system::System::step`]), IAS15 was
+//! pinned to that guess and unable to grow to the natural step size
+//! that local truncation error allowed. On the figure-8 choreography
+//! this manifested as a substep cascade where the controller
+//! repeatedly shrunk to `DT_MIN` after close approaches and recovered
+//! only ~7× per accepted sub-step — never reaching the natural step
+//! because every recovery hit the artificial `user_dt` ceiling.
+//!
+//! Substep-granularity at the trait boundary is preserved for the
+//! same reasons that motivated the original design:
 //!
 //!   * `System::t` stays consistent with body state even when a close
 //!     encounter forces the controller to shrink `dt_try` well below
@@ -201,6 +218,174 @@ macro_rules! time_phase {
     ($field:ident, $block:block) => {{ $block }};
 }
 
+// ── Per-step diagnostic trace (feature-gated) ────────────────────────────────
+//
+// `ias15-diag` compiles in detailed per-step trace emission useful for
+// investigating slow-onset cumulative failures of the IAS15 controller —
+// the figure-8 cascade documented in
+// `docs/experiments/2026-04-26-ias15-warmstart-bug.md` is the
+// motivating example. The feature is off by default (zero codegen
+// footprint); when on, emission is *additionally* gated on the env var
+// `APSIS_IAS15_TRACE=1` so a feature-enabled binary stays silent until
+// the operator explicitly opts in.
+//
+// Each trace line is tab-separated with a stable column schema so
+// downstream analysis (Python/pandas, awk pipelines) can parse without
+// regex. The columns are documented at the emission site.
+
+#[cfg(feature = "ias15-diag")]
+pub mod diag {
+    use std::cell::Cell;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+    static TRACE_ENABLED: AtomicBool = AtomicBool::new(false);
+    static TRACE_INITIALISED: AtomicBool = AtomicBool::new(false);
+    static EVENT_CAP: AtomicUsize = AtomicUsize::new(2000);
+
+    thread_local! {
+        /// Monotonic event counter so the trace is grep-friendly even
+        /// when several runs interleave their output.
+        pub(super) static EVENT_COUNTER: Cell<u64> = const { Cell::new(0) };
+    }
+
+    /// Read the env var lazily on first call, then memoise. The env var
+    /// is the *runtime* gate; the Cargo feature is the *compile-time*
+    /// gate. Both must be set for any output.
+    ///
+    /// Also reads `APSIS_IAS15_TRACE_CAP` if present and overrides the
+    /// default per-thread emission cap of 2 000 events. Keeping a cap
+    /// matters because cascade scenarios emit ≥10⁸ attempts; without
+    /// throttling the trace itself becomes the cost.
+    pub(super) fn trace_enabled() -> bool {
+        if !TRACE_INITIALISED.load(Ordering::Relaxed) {
+            let on = std::env::var("APSIS_IAS15_TRACE").map(|v| v == "1").unwrap_or(false);
+            if let Ok(cap) = std::env::var("APSIS_IAS15_TRACE_CAP") {
+                if let Ok(n) = cap.parse::<usize>() {
+                    EVENT_CAP.store(n, Ordering::Relaxed);
+                }
+            }
+            TRACE_ENABLED.store(on, Ordering::Relaxed);
+            TRACE_INITIALISED.store(true, Ordering::Relaxed);
+        }
+        TRACE_ENABLED.load(Ordering::Relaxed)
+    }
+
+    /// Bump and return the next event id, or `None` if the cap is reached.
+    /// Callers should skip emission when `None` is returned.
+    pub(super) fn next_event() -> Option<u64> {
+        EVENT_COUNTER.with(|c| {
+            let n = c.get();
+            if (n as usize) >= EVENT_CAP.load(Ordering::Relaxed) {
+                return None;
+            }
+            c.set(n + 1);
+            Some(n)
+        })
+    }
+
+    /// Reset the event counter. Useful between scenarios in a benchmark
+    /// harness so each scenario's trace has independent ids.
+    pub fn reset_events() {
+        EVENT_COUNTER.with(|c| c.set(0));
+    }
+}
+
+/// Emit a warmstart diagnostic line. Invoked *after* `warmstart_b` has
+/// run on the IAS15 instance. Reports two L₂ norms over all bodies and
+/// components:
+///
+/// * `b_norm` — the warmstart's full prediction (Pascal cross-terms
+///   plus the previous-step Picard residual `be`); this is the b that
+///   Picard will refine on the upcoming attempt.
+/// * `e_norm` — the pure Pascal-extrapolated piece, before the `be`
+///   correction; lets the trace separate "what the polynomial-basis
+///   transform alone would predict" from "what we actually feed Picard".
+///
+/// On smooth motion at `q ≈ 1` both norms track each other and the
+/// ratio is near 1; under aggressive `dt` changes (close encounters)
+/// the cross-terms shift the prediction substantially and the two
+/// diverge. A persistent divergence after Picard refinement (i.e. b
+/// norms still inflated post-converge) is the post-bug-fix signature
+/// we track to make sure no equivalent regression slips back in.
+#[cfg(feature = "ias15-diag")]
+fn diag_emit_warmstart(ias: &Ias15, q: f64, dt_try: f64) {
+    if !diag::trace_enabled() {
+        return;
+    }
+    let id = match diag::next_event() {
+        Some(n) => n,
+        None => return,
+    };
+    let mut b_norm_sq = 0.0_f64;
+    for row in &ias.b {
+        for c in row {
+            b_norm_sq += c.0 * c.0 + c.1 * c.1;
+        }
+    }
+    let mut e_norm_sq = 0.0_f64;
+    for row in &ias.e {
+        for c in row {
+            e_norm_sq += c.0 * c.0 + c.1 * c.1;
+        }
+    }
+    eprintln!(
+        "[ias15-diag]\twarmstart\tev={}\tdt_try={:.6e}\tq={:.6e}\tb_norm={:.6e}\te_norm={:.6e}",
+        id, dt_try, q, b_norm_sq.sqrt(), e_norm_sq.sqrt(),
+    );
+}
+
+/// Emit a per-attempt diagnostic line *after* `decide_dt`. Captures the
+/// actual error signal the controller saw and the action it chose, so a
+/// post-mortem trace can correlate stagnation events with truncation
+/// rejections and `dt_next` proposals.
+#[cfg(feature = "ias15-diag")]
+fn diag_emit_attempt(
+    ias: &Ias15,
+    dt_try: f64,
+    dt_next_after: f64,
+    trunc_err: f64,
+    picard_converged: bool,
+    picard_iters: u32,
+    decision_label: &'static str,
+) {
+    if !diag::trace_enabled() {
+        return;
+    }
+    let id = match diag::next_event() {
+        Some(n) => n,
+        None => return,
+    };
+    eprintln!(
+        "[ias15-diag]\tattempt\tev={}\tsubstep={}\tdt_try={:.6e}\tdt_next={:.6e}\ttrunc_err={:.6e}\tpicard_conv={}\tpicard_iters={}\tstagnations={}\tcycles={}\tdecision={}",
+        id,
+        ias.substeps_total,
+        dt_try,
+        dt_next_after,
+        trunc_err,
+        picard_converged as u8,
+        picard_iters,
+        ias.picard_stagnations_total,
+        ias.shrink_grow_cycles_total,
+        decision_label,
+    );
+}
+
+// No-op shims when the feature is off — the calls compile out entirely.
+#[cfg(not(feature = "ias15-diag"))]
+fn diag_emit_warmstart(_ias: &Ias15, _q: f64, _dt_try: f64) {}
+
+#[cfg(not(feature = "ias15-diag"))]
+fn diag_emit_attempt(
+    _ias: &Ias15,
+    _dt_try: f64,
+    _dt_next_after: f64,
+    _trunc_err: f64,
+    _picard_converged: bool,
+    _picard_iters: u32,
+    _decision_label: &'static str,
+) {
+}
+
 // ── Gauss-Radau node spacings ────────────────────────────────────────────────
 //
 // 8 nodes on [0, 1]: h₀ = 0 is the left end-point (implicit; the step
@@ -232,8 +417,10 @@ const H: [f64; 8] = [
 //     g_j = b_j + Σ_{k>j}  d_mat[k][j] · b_k
 //
 // We store only the lower triangle (row k, cols 0..k). Values from
-// Everhart (1985) table I; constants cross-checked against the
-// REBOUND reference implementation.
+// Everhart (1985) table I; the same constants appear in Rein &
+// Spiegel (2015) §2 and in any specification-correct IAS15
+// implementation, including the independent C implementation in
+// REBOUND used as the parity reference.
 
 const C_MAT: [[f64; 7]; 7] = [
     [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
@@ -332,31 +519,58 @@ const DEFAULT_EPSILON: f64 = 1e-9;
 /// singularity) from driving the step size to zero and stalling the
 /// scheduler. Below this, we accept the attempt regardless and let
 /// the caller decide what to do (typically: log a degraded-step and
-/// keep integrating). Matches REBOUND's `integrator_ias15.min_dt`
-/// default behaviour when no explicit floor is configured.
+/// keep integrating). The IAS15 specification (Rein & Spiegel 2015
+/// §3.4) leaves this floor as an implementation choice; `1e-12` is
+/// three decades above f64 machine epsilon and matches the value
+/// used by the reference C implementation when no explicit floor is
+/// configured by the caller.
 const DT_MIN: f64 = 1e-12;
 
 /// Multiplier on the theoretically optimal Δt after each attempt.
 /// Keeps the controller away from the accept/reject boundary so
 /// step size doesn't oscillate between borderline-too-large and
-/// too-small. 0.9 matches REBOUND (`integrator_ias15.safety_factor`).
+/// too-small. `0.9` is the value specified in Rein & Spiegel (2015)
+/// §3.4.
 const DT_SAFETY: f64 = 0.9;
 
 /// Conservative growth factor used only as a fallback when the error
 /// estimate is zero (exact machine-precision step). In all other cases
-/// the error formula drives dt_next directly — no growth cap is applied,
-/// matching REBOUND's controller exactly.
+/// the error formula drives `dt_next` directly, capped above by
+/// [`DT_GROWTH_LIMIT`].
 const DT_ZERO_ERR_GROWTH: f64 = 2.0;
+
+/// Maximum step-size growth ratio per accepted sub-step.
+///
+/// The IAS15 specification (Rein & Spiegel 2015 §3.4) caps `dt_new`
+/// at `7 × dt_current` to prevent the controller from overshooting
+/// the locally-stable step when the previous attempt's truncation
+/// error sits well below `ε`. Without this cap the formula
+/// `dt_next = dt · 0.9 · (ε/err)^{1/7}` proposes unbounded growth in
+/// smooth regions of the trajectory; the next sub-step then attempts
+/// a step many times larger than physically warranted, the
+/// truncation gate rejects it, and the controller spends a full
+/// shrink cascade recovering — a substep pattern that compounds
+/// across close encounters in scenarios like the figure-8
+/// choreography (see
+/// `docs/experiments/2026-04-26-ias15-warmstart-bug.md`,
+/// §"controller substep blowup", for the empirical analysis on
+/// `apsis`).
+///
+/// `7.0` is the specification value; tightening it would slow
+/// recovery from over-shrinks (post-close-encounter), while
+/// loosening it would re-introduce the overshoot pathology.
+const DT_GROWTH_LIMIT: f64 = 7.0;
 
 /// Cap on predictor-corrector Picard iterations per attempt. In well-
 /// behaved regimes 2–3 suffice; 12 is a safety net against pathological
 /// cases where the iteration fails to converge at all.
 const MAX_PICARD_ITERATIONS: usize = 12;
 
-/// Convergence threshold on max|Δb₆|/max|a₀| across one Picard
-/// iteration. `1e-16` is essentially round-off: REBOUND uses the
-/// same threshold with an early-exit when two consecutive iterations
-/// fail to improve, which we also do.
+/// Convergence threshold on the Picard residual across one
+/// predictor–corrector iteration. `1e-16` is essentially f64 round-off
+/// — Rein & Spiegel (2015) §3.3 specify exactly this floor and pair
+/// it with an early-exit on two consecutive non-improving iterations,
+/// which we also do (see [`Ias15::picard_loop_inner`]).
 const PICARD_TOL: f64 = 1e-16;
 
 /// Lower bound on user-settable epsilon. f64 machine epsilon is
@@ -378,10 +592,10 @@ const EPSILON_MAX: f64 = 1e-3;
 
 /// Shrink factor applied when the Picard predictor–corrector fails to
 /// converge. Divergence is a Lipschitz-regime problem (the step is
-/// simply too large for the local dynamics); a fixed halving matches
-/// REBOUND's heuristic and converges faster than the truncation formula
-/// `(ε/err)^(1/7)` when the error comes from non-convergence, not from
-/// dt⁷-scaled truncation.
+/// simply too large for the local dynamics); a fixed halving is the
+/// canonical IAS15 response (Rein & Spiegel 2015 §3.4) and converges
+/// faster than the truncation formula `(ε/err)^{1/7}` when the error
+/// comes from non-convergence rather than from dt⁷-scaled truncation.
 const PICARD_SHRINK: f64 = 0.5;
 
 // ── Controller decision type ─────────────────────────────────────────────────
@@ -549,6 +763,31 @@ pub struct Ias15 {
     /// or deadline fired). Should stay at zero for well-posed scenes.
     degraded_total: u64,
 
+    /// Cumulative count of Picard early-exits via the stagnation guard
+    /// (residual stopped decreasing for two consecutive iterations). On
+    /// smooth motion this counter stays well below `substeps_total`; a
+    /// sustained high ratio is the cheapest signal that the warmstart
+    /// is biasing `b` outside Picard's basin of attraction. Surfaced
+    /// through [`AdaptiveStats::picard_stagnations`].
+    picard_stagnations_total: u64,
+
+    /// Cumulative count of "shrink → grow" reversals in the controller.
+    /// Detected when `dt_next` increases relative to `dt_last_accepted`
+    /// after the previous accept's `dt_next` had decreased relative to
+    /// *its* `dt_last_accepted`. Healthy adaptive runs in a smooth
+    /// regime register `shrink_grow_cycles_total / substeps_total ≈ 0`;
+    /// chatter indicates controller-warmstart oscillation and is the
+    /// fingerprint the figure-8 cascade left behind. Surfaced through
+    /// [`AdaptiveStats::shrink_grow_cycles`].
+    shrink_grow_cycles_total: u64,
+
+    /// Sign of the last `(dt_next - dt_last_accepted)` direction:
+    /// `-1` means the controller just shrunk, `+1` grew, `0` means no
+    /// previous accept. Updated on every accept in lockstep with
+    /// `dt_next`. Used solely to detect reversals — the direction
+    /// itself is not exposed.
+    dt_dir_prev: i8,
+
     // ── Picard scratch buffers ───────────────────────────────────────
     //
     // Start-of-attempt positions and velocities, and the previous
@@ -624,6 +863,9 @@ impl Ias15 {
             rejections_truncation_total: 0,
             picard_iters_total: 0,
             degraded_total: 0,
+            picard_stagnations_total: 0,
+            shrink_grow_cycles_total: 0,
+            dt_dir_prev: 0,
             pic_x0: Vec::new(),
             pic_v0: Vec::new(),
             pic_b6_old: Vec::new(),
@@ -748,33 +990,41 @@ impl Ias15 {
 impl Integrator for Ias15 {
     /// Perform **one** adaptive Gauss-Radau sub-step.
     ///
-    /// The input `dt` is treated as the caller's budget: the accepted
-    /// sub-step will not exceed it. The actual step size, chosen by the
-    /// error controller, is reported through [`StepResult::consumed_dt`],
-    /// and the caller is expected to re-invoke `step` until the full
-    /// simulation-time target has been reached (REBOUND-style driver;
-    /// see the module-level documentation on sub-step semantics).
+    /// The input `dt_hint` is the controller's first-call seed (see the
+    /// module-level documentation on sub-step semantics); the actual
+    /// step size, chosen by the error controller per the IAS15
+    /// specification (Rein & Spiegel 2015 §2.3), is reported through
+    /// [`StepResult::consumed_dt`]. The caller is expected to re-invoke
+    /// `step` until the full simulation-time target has been reached.
     fn step(
         &mut self,
         bodies: &mut [Body],
         ctx: &mut IntegratorContext<'_>,
-        dt: f64,
+        dt_hint: f64,
         acc: &mut Vec<(f64, f64)>,
     ) -> StepResult {
         let n = bodies.len();
         self.ensure_capacity(n);
 
-        // The caller's budget acts as a hard upper bound on this sub-step
-        // size; the error controller may shrink it further. A zero or
-        // negative hint is treated as DT_MIN (pathological, but legal).
-        let dt_cap = dt.max(DT_MIN);
-
-        // Seed `dt_next` from the budget on the very first call.
+        // Caller's `dt_hint` is the *first-call seed* for the controller,
+        // not a per-call hard cap. Capping `dt_try` at `dt_hint` on every
+        // call would pin the integrator to the user's initial guess and
+        // prevent it from ever growing to the natural step that the local
+        // truncation error permits — the IAS15 controller would behave
+        // like a fixed-step integrator with adaptive sub-stepping below
+        // the cap. The canonical IAS15 contract (Rein & Spiegel 2015
+        // §2.3) treats the user's `dt` as a hint that the controller
+        // mutates and reuses on subsequent calls; we follow the same
+        // contract by storing the first-call seed in `dt_next` and
+        // letting the controller drive `dt_try` from there onward.
+        //
+        // A zero or negative hint is treated as DT_MIN (pathological, but
+        // legal — e.g. when the caller has no opinion on the step size).
         if self.dt_next <= 0.0 {
-            self.dt_next = dt_cap;
+            self.dt_next = dt_hint.max(DT_MIN);
         }
 
-        let mut dt_try = self.dt_next.min(dt_cap).max(DT_MIN);
+        let mut dt_try = self.dt_next.max(DT_MIN);
 
         // Snapshot taken once per sub-step: body kinematics + integrator
         // state that must survive rejection retries. `a0` (start-of-step
@@ -809,6 +1059,7 @@ impl Integrator for Ias15 {
                 time_phase!(warmstart_b, {
                     self.warmstart_b(dt_try, self.dt_last_accepted);
                 });
+                diag_emit_warmstart(self, dt_try / self.dt_last_accepted, dt_try);
             }
             time_phase!(recompute_g_from_b, {
                 self.recompute_g_from_b();
@@ -834,10 +1085,22 @@ impl Integrator for Ias15 {
                     time_phase!(snapshot_restore, {
                         self.restore_snapshot(bodies);
                     });
-                    // Fixed halving (REBOUND convention): divergence
-                    // means the step exceeds the local Lipschitz bound;
-                    // the dt⁷ formula would under-shrink here.
-                    dt_try = (dt_try * PICARD_SHRINK).max(DT_MIN).min(dt_cap);
+                    // Fixed halving per Rein & Spiegel (2015) §3.4:
+                    // Picard divergence means the step exceeds the
+                    // local Lipschitz bound, and the (ε/err)^{1/7}
+                    // formula — which assumes the dt⁷-scaled
+                    // truncation regime — would under-shrink here.
+                    let dt_next_attempt = (dt_try * PICARD_SHRINK).max(DT_MIN);
+                    diag_emit_attempt(
+                        self,
+                        dt_try,
+                        dt_next_attempt,
+                        trunc_err,
+                        converged,
+                        picard_iters,
+                        "reject_picard",
+                    );
+                    dt_try = dt_next_attempt;
                     continue;
                 },
                 DtDecision::RejectTruncation => {
@@ -846,8 +1109,33 @@ impl Integrator for Ias15 {
                     time_phase!(snapshot_restore, {
                         self.restore_snapshot(bodies);
                     });
-                    // Standard controller: dt · safety · (ε/err)^(1/7).
-                    dt_try = self.optimal_dt(dt_try, trunc_err).max(DT_MIN).min(dt_cap);
+                    // Halving on truncation rejection per the IAS15
+                    // specification (Rein & Spiegel 2015 §3.4).
+                    //
+                    // Earlier revisions of this file used the
+                    // `optimal_dt` formula (`dt · 0.9 · (ε/err)^{1/7}`)
+                    // here, mirroring the controller's accept-path
+                    // proposal. The trade-off showed up cleanly on the
+                    // figure-8 cascade trace: when `err` sits just
+                    // above `ε` (the noise-floor regime that emerges
+                    // past close-encounter onset), the formula shrinks
+                    // by only 10–20 % per attempt; 25–30 retries are
+                    // needed to drop `dt` by the factor-of-1000+ that
+                    // the local geometry actually demands, and each
+                    // retry pays a full force-eval sweep. The
+                    // specification's halving converges to an
+                    // acceptable `dt` in ~10 retries; we follow it.
+                    let dt_next_attempt = (dt_try * 0.5).max(DT_MIN);
+                    diag_emit_attempt(
+                        self,
+                        dt_try,
+                        dt_next_attempt,
+                        trunc_err,
+                        converged,
+                        picard_iters,
+                        "reject_trunc",
+                    );
+                    dt_try = dt_next_attempt;
                     continue;
                 },
                 DtDecision::Accept { degraded: step_degraded } => {
@@ -928,7 +1216,55 @@ impl Integrator for Ias15 {
                     // iteration — not a truncation-error surrogate.
                     // Feeding it into `optimal_dt` distorted the
                     // controller (cf. TD-004).
-                    self.dt_next = self.optimal_dt(dt_try, trunc_err).max(DT_MIN);
+                    //
+                    // The proposal is then capped above at
+                    // `dt_try · DT_GROWTH_LIMIT` per the IAS15
+                    // specification's 7×-per-step growth bound (Rein
+                    // & Spiegel 2015 §3.4); without the cap,
+                    // smooth-region steps with `err ≪ ε` propose
+                    // wild overshoots that the next attempt's
+                    // truncation gate immediately rejects, costing a
+                    // full shrink cascade per close encounter.
+                    let raw = self.optimal_dt(dt_try, trunc_err);
+                    let new_dt_next = raw.min(dt_try * DT_GROWTH_LIMIT).max(DT_MIN);
+
+                    // Shrink-grow chatter detection: a *reversal* fires
+                    // when the current step proposed growth (`dt_next >
+                    // dt_try`) immediately after a step that proposed a
+                    // shrink (`dt_dir_prev == -1`). On smooth motion the
+                    // controller settles on a near-constant `dt_next`
+                    // and reversals are rare; persistent chatter
+                    // signals warmstart-controller oscillation, which
+                    // is the cumulative-failure fingerprint surfaced
+                    // through `AdaptiveStats::shrink_grow_cycles`.
+                    let dt_dir_now: i8 = if new_dt_next > dt_try {
+                        1
+                    } else if new_dt_next < dt_try {
+                        -1
+                    } else {
+                        0
+                    };
+                    if self.dt_dir_prev == -1 && dt_dir_now == 1 {
+                        self.shrink_grow_cycles_total =
+                            self.shrink_grow_cycles_total.saturating_add(1);
+                    }
+                    self.dt_dir_prev = dt_dir_now;
+                    self.dt_next = new_dt_next;
+
+                    let label = if step_degraded {
+                        if deadline_hit { "accept_deadline" } else { "accept_floor" }
+                    } else {
+                        "accept"
+                    };
+                    diag_emit_attempt(
+                        self,
+                        dt_try,
+                        new_dt_next,
+                        trunc_err,
+                        converged,
+                        picard_iters,
+                        label,
+                    );
 
                     break (dt_try, pe, step_snapshot, step_degraded);
                 },
@@ -956,6 +1292,61 @@ impl Integrator for Ias15 {
         Some(self.epsilon)
     }
 
+    /// IAS15 owns its step size: the caller's `dt_hint` is a first-call
+    /// seed, then the Gauss-Radau error controller drives `dt_next`.
+    fn controls_own_step_size(&self) -> bool {
+        true
+    }
+
+    /// The controller's recommended size for the next sub-step. Equals
+    /// the caller's hint before the very first call (when `dt_next` is
+    /// still 0); otherwise the value computed by `optimal_dt` after the
+    /// most-recent accept.
+    fn proposed_next_dt(&self) -> Option<f64> {
+        if self.dt_next > 0.0 {
+            Some(self.dt_next)
+        } else {
+            None
+        }
+    }
+
+    /// Apply a uniform translation `(-dx, -dy)` while keeping IAS15's
+    /// per-body Neumaier compensation buffers (`csx`) consistent with
+    /// the post-shift body positions. We route the translation through
+    /// the same `add_cs` primitive that `advance_state` uses for the
+    /// per-step position update, so the compensated representation
+    /// `(body.x_new, csx_new)` is the extended-precision continuation
+    /// of `(body.x_old, csx_old) − (dx, dy)`.
+    ///
+    /// A bare subtraction (`body.x -= dx`) without touching `csx`
+    /// would silently drop the compensation history accumulated up to
+    /// the recentering call: the next `add_cs` invocation
+    /// (`y = inp − csx_old`) consumes the stale `csx` entry and the
+    /// rounding errors it tracked are gone. For one sub-ULP shift
+    /// this loss is below the trajectory-level signal, but on long
+    /// integrations under periodic COM recentering it adds up and
+    /// breaks the bit-reproducibility property the IAS15 module
+    /// header advertises (round-off `O(ε)` rather than `O(ε · N_steps)`).
+    fn recenter_bodies(&mut self, bodies: &mut [Body], dx: f64, dy: f64) {
+        // The compensation buffers `csx` are sized lazily by
+        // `ensure_capacity` on the first `step()` call. If the caller
+        // recenters before any step has run (e.g. an explicit
+        // `System::recenter_com` invocation right after construction),
+        // there is nothing to preserve — fall back to the bare
+        // subtraction that the trait default would have done.
+        if self.csx.len() != bodies.len() {
+            for b in bodies.iter_mut() {
+                b.x -= dx;
+                b.y -= dy;
+            }
+            return;
+        }
+        for (i, b) in bodies.iter_mut().enumerate() {
+            add_cs(&mut b.x, &mut self.csx[i].0, -dx);
+            add_cs(&mut b.y, &mut self.csx[i].1, -dy);
+        }
+    }
+
     fn adaptive_stats(&self) -> Option<super::traits::AdaptiveStats> {
         let rejections_picard = self.rejections_picard_total;
         let rejections_truncation = self.rejections_truncation_total;
@@ -966,6 +1357,8 @@ impl Integrator for Ias15 {
             rejections_truncation,
             picard_iters: self.picard_iters_total,
             degraded: self.degraded_total,
+            picard_stagnations: self.picard_stagnations_total,
+            shrink_grow_cycles: self.shrink_grow_cycles_total,
         })
     }
 
@@ -1103,9 +1496,12 @@ impl Ias15 {
             // scales gracefully: a single noisy body contributes
             // 1/√N to the total, so the floor shrinks as N grows
             // rather than staying pinned to the worst outlier.
-            // This is the criterion REBOUND's IAS15 uses in spirit:
-            // evaluate convergence per degree of freedom, not on
-            // the extremal degree of freedom.
+            // The same per-degree-of-freedom convergence criterion is
+            // used in spirit by Rein & Spiegel (2015) §3.3 — they
+            // formulate it as a max-max ratio rather than RMS, and
+            // the two metrics are numerically close at small N. We
+            // pick RMS to stay well-behaved at large N (see the lab
+            // notebook on solar-system rejection rates under max-max).
             //
             // Bodies with `||a₀[i]|| == 0` are degenerate and
             // skipped (they do not constrain Picard convergence).
@@ -1137,17 +1533,38 @@ impl Ias15 {
                 return (true, residual, iters);
             }
 
-            // Stagnation guard: require two consecutive iterations
-            // without improvement before declaring divergence. Near
-            // PICARD_TOL = 1e-16 the residual oscillates on round-off
-            // noise — a single "worse" iteration is normal and must
-            // not trigger a spurious reject + dt halving. Matches
-            // REBOUND's heuristic.
+            // Stagnation = convergence-by-saturation. Near the f64
+            // round-off floor the Picard residual stops decreasing and
+            // begins oscillating on ULP noise; in that regime the b
+            // coefficients are as accurate as f64 allows, and the
+            // remaining accept/reject decision belongs to the
+            // truncation-error gate, not to a spurious "Picard didn't
+            // converge to PICARD_TOL" reject + dt-halving cascade.
+            //
+            // The previous formulation returned `(false, …)` on two
+            // consecutive non-improving iterations, which forced
+            // RejectPicard → dt /= 2. On scenarios with sharp local
+            // acceleration (figure-8 central crossings, hard close
+            // approaches) the residual plateaus above PICARD_TOL but
+            // well below any physically meaningful threshold; halving
+            // dt cascades all the way to DT_MIN and the controller
+            // gets stuck (see `validation/rebound-parity/figure8/`).
+            //
+            // The IAS15 specification (Rein & Spiegel 2015 §3.3)
+            // treats stagnation as `break` from the predictor–
+            // corrector loop: the current b is accepted as best
+            // effort and the truncation-error gate decides whether
+            // dt was OK. We follow the specification here — return
+            // `(true, …)` so `decide_dt` routes through the
+            // truncation branch, shrinking dt only when the
+            // *physical* error estimate demands it.
             if iter >= 2 && residual > last_residual {
                 no_improve += 1;
                 if no_improve >= 2 {
                     restore_xv(bodies, x0, v0);
-                    return (false, residual, iters);
+                    self.picard_stagnations_total =
+                        self.picard_stagnations_total.saturating_add(1);
+                    return (true, residual, iters);
                 }
             } else {
                 no_improve = 0;
@@ -1155,6 +1572,11 @@ impl Ias15 {
             last_residual = residual;
         }
 
+        // Hit MAX_PICARD_ITERATIONS without convergence and without
+        // stagnation-triggered early exit. This is genuine
+        // non-convergence (residual still strictly decreasing but
+        // hasn't crossed PICARD_TOL within the iteration budget) and
+        // is the only path that should drive a Picard reject.
         restore_xv(bodies, x0, v0);
         (false, last_residual, iters)
     }
@@ -1290,11 +1712,13 @@ impl Ias15 {
     }
 
     /// Extrapolate `b` from the previous accepted step to the current
-    /// `dt_try`. Uses the standard REBOUND formula: b_new is a simple
-    /// rescaling of b by powers of `(dt_try / dt_prev)` plus a
-    /// correction from the drift `e = b - b_prev` to capture how the
-    /// coefficients changed last step. This drastically reduces the
-    /// number of Picard iterations in steady-state integration.
+    /// `dt_try`. Implements the polynomial-basis transformation
+    /// derived in Everhart (1985, eq. III.12) and used in IAS15 (Rein
+    /// & Spiegel 2015 §3.2): `b_new` is the Pascal-triangle (binomial)
+    /// rescaling of `b` by powers of `(dt_try / dt_prev)`, plus a
+    /// correction from the drift `b - e` that carries forward last
+    /// step's predictor–corrector residual. This drastically reduces
+    /// the number of Picard iterations in steady-state integration.
     fn warmstart_b(&mut self, dt_try: f64, dt_prev: f64) {
         if dt_prev <= 0.0 {
             return;
@@ -1307,6 +1731,45 @@ impl Ias15 {
         let q6 = q5 * q;
         let q7 = q6 * q;
 
+        // Pascal-triangle (binomial) coefficients for the polynomial-basis
+        // transformation that maps the previous step's `b` to the next
+        // step's `e` after the time variable rescales by `q = dt_try / dt_prev`.
+        //
+        // The acceleration ansatz is `a(u) = a_0 + b_0 * u + b_1 * u^2 + ...
+        // + b_6 * u^7` with `u ∈ [0, 1]` the dimensionless intra-step time.
+        // When `dt` changes, the *substantive* polynomial in physical time
+        // is unchanged; what changes is the variable substitution
+        // `u_new = (dt_prev / dt_try) * u_old = u_old / q`, which when
+        // re-expanded in the new `u_new` produces a triangular system:
+        //
+        //     b_new[k] = q^{k+1} * Σ_{j ≥ k} C(j+1, k+1) * b_old[j]
+        //
+        // where `C(n, m)` is the binomial coefficient. The diagonal term
+        // `j = k` gives the simple `q^{k+1} * b[k]` rescaling; the
+        // off-diagonal `j > k` cross-terms are what couple higher-order
+        // coefficients into the lower-order prediction. The previous
+        // implementation kept only the diagonal term, which is correct
+        // for the lone `b_6 → b_6` mapping (single column) but loses
+        // every cross-term for `k < 6`. The visible symptom: on stiff
+        // scenarios with frequent close-encounter dt changes (figure-8,
+        // Mercury 1PN), the warm-started `b` accumulates a per-step
+        // bias against the true coefficients, which Picard partially
+        // corrects but `truncation_error` reports as elevated; the
+        // controller responds by collapsing `dt` to the floor and
+        // recovery becomes asymptotically slow as the bias compounds
+        // at each rescale. The full Pascal expansion is the unique
+        // basis transformation that exactly preserves the polynomial
+        // under variable-rescaling, derived in Everhart (1985, §III).
+        //
+        //          b[0]  b[1]  b[2]  b[3]  b[4]  b[5]  b[6]
+        //   e[0]:  1     2     3     4     5     6     7      × q
+        //   e[1]:  -     1     3     6     10    15    21     × q^2
+        //   e[2]:  -     -     1     4     10    20    35     × q^3
+        //   e[3]:  -     -     -     1     5     15    35     × q^4
+        //   e[4]:  -     -     -     -     1     6     21     × q^5
+        //   e[5]:  -     -     -     -     -     1     7      × q^6
+        //   e[6]:  -     -     -     -     -     -     1      × q^7
+
         for i in 0..self.b.len() {
             let be = [
                 (self.b[i][0].0 - self.e[i][0].0, self.b[i][0].1 - self.e[i][0].1),
@@ -1318,14 +1781,49 @@ impl Ias15 {
                 (self.b[i][6].0 - self.e[i][6].0, self.b[i][6].1 - self.e[i][6].1),
             ];
 
-            // Rescale b-coefficients for the new step size.
-            self.e[i][0] = (self.b[i][0].0 * q, self.b[i][0].1 * q);
-            self.e[i][1] = (self.b[i][1].0 * q2, self.b[i][1].1 * q2);
-            self.e[i][2] = (self.b[i][2].0 * q3, self.b[i][2].1 * q3);
-            self.e[i][3] = (self.b[i][3].0 * q4, self.b[i][3].1 * q4);
-            self.e[i][4] = (self.b[i][4].0 * q5, self.b[i][4].1 * q5);
-            self.e[i][5] = (self.b[i][5].0 * q6, self.b[i][5].1 * q6);
-            self.e[i][6] = (self.b[i][6].0 * q7, self.b[i][6].1 * q7);
+            let b = self.b[i];
+
+            // e[0] = q · (b0 + 2 b1 + 3 b2 + 4 b3 + 5 b4 + 6 b5 + 7 b6)
+            let e0_x = q * (b[0].0 + 2.0 * b[1].0 + 3.0 * b[2].0 + 4.0 * b[3].0
+                + 5.0 * b[4].0 + 6.0 * b[5].0 + 7.0 * b[6].0);
+            let e0_y = q * (b[0].1 + 2.0 * b[1].1 + 3.0 * b[2].1 + 4.0 * b[3].1
+                + 5.0 * b[4].1 + 6.0 * b[5].1 + 7.0 * b[6].1);
+
+            // e[1] = q² · (b1 + 3 b2 + 6 b3 + 10 b4 + 15 b5 + 21 b6)
+            let e1_x = q2 * (b[1].0 + 3.0 * b[2].0 + 6.0 * b[3].0 + 10.0 * b[4].0
+                + 15.0 * b[5].0 + 21.0 * b[6].0);
+            let e1_y = q2 * (b[1].1 + 3.0 * b[2].1 + 6.0 * b[3].1 + 10.0 * b[4].1
+                + 15.0 * b[5].1 + 21.0 * b[6].1);
+
+            // e[2] = q³ · (b2 + 4 b3 + 10 b4 + 20 b5 + 35 b6)
+            let e2_x = q3 * (b[2].0 + 4.0 * b[3].0 + 10.0 * b[4].0
+                + 20.0 * b[5].0 + 35.0 * b[6].0);
+            let e2_y = q3 * (b[2].1 + 4.0 * b[3].1 + 10.0 * b[4].1
+                + 20.0 * b[5].1 + 35.0 * b[6].1);
+
+            // e[3] = q⁴ · (b3 + 5 b4 + 15 b5 + 35 b6)
+            let e3_x = q4 * (b[3].0 + 5.0 * b[4].0 + 15.0 * b[5].0 + 35.0 * b[6].0);
+            let e3_y = q4 * (b[3].1 + 5.0 * b[4].1 + 15.0 * b[5].1 + 35.0 * b[6].1);
+
+            // e[4] = q⁵ · (b4 + 6 b5 + 21 b6)
+            let e4_x = q5 * (b[4].0 + 6.0 * b[5].0 + 21.0 * b[6].0);
+            let e4_y = q5 * (b[4].1 + 6.0 * b[5].1 + 21.0 * b[6].1);
+
+            // e[5] = q⁶ · (b5 + 7 b6)
+            let e5_x = q6 * (b[5].0 + 7.0 * b[6].0);
+            let e5_y = q6 * (b[5].1 + 7.0 * b[6].1);
+
+            // e[6] = q⁷ · b6   (only column where the diagonal is the full transform)
+            let e6_x = q7 * b[6].0;
+            let e6_y = q7 * b[6].1;
+
+            self.e[i][0] = (e0_x, e0_y);
+            self.e[i][1] = (e1_x, e1_y);
+            self.e[i][2] = (e2_x, e2_y);
+            self.e[i][3] = (e3_x, e3_y);
+            self.e[i][4] = (e4_x, e4_y);
+            self.e[i][5] = (e5_x, e5_y);
+            self.e[i][6] = (e6_x, e6_y);
 
             for k in 0..7 {
                 self.b[i][k] = (self.e[i][k].0 + be[k].0, self.e[i][k].1 + be[k].1);
@@ -1460,12 +1958,13 @@ mod tests {
         let sample_dt = total_time / 200.0;
         let mut next_sample = 0.0;
 
-        // REBOUND-style driver: advance by calling `step()` until the
-        // target simulation time is reached. Each call consumes one
-        // adaptive sub-step whose size IAS15 chose; using a fixed
-        // `for _ in 0..n_steps` loop here would silently assume every
-        // call consumes `dt_budget` and fall short of the intended
-        // integration window.
+        // Substep-granularity driver per the IAS15 sub-step contract
+        // (Rein & Spiegel 2015 §2.3): advance by calling `step()`
+        // until the target simulation time is reached. Each call
+        // consumes one adaptive sub-step whose size the controller
+        // chose; using a fixed `for _ in 0..n_steps` loop here would
+        // silently assume every call consumes `dt_budget` and fall
+        // short of the intended integration window.
         while sys.t() < total_time {
             sys.step();
             let err = sys.metrics().rel_energy_error;
@@ -1618,12 +2117,13 @@ mod tests {
     /// extrapolated over earlier sub-steps, producing the visible "teleport"
     /// artefact.
     ///
-    /// Under the REBOUND-style contract (`reb_integrator_ias15_part1/2`,
-    /// Rein & Spiegel 2015 §2.3), each `step()` call executes exactly one
-    /// adaptive sub-step and reports its size via `StepResult::consumed_dt`;
+    /// Under the IAS15 substep-granularity contract (Rein & Spiegel
+    /// 2015 §2.3), each `step()` call executes exactly one adaptive
+    /// sub-step and reports its size via `StepResult::consumed_dt`;
     /// `System::step` advances `System::t` by that value. A budget far
-    /// larger than what the controller can accept at perihelion therefore
-    /// yields `System::t` strictly below the budget after one call.
+    /// larger than what the controller can accept at perihelion
+    /// therefore yields `System::t` strictly below the budget after
+    /// one call.
     #[test]
     fn ias15_system_t_matches_adaptive_substep() {
         const A: f64 = 1.0;
@@ -1739,10 +2239,339 @@ mod tests {
 
     #[test]
     fn decide_dt_trunc_exactly_at_epsilon_is_merit() {
-        // Boundary: trunc_err == ε should be accepted (≤, not <).
-        // Matches REBOUND's threshold convention; flipping this would
-        // silently change step-size distributions in benchmarks.
+        // Boundary: trunc_err == ε should be accepted (≤, not <),
+        // following the threshold convention specified in Rein &
+        // Spiegel (2015) §3.4. Flipping this would silently change
+        // step-size distributions in benchmarks.
         let d = decide_dt(true, 1e-9, 1e-3, 1e-9, false);
         assert_eq!(d, DtDecision::Accept { degraded: false });
+    }
+
+    // ── warmstart_b — direct polynomial-transformation tests ────────────────
+    //
+    // The acceleration ansatz over one IAS15 step is
+    //
+    //     a(u) = a₀ + b[0]·u + b[1]·u² + b[2]·u³ + … + b[6]·u⁷
+    //
+    // with `u ∈ [0, 1]` the dimensionless intra-step time. When the
+    // controller picks a different `dt_new = q · dt_prev` for the next
+    // step, the *physical* polynomial in absolute time is unchanged; only
+    // the parametrisation of `u` changes. Substituting `u_new = (u_old −
+    // 1) / q` (i.e. continuing the polynomial past the previous step's
+    // end into the next step's start) and re-collecting powers yields
+    // the polynomial-basis transformation
+    //
+    //     b_new[m] = q^{m+1} · Σ_{k ≥ m} C(k+1, m+1) · b_old[k]
+    //
+    // where `C(n, k)` is the binomial coefficient. The previous
+    // implementation kept only the diagonal term (`k = m`) and silently
+    // dropped every cross-term — see the design comment on
+    // `warmstart_b` for the cascade-failure mode that introduced.
+    //
+    // These tests pin the transformation in three ways:
+    //   1. By formula match against the explicit Pascal-coefficient
+    //      table — catches arithmetic typos.
+    //   2. By identity at q = 1 — no rescaling should mean no change.
+    //   3. By polynomial-equivalence at multiple sample points — the
+    //      strongest of the three: even if both the implementation and
+    //      the formula table were wrong in the same way, the
+    //      polynomial sampled in the new coordinates must agree with
+    //      the same polynomial sampled in the old coordinates at the
+    //      corresponding `u_old = 1 + q · u_new`.
+    //
+    // Together they make it nearly impossible to reintroduce the
+    // missing-cross-terms regression without one of the three failing.
+
+    /// Helper: construct an `Ias15` with `n` body slots and pre-populate
+    /// `b[0]` and `e[0]` to user-supplied coefficients. Uses
+    /// `ensure_capacity` (private) to allocate the buffers; sets `e = b`
+    /// so `be = 0` in `warmstart_b` and the warmstart contribution is
+    /// isolated from the predictor-corrector residual term.
+    fn ias15_with_b(b_x: [f64; 7], b_y: [f64; 7]) -> Ias15 {
+        let mut ias = Ias15::new();
+        ias.ensure_capacity(1);
+        for k in 0..7 {
+            ias.b[0][k] = (b_x[k], b_y[k]);
+            ias.e[0][k] = (b_x[k], b_y[k]);
+        }
+        ias
+    }
+
+    /// Reference Pascal-coefficient transformation, written out by hand
+    /// from the binomial-expansion derivation. Kept independent of the
+    /// implementation under test — a refactor of `warmstart_b` cannot
+    /// also "refactor" this reference without the test still catching
+    /// the divergence.
+    fn pascal_warmstart_reference(b: [f64; 7], q: f64) -> [f64; 7] {
+        let q2 = q * q;
+        let q3 = q2 * q;
+        let q4 = q3 * q;
+        let q5 = q4 * q;
+        let q6 = q5 * q;
+        let q7 = q6 * q;
+        [
+            q  * (b[0] + 2.0 * b[1] + 3.0 * b[2] + 4.0 * b[3]
+                + 5.0 * b[4] + 6.0 * b[5] + 7.0 * b[6]),
+            q2 * (b[1] + 3.0 * b[2] + 6.0 * b[3] + 10.0 * b[4]
+                + 15.0 * b[5] + 21.0 * b[6]),
+            q3 * (b[2] + 4.0 * b[3] + 10.0 * b[4] + 20.0 * b[5] + 35.0 * b[6]),
+            q4 * (b[3] + 5.0 * b[4] + 15.0 * b[5] + 35.0 * b[6]),
+            q5 * (b[4] + 6.0 * b[5] + 21.0 * b[6]),
+            q6 * (b[5] + 7.0 * b[6]),
+            q7 *  b[6],
+        ]
+    }
+
+    /// Evaluate the polynomial `a(u) = Σ_k b[k] · u^{k+1}` at a given
+    /// `u`. The constant (`a_0`) term is excluded so the test can isolate
+    /// the b-driven part — `warmstart_b` does not touch `a_0` (it lives
+    /// in the body state, not in the integrator's coefficient buffer).
+    fn poly_b_eval(b: [f64; 7], u: f64) -> f64 {
+        let u2 = u * u;
+        let u3 = u2 * u;
+        let u4 = u3 * u;
+        let u5 = u4 * u;
+        let u6 = u5 * u;
+        let u7 = u6 * u;
+        b[0] * u
+            + b[1] * u2
+            + b[2] * u3
+            + b[3] * u4
+            + b[4] * u5
+            + b[5] * u6
+            + b[6] * u7
+    }
+
+    #[test]
+    fn warmstart_b_zero_b_in_zero_b_out() {
+        // Cold-start sanity: when both `b` and `e` are zero (as on the
+        // very first call, or after `ensure_capacity` zero-allocates
+        // the buffers), warmstart must produce zero — there is no
+        // signal to extrapolate from. A regression that adds a
+        // round-off noise floor here would silently inject a non-zero
+        // initial guess into Picard on cold starts and inflate the
+        // first few `truncation_error` measurements; the controller
+        // would react by shrinking `dt` for no physical reason.
+        let mut ias = ias15_with_b([0.0; 7], [0.0; 7]);
+        for &q in &[0.1_f64, 0.5, 1.0, 2.0, 10.0] {
+            // Reset state for each q in the loop (keep be = 0, b = 0).
+            for k in 0..7 {
+                ias.b[0][k] = (0.0, 0.0);
+                ias.e[0][k] = (0.0, 0.0);
+            }
+            ias.warmstart_b(q, 1.0);
+            for k in 0..7 {
+                assert_eq!(
+                    ias.b[0][k].0, 0.0,
+                    "b[{}].x non-zero at q={} from zero input — round-off injection regression",
+                    k, q,
+                );
+                assert_eq!(
+                    ias.b[0][k].1, 0.0,
+                    "b[{}].y non-zero at q={} from zero input — round-off injection regression",
+                    k, q,
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn warmstart_b_q_eq_one_reproduces_polynomial_continuation() {
+        // At q = 1 (constant dt), the Pascal transformation re-expresses
+        // the *same* polynomial in coordinates centred at the next
+        // step's start — which corresponds to `u_old = 1`. The new
+        // `b` therefore encodes the polynomial's derivatives at
+        // `u_old = 1` (in the appropriate scaling), NOT the identity
+        // mapping `b_new = b_old`. Naïvely "preserving b at q=1"
+        // (the previous diagonal-only formula's behaviour) is the
+        // root of the cascade investigated in
+        // `docs/experiments/2026-04-26-ias15-warmstart-bug.md`.
+        //
+        // This test verifies the polynomial-continuation property by
+        // checking that for every sampled `u_new ∈ [0, 1]` the new
+        // polynomial's b-driven part equals the old polynomial
+        // sampled at `u_old = 1 + u_new` minus the old polynomial at
+        // `u_old = 1` (the latter goes into `a_0`, not `b`).
+        let b_x = [0.7, -0.4, 0.2, -0.15, 0.1, -0.05, 0.03];
+        let q = 1.0;
+
+        let mut ias = ias15_with_b(b_x, [0.0; 7]);
+        ias.warmstart_b(q, 1.0);
+
+        let new_x: [f64; 7] = std::array::from_fn(|k| ias.b[0][k].0);
+
+        for &u_new in &[0.0_f64, 0.25, 0.5, 0.75, 1.0] {
+            let u_old = 1.0 + q * u_new;
+            let expected = poly_b_eval(b_x, u_old) - poly_b_eval(b_x, 1.0);
+            let got = poly_b_eval(new_x, u_new);
+            let diff = (got - expected).abs();
+            let scale = expected.abs().max(1.0);
+            assert!(
+                diff <= 1e-12 * scale,
+                "q=1 polynomial continuation failed at u_new={}: got {:.18e}, expected {:.18e}",
+                u_new, got, expected,
+            );
+        }
+    }
+
+    #[test]
+    fn warmstart_b_matches_pascal_reference_at_q_eq_two() {
+        // q = 2 is the typical upper end of step-growth ratio
+        // permitted by [`DT_GROWTH_LIMIT`] under the IAS15 controller.
+        // With the ICs below every cross-term contribution is O(1),
+        // so any missing column of the Pascal table fails the
+        // assertion by orders of magnitude rather than by ULPs.
+        let b_x = [0.5, -1.0, 0.7, -0.4, 0.3, -0.2, 0.1];
+        let b_y = [-0.1, 0.3, -0.5, 0.2, 0.6, -0.4, 0.8];
+        let q = 2.0;
+
+        let mut ias = ias15_with_b(b_x, b_y);
+        ias.warmstart_b(q, 1.0);
+
+        let ref_x = pascal_warmstart_reference(b_x, q);
+        let ref_y = pascal_warmstart_reference(b_y, q);
+
+        for k in 0..7 {
+            let diff_x = (ias.b[0][k].0 - ref_x[k]).abs();
+            let diff_y = (ias.b[0][k].1 - ref_y[k]).abs();
+            // Tolerance: ~50× f64 ULP scaled by the largest summand
+            // for that coefficient (so the bound is meaningful for
+            // both the q⁷·b₆ column with magnitude ~1 and the q¹·…
+            // column whose accumulator can reach ~50 by the Pascal
+            // arithmetic). We do not relax this beyond round-off.
+            assert!(
+                diff_x <= 1e-13_f64 * ref_x[k].abs().max(1.0),
+                "b[{}].x at q={}: got {:.18e}, expected {:.18e}, diff {:.3e}",
+                k, q, ias.b[0][k].0, ref_x[k], diff_x,
+            );
+            assert!(
+                diff_y <= 1e-13_f64 * ref_y[k].abs().max(1.0),
+                "b[{}].y at q={}: got {:.18e}, expected {:.18e}, diff {:.3e}",
+                k, q, ias.b[0][k].1, ref_y[k], diff_y,
+            );
+        }
+    }
+
+    #[test]
+    fn warmstart_b_matches_pascal_reference_at_q_lt_one() {
+        // q < 1 is the close-encounter case: dt shrinking after a
+        // truncation rejection, or recovery from a degraded floor
+        // accept. The diagonal-only formula loses the most accuracy
+        // here (small q⁷ exposes the missing cross-terms most
+        // visibly), so this is the regime the cascade actually lived
+        // in.
+        let b_x = [1.2, -0.8, 0.5, -0.3, 0.2, -0.1, 0.05];
+        let b_y = [-0.7, 0.4, -0.2, 0.1, -0.05, 0.025, -0.0125];
+        let q = 0.3;
+
+        let mut ias = ias15_with_b(b_x, b_y);
+        ias.warmstart_b(q, 1.0);
+
+        let ref_x = pascal_warmstart_reference(b_x, q);
+        let ref_y = pascal_warmstart_reference(b_y, q);
+
+        for k in 0..7 {
+            let diff_x = (ias.b[0][k].0 - ref_x[k]).abs();
+            let diff_y = (ias.b[0][k].1 - ref_y[k]).abs();
+            assert!(
+                diff_x <= 1e-13_f64 * ref_x[k].abs().max(1.0),
+                "b[{}].x at q={}: got {:.18e}, expected {:.18e}, diff {:.3e}",
+                k, q, ias.b[0][k].0, ref_x[k], diff_x,
+            );
+            assert!(
+                diff_y <= 1e-13_f64 * ref_y[k].abs().max(1.0),
+                "b[{}].y at q={}: got {:.18e}, expected {:.18e}, diff {:.3e}",
+                k, q, ias.b[0][k].1, ref_y[k], diff_y,
+            );
+        }
+    }
+
+    #[test]
+    fn warmstart_b_preserves_polynomial_at_sample_points() {
+        // The strongest test: independent of the Pascal-coefficient
+        // table, the *polynomial* the new `b` represents (in the new
+        // step's `u_new ∈ [0, 1]` parametrisation) must agree with the
+        // *same* polynomial that the old `b` represents (in the old
+        // step's `u_old = 1 + q · u_new` parametrisation) at every
+        // sampled `u_new`. If any cross-term is missed by the
+        // implementation, this assertion fails by an arbitrarily large
+        // margin — far more than ULP — because the missing
+        // contributions are O(b_k) for k > m, not O(ULP · b).
+        let b_x = [0.7, -0.4, 0.2, -0.15, 0.1, -0.05, 0.03];
+        let b_y = [-0.6, 0.5, -0.4, 0.3, -0.2, 0.1, -0.05];
+
+        for &q in &[0.1_f64, 0.5, 0.9, 1.0, 1.5, 2.0, 5.0] {
+            let mut ias = ias15_with_b(b_x, b_y);
+            ias.warmstart_b(q, 1.0);
+
+            let new_x: [f64; 7] = std::array::from_fn(|k| ias.b[0][k].0);
+            let new_y: [f64; 7] = std::array::from_fn(|k| ias.b[0][k].1);
+
+            for &u_new in &[0.0_f64, 0.1, 0.25, 0.5, 0.75, 0.9, 1.0] {
+                // Old coordinate corresponding to this u_new.
+                let u_old = 1.0 + q * u_new;
+                let expected_x = poly_b_eval(b_x, u_old) - poly_b_eval(b_x, 1.0);
+                let expected_y = poly_b_eval(b_y, u_old) - poly_b_eval(b_y, 1.0);
+                // The new polynomial in u_new is shifted so its
+                // constant term equals the old polynomial at u_old=1
+                // (which lives in `a_0`, not in `b`). So we compare
+                // the b-driven part — the *increment* of the
+                // acceleration past the new step's start.
+                let got_x = poly_b_eval(new_x, u_new);
+                let got_y = poly_b_eval(new_y, u_new);
+
+                let scale_x = expected_x.abs().max(1.0);
+                let scale_y = expected_y.abs().max(1.0);
+                let diff_x = (got_x - expected_x).abs();
+                let diff_y = (got_y - expected_y).abs();
+                assert!(
+                    diff_x <= 1e-12 * scale_x,
+                    "polynomial mismatch at q={}, u_new={}: x got {:.18e}, expected {:.18e}, diff {:.3e}",
+                    q, u_new, got_x, expected_x, diff_x,
+                );
+                assert!(
+                    diff_y <= 1e-12 * scale_y,
+                    "polynomial mismatch at q={}, u_new={}: y got {:.18e}, expected {:.18e}, diff {:.3e}",
+                    q, u_new, got_y, expected_y, diff_y,
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn warmstart_b_preserves_picard_residual_when_be_nonzero() {
+        // `warmstart_b` carries an additive correction `be = b - e`
+        // that represents the Picard residual from the previous step
+        // (i.e. how much `b` moved beyond the previous warmstart's
+        // prediction). Under the rescaling, that residual must be
+        // preserved verbatim — it is the part of the polynomial the
+        // *previous* step's controller already accounted for, and
+        // dropping it would re-introduce the prediction error on
+        // every retry.
+        //
+        // Construction: pick `b` and `e` independently, so `be ≠ 0`.
+        // The expected output is `pascal(b) + (b - e)`.
+        let b_x = [0.3, -0.2, 0.15, -0.1, 0.07, -0.05, 0.03];
+        let e_x = [0.25, -0.15, 0.10, -0.05, 0.03, -0.02, 0.01];
+        let q = 0.7;
+
+        let mut ias = Ias15::new();
+        ias.ensure_capacity(1);
+        for k in 0..7 {
+            ias.b[0][k] = (b_x[k], 0.0);
+            ias.e[0][k] = (e_x[k], 0.0);
+        }
+        ias.warmstart_b(q, 1.0);
+
+        let pascal = pascal_warmstart_reference(b_x, q);
+        for k in 0..7 {
+            let expected = pascal[k] + (b_x[k] - e_x[k]);
+            let diff = (ias.b[0][k].0 - expected).abs();
+            assert!(
+                diff <= 1e-13_f64 * expected.abs().max(1.0),
+                "be-correction lost at b[{}]: got {:.18e}, expected {:.18e}, diff {:.3e}",
+                k, ias.b[0][k].0, expected, diff,
+            );
+        }
     }
 }

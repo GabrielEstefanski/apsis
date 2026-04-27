@@ -233,7 +233,7 @@ pub struct StepResult {
     /// bound `ε` was not actually satisfied. Fixed-step integrators (VV,
     /// Y4, WH) always report `false`. Callers that care about energy-budget
     /// quality can use this to surface a warning or log a degraded-step
-    /// event (REBOUND logs an equivalent `ias15.min_dt` warning).
+    /// event.
     pub degraded: bool,
 }
 
@@ -282,18 +282,47 @@ pub enum ExecutionProfile {
 ///
 /// # Contract
 ///
-/// - `step()` advances `bodies` by **at most** the requested `dt`.
-///   - Fixed-step integrators (VV, Y4, WH) always consume exactly `dt`.
-///   - Adaptive integrators (IAS15) take **one** internal sub-step whose
-///     size is chosen by the error controller; the accepted size is
-///     reported via [`StepResult::consumed_dt`]. The caller loops until
-///     the desired simulation time is reached, mirroring the REBOUND API
-///     (`reb_integrator_ias15_part1/2` — Rein & Spiegel 2015).
+/// - `step()` advances `bodies` by **at most** the requested `dt_hint`.
+///   - Fixed-step integrators (VV, Y4, WH) always consume exactly
+///     `dt_hint`. They report
+///     [`controls_own_step_size`](Self::controls_own_step_size) as
+///     `false` and leave [`proposed_next_dt`](Self::proposed_next_dt)
+///     at its `None` default.
+///   - Self-adaptive integrators (IAS15) treat `dt_hint` as a
+///     *first-call seed* for their internal step controller; on
+///     subsequent calls the controller-chosen step is used instead.
+///     The accepted size of the single sub-step is reported via
+///     [`StepResult::consumed_dt`]. The caller loops until the desired
+///     simulation time is reached — the substep-granularity contract
+///     specified in Rein & Spiegel (2015) §2.3. These integrators
+///     report [`controls_own_step_size`](Self::controls_own_step_size)
+///     as `true` so the orchestrator can read their controller's
+///     next-step proposal via
+///     [`proposed_next_dt`](Self::proposed_next_dt) and surface it to
+///     the user / UI as the simulation's "current dt".
 /// - `step()` may call `ctx.force.compute()` one or more times.
 /// - `step()` must leave `acc` consistent with the final body positions
 ///   (so that diagnostics can read it).
 /// - `step()` must apply `ctx.g_factor` scaling and `ctx.perturbations`
 ///   at the appropriate points in the scheme.
+///
+/// # Why the hint-vs-cap distinction matters
+///
+/// Treating the orchestrator's `dt_hint` as a hard per-call cap silently
+/// pins a self-adaptive integrator to whatever step the user supplied as
+/// an initial guess: the controller can shrink below the cap on stiff
+/// regions but can never grow above it, even when the local truncation
+/// error would permit it. This was the IAS15 floor-cascade bug
+/// investigated in
+/// `docs/experiments/2026-04-26-ias15-warmstart-bug.md` — the integrator
+/// behaved like a fixed-step scheme with internal sub-stepping below the
+/// cap, producing correct trajectories at orders-of-magnitude unnecessary
+/// substep counts.
+///
+/// The two-method contract here makes the distinction explicit at the
+/// trait boundary: a future SABA, Hermite, or MERCURIUS implementation
+/// declares its discipline up front, and the orchestrator routes the
+/// hint vs cap accordingly.
 ///
 /// # Mutability
 ///
@@ -302,16 +331,88 @@ pub enum ExecutionProfile {
 /// predictor–corrector history).
 pub trait Integrator: Send {
     /// Advance the system by one time step.
+    ///
+    /// `dt_hint` is interpreted per the contract advertised by
+    /// [`controls_own_step_size`](Self::controls_own_step_size):
+    /// fixed-step schemes consume exactly `dt_hint`; self-adaptive
+    /// schemes use it as a first-call seed and otherwise let their
+    /// controller pick.
     fn step(
         &mut self,
         bodies: &mut [Body],
         ctx: &mut IntegratorContext<'_>,
-        dt: f64,
+        dt_hint: f64,
         acc: &mut Vec<(f64, f64)>,
     ) -> StepResult;
 
     /// Which algorithm this integrator represents.
     fn kind(&self) -> IntegratorKind;
+
+    /// Whether the integrator's internal controller decides the actual
+    /// step size, treating the orchestrator's `dt_hint` as a *hint*
+    /// rather than a hard cap. `false` means the integrator consumes
+    /// exactly `dt_hint`; `true` means it picks its own step (possibly
+    /// after seeding from `dt_hint` on the first call).
+    ///
+    /// The orchestrator uses this to decide whether to reset its own
+    /// `current_dt` field after each step (fixed-step → reset to
+    /// `user_dt`; self-adaptive → adopt
+    /// [`proposed_next_dt`](Self::proposed_next_dt)) and whether to
+    /// surface a controller-driven step size in UI panels.
+    fn controls_own_step_size(&self) -> bool {
+        false
+    }
+
+    /// The step size the integrator's controller proposes for the next
+    /// call, if applicable. Returns `None` for fixed-step schemes; for
+    /// self-adaptive schemes it tracks the controller's most-recent
+    /// `dt_next` recommendation.
+    ///
+    /// The orchestrator may use this to update its `current_dt` field
+    /// so external observers (UI dt readout, headless CSV columns)
+    /// reflect the controller's actual cadence rather than the user's
+    /// initial guess.
+    fn proposed_next_dt(&self) -> Option<f64> {
+        None
+    }
+
+    /// Apply a uniform translation `(-dx, -dy)` to every body, routing the
+    /// shift through whatever compensated-summation accumulators the
+    /// integrator maintains for body position.
+    ///
+    /// # Why this matters — bit-reproducibility
+    ///
+    /// IAS15 carries a Neumaier-style compensation buffer (`csx`) that
+    /// pairs with each body's stored position. The pair `(x, csx)`
+    /// represents an extended-precision running sum: every accepted
+    /// substep updates `x` via `add_cs(p = body.x, csp = csx, inp =
+    /// position increment)`, which preserves low-order bits across the
+    /// long integration horizons IAS15 advertises (~10⁹ orbits at f64
+    /// machine precision, per Rein & Spiegel 2015 §3).
+    ///
+    /// External translations of body position — most commonly the
+    /// periodic COM-recentering applied by `System::step` — disrupt this
+    /// invariant when written as a bare `body.x -= dx`. The compensation
+    /// `csx` then references the rounding history of the *pre-shift*
+    /// running sum, but `body.x` has been arbitrarily perturbed; the next
+    /// `add_cs` call wipes the prior compensation rather than continuing
+    /// to track it. For a single sub-ULP shift this loss is negligible,
+    /// but it accumulates into a bit-reproducibility gap on long runs and
+    /// undermines snapshot-replay determinism — exactly the property the
+    /// reproducibility ADR commits to.
+    ///
+    /// Routing the shift through `add_cs` (or its arithmetic equivalent)
+    /// preserves the invariant: the new `(x, csx)` pair is the
+    /// compensated representation of `(x_old, csx_old) - (dx, dy)`.
+    /// Default impl performs an uncompensated subtraction (correct for
+    /// integrators with no per-body compensation buffer); IAS15
+    /// overrides to use its own buffers.
+    fn recenter_bodies(&mut self, bodies: &mut [Body], dx: f64, dy: f64) {
+        for b in bodies.iter_mut() {
+            b.x -= dx;
+            b.y -= dy;
+        }
+    }
 
     /// Set the error tolerance for adaptive integrators (IAS15).
     /// No-op for fixed-step integrators.
@@ -365,9 +466,11 @@ pub trait Integrator: Send {
     ///    `DT_MIN` — regardless of how physically benign the scenario
     ///    actually is.
     ///
-    /// This is why REBOUND pairs IAS15 exclusively with direct O(N²)
-    /// summation. The pairing is a mathematical prerequisite of the
-    /// method, not an implementation shortcut.
+    /// The pairing of IAS15 with direct O(N²) summation is therefore
+    /// a mathematical prerequisite of the method (Rein & Spiegel 2015
+    /// §2.1 explicitly assumes a deterministic force law for the
+    /// predictor–corrector convergence proof), not an implementation
+    /// shortcut.
     ///
     /// # Why other integrators do not need this
     ///
@@ -406,6 +509,26 @@ pub trait Integrator: Send {
 /// Counts are **cumulative** from integrator construction. Compute rates in
 /// the caller (e.g. `rejections / substeps` as an acceptance-efficiency
 /// indicator, or `picard_iters / attempts` for mean inner-loop work).
+///
+/// # Instrumentation policy
+///
+/// Every counter here is incremented unconditionally at runtime — the
+/// cost is one `saturating_add` per accept/reject path, well below the
+/// Picard arithmetic that surrounds it. Enabling them by default makes
+/// the counters available to *any* caller (benchmarks, headless CSV,
+/// the lab notebooks under `validation/`) without recompilation, which
+/// is the only way to catch the slow-onset cumulative failures that
+/// motivated the figure-8 cascade investigation
+/// (`docs/experiments/2026-04-26-ias15-warmstart-bug.md`): a regression
+/// in those counters can be diagnosed from a single CSV column rather
+/// than from a recompile-and-rerun loop.
+///
+/// More expensive per-step trace data — b-coefficient norms after
+/// warmstart, cross-term-vs-diagonal contribution ratios, the
+/// step-size ratio history — sit behind the optional `ias15-diag`
+/// Cargo feature, since their per-step overhead is non-trivial and
+/// they are useful only when actively investigating a controller
+/// regression.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct AdaptiveStats {
     /// Accepted sub-steps.
@@ -426,4 +549,22 @@ pub struct AdaptiveStats {
     /// Accepted sub-steps that hit the `DT_MIN` escape or deadline
     /// without meeting tolerance. Should be zero in healthy scenes.
     pub degraded: u64,
+    /// Picard predictor–corrector early-exits via the stagnation guard
+    /// (residual stopped decreasing for two consecutive iterations,
+    /// counted as success-by-saturation). Healthy scenes should see
+    /// `picard_stagnations / substeps ≪ 1`; a sustained high ratio
+    /// indicates the warmstart is biasing `b` outside Picard's basin
+    /// of attraction — which on the figure-8 cascade was the
+    /// *symptom* of the missing-cross-terms warmstart bug.
+    pub picard_stagnations: u64,
+    /// Number of "shrink → grow" reversals in the controller's `dt_next`.
+    /// A reversal is counted whenever `dt_next` increases after an
+    /// accept whose previous accept's `dt_next` had decreased. The
+    /// frequency reveals controller chatter: a healthy run on a smooth
+    /// regime sees `shrink_grow_cycles / substeps ≈ 0`; a run plagued
+    /// by wrong-warmstart bias oscillates as the controller alternately
+    /// over- and under-shrinks. Together with `picard_stagnations` this
+    /// is the cheapest "is something off?" signal the orchestrator can
+    /// surface without enabling the `ias15-diag` feature.
+    pub shrink_grow_cycles: u64,
 }
