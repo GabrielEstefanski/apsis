@@ -33,3 +33,4 @@ pub mod domain;
 pub mod io;
 pub mod physics;
 pub mod templates;
+pub mod units;

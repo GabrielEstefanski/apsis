@@ -126,9 +126,12 @@ def test_system_constructor_accepts_string_or_enum_integrator() -> None:
     sun = apsis.Body.star(mass=1.0)
     earth = apsis.Body.rocky(mass=3e-6, position=(1.0, 0.0), velocity=(0.0, 1.0))
 
-    sys_str = apsis.System(bodies=[sun, earth], integrator="ias15", dt=1e-3)
+    sys_str = apsis.System(bodies=[sun, earth], units=apsis.units.CANONICAL, integrator="ias15", dt=1e-3)
     sys_enum = apsis.System(
-        bodies=[sun, earth], integrator=apsis.IntegratorKind.IAS15, dt=1e-3
+        bodies=[sun, earth],
+        units=apsis.units.CANONICAL,
+        integrator=apsis.IntegratorKind.IAS15,
+        dt=1e-3,
     )
     assert sys_str.integrator == apsis.IntegratorKind.IAS15
     assert sys_enum.integrator == apsis.IntegratorKind.IAS15
@@ -137,7 +140,7 @@ def test_system_constructor_accepts_string_or_enum_integrator() -> None:
 def test_system_string_is_case_insensitive() -> None:
     """The slug parser is liberal: ``"IAS15"`` works as well as ``"ias15"``."""
     sun = apsis.Body.star(mass=1.0)
-    sys = apsis.System(bodies=[sun], integrator="IAS15", dt=1e-3)
+    sys = apsis.System(bodies=[sun], units=apsis.units.CANONICAL, integrator="IAS15", dt=1e-3)
     assert sys.integrator == apsis.IntegratorKind.IAS15
 
 
@@ -145,14 +148,14 @@ def test_system_rejects_unknown_integrator() -> None:
     """Typos and unknown spellings raise ``ValueError`` listing valid choices."""
     sun = apsis.Body.star(mass=1.0)
     with pytest.raises(ValueError, match="integrator"):
-        apsis.System(bodies=[sun], integrator="ias16", dt=1e-3)
+        apsis.System(bodies=[sun], units=apsis.units.CANONICAL, integrator="ias16", dt=1e-3)
 
 
 def test_system_run_loop_advances_time() -> None:
     """``integrate_for`` moves ``t`` forward and bumps the step counter."""
     sun = apsis.Body.star(mass=1.0).unsoftened()
     earth = apsis.Body.rocky(mass=3e-6, position=(1.0, 0.0), velocity=(0.0, 1.0)).unsoftened()
-    sys = apsis.System(bodies=[sun, earth], integrator="ias15", dt=1e-3)
+    sys = apsis.System(bodies=[sun, earth], units=apsis.units.CANONICAL, integrator="ias15", dt=1e-3)
 
     assert sys.t == 0.0
     assert sys.steps == 0
@@ -177,7 +180,7 @@ def test_system_energy_delta_is_machine_precision_on_kepler() -> None:
              .at((1.0, 0.0))
              .with_velocity((0.0, 1.0))
              .unsoftened())
-    sys = apsis.System(bodies=[sun, earth], integrator="ias15", dt=1e-3)
+    sys = apsis.System(bodies=[sun, earth], units=apsis.units.CANONICAL, integrator="ias15", dt=1e-3)
 
     sys.integrate_for(2 * 3.14159)
 
@@ -193,7 +196,7 @@ def _two_body_kepler_system() -> apsis.System:
              .at((1.0, 0.0))
              .with_velocity((0.0, 1.0))
              .unsoftened())
-    return apsis.System(bodies=[sun, earth], integrator="ias15", dt=1e-3)
+    return apsis.System(bodies=[sun, earth], units=apsis.units.CANONICAL, integrator="ias15", dt=1e-3)
 
 
 def test_sample_returns_trajectory_with_expected_shape() -> None:
@@ -298,3 +301,119 @@ def test_sample_energy_drift_within_one_orbit_is_machine_precision() -> None:
 
     rel_drift = (traj.energy - traj.energy[0]) / abs(traj.energy[0])
     assert np.max(np.abs(rel_drift)) < 1e-12
+
+
+# ── UnitSystem ────────────────────────────────────────────────────────────────
+
+
+def test_named_unit_systems_are_exposed_as_singletons() -> None:
+    """``apsis.units.{SOLAR,SI,CANONICAL,HENON,CGS}`` are pre-built ``UnitSystem`` instances."""
+    for name in ("CANONICAL", "HENON", "SI", "SOLAR", "CGS"):
+        u = getattr(apsis.units, name)
+        assert isinstance(u, apsis.UnitSystem)
+
+
+def test_canonical_g_is_one_and_solar_g_is_near_four_pi_squared() -> None:
+    """Identity checks on the derived gravitational constant."""
+    assert apsis.units.CANONICAL.g == 1.0
+    assert apsis.units.HENON.g == 1.0
+    assert apsis.units.SI.g == pytest.approx(apsis.units.G_SI)
+
+    four_pi_sq = 4.0 * 3.141592653589793 ** 2
+    assert abs(apsis.units.SOLAR.g - four_pi_sq) / four_pi_sq < 1e-2
+
+
+def test_unit_system_conversions_round_trip() -> None:
+    """Applying ``to_si`` then ``from_si`` returns the original value within ULP."""
+    u = apsis.units.SOLAR
+    for value in (1.0, 0.5, 1.234567):
+        assert u.length_from_si(u.length_to_si(value)) == pytest.approx(value, abs=1e-15)
+        assert u.time_from_si(u.time_to_si(value)) == pytest.approx(value, abs=1e-15)
+        assert u.mass_from_si(u.mass_to_si(value)) == pytest.approx(value, abs=1e-15)
+
+
+def test_unit_system_conversions_apply_named_scales() -> None:
+    """``solar().length_to_si(1.0)`` is one AU in metres, etc."""
+    u = apsis.units.SOLAR
+    assert u.length_to_si(1.0) == pytest.approx(apsis.units.AU_M)
+    assert u.time_to_si(1.0) == pytest.approx(apsis.units.YR_S)
+    assert u.mass_to_si(1.0) == pytest.approx(apsis.units.MSUN_KG)
+
+
+def test_unit_system_custom_validates_at_boundary() -> None:
+    """Zero, negative, infinite, and NaN scales raise ``ValueError``."""
+    for bad in (0.0, -1.0, float("inf"), float("nan")):
+        with pytest.raises(ValueError, match="length_m"):
+            apsis.UnitSystem.custom(length_m=bad, time_s=1.0, mass_kg=1.0)
+        with pytest.raises(ValueError, match="time_s"):
+            apsis.UnitSystem.custom(length_m=1.0, time_s=bad, mass_kg=1.0)
+        with pytest.raises(ValueError, match="mass_kg"):
+            apsis.UnitSystem.custom(length_m=1.0, time_s=1.0, mass_kg=bad)
+
+
+def test_unit_system_equality_compares_scales_not_labels() -> None:
+    """Two systems with identical SI scales are equal regardless of labels."""
+    custom = apsis.UnitSystem.custom(
+        length_m=apsis.units.AU_M,
+        time_s=apsis.units.YR_S,
+        mass_kg=apsis.units.MSUN_KG,
+    )
+    assert custom == apsis.units.SOLAR
+    # But their display labels differ — the SOLAR factory carries "AU"/"yr"/"Msun",
+    # custom() uses generic placeholders.
+    assert custom.length_label != apsis.units.SOLAR.length_label
+
+
+def test_system_requires_units_kwarg() -> None:
+    """Constructing a System without ``units=`` is a ``TypeError``."""
+    sun = apsis.Body.star(mass=1.0)
+    with pytest.raises(TypeError):
+        apsis.System(bodies=[sun], integrator="ias15", dt=1e-3)  # type: ignore[call-arg]
+
+
+def test_system_units_snapshot_is_immutable_across_integration() -> None:
+    """The units snapshot survives integration unchanged.
+
+    Locks the invariant the design hinges on: once chosen, the unit
+    system can never silently change. Without this guarantee, every
+    energy / momentum baseline captured at construction would become
+    physically meaningless mid-run.
+    """
+    sun = apsis.Body.star(mass=1.0).unsoftened()
+    earth = (apsis.Body.rocky(mass=3e-6)
+             .at((1.0, 0.0))
+             .with_velocity((0.0, 1.0))
+             .unsoftened())
+    sys = apsis.System(
+        bodies=[sun, earth],
+        units=apsis.units.SOLAR,
+        integrator="ias15",
+        dt=1e-3,
+    )
+    units_at_construction = sys.units
+    assert units_at_construction == apsis.units.SOLAR
+
+    sys.integrate_for(1.0)
+
+    assert sys.units == units_at_construction
+    assert sys.units == apsis.units.SOLAR
+
+
+def test_system_units_propagates_to_g_factor() -> None:
+    """The system's effective G is read from the chosen unit system at construction."""
+    sun = apsis.Body.star(mass=1.0).unsoftened()
+    sys_solar = apsis.System(
+        bodies=[sun],
+        units=apsis.units.SOLAR,
+        integrator="ias15",
+        dt=1e-3,
+    )
+    sys_canon = apsis.System(
+        bodies=[sun],
+        units=apsis.units.CANONICAL,
+        integrator="ias15",
+        dt=1e-3,
+    )
+    assert sys_solar.units.g != sys_canon.units.g
+    assert sys_canon.units.g == 1.0
+    assert abs(sys_solar.units.g - 39.478) < 0.05

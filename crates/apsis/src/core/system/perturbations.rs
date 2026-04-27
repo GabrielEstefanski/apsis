@@ -149,6 +149,7 @@ impl System {
 mod tests {
     use super::*;
     use crate::domain::body::Body;
+    use crate::units::UnitSystem;
 
     #[test]
     fn with_exact_gravity_zeroes_existing_bodies() {
@@ -156,7 +157,7 @@ mod tests {
         // Pre-condition: material-scaled softening is nonzero.
         assert!(bodies.iter().all(|b| b.softening > 0.0));
 
-        let sys = System::new(bodies).with_exact_gravity();
+        let sys = System::new(bodies, UnitSystem::canonical()).with_exact_gravity();
         assert!(sys.bodies().iter().all(|b| b.softening == 0.0));
         assert_eq!(sys.softening_scale_value(), 0.0);
     }
@@ -165,7 +166,7 @@ mod tests {
     fn with_exact_gravity_persists_for_later_added_bodies() {
         // Bodies added *after* `with_exact_gravity` must also end up
         // unsoftened — otherwise the guarantee is leaky.
-        let mut sys = System::new(vec![Body::star(1.0)]).with_exact_gravity();
+        let mut sys = System::new(vec![Body::star(1.0)], UnitSystem::canonical()).with_exact_gravity();
         sys.add_body(Body::rocky(3e-6));
         assert!(sys.bodies().iter().all(|b| b.softening == 0.0));
     }

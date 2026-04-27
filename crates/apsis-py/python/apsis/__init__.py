@@ -44,13 +44,17 @@ from apsis._native import (
     IntegratorKind,
     System,
     Trajectory,
+    UnitSystem,
     __version__,
 )
+from apsis._native import units
 
 __all__ = [
     "Body",
     "IntegratorKind",
     "System",
     "Trajectory",
+    "UnitSystem",
+    "units",
     "__version__",
 ]

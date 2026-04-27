@@ -37,6 +37,7 @@ use crate::body::PyBody;
 use crate::convert::value_error;
 use crate::integrator::{IntegratorKind as PyIntegratorKind, resolve as resolve_integrator};
 use crate::trajectory::PyTrajectory;
+use crate::units::PyUnitSystem;
 
 /// Orchestrator for the simulation: bodies, chosen integrator, and
 /// the run loop. Bodies are passed at construction time; the
@@ -80,24 +81,31 @@ pub(crate) struct PySystem {
 
 #[pymethods]
 impl PySystem {
-    /// Construct a system from an explicit body list and integrator
-    /// settings. All arguments are kwargs-only — there is no
-    /// positional form, so a researcher reading the call site sees
-    /// every dial named.
+    /// Construct a system from an explicit body list, a unit system,
+    /// and integrator settings. All arguments are kwargs-only — there
+    /// is no positional form, so a researcher reading the call site
+    /// sees every dial named.
     ///
     /// Arguments:
     ///
     /// - `bodies`: list of [`Body`] instances. May be empty for the
     ///   degenerate case (`integrate_for` will then advance time
     ///   without changing anything), but typically holds two or more.
+    /// - `units`: which [`UnitSystem`] interprets the body state and
+    ///   the time step. Mandatory and immutable — pick from the named
+    ///   factories (`apsis.units.SOLAR`, `apsis.units.SI`,
+    ///   `apsis.units.CANONICAL`, `apsis.units.HENON`, `apsis.units.CGS`)
+    ///   or build one with `UnitSystem.custom(...)`. There is no
+    ///   default; the unit system is part of the simulation's
+    ///   physical contract and must be stated explicitly.
     /// - `integrator`: which integrator to drive the run loop with.
     ///   Accepts an [`IntegratorKind`] variant or a canonical string
     ///   slug (`"ias15"`, `"yoshida4"`, `"velocity_verlet"`,
     ///   `"wisdom_holman"`).
-    /// - `dt`: initial time step in simulation units. For
-    ///   self-adaptive integrators (IAS15) this is a hint that the
-    ///   controller mutates as it runs; for fixed-step schemes it is
-    ///   the exact step.
+    /// - `dt`: initial time step in the chosen unit system's
+    ///   canonical time. For self-adaptive integrators (IAS15) this
+    ///   is a hint that the controller mutates as it runs; for
+    ///   fixed-step schemes it is the exact step.
     /// - `epsilon`: target relative truncation error per substep,
     ///   used by IAS15. `None` (default) keeps the integrator's
     ///   built-in default ($10^{-9}$, per Rein & Spiegel 2015).
@@ -107,9 +115,10 @@ impl PySystem {
     ///   `Body.<material>(...).unsoftened()` but applies system-wide
     ///   without per-body chaining. Default `False`.
     #[new]
-    #[pyo3(signature = (*, bodies, integrator, dt, epsilon=None, exact_gravity=false))]
+    #[pyo3(signature = (*, bodies, units, integrator, dt, epsilon=None, exact_gravity=false))]
     fn new(
         bodies: Vec<PyBody>,
+        units: PyUnitSystem,
         integrator: &Bound<'_, PyAny>,
         dt: f64,
         epsilon: Option<f64>,
@@ -133,8 +142,9 @@ impl PySystem {
         let kind: CoreIntegratorKind = resolve_integrator(integrator)?;
         let body_vec = bodies.into_iter().map(|b| b.inner).collect::<Vec<_>>();
 
-        let mut sys =
-            CoreSystem::new(body_vec).with_integrator(kind).with_dt(dt);
+        let mut sys = CoreSystem::new(body_vec, units.inner)
+            .with_integrator(kind)
+            .with_dt(dt);
         if exact_gravity {
             sys = sys.with_exact_gravity();
         }
@@ -378,6 +388,18 @@ impl PySystem {
     #[getter]
     fn integrator(&self) -> PyIntegratorKind {
         PyIntegratorKind::from_core(self.inner.metrics().integrator_kind)
+    }
+
+    /// The unit system the simulation was constructed against.
+    ///
+    /// Frozen for the lifetime of the system — there is no setter,
+    /// and no integration step can mutate it. Read it to log the
+    /// run's physical contract, compare to a saved baseline, or
+    /// drive a downstream conversion (e.g. plot positions in metres
+    /// when the simulation runs in `solar()` units).
+    #[getter]
+    fn units(&self) -> PyUnitSystem {
+        PyUnitSystem::from_core(*self.inner.units())
     }
 
     // ── Mutators ─────────────────────────────────────────────────────────

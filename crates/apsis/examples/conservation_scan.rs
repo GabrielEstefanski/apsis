@@ -27,6 +27,7 @@ use std::time::{Duration, Instant};
 
 use apsis::core::system::System;
 use apsis::physics::integrator::IntegratorKind;
+use apsis::units::UnitSystem;
 
 mod common;
 use common::scenarios::{self, Scenario};
@@ -97,7 +98,7 @@ fn measure(scenario: &Scenario, integrator: IntegratorKind, n: usize) -> Row {
     let t_char = (scenario.t_characteristic)(n);
     let t_total = PERIODS * t_char;
 
-    let mut sys = System::new(bodies).with_integrator(integrator).with_dt(dt);
+    let mut sys = System::new(bodies, UnitSystem::canonical()).with_integrator(integrator).with_dt(dt);
 
     // One step populates the cached last_kinetic / last_potential so
     // that sys.energy() returns the real Hamiltonian rather than 0.

@@ -20,6 +20,7 @@ use super::metrics::{self, RunSamples, ScenarioMetrics};
 use super::scenarios::ScenarioSpec;
 use apsis::core::system::System;
 use apsis::physics::integrator::traits::IntegratorKind;
+use apsis::units::UnitSystem;
 
 /// Tree-opening parameter for Barnes-Hut. Below the exact O(N²)
 /// threshold (all scenarios in this harness are small-N) this value
@@ -211,7 +212,7 @@ fn expected_substeps_upper_bound(spec: &ScenarioSpec) -> usize {
 }
 
 fn build_system(spec: &ScenarioSpec) -> System {
-    let mut sys = System::new(spec.bodies.clone())
+    let mut sys = System::new(spec.bodies.clone(), UnitSystem::canonical())
         .with_theta(THETA)
         .with_dt(spec.dt_budget)
         .with_max_depth(MAX_DEPTH);

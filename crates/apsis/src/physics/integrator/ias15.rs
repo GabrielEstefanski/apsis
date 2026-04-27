@@ -2013,6 +2013,7 @@ mod tests {
     use super::*;
     use crate::core::system::System;
     use crate::domain::body::Body;
+    use crate::units::UnitSystem;
 
     /// Kepler e=0.5 orbit: tests both (i) peak |δE/E₀| never exceeds
     /// the quoted tolerance over 100 orbits AND (ii) the energy error
@@ -2049,7 +2050,7 @@ mod tests {
         b2.softening = 0.0;
 
         let mut sys =
-            System::new(vec![b1, b2]).with_theta(0.5).with_dt(dt_budget).with_max_depth(10);
+            System::new(vec![b1, b2], UnitSystem::canonical()).with_theta(0.5).with_dt(dt_budget).with_max_depth(10);
         sys.set_integrator(IntegratorKind::Ias15);
 
         let mut peak = 0.0_f64;
@@ -2137,7 +2138,7 @@ mod tests {
         let mut b2 = Body::rocky(1.0).at(r_peri / 2.0, 0.0).with_velocity(0.0, v_peri / 2.0);
         b2.softening = 0.0;
 
-        let mut sys = System::new(vec![b1, b2]).with_theta(0.5).with_dt(DT).with_max_depth(10);
+        let mut sys = System::new(vec![b1, b2], UnitSystem::canonical()).with_theta(0.5).with_dt(DT).with_max_depth(10);
         sys.set_integrator(IntegratorKind::Ias15);
 
         let period = 2.0 * std::f64::consts::PI * (A.powi(3) / MU).sqrt();
@@ -2188,7 +2189,7 @@ mod tests {
             b.softening = 0.0;
         }
 
-        let mut sys = System::new(bodies).with_theta(0.5).with_dt(DT).with_max_depth(10);
+        let mut sys = System::new(bodies, UnitSystem::canonical()).with_theta(0.5).with_dt(DT).with_max_depth(10);
         sys.set_integrator(IntegratorKind::Ias15);
 
         let n_steps = (T_END / DT).ceil() as u64;
@@ -2244,7 +2245,7 @@ mod tests {
         b2.softening = 0.0;
 
         let mut sys =
-            System::new(vec![b1, b2]).with_theta(0.5).with_dt(dt_budget).with_max_depth(10);
+            System::new(vec![b1, b2], UnitSystem::canonical()).with_theta(0.5).with_dt(dt_budget).with_max_depth(10);
         sys.set_integrator(IntegratorKind::Ias15);
 
         let t0 = sys.t();
