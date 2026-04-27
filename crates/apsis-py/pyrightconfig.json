@@ -1,0 +1,43 @@
+{
+    "_comment": [
+        "Pyright / Pylance configuration scoped to the apsis-py crate.",
+        "",
+        "Why a separate file (and not just [tool.pyright] in pyproject.toml):",
+        "Pyright looks for configuration in the directory it is invoked from",
+        "and parents thereof. When the IDE is rooted at the workspace top",
+        "(the gravity-sim repo root), the per-crate pyproject.toml is",
+        "outside that search path and its [tool.pyright] block is silently",
+        "ignored. A pyrightconfig.json placed alongside the crate sources",
+        "is discovered by pyright through its own walk and applied without",
+        "requiring the IDE to be re-rooted into the crate.",
+        "",
+        "The settings here mirror [tool.pyright] in pyproject.toml so",
+        "command-line pyright invocations (`pyright crates/apsis-py`) and",
+        "IDE invocations agree on the same checking discipline.",
+        "",
+        "extraPaths: tells pyright to treat python/ as a source root so",
+        "imports of `apsis` resolve through the local package even when",
+        "the extension has not yet been installed into the active venv.",
+        "",
+        "reportMissingImports: kept on as a warning, not an error; this",
+        "lets a contributor open the project before running",
+        "`pip install -e .[dev]` without the diagnostics panel filling",
+        "with unactionable errors against test-only dependencies."
+    ],
+    "include": [
+        "python",
+        "tests",
+        "examples"
+    ],
+    "exclude": [
+        "**/__pycache__",
+        "**/.venv",
+        "**/target"
+    ],
+    "extraPaths": [
+        "python"
+    ],
+    "typeCheckingMode": "strict",
+    "reportMissingImports": "warning",
+    "reportMissingTypeStubs": "warning"
+}
