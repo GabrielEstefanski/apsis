@@ -238,13 +238,33 @@ class System:
     def integrate_until(self, t_end: float) -> int:
         """Advance until ``t >= t_end``. Returns step count."""
 
-    def sample(self, duration: float, n_samples: int) -> Trajectory:
-        """Integrate for ``duration`` time units while recording ``n_samples``
-        evenly spaced snapshots, returning a :class:`Trajectory` of NumPy
-        arrays. The first sample captures the pre-integration state; the
-        last sample is taken after advancing to ``current_t + duration``
-        (within one adaptive sub-step under IAS15). Sampling advances the
-        system state in place.
+    def sample(
+        self,
+        *,
+        times: Sequence[float] | _F64Array1D | None = None,
+        duration: float | None = None,
+        n_samples: int | None = None,
+    ) -> Trajectory:
+        """Record the state at a set of target times, returning a
+        :class:`Trajectory` of NumPy arrays.
+
+        Two invocation forms — exactly one must be used:
+
+        Explicit times (primary)::
+
+            traj = sys.sample(times=np.linspace(0.0, 100.0, 1024))
+            traj = sys.sample(times=np.logspace(-3, 2, 200))
+            traj = sys.sample(times=[0.0, 1.0, 10.0, 100.0])
+
+        Evenly spaced (convenience)::
+
+            traj = sys.sample(duration=10.0, n_samples=128)
+
+        ``times`` must be non-empty, finite, monotonically non-decreasing,
+        and ``times[0] >= sys.t``. There is no interpolation: each
+        recorded sample is the integrator's actual output at (or just
+        past) the requested time. Sampling advances ``sys.t`` to
+        ``traj.t[-1]``.
         """
 
     # ── Mutators ──

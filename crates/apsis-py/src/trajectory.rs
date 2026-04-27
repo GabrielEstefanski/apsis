@@ -1,32 +1,10 @@
 //! Dense trajectory recorder backed by NumPy arrays.
 //!
-//! The `Trajectory` Python class is the result of a single
-//! [`crate::system::PySystem::sample`] call: a fixed-size record of
-//! the simulation state at evenly spaced sample times, with positions,
-//! velocities, total energy, and the sample times themselves laid out
-//! as NumPy arrays ready for `matplotlib`, `pandas`, or any other
-//! Python-side analysis tool.
-//!
-//! # Why pre-built NumPy arrays
-//!
-//! The alternative — holding raw `Vec<f64>` on the Rust side and
-//! converting on each property access — would force a researcher who
-//! plots `traj.x[:, 0]` and `traj.x[:, 1]` to pay two array
-//! constructions for what is conceptually one read. A `Trajectory` is
-//! produced once, materialised into NumPy at construction time, and
-//! handed out as zero-copy `Bound<'py, PyArrayN>` views thereafter.
-//! Memory cost is the same; the API call cost drops from O(n_samples
-//! × n_bodies) per access to O(1).
-//!
-//! # Why a struct rather than a 6-tuple
-//!
-//! A `(t, x, y, vx, vy, energy)` return type would force every caller
-//! to remember the order, which is exactly the positional-argument
-//! pitfall called out in the binding's design discussion. The
-//! `Trajectory` struct names every field, makes IDE autocomplete
-//! discover them, and surfaces `n_samples` and `n_bodies` as
-//! first-class properties so a researcher does not need to
-//! `traj.t.shape[0]` every other line.
+//! [`PyTrajectory`] is what [`crate::system::PySystem::sample`] returns:
+//! a fixed-size record of positions, velocities, total energy, and
+//! sample times, materialised once into NumPy and handed out as
+//! zero-copy `Bound<'py, PyArrayN>` views. Field-named struct, not a
+//! 6-tuple, so IDE autocomplete works and there's no positional pitfall.
 
 use numpy::ndarray::Array2;
 use numpy::{IntoPyArray, PyArray1, PyArray2};
@@ -59,15 +37,9 @@ pub(crate) struct PyTrajectory {
 }
 
 impl PyTrajectory {
-    /// Materialise a `Trajectory` from the row-major flat buffers
-    /// populated by the sampling loop. Each 2-D array is reshaped
-    /// from a `Vec<f64>` of length `n_samples × n_bodies`; the 1-D
-    /// arrays come straight from `Vec<f64>` of length `n_samples`.
-    ///
-    /// This is the only entry point the binding offers for building a
-    /// `Trajectory` — Python users construct one exclusively via
-    /// `System.sample(...)`. Keeping construction internal preserves
-    /// the invariant that every field has consistent dimensions.
+    /// Materialise a `Trajectory` from row-major flat buffers. Crate-private
+    /// — Python users only get a `Trajectory` via `System.sample`, so the
+    /// shape invariants stay enforced at the single producer.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn build(
         py: Python<'_>,

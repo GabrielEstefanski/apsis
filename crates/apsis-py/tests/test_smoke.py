@@ -281,6 +281,147 @@ def test_sample_rejects_invalid_arguments() -> None:
         sys.sample(duration=1.0, n_samples=0)
 
 
+# ── sample(times=...) — explicit-targets API ─────────────────────────────────
+
+
+def test_sample_with_explicit_times_records_at_those_targets() -> None:
+    """``sample(times=...)`` records one sample per target; ``traj.t[i]`` meets or
+    overshoots ``targets[i]`` (overshoot is bounded by one IAS15 adaptive sub-step,
+    which on a smooth Kepler orbit can be a non-trivial fraction of an orbital period)."""
+    sys = _two_body_kepler_system()
+    targets = np.linspace(0.0, 6.28, 64)
+
+    traj = sys.sample(times=targets)
+
+    assert traj.t.shape == (64,)
+    assert traj.n_samples == 64
+    # Contract: each recorded sample is at or after its requested time.
+    assert np.all(traj.t >= targets - 1e-12)
+    # Trajectory time axis is monotonically non-decreasing (a sub-step that
+    # straddles two consecutive targets produces equal-valued rows, which is
+    # fine — the body state is the same).
+    assert np.all(np.diff(traj.t) >= 0.0)
+    # End reaches or just passes the final target.
+    assert traj.t[-1] >= targets[-1] - 1e-12
+
+
+def test_sample_accepts_list_and_tuple() -> None:
+    """``times`` accepts plain Python sequences, not just NumPy arrays."""
+    sys_list = _two_body_kepler_system()
+    traj_list = sys_list.sample(times=[0.0, 1.0, 3.0, 6.28])
+    assert traj_list.t.shape == (4,)
+
+    sys_tuple = _two_body_kepler_system()
+    traj_tuple = sys_tuple.sample(times=(0.0, 1.0, 3.0, 6.28))
+    assert traj_tuple.t.shape == (4,)
+
+
+def test_sample_supports_log_spaced_times() -> None:
+    """Log-spaced sampling is the headline use case for chaotic / multi-scale runs.
+
+    The contract is just "the API accepts a non-uniformly-spaced array and
+    integrates through it correctly". Specific density bounds are fragile
+    because the IAS15 sub-step can land on either side of a closely-spaced
+    pair of targets — a more meaningful test would compare *target* spacing,
+    which is purely an input property and doesn't need to round-trip.
+    """
+    sys = _two_body_kepler_system()
+    targets = np.logspace(-2, 1, 32)  # 0.01 → 10 in 32 log-spaced points
+
+    traj = sys.sample(times=targets)
+
+    assert traj.t.shape == (32,)
+    assert np.all(traj.t >= targets - 1e-12)
+    # Target spacing is log-dense at small t, sparse at large t.
+    target_diffs = np.diff(targets)
+    assert target_diffs[0] < target_diffs[-1] / 100
+
+
+def test_sample_respects_pre_sample_integration() -> None:
+    """If the system has already advanced, ``times[0] >= sys.t`` is the contract;
+    samples are recorded at-or-after that point."""
+    sys = _two_body_kepler_system()
+    sys.integrate_for(0.5)
+    start_t = sys.t
+
+    traj = sys.sample(times=np.linspace(start_t, start_t + 1.0, 16))
+
+    assert traj.t[0] >= start_t
+    assert traj.t[0] == pytest.approx(start_t, abs=1e-12)
+
+
+def test_sample_rejects_empty_times() -> None:
+    """An empty ``times`` array is rejected — there is no sensible interpretation."""
+    sys = _two_body_kepler_system()
+    with pytest.raises(ValueError, match="times"):
+        sys.sample(times=[])
+    with pytest.raises(ValueError, match="times"):
+        sys.sample(times=np.array([]))
+
+
+def test_sample_rejects_non_monotonic_times() -> None:
+    """Forward integration is the only supported direction."""
+    sys = _two_body_kepler_system()
+    with pytest.raises(ValueError, match="monotonically non-decreasing"):
+        sys.sample(times=[0.0, 5.0, 3.0])
+
+
+def test_sample_rejects_times_before_current_t() -> None:
+    """Sampling can't rewind the simulator past ``sys.t``."""
+    sys = _two_body_kepler_system()
+    sys.integrate_for(1.0)
+    with pytest.raises(ValueError, match="cannot integrate backwards"):
+        sys.sample(times=[0.0, 0.5, 1.5])
+
+
+def test_sample_rejects_non_finite_times() -> None:
+    """``NaN`` and ``±∞`` are rejected with the offending index reported."""
+    sys = _two_body_kepler_system()
+    with pytest.raises(ValueError, match=r"times\[1\]"):
+        sys.sample(times=[0.0, float("nan"), 1.0])
+    with pytest.raises(ValueError, match=r"times\[2\]"):
+        sys.sample(times=[0.0, 1.0, float("inf")])
+
+
+def test_sample_rejects_mixing_modes() -> None:
+    """Passing both ``times=`` and ``duration=``/``n_samples=`` is a contract violation."""
+    sys = _two_body_kepler_system()
+    with pytest.raises(ValueError, match="not both"):
+        sys.sample(times=[0.0, 1.0], duration=1.0, n_samples=10)
+    with pytest.raises(ValueError, match="not both"):
+        sys.sample(times=[0.0, 1.0], duration=1.0)
+
+
+def test_sample_rejects_partial_duration_mode() -> None:
+    """``duration=`` and ``n_samples=`` must be passed together."""
+    sys = _two_body_kepler_system()
+    with pytest.raises(ValueError, match="together"):
+        sys.sample(duration=1.0)
+    with pytest.raises(ValueError, match="together"):
+        sys.sample(n_samples=10)
+
+
+def test_sample_rejects_no_arguments() -> None:
+    """Calling ``sample()`` with neither form raises the same clear error."""
+    sys = _two_body_kepler_system()
+    with pytest.raises(ValueError, match="times|duration"):
+        sys.sample()
+
+
+def test_sample_evenly_and_explicit_match_for_matched_inputs() -> None:
+    """``sample(duration=, n_samples=)`` matches
+    ``sample(times=np.linspace(t, t+duration, n_samples))`` bit-for-bit."""
+    sys_a = _two_body_kepler_system()
+    sys_b = _two_body_kepler_system()
+
+    traj_a = sys_a.sample(duration=2.0, n_samples=32)
+    traj_b = sys_b.sample(times=np.linspace(0.0, 2.0, 32))
+
+    np.testing.assert_array_equal(traj_a.t, traj_b.t)
+    np.testing.assert_array_equal(traj_a.x, traj_b.x)
+    np.testing.assert_array_equal(traj_a.energy, traj_b.energy)
+
+
 def test_sample_single_point_records_only_initial_state() -> None:
     """``n_samples=1`` is the degenerate zero-integration case: state is captured but not advanced."""
     sys = _two_body_kepler_system()

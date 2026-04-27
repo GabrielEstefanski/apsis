@@ -202,28 +202,10 @@ impl System {
         }
     }
 
-    /// Recompute the energy-diagnostic cache (`last_kinetic`,
-    /// `last_potential`, and the relative-drift baseline) from the
-    /// current body state, without advancing time.
-    ///
-    /// Useful for callers that read [`energy`](Self::energy) before
-    /// the first [`step`](Self::step) — e.g. the Python binding's
-    /// `System.sample`, which records the pre-integration state as
-    /// the first row of a [`Trajectory`]. Without this method,
-    /// `last_kinetic` and `last_potential` are zero between
-    /// construction and the first `step()` call, so the cached
-    /// energy is degenerate.
-    ///
-    /// The implementation mirrors what `step()` does at its energy
-    /// boundary: it asks the force model to populate `scratch_acc`
-    /// and return the gravitational potential, then runs
-    /// [`update_energy_tracking`](Self::update_energy_tracking) to
-    /// fold in kinetic energy and seed the baseline. Perturbative
-    /// contributions that are non-conservative (e.g. 1PN) are
-    /// intentionally not folded in, matching `step()`'s convention.
-    ///
-    /// Cost: one full force evaluation. Idempotent for fixed body
-    /// state — calling it twice in a row produces the same cache.
+    /// Recompute the energy / angular-momentum cache from the current
+    /// body state without advancing time. One force evaluation; idempotent.
+    /// Use before reading [`energy`](Self::energy) on a freshly-constructed
+    /// system that hasn't run a step yet.
     pub fn refresh_energy_diagnostics(&mut self) {
         if self.bodies.is_empty() {
             self.last_kinetic = 0.0;

@@ -34,33 +34,15 @@
 //!
 //! # Module layout
 //!
-//! The Rust side is organised by concern, one wrapper per file:
+//! Each module owns one `#[pyclass]` and exposes a `pub(crate) register`
+//! called from the [`_native`] entry point below.
 //!
-//! - [`body`]: `Body` Python class — point-mass kinematics, softening,
-//!   and material classification, with the nine material factories
-//!   (`star`, `rocky`, `gas_giant`, ...) and the immutable fluent
-//!   builder (`at`, `with_velocity`, `with_density`, `unsoftened`).
-//! - [`integrator`]: `IntegratorKind` enum exposed to Python under
-//!   upper-case acronym names (`IAS15`, `YOSHIDA4`, ...) plus the
-//!   string-slug normalisation [`integrator::resolve`] used by every
-//!   wrapper that takes an `integrator=` kwarg.
-//! - [`system`]: `System` Python class — orchestration with kwargs
-//!   constructor, run-loop verbs (`step`, `integrate_for`,
-//!   `integrate_until`), and read-only diagnostic properties
-//!   (`t`, `bodies`, `energy`, `energy_delta`, ...).
-//! - [`trajectory`]: `Trajectory` Python class — dense NumPy-backed
-//!   record returned by `System.sample`, with shape-`(n_samples,)`
-//!   `t` / `energy` axes and shape-`(n_samples, n_bodies)` `x` / `y`
-//!   / `vx` / `vy` axes ready for `matplotlib`.
-//! - [`convert`]: shared boundary helpers (error formatting, 2-vector
-//!   parsing, slug normalisation). Owned by no single wrapper; called
-//!   from all of them.
-//!
-//! Each module owns one [`#[pyclass]`](pyo3::pyclass) (or one
-//! cohesive group of related classes) and exposes a `pub(crate)
-//! register` function that is called from the [`#[pymodule]`](pyo3::pymodule)
-//! entry point [`_native`] below. Adding a new class is a single-file
-//! addition plus one line of registration here; nothing else changes.
+//! - [`body`] — `Body` class with the nine material factories and fluent builder
+//! - [`integrator`] — `IntegratorKind` enum + slug parser
+//! - [`system`] — `System` orchestrator (constructor, run loop, diagnostics)
+//! - [`trajectory`] — `Trajectory` NumPy-backed return value of `System.sample`
+//! - [`units`] — `UnitSystem` class + `apsis.units` submodule of singletons
+//! - [`convert`] — boundary helpers (error formatting, 2-vector parsing, slugify)
 
 use pyo3::prelude::*;
 

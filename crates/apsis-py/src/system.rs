@@ -1,32 +1,9 @@
 //! Python-side wrapper of [`apsis::core::system::System`].
 //!
-//! The wrapper exposes a researcher-first API for the orchestrator:
-//! a kwargs-only constructor that names every dial a user is likely
-//! to set (`bodies`, `integrator`, `dt`, ...), simple verb methods
-//! for the run loop (`step`, `integrate_for`, `integrate_until`),
-//! and read-only properties for the cheap-to-query state
-//! (`t`, `bodies`, `energy`, `energy_delta`, ...).
-//!
-//! # Façade-only invariant
-//!
-//! Every `#[pymethods]` body delegates to one or two calls on
-//! [`apsis::core::system::System`]; nothing here implements a step,
-//! a force evaluation, or a conservation diagnostic of its own. The
-//! integrator-specific behaviour, the force-model determinism rule
-//! enforced by `set_integrator`, and the orchestrator's hook
-//! discipline are all owned by the core crate. This module exists
-//! to translate Python kwargs into those calls and to lift the
-//! results back through the FFI boundary in shapes that read like
-//! research code rather than like Rust types.
-//!
-//! # What is not (yet) wrapped
-//!
-//! Hooks, snapshot serialisation, headless run-config loading, and
-//! custom Python-defined perturbations are intentionally outside
-//! Phase 1 — each requires either Python-side callbacks (and
-//! therefore a careful PyO3 GIL story) or a serialisation contract
-//! that hasn't yet stabilised on the Rust side. They land in
-//! follow-up commits, not in this scaffolding.
+//! Kwargs-only constructor, verb-method run loop (`step`,
+//! `integrate_for`, `integrate_until`, `sample`), and O(1) read-only
+//! diagnostics. Every `#[pymethods]` body delegates to the core crate;
+//! no physics or conservation logic lives here.
 
 use apsis::core::system::System as CoreSystem;
 use apsis::physics::integrator::IntegratorKind as CoreIntegratorKind;
@@ -142,9 +119,7 @@ impl PySystem {
         let kind: CoreIntegratorKind = resolve_integrator(integrator)?;
         let body_vec = bodies.into_iter().map(|b| b.inner).collect::<Vec<_>>();
 
-        let mut sys = CoreSystem::new(body_vec, units.inner)
-            .with_integrator(kind)
-            .with_dt(dt);
+        let mut sys = CoreSystem::new(body_vec, units.inner).with_integrator(kind).with_dt(dt);
         if exact_gravity {
             sys = sys.with_exact_gravity();
         }
@@ -156,9 +131,6 @@ impl PySystem {
     }
 
     // ── Run loop ─────────────────────────────────────────────────────────
-    //
-    // Each method advances the simulation; nothing here reads back
-    // state. The cheap-property getters below are the read path.
 
     /// Advance the simulation by exactly one integrator step. For
     /// fixed-step schemes (Velocity Verlet, Yoshida 4, Wisdom-Holman)
@@ -188,74 +160,106 @@ impl PySystem {
     /// of integrator steps executed during the call.
     fn integrate_until(&mut self, t_end: f64) -> PyResult<u64> {
         if !t_end.is_finite() {
-            return Err(value_error(
-                "t_end",
-                format!("expected a finite float, got {t_end}"),
-            ));
+            return Err(value_error("t_end", format!("expected a finite float, got {t_end}")));
         }
         Ok(self.inner.integrate_until(t_end))
     }
 
-    /// Integrate forward by `duration` time units while recording the
-    /// state at `n_samples` evenly spaced times, returning a
+    /// Record the system state at a set of target times, returning a
     /// [`Trajectory`](crate::trajectory::PyTrajectory) of NumPy arrays
     /// ready for `matplotlib`, `pandas`, or any other Python-side
     /// analysis tool.
     ///
-    /// The first sample is taken before any integration runs, so
-    /// `traj.t[0]` is the system's current `t` at the start of the
-    /// call and `traj.x[0, :]` matches the bodies' positions at that
-    /// instant. The last sample is taken after integration to
-    /// `start_t + duration`, so `traj.t[-1] >= start_t + duration`
-    /// (the integrator may overshoot the final target by at most one
-    /// adaptive sub-step under IAS15). Intermediate samples are spaced
-    /// uniformly in target time; the actual `traj.t` values are
-    /// monotonically non-decreasing but inherit the same overshoot
-    /// behaviour as `integrate_until`.
+    /// # Two invocation forms
+    ///
+    /// **Explicit times** (primary):
+    ///
+    /// ```python
+    /// import numpy as np
+    /// traj = sys.sample(times=np.linspace(0.0, 100.0, 1024))
+    /// traj = sys.sample(times=np.logspace(-3, 2, 200))
+    /// traj = sys.sample(times=[0.0, 1.0, 10.0, 100.0])
+    /// ```
+    ///
+    /// The `times` argument accepts any 1-D sequence of floats — NumPy
+    /// arrays, Python lists, tuples. The simulator integrates forward
+    /// (using `integrate_until`) to each target time in order and
+    /// records the state. There is **no interpolation**: each row of
+    /// the returned trajectory is the integrator's actual output at
+    /// (or just past) the requested time, with overshoot ≤ 1 adaptive
+    /// sub-step under IAS15.
+    ///
+    /// **Evenly spaced** (convenience):
+    ///
+    /// ```python
+    /// traj = sys.sample(duration=10.0, n_samples=128)
+    /// ```
+    ///
+    /// Equivalent to passing
+    /// `times=np.linspace(sys.t, sys.t + duration, n_samples)`.
+    ///
+    /// Pass exactly one form: either `times=` alone, or both
+    /// `duration=` and `n_samples=` together. Mixing the two forms
+    /// raises `ValueError` at the FFI boundary.
+    ///
+    /// # Validation
+    ///
+    /// `times` must be:
+    /// - non-empty (at least one sample),
+    /// - finite (no `NaN` or `±∞`),
+    /// - monotonically non-decreasing (the simulator integrates
+    ///   forward only — moving backwards would require either
+    ///   reversibility, which not every integrator provides, or a
+    ///   reset, which silently destroys state),
+    /// - `times[0] >= sys.t` for the same reason.
+    ///
+    /// Each rule is reported with its offending index so a researcher
+    /// debugging a notebook sees the exact element that broke the
+    /// contract.
+    ///
+    /// # Side effects
     ///
     /// Sampling **advances the system state**: after the call,
     /// `sys.t == traj.t[-1]` and the bodies hold the configuration
-    /// recorded at the last sample. To preserve the pre-sample state,
-    /// hold a snapshot of the bodies before calling.
+    /// recorded at the last sample. The energy / angular-momentum
+    /// cache is primed so `traj.energy[0]` carries a real `K + U`
+    /// even when sampling starts from a freshly-constructed system.
     ///
-    /// Arguments:
-    ///
-    /// - `duration`: total time advanced during the sampling window.
-    ///   Must be strictly positive.
-    /// - `n_samples`: number of samples to record, including the
-    ///   initial state. Must be ≥ 1.
-    ///
-    /// Memory cost is `n_samples × (4 × n_bodies + 2)` `f64` values —
-    /// 32 MB for `n_samples = 1000` and `n_bodies = 1000`, well below
-    /// any realistic physical-research scenario. For sampling regimes
-    /// large enough to exceed RAM, prefer a streaming consumer (which
-    /// is not yet exposed; file an issue if this becomes a real
-    /// constraint).
+    #[pyo3(signature = (*, times=None, duration=None, n_samples=None))]
     fn sample(
         &mut self,
         py: Python<'_>,
-        duration: f64,
-        n_samples: usize,
+        times: Option<&Bound<'_, PyAny>>,
+        duration: Option<f64>,
+        n_samples: Option<usize>,
     ) -> PyResult<PyTrajectory> {
-        if !duration.is_finite() || duration <= 0.0 {
-            return Err(value_error(
-                "duration",
-                format!("expected a strictly positive finite float, got {duration}"),
-            ));
-        }
-        if n_samples == 0 {
-            return Err(value_error("n_samples", "expected at least 1, got 0"));
-        }
-
-        let n_bodies = self.inner.bodies().len();
-        let t_start = self.inner.t();
-        let stride = if n_samples == 1 {
-            // Degenerate single-sample run: just record current state.
-            // Stride is unused but must be defined.
-            0.0
-        } else {
-            duration / (n_samples - 1) as f64
+        let resolved_times: Vec<f64> = match (times, duration, n_samples) {
+            (Some(arr), None, None) => extract_times(arr)?,
+            (None, Some(dur), Some(n)) => build_evenly_spaced_times(self.inner.t(), dur, n)?,
+            (Some(_), Some(_), _) | (Some(_), _, Some(_)) => {
+                return Err(value_error(
+                    "sample",
+                    "pass either times= or both duration= and n_samples=, not both",
+                ));
+            },
+            (None, Some(_), None) | (None, None, Some(_)) => {
+                return Err(value_error(
+                    "sample",
+                    "duration= and n_samples= must be passed together",
+                ));
+            },
+            (None, None, None) => {
+                return Err(value_error(
+                    "sample",
+                    "pass either times= or both duration= and n_samples=",
+                ));
+            },
         };
+
+        validate_times(&resolved_times, self.inner.t())?;
+
+        let n_samples = resolved_times.len();
+        let n_bodies = self.inner.bodies().len();
 
         let mut t_buf = Vec::with_capacity(n_samples);
         let mut x_buf = Vec::with_capacity(n_samples * n_bodies);
@@ -264,24 +268,11 @@ impl PySystem {
         let mut vy_buf = Vec::with_capacity(n_samples * n_bodies);
         let mut energy_buf = Vec::with_capacity(n_samples);
 
-        // Prime the energy / angular-momentum cache so the pre-integration
-        // sample carries a real K + U rather than the construction-time
-        // zero. After the first integrator step, both `step()` and the
-        // adaptive controller maintain the cache themselves.
+        // Pre-step cache is zero until the first integrator step; without
+        // priming, `traj.energy[0]` would be the construction-time zero.
         self.inner.refresh_energy_diagnostics();
 
-        record_state(
-            &self.inner,
-            &mut t_buf,
-            &mut x_buf,
-            &mut y_buf,
-            &mut vx_buf,
-            &mut vy_buf,
-            &mut energy_buf,
-        );
-
-        for i in 1..n_samples {
-            let t_target = t_start + stride * i as f64;
+        for &t_target in &resolved_times {
             self.inner.integrate_until(t_target);
             record_state(
                 &self.inner,
@@ -294,7 +285,9 @@ impl PySystem {
             );
         }
 
-        PyTrajectory::build(py, t_buf, x_buf, y_buf, vx_buf, vy_buf, energy_buf, n_samples, n_bodies)
+        PyTrajectory::build(
+            py, t_buf, x_buf, y_buf, vx_buf, vy_buf, energy_buf, n_samples, n_bodies,
+        )
     }
 
     // ── State & diagnostics (O(1) properties) ────────────────────────────
@@ -435,19 +428,80 @@ fn kind_slug(kind: CoreIntegratorKind) -> &'static str {
     }
 }
 
-/// Append one row of state to the trajectory buffers.
-///
-/// The 1-D buffers (`t_buf`, `energy_buf`) get one entry; the 2-D
-/// buffers (`x_buf`, `y_buf`, `vx_buf`, `vy_buf`) get one entry per
-/// body in row-major (sample-major) order so the resulting NumPy
-/// `Array2::from_shape_vec((n_samples, n_bodies), ...)` reshapes
-/// correctly without further transposition.
-///
-/// Pulled out into a dedicated helper rather than inlined into the
-/// sample loop because the same recording pattern repeats once for
-/// the initial-state sample and once per integration target — DRY
-/// at the wrapper level even though each individual call is a few
-/// `push` statements.
+/// Extract a `Vec<f64>` from any Python sequence-of-floats (NumPy array,
+/// list, tuple). Owned buffer so the sampling loop can take a slice.
+fn extract_times(obj: &Bound<'_, PyAny>) -> PyResult<Vec<f64>> {
+    obj.extract::<Vec<f64>>().map_err(|_| {
+        value_error(
+            "times",
+            format!(
+                "expected a 1-D sequence of floats (NumPy array, list, tuple), got {}",
+                obj.get_type().name().map(|s| s.to_string()).unwrap_or_else(|_| "<?>".into()),
+            ),
+        )
+    })
+}
+
+/// Build `np.linspace(t_start, t_start + duration, n_samples)` as the
+/// convenience-form expansion of `sample(duration=, n_samples=)`.
+fn build_evenly_spaced_times(t_start: f64, duration: f64, n_samples: usize) -> PyResult<Vec<f64>> {
+    if !duration.is_finite() || duration <= 0.0 {
+        return Err(value_error(
+            "duration",
+            format!("expected a strictly positive finite float, got {duration}"),
+        ));
+    }
+    if n_samples == 0 {
+        return Err(value_error("n_samples", "expected at least 1, got 0"));
+    }
+
+    let stride = if n_samples == 1 { 0.0 } else { duration / (n_samples - 1) as f64 };
+    Ok((0..n_samples).map(|i| t_start + stride * i as f64).collect())
+}
+
+/// Validate a `times` array: non-empty, finite, monotonically
+/// non-decreasing, `times[0] >= current_t`. Equality is allowed — fine
+/// `np.linspace` can hit float-equality ties at consecutive indices.
+fn validate_times(times: &[f64], current_t: f64) -> PyResult<()> {
+    if times.is_empty() {
+        return Err(value_error("times", "expected at least one sample time, got an empty array"));
+    }
+    for (i, &t) in times.iter().enumerate() {
+        if !t.is_finite() {
+            return Err(value_error("times", format!("times[{i}] = {t} is not finite")));
+        }
+    }
+    for i in 1..times.len() {
+        if times[i] < times[i - 1] {
+            return Err(value_error(
+                "times",
+                format!(
+                    "times must be monotonically non-decreasing; \
+                     times[{}] = {} < times[{}] = {}",
+                    i,
+                    times[i],
+                    i - 1,
+                    times[i - 1]
+                ),
+            ));
+        }
+    }
+    if times[0] < current_t {
+        return Err(value_error(
+            "times",
+            format!(
+                "first sample time {} is before the system's current t = {}; \
+                 cannot integrate backwards",
+                times[0], current_t
+            ),
+        ));
+    }
+    Ok(())
+}
+
+/// Push one row of state into the flat trajectory buffers in
+/// sample-major (row-major) order so the consumer's `Array2::from_shape_vec`
+/// reshape is straight `(n_samples, n_bodies)` without a transpose.
 fn record_state(
     sys: &CoreSystem,
     t_buf: &mut Vec<f64>,
