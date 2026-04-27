@@ -16,6 +16,7 @@ from apsis._native import (
     Body as Body,
     IntegratorKind as IntegratorKind,
     System as System,
+    Trajectory as Trajectory,
     __version__ as __version__,
 )
 
@@ -23,5 +24,6 @@ __all__ = [
     "Body",
     "IntegratorKind",
     "System",
+    "Trajectory",
     "__version__",
 ]

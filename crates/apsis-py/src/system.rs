@@ -36,6 +36,7 @@ use pyo3::types::PyAny;
 use crate::body::PyBody;
 use crate::convert::value_error;
 use crate::integrator::{IntegratorKind as PyIntegratorKind, resolve as resolve_integrator};
+use crate::trajectory::PyTrajectory;
 
 /// Orchestrator for the simulation: bodies, chosen integrator, and
 /// the run loop. Bodies are passed at construction time; the
@@ -185,6 +186,107 @@ impl PySystem {
         Ok(self.inner.integrate_until(t_end))
     }
 
+    /// Integrate forward by `duration` time units while recording the
+    /// state at `n_samples` evenly spaced times, returning a
+    /// [`Trajectory`](crate::trajectory::PyTrajectory) of NumPy arrays
+    /// ready for `matplotlib`, `pandas`, or any other Python-side
+    /// analysis tool.
+    ///
+    /// The first sample is taken before any integration runs, so
+    /// `traj.t[0]` is the system's current `t` at the start of the
+    /// call and `traj.x[0, :]` matches the bodies' positions at that
+    /// instant. The last sample is taken after integration to
+    /// `start_t + duration`, so `traj.t[-1] >= start_t + duration`
+    /// (the integrator may overshoot the final target by at most one
+    /// adaptive sub-step under IAS15). Intermediate samples are spaced
+    /// uniformly in target time; the actual `traj.t` values are
+    /// monotonically non-decreasing but inherit the same overshoot
+    /// behaviour as `integrate_until`.
+    ///
+    /// Sampling **advances the system state**: after the call,
+    /// `sys.t == traj.t[-1]` and the bodies hold the configuration
+    /// recorded at the last sample. To preserve the pre-sample state,
+    /// hold a snapshot of the bodies before calling.
+    ///
+    /// Arguments:
+    ///
+    /// - `duration`: total time advanced during the sampling window.
+    ///   Must be strictly positive.
+    /// - `n_samples`: number of samples to record, including the
+    ///   initial state. Must be ≥ 1.
+    ///
+    /// Memory cost is `n_samples × (4 × n_bodies + 2)` `f64` values —
+    /// 32 MB for `n_samples = 1000` and `n_bodies = 1000`, well below
+    /// any realistic physical-research scenario. For sampling regimes
+    /// large enough to exceed RAM, prefer a streaming consumer (which
+    /// is not yet exposed; file an issue if this becomes a real
+    /// constraint).
+    fn sample(
+        &mut self,
+        py: Python<'_>,
+        duration: f64,
+        n_samples: usize,
+    ) -> PyResult<PyTrajectory> {
+        if !duration.is_finite() || duration <= 0.0 {
+            return Err(value_error(
+                "duration",
+                format!("expected a strictly positive finite float, got {duration}"),
+            ));
+        }
+        if n_samples == 0 {
+            return Err(value_error("n_samples", "expected at least 1, got 0"));
+        }
+
+        let n_bodies = self.inner.bodies().len();
+        let t_start = self.inner.t();
+        let stride = if n_samples == 1 {
+            // Degenerate single-sample run: just record current state.
+            // Stride is unused but must be defined.
+            0.0
+        } else {
+            duration / (n_samples - 1) as f64
+        };
+
+        let mut t_buf = Vec::with_capacity(n_samples);
+        let mut x_buf = Vec::with_capacity(n_samples * n_bodies);
+        let mut y_buf = Vec::with_capacity(n_samples * n_bodies);
+        let mut vx_buf = Vec::with_capacity(n_samples * n_bodies);
+        let mut vy_buf = Vec::with_capacity(n_samples * n_bodies);
+        let mut energy_buf = Vec::with_capacity(n_samples);
+
+        // Prime the energy / angular-momentum cache so the pre-integration
+        // sample carries a real K + U rather than the construction-time
+        // zero. After the first integrator step, both `step()` and the
+        // adaptive controller maintain the cache themselves.
+        self.inner.refresh_energy_diagnostics();
+
+        record_state(
+            &self.inner,
+            &mut t_buf,
+            &mut x_buf,
+            &mut y_buf,
+            &mut vx_buf,
+            &mut vy_buf,
+            &mut energy_buf,
+        );
+
+        for i in 1..n_samples {
+            let t_target = t_start + stride * i as f64;
+            self.inner.integrate_until(t_target);
+            record_state(
+                &self.inner,
+                &mut t_buf,
+                &mut x_buf,
+                &mut y_buf,
+                &mut vx_buf,
+                &mut vy_buf,
+                &mut energy_buf,
+            );
+        }
+
+        PyTrajectory::build(py, t_buf, x_buf, y_buf, vx_buf, vy_buf, energy_buf, n_samples, n_bodies)
+    }
+
     // ── State & diagnostics (O(1) properties) ────────────────────────────
 
     /// Current simulation time in simulation units.
@@ -308,6 +410,38 @@ fn kind_slug(kind: CoreIntegratorKind) -> &'static str {
         CoreIntegratorKind::Yoshida4 => "yoshida4",
         CoreIntegratorKind::VelocityVerlet => "velocity_verlet",
         CoreIntegratorKind::WisdomHolman => "wisdom_holman",
+    }
+}
+
+/// Append one row of state to the trajectory buffers.
+///
+/// The 1-D buffers (`t_buf`, `energy_buf`) get one entry; the 2-D
+/// buffers (`x_buf`, `y_buf`, `vx_buf`, `vy_buf`) get one entry per
+/// body in row-major (sample-major) order so the resulting NumPy
+/// `Array2::from_shape_vec((n_samples, n_bodies), ...)` reshapes
+/// correctly without further transposition.
+///
+/// Pulled out into a dedicated helper rather than inlined into the
+/// sample loop because the same recording pattern repeats once for
+/// the initial-state sample and once per integration target — DRY
+/// at the wrapper level even though each individual call is a few
+/// `push` statements.
+fn record_state(
+    sys: &CoreSystem,
+    t_buf: &mut Vec<f64>,
+    x_buf: &mut Vec<f64>,
+    y_buf: &mut Vec<f64>,
+    vx_buf: &mut Vec<f64>,
+    vy_buf: &mut Vec<f64>,
+    energy_buf: &mut Vec<f64>,
+) {
+    t_buf.push(sys.t());
+    energy_buf.push(sys.energy());
+    for b in sys.bodies() {
+        x_buf.push(b.x);
+        y_buf.push(b.y);
+        vx_buf.push(b.vx);
+        vy_buf.push(b.vy);
     }
 }
 
