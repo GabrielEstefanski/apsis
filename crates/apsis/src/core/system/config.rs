@@ -73,28 +73,16 @@ impl System {
 
     // ── Unit system ────────────────────────────────────────────────────────────
 
-    /// The system's unit system, frozen at construction time.
-    ///
-    /// Returns a borrow rather than a clone-by-value so the absence of
-    /// any `&mut UnitSystem` access path is visible at the type level —
-    /// no caller can mutate units after construction.
-    ///
-    /// See [`crate::units`] for the contract: every body coordinate,
-    /// velocity, mass, and `dt` value the simulation handles is
-    /// interpreted in the canonical units of this `UnitSystem`.
+    /// The system's unit system, frozen at construction. Returns a borrow
+    /// so the absence of `&mut UnitSystem` is visible at the type level.
     pub fn units(&self) -> &crate::units::UnitSystem {
         &self.units
     }
 
     // ── Gravitational scaling ──────────────────────────────────────────────────
-    //
-    // `g_factor` is initialised from `units.g()` at construction, but is
-    // separately mutable through `set_g_factor` for the GUI's "G slider"
-    // experimentation knob. The unit system itself stays frozen — what
-    // changes here is the runtime scaling applied on top of the canonical
-    // physical constant the units imply. Researchers who never touch the
-    // slider see `g_factor() == units().g()` for the lifetime of the run.
 
+    /// Override the runtime `G` multiplier (GUI slider). The unit system stays
+    /// frozen; this scales `g_factor` on top of `units().g()`.
     pub fn set_g_factor(&mut self, g: f64) {
         self.g_factor = g.max(0.0);
     }

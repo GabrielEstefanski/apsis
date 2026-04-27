@@ -143,19 +143,12 @@ pub struct System {
     /// Whether the adaptive θ controller is active.
     pub(crate) adaptive_theta: bool,
 
-    /// Active unit system. Frozen for the lifetime of the [`System`];
-    /// there is no public setter and no `&mut UnitSystem` access path.
-    /// `g_factor` below is derived from this at construction.
-    ///
-    /// See [`crate::units`] for the contract — every body coordinate,
-    /// velocity, mass, and `dt` value passed in is interpreted in
-    /// the canonical units of this `UnitSystem`.
+    /// Active unit system. Frozen post-construction; see [`crate::units`].
     pub(crate) units: UnitSystem,
 
-    /// Active gravitational coupling in canonical units. Initialised
-    /// from `units.g()` at construction; subsequently mutable via
-    /// [`set_g_factor`](Self::set_g_factor) for the GUI's "G slider"
-    /// experimentation knob, but the unit system itself stays frozen.
+    /// Effective `G` in canonical units. Seeded from `units.g()` at
+    /// construction; the GUI's "G slider" can rescale it independently
+    /// via [`set_g_factor`](Self::set_g_factor).
     pub(crate) g_factor: f64,
 
     /// Initial angular momentum (z-component) — conservation baseline.
@@ -303,14 +296,11 @@ impl System {
     pub fn from_template(kind: TemplateKind) -> Self {
         let template = kind.build(0);
         let named = instantiate(&template);
-        // Templates are calibrated in canonical (Hénon) units; this is
-        // documented across the preset catalog and the parity portfolio.
-        // Researchers who want a different unit interpretation must
-        // rebuild the system manually with the appropriate `UnitSystem`.
+        // Presets are calibrated for G = 1 (Hénon).
         let mut sys = Self::new(Vec::new(), UnitSystem::canonical());
         sys.add_named_bodies(named);
-        // add_named_bodies cleared template_source; re-set it so a
-        // subsequent .with_seed(...) can rebuild the body list.
+        // Restore the template handle that add_named_bodies cleared, so
+        // a follow-up .with_seed(...) can rebuild from the same preset.
         sys.template_source = Some(kind);
         sys
     }
@@ -395,17 +385,8 @@ impl System {
     }
 
     // ── Fluent construction builder ───────────────────────────────────────────
-    //
-    // Each method consumes and returns `Self`, so the full configuration
-    // reads top-to-bottom at construction time:
-    //
-    //     let sys = System::new(bodies)
-    //         .with_integrator(IntegratorKind::Ias15)
-    //         .with_dt(1e-4)
-    //         .with_theta(0.6);
-    //
-    // Runtime mutation uses the `set_*` counterparts in
-    // [`crate::core::system::config`].
+    // Consume-and-return-Self chain. Runtime mutation lives in the `set_*`
+    // counterparts in [`crate::core::system::config`].
 
     /// Fixed timestep for the integrator.
     #[inline]

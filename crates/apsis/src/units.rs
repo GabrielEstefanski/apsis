@@ -4,47 +4,13 @@
 //! state (`x`, `vy`, `mass`, `dt`) into a physically meaningful run.
 //! Every [`crate::core::system::System`] is constructed against an
 //! explicit `UnitSystem`; there is no implicit default and no setter
-//! after construction. Once chosen, the unit system is part of the
-//! simulation's public state — readable via [`System::units`], cloned
-//! into snapshots, and printed in the run's diagnostic header.
+//! after construction.
 //!
-//! # Design
-//!
-//! The system holds three independent SI scales: a length (meters
-//! per code-unit length), a time (seconds per code-unit time), and a
-//! mass (kilograms per code-unit mass). The gravitational constant
-//! `G` is **always derived** from these:
-//!
-//! ```text
-//! G_code = G_SI · M[kg] · T[s]² / L[m]³
-//! ```
-//!
-//! Nothing in this crate hardcodes `G = 4π²` for solar units, or
-//! `G = 1` for Hénon units; both emerge from the SI scales by
-//! construction. Researchers who add a new factory pass three
-//! scales and trust the formula.
-//!
-//! # No dimensional checking
-//!
-//! `UnitSystem` is **not** an analogue of `astropy.units` or `uom`.
-//! It does not carry per-value dimension tags; multiplying a length
-//! by a mass yields an `f64` of unspecified meaning, exactly as
-//! today. The contract is that **all** body state and `dt` values
-//! passed into a `System` are interpreted in the canonical units of
-//! the supplied `UnitSystem`. Passing a value in the wrong unit is
-//! a silent physical error, not a runtime error — the same trade-off
-//! REBOUND makes, for the same reason (researchers do not want
-//! per-multiplication overhead in a tight loop).
-//!
-//! # Reproducibility
-//!
-//! `UnitSystem` is `Copy + PartialEq` so a saved baseline can be
-//! compared against the live state at any point in the run. Two
-//! systems with the same SI scales compare equal regardless of label
-//! metadata; the label is purely for [`Display`] output and carries
-//! no physical meaning.
-//!
-//! [`System::units`]: crate::core::system::System::units
+//! `G` is always derived from the three SI scales by
+//! `G_code = G_SI · M[kg] · T[s]² / L[m]³`; nothing here hardcodes
+//! `4π²` or `1`. There is no dimensional checking — passing a value
+//! in the wrong unit is a silent physical error, matching REBOUND's
+//! trade-off (no per-multiplication overhead in the integrator loop).
 
 use std::fmt;
 
@@ -86,9 +52,7 @@ pub struct UnitSystem {
     time_s: f64,
     mass_kg: f64,
 
-    // Display-only labels for the three axes. Carry no physical meaning;
-    // ignored by `PartialEq`. Set by each named factory; `custom()`
-    // assigns generic placeholders.
+    // Display-only labels — ignored by `PartialEq`.
     length_label: &'static str,
     time_label: &'static str,
     mass_label: &'static str,
@@ -193,11 +157,6 @@ impl UnitSystem {
     }
 
     // ── Scale accessors ──────────────────────────────────────────────────
-    //
-    // The naming `_scale_si` (rather than `_in_si`) is deliberate: these
-    // are conversion factors, not converted values. Multiplying a code-unit
-    // length by `length_scale_si()` yields the corresponding length in
-    // metres; the `length_to_si` helper exists for that exact use.
 
     /// SI metres per code-unit length.
     #[inline]
@@ -232,11 +191,6 @@ impl UnitSystem {
     }
 
     // ── Explicit conversions ─────────────────────────────────────────────
-    //
-    // Naming convention is `dimension_to_si` / `dimension_from_si` rather
-    // than `to_si_dimension`, so autocompletion groups all length-related
-    // helpers together and the call site reads in dimension-first order
-    // (`units.length_to_si(x)`).
 
     /// Convert a length expressed in this system's canonical units to SI metres.
     #[inline]
@@ -295,14 +249,8 @@ impl UnitSystem {
     }
 }
 
-// `PartialEq` compares only the SI scales, ignoring the display labels.
-// Two `solar()` instances are equal; a `custom(AU_M, YR_S, MSUN_KG, ...)`
-// is also equal to `solar()` because they describe the same physical
-// system. Labels are display metadata, not physical state.
-//
-// Manual impl rather than `derive` because the derived version would
-// also compare label pointers, treating `solar()` as distinct from a
-// numerically identical `custom`.
+// Manual impl: only SI scales count; labels are display metadata so a
+// `custom(AU_M, YR_S, MSUN_KG)` compares equal to `solar()`.
 impl PartialEq for UnitSystem {
     fn eq(&self, other: &Self) -> bool {
         self.length_m == other.length_m

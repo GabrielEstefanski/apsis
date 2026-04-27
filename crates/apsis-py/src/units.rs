@@ -1,28 +1,9 @@
 //! PyO3 wrapper for [`apsis::units::UnitSystem`].
 //!
-//! The Python surface mirrors the Rust core bit-for-bit: the named
-//! factories surface as module-level singletons (`apsis.units.SOLAR`,
-//! `apsis.units.SI`, ...), and a [`UnitSystem`] class exposes the
-//! same accessors and explicit conversions. Construction of arbitrary
-//! unit systems goes through the `custom()` classmethod, which forwards
-//! to [`apsis::units::UnitSystem::custom`] and translates a
-//! [`UnitError`] into a `ValueError` at the FFI boundary.
-//!
-//! # Façade-only
-//!
-//! Nothing here implements unit logic. The conversions, the derived
-//! `g`, the SI constants, and the validation rules all live in
-//! [`apsis::units`]; this file is a translation layer.
-//!
-//! # Why module-level singletons (not a `UnitsKind` enum)
-//!
-//! `apsis.units.SOLAR` is a `UnitSystem` instance, not an enum
-//! variant. A researcher who imports `from apsis.units import SOLAR`
-//! gets a fully-formed object with `.g`, `.length_scale_si`, and
-//! every conversion method ready to call — no enum-to-instance
-//! resolution step in the way. The downside (allocating one
-//! `UnitSystem` per named factory at import time) is trivial since
-//! the type is `Copy` and 3 × `f64` + 3 × `&'static str` per slot.
+//! Named factories are exposed as module-level singletons
+//! (`apsis.units.SOLAR`, `SI`, `CANONICAL`, `HENON`, `CGS`); custom
+//! systems go through `UnitSystem.custom(...)`. All unit logic lives
+//! in the core; this file is a translation layer.
 
 use apsis::units::{UnitError as CoreUnitError, UnitSystem as CoreUnitSystem};
 use pyo3::prelude::*;
@@ -49,9 +30,6 @@ pub(crate) struct PyUnitSystem {
 }
 
 impl PyUnitSystem {
-    /// Internal constructor used by the named-factory module attributes
-    /// and by [`crate::system::PySystem`] when accepting a Python
-    /// `UnitSystem` value.
     pub(crate) fn from_core(inner: CoreUnitSystem) -> Self {
         Self { inner }
     }
@@ -207,21 +185,14 @@ impl PyUnitSystem {
         self.inner.mass_from_si(x)
     }
 
-    // ── Equality & display ───────────────────────────────────────────────
-    //
-    // `PartialEq` on the core type compares only SI scales (labels are
-    // metadata) — `__eq__` mirrors that contract: two `solar()`
-    // instances are equal, and a `custom()` with identical scales is
-    // also equal to `solar()` even though their labels differ.
-
     fn __eq__(&self, other: &Self) -> bool {
         self.inner == other.inner
     }
 
     fn __hash__(&self) -> u64 {
-        // Hash the three SI scales as bit patterns. Same equivalence
-        // class as `__eq__` (labels ignored). NaN scales are rejected
-        // at construction so `is_nan` is impossible here.
+        // FNV-1a over the three SI scale bit patterns; matches `__eq__`'s
+        // labels-are-metadata contract. Construction rejects NaN, so the
+        // bit pattern is a stable hash key.
         let mut h: u64 = 0;
         for v in [
             self.inner.length_scale_si(),
@@ -242,13 +213,9 @@ impl PyUnitSystem {
     }
 }
 
-/// Register the `UnitSystem` class and the named-factory module-level
-/// singletons (`apsis._native.units.SOLAR`, ...) so a Python user
-/// writes `apsis.units.SOLAR` rather than `apsis.UnitSystem.solar()`.
-///
-/// Each singleton is a `Py<PyUnitSystem>` constructed at module-init
-/// time. They're cheap (`Copy` underlying type) and stable across the
-/// lifetime of the interpreter.
+/// Register the `UnitSystem` class, the `apsis.units` submodule with its
+/// named-factory singletons (`SOLAR`, `SI`, ...), and the SI constants
+/// mirrored from the Rust core.
 pub(crate) fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     let py = m.py();
     let units_module = PyModule::new(py, "units")?;
@@ -260,7 +227,6 @@ pub(crate) fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     units_module.add("SOLAR", PyUnitSystem::solar())?;
     units_module.add("CGS", PyUnitSystem::cgs())?;
 
-    // SI constants — single source of truth, mirrored from the Rust core.
     units_module.add("G_SI", apsis::units::G_SI)?;
     units_module.add("AU_M", apsis::units::AU_M)?;
     units_module.add("YR_S", apsis::units::YR_S)?;
@@ -269,8 +235,6 @@ pub(crate) fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     units_module.add("G_KG", apsis::units::G_KG)?;
 
     m.add_submodule(&units_module)?;
-    // Also expose the class at the top level so `apsis.UnitSystem`
-    // works for direct-construction call sites.
     m.add_class::<PyUnitSystem>()?;
     Ok(())
 }

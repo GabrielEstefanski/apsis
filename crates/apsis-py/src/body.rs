@@ -131,13 +131,6 @@ impl PyBody {
 #[pymethods]
 impl PyBody {
     // ── Material factories ───────────────────────────────────────────────
-    //
-    // One classmethod per `apsis::domain::materials::Material` variant.
-    // Every factory has the same kwargs-only signature, so a researcher
-    // who learned `Body.star` already knows how to call `Body.rocky` or
-    // `Body.gas_giant`. The dispatch on material is the entire content
-    // of each method body — physics-side defaults (density, softening,
-    // colour, luminosity profile) live in the core's `Body::of`.
 
     /// Main-sequence luminous body. Default density and luminous material.
     #[staticmethod]
@@ -248,12 +241,8 @@ impl PyBody {
     }
 
     // ── Fluent builder ───────────────────────────────────────────────────
-    //
-    // Each builder method takes ONE argument (a 2-tuple where applicable)
-    // and returns a new `Body` — never two positional floats whose order
-    // could be swapped, never a mutation of the receiver. The Rust core's
-    // builder methods consume `self`; here we make a fresh `Self` so the
-    // Python user has stable value-semantics in every chain.
+    // Each method takes a single 2-tuple (no positional-swap risk) and
+    // returns a fresh `Body`; the Python view is value-typed.
 
     /// Place the body at `position = (x, y)`. Returns a new `Body`.
     fn at(&self, position: &Bound<'_, PyAny>) -> PyResult<Self> {
@@ -297,11 +286,6 @@ impl PyBody {
     }
 
     // ── Read-only properties ─────────────────────────────────────────────
-    //
-    // Every getter is O(1) and side-effect-free; they read from the
-    // `Copy`-typed core `Body`. A snapshot of the body's full state is
-    // therefore implicit in any property access — there is no shared
-    // mutable view that another method could change underneath you.
 
     /// Body mass in simulation units.
     #[getter]
