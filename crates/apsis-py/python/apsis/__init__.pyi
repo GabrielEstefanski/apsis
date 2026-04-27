@@ -13,8 +13,10 @@ line here in the same commit; type checking is not a follow-up task.
 """
 
 from apsis._native import (
+    AdaptiveStats as AdaptiveStats,
     Body as Body,
     IntegratorKind as IntegratorKind,
+    Stats as Stats,
     System as System,
     Trajectory as Trajectory,
     UnitSystem as UnitSystem,
@@ -23,8 +25,10 @@ from apsis._native import (
 from apsis._native import units as units
 
 __all__ = [
+    "AdaptiveStats",
     "Body",
     "IntegratorKind",
+    "Stats",
     "System",
     "Trajectory",
     "UnitSystem",

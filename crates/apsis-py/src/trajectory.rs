@@ -32,23 +32,32 @@ pub(crate) struct PyTrajectory {
     vx: Py<PyArray2<f64>>,
     vy: Py<PyArray2<f64>>,
     energy: Py<PyArray1<f64>>,
+    dt: Py<PyArray1<f64>>,
+    energy_drift: Py<PyArray1<f64>>,
+    lz_drift: Py<PyArray1<f64>>,
     n_samples: usize,
     n_bodies: usize,
+}
+
+pub(crate) struct TrajectoryBuffers {
+    pub t: Vec<f64>,
+    pub x: Vec<f64>,
+    pub y: Vec<f64>,
+    pub vx: Vec<f64>,
+    pub vy: Vec<f64>,
+    pub energy: Vec<f64>,
+    pub dt: Vec<f64>,
+    pub energy_drift: Vec<f64>,
+    pub lz_drift: Vec<f64>,
 }
 
 impl PyTrajectory {
     /// Materialise a `Trajectory` from row-major flat buffers. Crate-private
     /// — Python users only get a `Trajectory` via `System.sample`, so the
     /// shape invariants stay enforced at the single producer.
-    #[allow(clippy::too_many_arguments)]
     pub(crate) fn build(
         py: Python<'_>,
-        t: Vec<f64>,
-        x: Vec<f64>,
-        y: Vec<f64>,
-        vx: Vec<f64>,
-        vy: Vec<f64>,
-        energy: Vec<f64>,
+        b: TrajectoryBuffers,
         n_samples: usize,
         n_bodies: usize,
     ) -> PyResult<Self> {
@@ -64,12 +73,15 @@ impl PyTrajectory {
         };
 
         Ok(Self {
-            t: t.into_pyarray(py).unbind(),
-            x: to_2d("x", x)?,
-            y: to_2d("y", y)?,
-            vx: to_2d("vx", vx)?,
-            vy: to_2d("vy", vy)?,
-            energy: energy.into_pyarray(py).unbind(),
+            t: b.t.into_pyarray(py).unbind(),
+            x: to_2d("x", b.x)?,
+            y: to_2d("y", b.y)?,
+            vx: to_2d("vx", b.vx)?,
+            vy: to_2d("vy", b.vy)?,
+            energy: b.energy.into_pyarray(py).unbind(),
+            dt: b.dt.into_pyarray(py).unbind(),
+            energy_drift: b.energy_drift.into_pyarray(py).unbind(),
+            lz_drift: b.lz_drift.into_pyarray(py).unbind(),
             n_samples,
             n_bodies,
         })
@@ -132,6 +144,34 @@ impl PyTrajectory {
     #[getter]
     fn energy<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f64>> {
         self.energy.bind(py).clone()
+    }
+
+    /// Controller time-step at each sample. Shape `(n_samples,)`.
+    /// Constant for fixed-step integrators; for IAS15 it traces the
+    /// adaptive `dt_next` history — `plt.semilogy(traj.t, traj.dt)`
+    /// reveals the controller's response to close encounters.
+    #[getter]
+    fn dt<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f64>> {
+        self.dt.bind(py).clone()
+    }
+
+    /// Relative energy drift `δE / E₀` at each sample. Shape `(n_samples,)`.
+    /// First entry is zero by definition (baseline). Already normalised —
+    /// `plt.semilogy(traj.t, np.abs(traj.energy_drift))` is the standard
+    /// conservation diagnostic plot without further arithmetic.
+    #[getter]
+    fn energy_drift<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f64>> {
+        self.energy_drift.bind(py).clone()
+    }
+
+    /// Relative angular-momentum drift `δLz / Lz₀` at each sample.
+    /// Shape `(n_samples,)`. First entry zero by baseline; falls back
+    /// to absolute drift when `Lz₀` is below the core's numerical
+    /// threshold (figure-8-like configurations with zero net angular
+    /// momentum).
+    #[getter]
+    fn lz_drift<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f64>> {
+        self.lz_drift.bind(py).clone()
     }
 
     fn __repr__(&self) -> String {

@@ -40,8 +40,10 @@ package follows it bit-for-bit.
 """
 
 from apsis._native import (
+    AdaptiveStats,
     Body,
     IntegratorKind,
+    Stats,
     System,
     Trajectory,
     UnitSystem,
@@ -50,8 +52,10 @@ from apsis._native import (
 from apsis._native import units
 
 __all__ = [
+    "AdaptiveStats",
     "Body",
     "IntegratorKind",
+    "Stats",
     "System",
     "Trajectory",
     "UnitSystem",

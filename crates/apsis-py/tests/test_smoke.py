@@ -540,6 +540,117 @@ def test_system_units_snapshot_is_immutable_across_integration() -> None:
     assert sys.units == apsis.units.SOLAR
 
 
+# ── Diagnostics: Stats / AdaptiveStats / Trajectory parallel arrays ──────────
+
+
+def test_adaptive_counters_zero_at_construction() -> None:
+    """Pre-integration the counters all read zero; after integration they advance."""
+    sys = _two_body_kepler_system()
+    assert sys.substeps == 0
+    assert sys.step_rejections == 0
+    assert sys.picard_iters == 0
+    assert sys.picard_stagnations == 0
+    assert sys.shrink_grow_cycles == 0
+    assert sys.degraded_steps == 0
+    assert sys.force_evaluations == 0
+
+    sys.integrate_for(2 * 3.14159)
+    assert sys.substeps > 0
+    assert sys.picard_iters > 0
+    assert sys.force_evaluations > 0
+
+
+def test_adaptive_stats_is_none_for_fixed_step_integrators() -> None:
+    """Fixed-step schemes don't run a controller, so the binding returns ``None``."""
+    sun = apsis.Body.star(mass=1.0).unsoftened()
+    earth = apsis.Body.rocky(mass=3e-6, position=(1.0, 0.0), velocity=(0.0, 1.0)).unsoftened()
+    for scheme in ("yoshida4", "velocity_verlet"):
+        sys = apsis.System(
+            bodies=[sun, earth],
+            units=apsis.units.CANONICAL,
+            integrator=scheme,
+            dt=1e-3,
+        )
+        sys.integrate_for(0.1)
+        assert sys.adaptive_stats is None
+        assert sys.substeps == 0
+        assert sys.step_rejections == 0
+
+
+def test_adaptive_stats_populated_for_ias15() -> None:
+    """IAS15 carries a real ``AdaptiveStats`` after a run."""
+    sys = _two_body_kepler_system()
+    sys.integrate_for(2 * 3.14159)
+
+    a = sys.adaptive_stats
+    assert a is not None
+    assert isinstance(a, apsis.AdaptiveStats)
+    assert a.substeps > 0
+    assert a.picard_iters > 0
+    # Smooth Kepler: rejections rare, stagnations zero, degraded zero.
+    assert a.rejections >= 0
+    assert a.picard_stagnations >= 0
+    assert a.degraded == 0
+
+
+def test_stats_object_carries_all_headline_diagnostics() -> None:
+    """``sys.stats`` aggregates the scalar diagnostics into one frozen object."""
+    sys = _two_body_kepler_system()
+    sys.integrate_for(2 * 3.14159)
+    s = sys.stats
+
+    assert isinstance(s, apsis.Stats)
+    assert s.t > 0
+    assert s.steps > 0
+    assert s.dt > 0
+    assert s.energy < 0  # bound Kepler orbit
+    assert abs(s.energy_drift) < 1e-12
+    assert s.kinetic_energy > 0
+    assert s.potential_energy < 0
+    assert s.integrator == apsis.IntegratorKind.IAS15
+    assert s.force_evaluations > 0
+
+
+def test_trajectory_carries_dt_history() -> None:
+    """``traj.dt`` records the controller's step size at each sample."""
+    sys = _two_body_kepler_system()
+    traj = sys.sample(times=np.linspace(0.0, 6.28, 32))
+
+    assert traj.dt.shape == (32,)
+    assert traj.dt.dtype == np.float64
+    # IAS15 starts at the user-provided seed dt and adapts upward on a
+    # smooth Kepler orbit; dt[1:] should mostly exceed the seed.
+    assert np.all(traj.dt > 0.0)
+
+
+def test_trajectory_carries_energy_and_lz_drift_history() -> None:
+    """``traj.energy_drift`` / ``traj.lz_drift`` plot directly without further math."""
+    sys = _two_body_kepler_system()
+    traj = sys.sample(times=np.linspace(0.0, 2 * 3.14159, 64))
+
+    assert traj.energy_drift.shape == (64,)
+    assert traj.lz_drift.shape == (64,)
+    # Drift magnitudes stay bounded for IAS15 over one orbit.
+    assert np.max(np.abs(traj.energy_drift)) < 1e-12
+    assert np.max(np.abs(traj.lz_drift)) < 1e-12
+
+
+def test_yoshida4_trajectory_dt_is_constant() -> None:
+    """Fixed-step integrator: every sample reads back the same dt."""
+    sun = apsis.Body.star(mass=1.0).unsoftened()
+    earth = apsis.Body.rocky(mass=3e-6, position=(1.0, 0.0), velocity=(0.0, 1.0)).unsoftened()
+    sys = apsis.System(
+        bodies=[sun, earth],
+        units=apsis.units.CANONICAL,
+        integrator="yoshida4",
+        dt=1e-3,
+    )
+
+    traj = sys.sample(times=np.linspace(0.0, 1.0, 16))
+
+    assert np.allclose(traj.dt, 1e-3)
+
+
 def test_system_units_propagates_to_g_factor() -> None:
     """The system's effective G is read from the chosen unit system at construction."""
     sun = apsis.Body.star(mass=1.0).unsoftened()

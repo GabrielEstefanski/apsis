@@ -303,6 +303,31 @@ class System:
     def units(self) -> UnitSystem:
         """The unit system this system was constructed against. Frozen."""
 
+    # ── Adaptive controller counters (zero for fixed-step integrators) ──
+    @property
+    def substeps(self) -> int: ...
+    @property
+    def step_rejections(self) -> int: ...
+    @property
+    def picard_stagnations(self) -> int: ...
+    @property
+    def shrink_grow_cycles(self) -> int: ...
+    @property
+    def picard_iters(self) -> int: ...
+    @property
+    def degraded_steps(self) -> int: ...
+    @property
+    def force_evaluations(self) -> int:
+        """Estimated total force evaluations (`steps × force_evals_per_step`)."""
+
+    @property
+    def stats(self) -> Stats:
+        """Frozen snapshot of cumulative scalar diagnostics."""
+
+    @property
+    def adaptive_stats(self) -> AdaptiveStats | None:
+        """Controller counters for adaptive integrators; ``None`` for fixed-step."""
+
     def __repr__(self) -> str: ...
 
 # ── Trajectory ────────────────────────────────────────────────────────────────
@@ -354,6 +379,70 @@ class Trajectory:
     def energy(self) -> _F64Array1D:
         """Total mechanical energy at each sample, shape ``(n_samples,)``."""
 
+    @property
+    def dt(self) -> _F64Array1D:
+        """Controller dt at each sample. Constant for fixed-step integrators;
+        traces the adaptive controller for IAS15."""
+
+    @property
+    def energy_drift(self) -> _F64Array1D:
+        """Relative energy drift ``δE/E₀`` at each sample, shape ``(n_samples,)``."""
+
+    @property
+    def lz_drift(self) -> _F64Array1D:
+        """Relative angular-momentum drift ``δLz/Lz₀`` at each sample."""
+
+    def __repr__(self) -> str: ...
+
+# ── Stats / AdaptiveStats ─────────────────────────────────────────────────────
+
+class Stats:
+    """Frozen snapshot of cumulative scalar diagnostics; returned by ``System.stats``."""
+
+    @property
+    def t(self) -> float: ...
+    @property
+    def steps(self) -> int: ...
+    @property
+    def dt(self) -> float: ...
+    @property
+    def energy(self) -> float: ...
+    @property
+    def energy_drift(self) -> float: ...
+    @property
+    def kinetic_energy(self) -> float: ...
+    @property
+    def potential_energy(self) -> float: ...
+    @property
+    def lz(self) -> float: ...
+    @property
+    def lz_drift(self) -> float: ...
+    @property
+    def integrator(self) -> IntegratorKind: ...
+    @property
+    def force_evaluations(self) -> int: ...
+    def __repr__(self) -> str: ...
+
+class AdaptiveStats:
+    """Frozen snapshot of an adaptive integrator's controller counters.
+    Returned by ``System.adaptive_stats`` for IAS15; ``None`` for fixed-step."""
+
+    @property
+    def substeps(self) -> int: ...
+    @property
+    def rejections(self) -> int: ...
+    @property
+    def rejections_picard(self) -> int: ...
+    @property
+    def rejections_truncation(self) -> int: ...
+    @property
+    def picard_iters(self) -> int: ...
+    @property
+    def picard_stagnations(self) -> int: ...
+    @property
+    def shrink_grow_cycles(self) -> int: ...
+    @property
+    def degraded(self) -> int: ...
     def __repr__(self) -> str: ...
 
 # ── UnitSystem ────────────────────────────────────────────────────────────────
