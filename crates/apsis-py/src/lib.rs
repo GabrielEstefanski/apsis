@@ -69,6 +69,7 @@ mod convert;
 mod integrator;
 mod system;
 mod trajectory;
+mod units;
 
 /// `apsis._native`: the Rust-built extension module.
 ///
@@ -84,5 +85,6 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     integrator::register(m)?;
     system::register(m)?;
     trajectory::register(m)?;
+    units::register(m)?;
     Ok(())
 }

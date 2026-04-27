@@ -38,6 +38,7 @@ use std::path::PathBuf;
 use apsis::core::system::System;
 use apsis::domain::body::Body;
 use apsis::physics::integrator::IntegratorKind;
+use apsis::units::UnitSystem;
 
 // ── Protocol constants (mirrored in the notebook) ───────────────────────── //
 
@@ -93,7 +94,7 @@ fn main() {
 
     // ── Integrator setup ────────────────────────────────────────────────── //
     let dt0 = PERIOD * DT_FRACTION_OF_PERIOD;
-    let mut sys = System::new(vec![body1, body2, body3])
+    let mut sys = System::new(vec![body1, body2, body3], UnitSystem::canonical())
         .with_integrator(IntegratorKind::Ias15)
         .with_dt(dt0);
 

@@ -42,6 +42,7 @@ use apsis::core::system::System;
 use apsis::domain::body::Body;
 use apsis::physics::gravity::kernel::TruncatedPlummerKernel;
 use apsis::physics::integrator::IntegratorKind;
+use apsis::units::UnitSystem;
 use apsis_1pn::PostNewtonian1PN;
 
 /// Equal-mass two-body configuration at e = 0.5, a = 1 (COM at origin).
@@ -146,7 +147,7 @@ fn truncated_kernel_plus_1pn_fires_both_exactness_and_continuity_warnings() {
     });
 
     let kernel = Arc::new(TruncatedPlummerKernel::new(1.0));
-    let mut sys = System::new(two_body_eccentric())
+    let mut sys = System::new(two_body_eccentric(), UnitSystem::canonical())
         .with_kernel(kernel)
         .with_integrator(IntegratorKind::Yoshida4);
     sys.add_perturbation(Box::new(PostNewtonian1PN::solar_units()));
@@ -219,7 +220,7 @@ fn truncated_kernel_energy_spikes_are_in_bijection_with_r_cut_crossings() {
     // and pairing that against the first post-step value would look like
     // a spurious spike.
     let mut sys_smooth =
-        System::new(two_body_eccentric()).with_integrator(IntegratorKind::Yoshida4).with_dt(DT);
+        System::new(two_body_eccentric(), UnitSystem::canonical()).with_integrator(IntegratorKind::Yoshida4).with_dt(DT);
     sys_smooth.step();
 
     let mut baseline_samples: Vec<Sample> = Vec::with_capacity(N_STEPS);
@@ -247,7 +248,7 @@ fn truncated_kernel_energy_spikes_are_in_bijection_with_r_cut_crossings() {
 
     // ── Truncated run: same bodies, TruncatedPlummerKernel ───────────────
     let kernel = Arc::new(TruncatedPlummerKernel::new(R_CUT));
-    let mut sys_trunc = System::new(two_body_eccentric())
+    let mut sys_trunc = System::new(two_body_eccentric(), UnitSystem::canonical())
         .with_kernel(kernel)
         .with_integrator(IntegratorKind::Yoshida4)
         .with_dt(DT);

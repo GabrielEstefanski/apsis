@@ -49,6 +49,7 @@ use crate::physics::integrator::{
 use crate::physics::orbital::OrbitalElements;
 use crate::templates::instantiate::instantiate;
 use crate::templates::kind::TemplateKind;
+use crate::units::UnitSystem;
 
 // ── Default parameters (used by System::new) ──────────────────────────────────
 
@@ -142,7 +143,19 @@ pub struct System {
     /// Whether the adaptive θ controller is active.
     pub(crate) adaptive_theta: bool,
 
-    /// Gravitational scaling factor (G multiplier).
+    /// Active unit system. Frozen for the lifetime of the [`System`];
+    /// there is no public setter and no `&mut UnitSystem` access path.
+    /// `g_factor` below is derived from this at construction.
+    ///
+    /// See [`crate::units`] for the contract — every body coordinate,
+    /// velocity, mass, and `dt` value passed in is interpreted in
+    /// the canonical units of this `UnitSystem`.
+    pub(crate) units: UnitSystem,
+
+    /// Active gravitational coupling in canonical units. Initialised
+    /// from `units.g()` at construction; subsequently mutable via
+    /// [`set_g_factor`](Self::set_g_factor) for the GUI's "G slider"
+    /// experimentation knob, but the unit system itself stays frozen.
     pub(crate) g_factor: f64,
 
     /// Initial angular momentum (z-component) — conservation baseline.
@@ -200,10 +213,19 @@ pub struct System {
 }
 
 impl System {
-    /// Create a simulation from a body list, using default parameters.
+    /// Create a simulation from a body list and an explicit unit system.
     ///
-    /// Defaults are chosen to match the conventions of small-N research
-    /// scripts in the broader N-body community:
+    /// The `units` argument is **mandatory and immutable**. Every body
+    /// coordinate, velocity, mass, and `dt` passed in (now or later)
+    /// is interpreted in the canonical units of this [`UnitSystem`];
+    /// passing a value in the wrong unit is a silent physical error,
+    /// not a runtime error. The unit system cannot be changed after
+    /// construction — the only way to "change units" is to rebuild
+    /// the `System`.
+    ///
+    /// Defaults for everything else (integrator, `dt`, θ, softening
+    /// scale, max quadtree depth) match the conventions of small-N
+    /// research scripts:
     ///
     /// | Parameter              | Default                     |
     /// |------------------------|-----------------------------|
@@ -214,36 +236,42 @@ impl System {
     /// | Softening scale        | `1.0`                        |
     ///
     /// Override any of these with the fluent [`with_*`](Self::with_dt)
-    /// builder methods. A typical research script reads:
+    /// builder methods.
     ///
     /// ```ignore
     /// use apsis::core::system::System;
     /// use apsis::domain::body::Body;
     /// use apsis::physics::integrator::IntegratorKind;
+    /// use apsis::units::UnitSystem;
     ///
     /// let sun = Body::star(1.0);
     /// let earth = Body::rocky(3e-6).at(1.0, 0.0).with_velocity(0.0, 1.0);
     ///
-    /// let mut sys = System::new(vec![sun, earth])
+    /// let mut sys = System::new(vec![sun, earth], UnitSystem::canonical())
     ///     .with_integrator(IntegratorKind::Ias15)
     ///     .with_dt(1e-4);
     ///
     /// sys.integrate_for(100.0);
     /// println!("dE/E = {:.3e}", sys.energy_delta());
     /// ```
-    pub fn new(bodies: Vec<Body>) -> Self {
+    pub fn new(bodies: Vec<Body>, units: UnitSystem) -> Self {
         Self::with_force_model_inner(
             bodies,
             Box::new(GravityForceModel::new(DEFAULT_THETA, DEFAULT_MAX_DEPTH)),
             DEFAULT_DT,
+            units,
         )
     }
 
     /// Construct with a pluggable force model (direct O(N²), GPU kernel,
     /// post-Newtonian, …). Escape hatch for advanced users; most callers
     /// prefer [`new`](Self::new) followed by builder methods.
-    pub fn with_force_model(bodies: Vec<Body>, force_model: Box<dyn ForceModel>) -> Self {
-        Self::with_force_model_inner(bodies, force_model, DEFAULT_DT)
+    pub fn with_force_model(
+        bodies: Vec<Body>,
+        force_model: Box<dyn ForceModel>,
+        units: UnitSystem,
+    ) -> Self {
+        Self::with_force_model_inner(bodies, force_model, DEFAULT_DT, units)
     }
 
     /// Construct a system from a built-in preset.
@@ -275,7 +303,11 @@ impl System {
     pub fn from_template(kind: TemplateKind) -> Self {
         let template = kind.build(0);
         let named = instantiate(&template);
-        let mut sys = Self::new(Vec::new());
+        // Templates are calibrated in canonical (Hénon) units; this is
+        // documented across the preset catalog and the parity portfolio.
+        // Researchers who want a different unit interpretation must
+        // rebuild the system manually with the appropriate `UnitSystem`.
+        let mut sys = Self::new(Vec::new(), UnitSystem::canonical());
         sys.add_named_bodies(named);
         // add_named_bodies cleared template_source; re-set it so a
         // subsequent .with_seed(...) can rebuild the body list.
@@ -287,6 +319,7 @@ impl System {
         bodies: Vec<Body>,
         force_model: Box<dyn ForceModel>,
         dt: f64,
+        units: UnitSystem,
     ) -> Self {
         let total_mass = bodies.iter().map(|b| b.mass).sum();
         let names = {
@@ -343,7 +376,8 @@ impl System {
             }),
             theta_ctrl: ThetaController::new(1e-3, 0.05, 1.5).with_initial_theta(theta),
             adaptive_theta: false,
-            g_factor: 1.0,
+            g_factor: units.g(),
+            units,
             initial_angular_momentum: None,
             rel_angular_momentum_error: 0.0,
             abs_angular_momentum_error: 0.0,

@@ -221,6 +221,7 @@ class System:
         self,
         *,
         bodies: Sequence[Body],
+        units: UnitSystem,
         integrator: IntegratorKind | str,
         dt: float,
         epsilon: float | None = None,
@@ -278,6 +279,10 @@ class System:
     @property
     def integrator(self) -> IntegratorKind: ...
 
+    @property
+    def units(self) -> UnitSystem:
+        """The unit system this system was constructed against. Frozen."""
+
     def __repr__(self) -> str: ...
 
 # ── Trajectory ────────────────────────────────────────────────────────────────
@@ -330,3 +335,102 @@ class Trajectory:
         """Total mechanical energy at each sample, shape ``(n_samples,)``."""
 
     def __repr__(self) -> str: ...
+
+# ── UnitSystem ────────────────────────────────────────────────────────────────
+
+class UnitSystem:
+    """Closed system of units for length, time, and mass.
+
+    Construct via one of the named factories (:meth:`canonical`, :meth:`henon`,
+    :meth:`si`, :meth:`solar`, :meth:`cgs`) or :meth:`custom`. Once chosen,
+    a ``UnitSystem`` is immutable — there is no setter for any of its fields.
+
+    All physics inputs (positions, velocities, masses, dt) passed to a
+    :class:`System` are interpreted in the canonical units of the supplied
+    ``UnitSystem``. The wrapper performs no dimensional checking — passing a
+    value in the wrong unit is a silent physical error, matching REBOUND's
+    convention.
+    """
+
+    @staticmethod
+    def canonical() -> UnitSystem:
+        """Hénon-style canonical N-body units: ``G = 1`` by construction."""
+
+    @staticmethod
+    def henon() -> UnitSystem:
+        """Alias for :meth:`canonical` using the literature name."""
+
+    @staticmethod
+    def si() -> UnitSystem:
+        """SI units: metre, second, kilogram."""
+
+    @staticmethod
+    def solar() -> UnitSystem:
+        """Solar-system canonical units: AU, year, solar mass. ``G ≈ 39.478``."""
+
+    @staticmethod
+    def cgs() -> UnitSystem:
+        """CGS units: centimetre, second, gram."""
+
+    @staticmethod
+    def custom(*, length_m: float, time_s: float, mass_kg: float) -> UnitSystem:
+        """Build a custom unit system from explicit SI scales.
+
+        All three scales must be strictly positive and finite; zero, negative,
+        infinite, or NaN values raise ``ValueError`` at the boundary.
+        """
+
+    @property
+    def length_scale_si(self) -> float:
+        """SI metres per code-unit length."""
+    @property
+    def time_scale_si(self) -> float:
+        """SI seconds per code-unit time."""
+    @property
+    def mass_scale_si(self) -> float:
+        """SI kilograms per code-unit mass."""
+    @property
+    def g(self) -> float:
+        """Newtonian gravitational constant in this system's canonical units."""
+    @property
+    def length_label(self) -> str: ...
+    @property
+    def time_label(self) -> str: ...
+    @property
+    def mass_label(self) -> str: ...
+
+    def length_to_si(self, x: float) -> float: ...
+    def length_from_si(self, x: float) -> float: ...
+    def time_to_si(self, x: float) -> float: ...
+    def time_from_si(self, x: float) -> float: ...
+    def mass_to_si(self, x: float) -> float: ...
+    def mass_from_si(self, x: float) -> float: ...
+
+    def __eq__(self, other: object) -> bool: ...
+    def __hash__(self) -> int: ...
+    def __repr__(self) -> str: ...
+    def __str__(self) -> str: ...
+
+# ── units submodule ───────────────────────────────────────────────────────────
+
+class _UnitsModule:
+    """Stub for ``apsis.units`` — exposes the named-factory singletons and
+    the SI constants. Mirrors the ``register`` function in
+    ``crates/apsis-py/src/units.rs``."""
+
+    CANONICAL: UnitSystem
+    HENON: UnitSystem
+    SI: UnitSystem
+    SOLAR: UnitSystem
+    CGS: UnitSystem
+
+    G_SI: float
+    AU_M: float
+    YR_S: float
+    MSUN_KG: float
+    CM_M: float
+    G_KG: float
+
+    UnitSystem: type[UnitSystem]
+
+units: _UnitsModule

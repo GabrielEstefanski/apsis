@@ -47,7 +47,7 @@
 //!
 //! let sun     = Body::star(1.0);
 //! let mercury = Body::rocky(1.66e-7).at(0.307, 0.0).with_velocity(0.0, 2.078);
-//! let mut sys = System::new(vec![sun, mercury])
+//! let mut sys = System::new(vec![sun, mercury], UnitSystem::canonical())
 //!     .with_integrator(IntegratorKind::Ias15)
 //!     .with_dt(1e-4);
 //!

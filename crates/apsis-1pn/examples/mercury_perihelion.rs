@@ -48,6 +48,7 @@ use apsis::core::system::System;
 use apsis::domain::body::Body;
 use apsis::physics::integrator::IntegratorKind;
 use apsis::physics::orbital::compute_elements;
+use apsis::units::UnitSystem;
 use apsis_1pn::PostNewtonian1PN;
 
 use std::f64::consts::PI;
@@ -77,7 +78,7 @@ fn main() {
 
     // ── Build the simulation ────────────────────────────────────────────────
     let mut sys =
-        System::new(vec![sun, mercury]).with_integrator(IntegratorKind::Ias15).with_dt(1e-4);
+        System::new(vec![sun, mercury], UnitSystem::canonical()).with_integrator(IntegratorKind::Ias15).with_dt(1e-4);
 
     // Attach the out-of-tree 1PN perturbation. Everything below this line
     // uses only the public API of `apsis`; `apsis-1pn` has
