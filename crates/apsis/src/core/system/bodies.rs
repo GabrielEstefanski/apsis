@@ -177,9 +177,16 @@ impl System {
     }
 
     /// Recenters the system so that the centre of mass is at the origin.
+    ///
+    /// The translation is routed through the active integrator's
+    /// [`recenter_bodies`](crate::physics::integrator::Integrator::recenter_bodies)
+    /// hook so any per-body compensation buffers (notably IAS15's `csx`)
+    /// stay consistent with the post-shift positions. The fixed-step
+    /// integrators have no such buffers and inherit the trait default
+    /// (bare subtraction).
     pub fn recenter_com(&mut self) {
         if let Some((dx, dy)) = calibration::com_offset(&self.bodies, self.total_mass) {
-            calibration::apply_body_shift(&mut self.bodies, dx, dy);
+            self.integrator.recenter_bodies(&mut self.bodies, dx, dy);
             // Notify the render-side TrailRecorder of the shift so it can
             // keep stored trail positions aligned with the new body coordinates.
             self.pending_com_shift.0 += -dx as f32;

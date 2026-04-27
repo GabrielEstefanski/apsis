@@ -202,8 +202,8 @@ pub struct System {
 impl System {
     /// Create a simulation from a body list, using default parameters.
     ///
-    /// Defaults are chosen to match REBOUND-equivalent expectations for
-    /// small-N research scripts:
+    /// Defaults are chosen to match the conventions of small-N research
+    /// scripts in the broader N-body community:
     ///
     /// | Parameter              | Default                     |
     /// |------------------------|-----------------------------|
