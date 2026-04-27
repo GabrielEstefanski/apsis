@@ -788,6 +788,45 @@ pub struct Ias15 {
     /// itself is not exposed.
     dt_dir_prev: i8,
 
+    /// First-Same-As-Last (FSAL) cache flag. `true` iff the caller's
+    /// `acc` buffer holds the gravitational acceleration evaluated at
+    /// the *current* body positions, i.e. iff the previous accepted
+    /// sub-step ended with a force evaluation that produced exactly the
+    /// `a₀` the next sub-step needs.
+    ///
+    /// The flag is set after every accept-path force evaluation and
+    /// cleared whenever the integrator's state or the body positions
+    /// change in a way that would invalidate the cached `acc`:
+    /// `ensure_capacity` resize (body count changed), `recenter_bodies`
+    /// (uniform translation applied externally), and the very first
+    /// call (no prior accept has occurred).
+    ///
+    /// External mutation of body positions or of `acc` between
+    /// `step()` calls is not detectable from inside the integrator;
+    /// callers that perform such mutation are expected to invalidate
+    /// the cache explicitly. In `apsis` the only path that mutates
+    /// body positions outside the integrator is the periodic COM
+    /// recentering, which is now routed through
+    /// [`Integrator::recenter_bodies`] precisely so the integrator
+    /// can invalidate this flag in the same call.
+    has_valid_post_acc: bool,
+
+    /// `ctx.g_factor` from the most recent accept-path force
+    /// evaluation. Compared against the incoming `ctx.g_factor` on the
+    /// next call: a mismatch invalidates [`Self::has_valid_post_acc`]
+    /// because the cached `acc` has been scaled by the old value.
+    cached_g_factor: f64,
+
+    /// Length of `ctx.perturbations` from the most recent accept-path
+    /// force evaluation. Compared against the incoming length on the
+    /// next call: a mismatch invalidates the FSAL cache because
+    /// perturbations have been added or cleared since the cache was
+    /// populated. Replacement of a perturbation in-place at unchanged
+    /// length is *not* detected here — callers that swap perturbations
+    /// without changing the length must invalidate the integrator
+    /// state explicitly (typically by recreating the integrator).
+    cached_perturbation_count: usize,
+
     // ── Picard scratch buffers ───────────────────────────────────────
     //
     // Start-of-attempt positions and velocities, and the previous
@@ -866,6 +905,9 @@ impl Ias15 {
             picard_stagnations_total: 0,
             shrink_grow_cycles_total: 0,
             dt_dir_prev: 0,
+            has_valid_post_acc: false,
+            cached_g_factor: 1.0,
+            cached_perturbation_count: 0,
             pic_x0: Vec::new(),
             pic_v0: Vec::new(),
             pic_b6_old: Vec::new(),
@@ -922,6 +964,13 @@ impl Ias15 {
             self.snap_csx = vec![(0.0, 0.0); n];
             self.snap_csv = vec![(0.0, 0.0); n];
             self.snapshot_valid = false;
+
+            // FSAL cache is tied to the body count: a resize means the
+            // caller's `acc` is either still sized for the old N (will
+            // be re-evaluated and resized inside `evaluate`) or a fresh
+            // buffer with no relation to the current state. Either way
+            // we cannot reuse it.
+            self.has_valid_post_acc = false;
         }
     }
 
@@ -1041,10 +1090,44 @@ impl Integrator for Ias15 {
             self.capture_snapshot(bodies);
         });
 
-        let raw_pe = time_phase!(evaluate, { evaluate(bodies, ctx.force, acc) });
-        scale_acc_and_pe(acc, ctx.g_factor, raw_pe);
-        apply_perturbations(bodies, acc, ctx.perturbations);
-        let a0: Vec<(f64, f64)> = time_phase!(a0_clone, { acc.clone() });
+        // First-Same-As-Last: the previous accept's end-of-step force
+        // evaluation produced `acc` at exactly the body positions this
+        // sub-step starts from. Reuse it as `a₀` instead of paying a
+        // second force evaluation at the same point.
+        //
+        // Validity of the cache requires four invariants to hold since
+        // the post-accept evaluation that populated it:
+        //
+        //   1. body positions unchanged outside the integrator
+        //      (invalidated by `ensure_capacity` resize and by
+        //      `recenter_bodies` translation),
+        //   2. `acc.len() == n` (the caller has not resized the buffer),
+        //   3. `ctx.g_factor` matches the cached value (the cached `acc`
+        //      has been scaled by `cached_g_factor`; a new value would
+        //      need a re-scale that is cheaper to do via re-evaluation
+        //      than to track),
+        //   4. `ctx.perturbations.len()` matches the cached count (added
+        //      or cleared perturbations would change the cached
+        //      contributions). In-place perturbation replacement at
+        //      unchanged length is documented as caller responsibility.
+        //
+        // When all four hold, the fast path simply clones the existing
+        // `acc` into `a₀`, saving one force evaluation per accepted
+        // sub-step — the canonical FSAL property of any explicit /
+        // implicit method whose stage-0 evaluation coincides with the
+        // previous step's stage-end.
+        let fsal_valid = self.has_valid_post_acc
+            && acc.len() == n
+            && self.cached_g_factor == ctx.g_factor
+            && self.cached_perturbation_count == ctx.perturbations.len();
+        let a0: Vec<(f64, f64)> = if fsal_valid {
+            time_phase!(a0_clone, { acc.clone() })
+        } else {
+            let raw_pe = time_phase!(evaluate, { evaluate(bodies, ctx.force, acc) });
+            scale_acc_and_pe(acc, ctx.g_factor, raw_pe);
+            apply_perturbations(bodies, acc, ctx.perturbations);
+            time_phase!(a0_clone, { acc.clone() })
+        };
 
         // ── Rejection retry loop ─────────────────────────────────────────
         //
@@ -1202,10 +1285,19 @@ impl Integrator for Ias15 {
                     // Post-step force evaluation: publishes `acc`
                     // consistent with the final body positions, and
                     // returns the potential energy the caller will use
-                    // for energy-conservation diagnostics.
+                    // for energy-conservation diagnostics. The same
+                    // `acc` is also the next sub-step's start-of-step
+                    // `a₀`; we record the parameters used here so the
+                    // FSAL fast path on the next call can verify the
+                    // cache is still valid (see the FSAL guard at the
+                    // top of `step()`).
                     let raw_pe = time_phase!(evaluate, { evaluate(bodies, ctx.force, acc) });
                     let pe = scale_acc_and_pe(acc, ctx.g_factor, raw_pe);
                     apply_perturbations(bodies, acc, ctx.perturbations);
+
+                    self.has_valid_post_acc = true;
+                    self.cached_g_factor = ctx.g_factor;
+                    self.cached_perturbation_count = ctx.perturbations.len();
 
                     self.update_warmstart_record();
                     self.dt_last_accepted = dt_try;
@@ -1339,12 +1431,20 @@ impl Integrator for Ias15 {
                 b.x -= dx;
                 b.y -= dy;
             }
+            // FSAL cache invalidation: `acc` was at the pre-shift
+            // body positions, which are no longer where `bodies` are.
+            self.has_valid_post_acc = false;
             return;
         }
         for (i, b) in bodies.iter_mut().enumerate() {
             add_cs(&mut b.x, &mut self.csx[i].0, -dx);
             add_cs(&mut b.y, &mut self.csx[i].1, -dy);
         }
+        // FSAL cache invalidation (same reason as the early-return
+        // branch above): even with the compensation-aware shift, body
+        // positions have moved by `(-dx, -dy)` from where the cached
+        // `acc` was evaluated.
+        self.has_valid_post_acc = false;
     }
 
     fn adaptive_stats(&self) -> Option<super::traits::AdaptiveStats> {
