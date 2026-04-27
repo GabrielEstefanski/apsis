@@ -18,7 +18,15 @@ from __future__ import annotations
 
 from typing import Sequence
 
+import numpy as np
+import numpy.typing as npt
+
 __version__: str
+
+# A 1-D ``float64`` NumPy array, used for trajectory time and energy axes.
+_F64Array1D = npt.NDArray[np.float64]
+# A 2-D ``float64`` NumPy array, used for per-body trajectory state arrays.
+_F64Array2D = npt.NDArray[np.float64]
 
 # ── IntegratorKind ────────────────────────────────────────────────────────────
 
@@ -229,6 +237,15 @@ class System:
     def integrate_until(self, t_end: float) -> int:
         """Advance until ``t >= t_end``. Returns step count."""
 
+    def sample(self, duration: float, n_samples: int) -> Trajectory:
+        """Integrate for ``duration`` time units while recording ``n_samples``
+        evenly spaced snapshots, returning a :class:`Trajectory` of NumPy
+        arrays. The first sample captures the pre-integration state; the
+        last sample is taken after advancing to ``current_t + duration``
+        (within one adaptive sub-step under IAS15). Sampling advances the
+        system state in place.
+        """
+
     # ── Mutators ──
     def recenter_com(self) -> None:
         """Translate every body so the centre of mass is at the origin."""
@@ -260,5 +277,56 @@ class System:
         """Current controller time step (mutates with IAS15; constant for fixed-step schemes)."""
     @property
     def integrator(self) -> IntegratorKind: ...
+
+    def __repr__(self) -> str: ...
+
+# ── Trajectory ────────────────────────────────────────────────────────────────
+
+class Trajectory:
+    """Dense recording of a simulation interval, returned by :meth:`System.sample`.
+
+    All arrays are ``float64`` NumPy ``ndarray`` views materialised once at
+    construction time and handed out as zero-copy reads thereafter. The 1-D
+    arrays (:attr:`t`, :attr:`energy`) have shape ``(n_samples,)``; the 2-D
+    arrays (:attr:`x`, :attr:`y`, :attr:`vx`, :attr:`vy`) have shape
+    ``(n_samples, n_bodies)`` with the body index on the second axis.
+
+    A typical plot of body ``k``'s orbit is
+    ``plt.plot(traj.x[:, k], traj.y[:, k])``; the energy-conservation
+    diagnostic is
+    ``plt.plot(traj.t, (traj.energy - traj.energy[0]) / abs(traj.energy[0]))``.
+    """
+
+    @property
+    def n_samples(self) -> int:
+        """Number of recorded samples (length of the time axis)."""
+
+    @property
+    def n_bodies(self) -> int:
+        """Number of bodies tracked in this trajectory."""
+
+    @property
+    def t(self) -> _F64Array1D:
+        """Sample times, shape ``(n_samples,)``."""
+
+    @property
+    def x(self) -> _F64Array2D:
+        """Body x-coordinates, shape ``(n_samples, n_bodies)``."""
+
+    @property
+    def y(self) -> _F64Array2D:
+        """Body y-coordinates, shape ``(n_samples, n_bodies)``."""
+
+    @property
+    def vx(self) -> _F64Array2D:
+        """Body x-velocities, shape ``(n_samples, n_bodies)``."""
+
+    @property
+    def vy(self) -> _F64Array2D:
+        """Body y-velocities, shape ``(n_samples, n_bodies)``."""
+
+    @property
+    def energy(self) -> _F64Array1D:
+        """Total mechanical energy at each sample, shape ``(n_samples,)``."""
 
     def __repr__(self) -> str: ...

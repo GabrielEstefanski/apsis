@@ -36,8 +36,8 @@
 //!
 //! The Rust side is organised by concern, one wrapper per file:
 //!
-//! - [`body`]: `Body` Python class — point-mass kinematics + softening
-//!   + material classification, with the nine material factories
+//! - [`body`]: `Body` Python class — point-mass kinematics, softening,
+//!   and material classification, with the nine material factories
 //!   (`star`, `rocky`, `gas_giant`, ...) and the immutable fluent
 //!   builder (`at`, `with_velocity`, `with_density`, `unsoftened`).
 //! - [`integrator`]: `IntegratorKind` enum exposed to Python under
@@ -48,6 +48,10 @@
 //!   constructor, run-loop verbs (`step`, `integrate_for`,
 //!   `integrate_until`), and read-only diagnostic properties
 //!   (`t`, `bodies`, `energy`, `energy_delta`, ...).
+//! - [`trajectory`]: `Trajectory` Python class — dense NumPy-backed
+//!   record returned by `System.sample`, with shape-`(n_samples,)`
+//!   `t` / `energy` axes and shape-`(n_samples, n_bodies)` `x` / `y`
+//!   / `vx` / `vy` axes ready for `matplotlib`.
 //! - [`convert`]: shared boundary helpers (error formatting, 2-vector
 //!   parsing, slug normalisation). Owned by no single wrapper; called
 //!   from all of them.
@@ -64,6 +68,7 @@ mod body;
 mod convert;
 mod integrator;
 mod system;
+mod trajectory;
 
 /// `apsis._native`: the Rust-built extension module.
 ///
@@ -78,5 +83,6 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     body::register(m)?;
     integrator::register(m)?;
     system::register(m)?;
+    trajectory::register(m)?;
     Ok(())
 }

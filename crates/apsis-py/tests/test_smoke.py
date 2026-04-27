@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import re
 
+import numpy as np
 import pytest
 
 import apsis
@@ -181,3 +182,119 @@ def test_system_energy_delta_is_machine_precision_on_kepler() -> None:
     sys.integrate_for(2 * 3.14159)
 
     assert abs(sys.energy_delta) < 1e-12, f"energy drift too large: {sys.energy_delta}"
+
+
+# ── Trajectory ────────────────────────────────────────────────────────────────
+
+
+def _two_body_kepler_system() -> apsis.System:
+    sun = apsis.Body.star(mass=1.0).unsoftened()
+    earth = (apsis.Body.rocky(mass=3e-6)
+             .at((1.0, 0.0))
+             .with_velocity((0.0, 1.0))
+             .unsoftened())
+    return apsis.System(bodies=[sun, earth], integrator="ias15", dt=1e-3)
+
+
+def test_sample_returns_trajectory_with_expected_shape() -> None:
+    """``sample(duration, n_samples)`` produces NumPy arrays of the right shape."""
+    sys = _two_body_kepler_system()
+    traj = sys.sample(duration=1.0, n_samples=64)
+
+    assert isinstance(traj, apsis.Trajectory)
+    assert traj.n_samples == 64
+    assert traj.n_bodies == 2
+    assert traj.t.shape == (64,)
+    assert traj.energy.shape == (64,)
+    assert traj.x.shape == (64, 2)
+    assert traj.y.shape == (64, 2)
+    assert traj.vx.shape == (64, 2)
+    assert traj.vy.shape == (64, 2)
+
+
+def test_sample_arrays_are_float64() -> None:
+    """Every Trajectory array is a plain ``float64`` NumPy ndarray."""
+    sys = _two_body_kepler_system()
+    traj = sys.sample(duration=1.0, n_samples=8)
+
+    for arr in (traj.t, traj.energy, traj.x, traj.y, traj.vx, traj.vy):
+        assert isinstance(arr, np.ndarray)
+        assert arr.dtype == np.float64
+
+
+def test_sample_time_axis_is_monotonic_and_brackets_duration() -> None:
+    """``traj.t`` is non-decreasing, starts at the system's pre-call ``t``,
+    and ends at or just past ``start_t + duration``."""
+    sys = _two_body_kepler_system()
+    sys.integrate_for(0.5)
+    start_t = sys.t
+
+    traj = sys.sample(duration=2.0, n_samples=32)
+
+    diffs = np.diff(traj.t)
+    assert np.all(diffs >= 0.0), "trajectory time axis went backwards"
+    assert traj.t[0] == pytest.approx(start_t)
+    assert traj.t[-1] >= start_t + 2.0
+    assert sys.t == pytest.approx(traj.t[-1])
+
+
+def test_sample_initial_row_matches_system_state() -> None:
+    """The first row of every state array equals the system's pre-sample state.
+
+    Positions and velocities are read straight from the bodies, so they round-trip
+    bit-for-bit. Energy is special: ``sample()`` primes the energy cache from
+    the current body state at the start of the call, so ``traj.energy[0]`` is a
+    real ``K + U`` value rather than the construction-time zero of ``sys.energy``.
+    Comparing it against the analytic Kepler total ``-G M m / (2 a)`` (which is
+    ``-0.5 * (G * M_sun * m_earth) / 1.0`` for the unit-radius, unit-velocity
+    setup) is the cheapest way to assert physical correctness without leaking
+    integrator state into the test.
+    """
+    sys = _two_body_kepler_system()
+    pre_positions = [b.position for b in sys.bodies]
+    pre_velocities = [b.velocity for b in sys.bodies]
+
+    traj = sys.sample(duration=0.5, n_samples=4)
+
+    expected_energy = -0.5 * 3e-6
+    assert traj.energy[0] == pytest.approx(expected_energy, rel=1e-9)
+    for k, (px, py) in enumerate(pre_positions):
+        assert traj.x[0, k] == pytest.approx(px)
+        assert traj.y[0, k] == pytest.approx(py)
+    for k, (vx, vy) in enumerate(pre_velocities):
+        assert traj.vx[0, k] == pytest.approx(vx)
+        assert traj.vy[0, k] == pytest.approx(vy)
+
+
+def test_sample_rejects_invalid_arguments() -> None:
+    """Non-positive ``duration`` and zero ``n_samples`` are rejected at the boundary."""
+    sys = _two_body_kepler_system()
+
+    with pytest.raises(ValueError, match="duration"):
+        sys.sample(duration=0.0, n_samples=4)
+    with pytest.raises(ValueError, match="duration"):
+        sys.sample(duration=-1.0, n_samples=4)
+    with pytest.raises(ValueError, match="n_samples"):
+        sys.sample(duration=1.0, n_samples=0)
+
+
+def test_sample_single_point_records_only_initial_state() -> None:
+    """``n_samples=1`` is the degenerate zero-integration case: state is captured but not advanced."""
+    sys = _two_body_kepler_system()
+    start_t = sys.t
+
+    traj = sys.sample(duration=1.0, n_samples=1)
+
+    assert traj.n_samples == 1
+    assert traj.t.shape == (1,)
+    assert traj.t[0] == pytest.approx(start_t)
+    assert sys.t == pytest.approx(start_t)
+
+
+def test_sample_energy_drift_within_one_orbit_is_machine_precision() -> None:
+    """End-to-end: the energy column of a one-orbit Kepler trajectory holds at f64 round-off."""
+    sys = _two_body_kepler_system()
+    traj = sys.sample(duration=2 * 3.14159, n_samples=128)
+
+    rel_drift = (traj.energy - traj.energy[0]) / abs(traj.energy[0])
+    assert np.max(np.abs(rel_drift)) < 1e-12
