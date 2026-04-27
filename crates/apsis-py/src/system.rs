@@ -13,7 +13,8 @@ use pyo3::types::PyAny;
 use crate::body::PyBody;
 use crate::convert::value_error;
 use crate::integrator::{IntegratorKind as PyIntegratorKind, resolve as resolve_integrator};
-use crate::trajectory::PyTrajectory;
+use crate::stats::{PyAdaptiveStats, PyStats};
+use crate::trajectory::{PyTrajectory, TrajectoryBuffers};
 use crate::units::PyUnitSystem;
 
 /// Orchestrator for the simulation: bodies, chosen integrator, and
@@ -261,12 +262,17 @@ impl PySystem {
         let n_samples = resolved_times.len();
         let n_bodies = self.inner.bodies().len();
 
-        let mut t_buf = Vec::with_capacity(n_samples);
-        let mut x_buf = Vec::with_capacity(n_samples * n_bodies);
-        let mut y_buf = Vec::with_capacity(n_samples * n_bodies);
-        let mut vx_buf = Vec::with_capacity(n_samples * n_bodies);
-        let mut vy_buf = Vec::with_capacity(n_samples * n_bodies);
-        let mut energy_buf = Vec::with_capacity(n_samples);
+        let mut buf = TrajectoryBuffers {
+            t: Vec::with_capacity(n_samples),
+            x: Vec::with_capacity(n_samples * n_bodies),
+            y: Vec::with_capacity(n_samples * n_bodies),
+            vx: Vec::with_capacity(n_samples * n_bodies),
+            vy: Vec::with_capacity(n_samples * n_bodies),
+            energy: Vec::with_capacity(n_samples),
+            dt: Vec::with_capacity(n_samples),
+            energy_drift: Vec::with_capacity(n_samples),
+            lz_drift: Vec::with_capacity(n_samples),
+        };
 
         // Pre-step cache is zero until the first integrator step; without
         // priming, `traj.energy[0]` would be the construction-time zero.
@@ -274,20 +280,10 @@ impl PySystem {
 
         for &t_target in &resolved_times {
             self.inner.integrate_until(t_target);
-            record_state(
-                &self.inner,
-                &mut t_buf,
-                &mut x_buf,
-                &mut y_buf,
-                &mut vx_buf,
-                &mut vy_buf,
-                &mut energy_buf,
-            );
+            record_state(&self.inner, &mut buf);
         }
 
-        PyTrajectory::build(
-            py, t_buf, x_buf, y_buf, vx_buf, vy_buf, energy_buf, n_samples, n_bodies,
-        )
+        PyTrajectory::build(py, buf, n_samples, n_bodies)
     }
 
     // ── State & diagnostics (O(1) properties) ────────────────────────────
@@ -384,15 +380,90 @@ impl PySystem {
     }
 
     /// The unit system the simulation was constructed against.
-    ///
-    /// Frozen for the lifetime of the system — there is no setter,
-    /// and no integration step can mutate it. Read it to log the
-    /// run's physical contract, compare to a saved baseline, or
-    /// drive a downstream conversion (e.g. plot positions in metres
-    /// when the simulation runs in `solar()` units).
+    /// Frozen — no setter, and integration cannot mutate it.
     #[getter]
     fn units(&self) -> PyUnitSystem {
         PyUnitSystem::from_core(*self.inner.units())
+    }
+
+    // ── Adaptive controller counters ─────────────────────────────────────
+    //
+    // Zero for fixed-step integrators (Velocity Verlet, Yoshida 4,
+    // Wisdom-Holman) — those expose nothing to count, so a single number
+    // per dimension keeps the API uniform across integrator choices.
+    // For richer per-counter access on adaptive integrators, prefer
+    // `sys.adaptive_stats` which returns `None` for fixed-step instead
+    // of conflating "zero" with "not applicable".
+
+    /// Accepted IAS15 sub-steps. `0` for fixed-step integrators.
+    #[getter]
+    fn substeps(&self) -> u64 {
+        self.inner.adaptive_stats().map(|s| s.substeps).unwrap_or(0)
+    }
+
+    /// Total IAS15 step rejections (controller shrunk `dt` and retried).
+    /// `0` for fixed-step integrators.
+    #[getter]
+    fn step_rejections(&self) -> u64 {
+        self.inner.adaptive_stats().map(|s| s.rejections).unwrap_or(0)
+    }
+
+    /// IAS15 Picard predictor–corrector early-exits via the stagnation
+    /// guard. Sustained `picard_stagnations / substeps ≫ 0` indicates
+    /// the warmstart is biasing the predictor outside its convergence
+    /// basin. `0` for fixed-step integrators.
+    #[getter]
+    fn picard_stagnations(&self) -> u64 {
+        self.inner.adaptive_stats().map(|s| s.picard_stagnations).unwrap_or(0)
+    }
+
+    /// Number of "shrink → grow" reversals in the IAS15 controller's
+    /// `dt_next`. Reveals controller chatter; healthy smooth runs see
+    /// `shrink_grow_cycles / substeps ≈ 0`. `0` for fixed-step.
+    #[getter]
+    fn shrink_grow_cycles(&self) -> u64 {
+        self.inner.adaptive_stats().map(|s| s.shrink_grow_cycles).unwrap_or(0)
+    }
+
+    /// Cumulative Picard iterations across all IAS15 attempts (accepted
+    /// and rejected). `0` for fixed-step integrators.
+    #[getter]
+    fn picard_iters(&self) -> u64 {
+        self.inner.adaptive_stats().map(|s| s.picard_iters).unwrap_or(0)
+    }
+
+    /// Accepted IAS15 sub-steps that hit the `DT_MIN` floor or the
+    /// step deadline without meeting tolerance. Should be `0` in
+    /// healthy scenes; `0` for fixed-step integrators.
+    #[getter]
+    fn degraded_steps(&self) -> u64 {
+        self.inner.adaptive_stats().map(|s| s.degraded).unwrap_or(0)
+    }
+
+    /// Estimated total force evaluations since construction. Computed
+    /// as `steps × integrator.force_evals_per_step()`; for IAS15 the
+    /// per-step factor (14) is an amortised average over the
+    /// Gauss-Radau stages and the typical Picard iteration count.
+    /// Use `picard_iters` for the exact IAS15 cost driver.
+    #[getter]
+    fn force_evaluations(&self) -> u64 {
+        let m = self.inner.metrics();
+        m.steps * (m.integrator_kind.force_evals_per_step() as u64)
+    }
+
+    /// Full snapshot of cumulative diagnostics as a [`Stats`] object.
+    /// O(1); reads cached counters with no integration side effects.
+    #[getter]
+    fn stats(&self) -> PyStats {
+        PyStats::from_system(&self.inner)
+    }
+
+    /// Adaptive-integrator counters as a frozen [`AdaptiveStats`] object,
+    /// or `None` for fixed-step integrators where no controller state
+    /// exists.
+    #[getter]
+    fn adaptive_stats(&self) -> Option<PyAdaptiveStats> {
+        self.inner.adaptive_stats().map(PyAdaptiveStats::from_core)
     }
 
     // ── Mutators ─────────────────────────────────────────────────────────
@@ -502,22 +573,18 @@ fn validate_times(times: &[f64], current_t: f64) -> PyResult<()> {
 /// Push one row of state into the flat trajectory buffers in
 /// sample-major (row-major) order so the consumer's `Array2::from_shape_vec`
 /// reshape is straight `(n_samples, n_bodies)` without a transpose.
-fn record_state(
-    sys: &CoreSystem,
-    t_buf: &mut Vec<f64>,
-    x_buf: &mut Vec<f64>,
-    y_buf: &mut Vec<f64>,
-    vx_buf: &mut Vec<f64>,
-    vy_buf: &mut Vec<f64>,
-    energy_buf: &mut Vec<f64>,
-) {
-    t_buf.push(sys.t());
-    energy_buf.push(sys.energy());
+fn record_state(sys: &CoreSystem, buf: &mut TrajectoryBuffers) {
+    let m = sys.metrics();
+    buf.t.push(m.t);
+    buf.energy.push(m.total_energy);
+    buf.dt.push(m.dt);
+    buf.energy_drift.push(m.rel_energy_error);
+    buf.lz_drift.push(m.rel_angular_momentum_error);
     for b in sys.bodies() {
-        x_buf.push(b.x);
-        y_buf.push(b.y);
-        vx_buf.push(b.vx);
-        vy_buf.push(b.vy);
+        buf.x.push(b.x);
+        buf.y.push(b.y);
+        buf.vx.push(b.vx);
+        buf.vy.push(b.vy);
     }
 }
 

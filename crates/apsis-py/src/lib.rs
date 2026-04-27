@@ -39,6 +39,7 @@
 //!
 //! - [`body`] — `Body` class with the nine material factories and fluent builder
 //! - [`integrator`] — `IntegratorKind` enum + slug parser
+//! - [`stats`] — `Stats` and `AdaptiveStats` frozen diagnostic snapshots
 //! - [`system`] — `System` orchestrator (constructor, run loop, diagnostics)
 //! - [`trajectory`] — `Trajectory` NumPy-backed return value of `System.sample`
 //! - [`units`] — `UnitSystem` class + `apsis.units` submodule of singletons
@@ -49,6 +50,7 @@ use pyo3::prelude::*;
 mod body;
 mod convert;
 mod integrator;
+mod stats;
 mod system;
 mod trajectory;
 mod units;
@@ -65,6 +67,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     body::register(m)?;
     integrator::register(m)?;
+    stats::register(m)?;
     system::register(m)?;
     trajectory::register(m)?;
     units::register(m)?;
