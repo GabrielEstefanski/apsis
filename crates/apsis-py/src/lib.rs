@@ -36,26 +36,34 @@
 //!
 //! The Rust side is organised by concern, one wrapper per file:
 //!
-//! - [`body`]: `Body` Python class — point-mass kinematics + softening.
-//! - [`integrator`]: `IntegratorKind` and `TemplateKind` enums, plus
-//!   the string-to-enum normalisation used by every kwargs-style
-//!   constructor.
-//! - [`system`]: `System` Python class — orchestration, builders,
-//!   run methods, accessors.
-//! - [`trajectory`]: `Trajectory` Python class — dense sampling
-//!   results returned as NumPy arrays.
-//! - [`perturbations`]: pre-bundled `PerturbationForce` instances
-//!   (currently `OnePN`) so researchers can reproduce headline
-//!   results without consuming the trait-level API.
+//! - [`body`]: `Body` Python class — point-mass kinematics + softening
+//!   + material classification, with the nine material factories
+//!   (`star`, `rocky`, `gas_giant`, ...) and the immutable fluent
+//!   builder (`at`, `with_velocity`, `with_density`, `unsoftened`).
+//! - [`integrator`]: `IntegratorKind` enum exposed to Python under
+//!   upper-case acronym names (`IAS15`, `YOSHIDA4`, ...) plus the
+//!   string-slug normalisation [`integrator::resolve`] used by every
+//!   wrapper that takes an `integrator=` kwarg.
+//! - [`system`]: `System` Python class — orchestration with kwargs
+//!   constructor, run-loop verbs (`step`, `integrate_for`,
+//!   `integrate_until`), and read-only diagnostic properties
+//!   (`t`, `bodies`, `energy`, `energy_delta`, ...).
+//! - [`convert`]: shared boundary helpers (error formatting, 2-vector
+//!   parsing, slug normalisation). Owned by no single wrapper; called
+//!   from all of them.
 //!
 //! Each module owns one [`#[pyclass]`](pyo3::pyclass) (or one
-//! cohesive group of related classes) and re-exports it through
-//! [`register`] into the top-level [`#[pymodule]`](pyo3::pymodule)
-//! [`_native`]. Adding a new class is a single-file addition plus
-//! one line of [`register`] wiring; nothing else in this crate
-//! changes.
+//! cohesive group of related classes) and exposes a `pub(crate)
+//! register` function that is called from the [`#[pymodule]`](pyo3::pymodule)
+//! entry point [`_native`] below. Adding a new class is a single-file
+//! addition plus one line of registration here; nothing else changes.
 
 use pyo3::prelude::*;
+
+mod body;
+mod convert;
+mod integrator;
+mod system;
 
 /// `apsis._native`: the Rust-built extension module.
 ///
@@ -67,5 +75,8 @@ use pyo3::prelude::*;
 #[pymodule]
 fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
+    body::register(m)?;
+    integrator::register(m)?;
+    system::register(m)?;
     Ok(())
 }

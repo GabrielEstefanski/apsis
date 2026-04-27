@@ -148,3 +148,31 @@ select = [
 minversion = "7.0"
 testpaths = ["tests"]
 addopts = "-ra --strict-markers"
+
+# ── Pyright / Pylance configuration ───────────────────────────────────────────
+#
+# Pyright (and the Pylance VS Code extension that drives it) needs to know
+# that the apsis Python package lives under `python/`, not at the crate root.
+# Without `extraPaths` it would search the standard locations only, and an
+# IDE opened on a fresh checkout — before `maturin develop` has installed the
+# package into the active virtual environment — would flag every
+# `import apsis` as an unresolved reference. Setting `extraPaths = ["python"]`
+# tells pyright to treat that directory as a source root, so the type stubs
+# under `python/apsis/*.pyi` resolve at edit time and IDE errors match what
+# the runtime sees once the extension is built.
+#
+# `reportMissingImports = "warning"` keeps the import-resolution check on but
+# downgrades it from blocking to advisory; this makes it possible to open
+# the project in an IDE that does not (yet) have the `[dev]` optional
+# dependencies installed (notably `pytest`) without the diagnostics panel
+# filling with unactionable errors. Pytest itself is declared in
+# `[project.optional-dependencies].dev`; once the contributor runs
+# `pip install -e .[dev]` the warning clears.
+
+[tool.pyright]
+include = ["python", "tests", "examples"]
+exclude = ["**/__pycache__", "**/.venv"]
+extraPaths = ["python"]
+typeCheckingMode = "strict"
+reportMissingImports = "warning"
+reportMissingTypeStubs = "warning"
