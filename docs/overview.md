@@ -110,23 +110,57 @@ pairs IAS15 with direct-O(N²) gravity rather than Barnes-Hut; see
 
 ## 5. Validation
 
-The library's top-line validation is the Mercury perihelion precession
-test shipped by the `apsis-1pn` crate:
+Validation rests on two independent reference signals: an
+analytic-physics test (Mercury's perihelion precession against General
+Relativity) and a cross-implementation parity portfolio (REBOUND IAS15
+on canonical scenarios). Together they bound the library's correctness
+both physically and numerically.
+
+### 5.1 Analytic physics — Mercury perihelion (Phase-3 gate)
+
+The library's headline physical validation is the Mercury perihelion
+precession test shipped by the `apsis-1pn` crate:
 
 - 500 Mercury orbits under IAS15 + 1PN + unsoftened gravity.
-- Measured perihelion drift: `+42.983 arcsec / century`.
-- General-Relativistic prediction: `+43 arcsec / century`.
-- Relative error: `4.4 × 10⁻⁶` (≈ 4 parts per million).
+- Measured perihelion drift: $+42.983$ arcsec/century.
+- General-Relativistic prediction: $+43$ arcsec/century.
+- Relative error: $4.4 \times 10^{-6}$ ($\approx 4$ parts per million).
 
-This number is asserted in CI via
-`cargo test --release -p apsis-1pn -- --ignored`, so any
-regression that would invalidate the paper's headline figure fails
-the build.
+This figure is asserted in CI via
+`cargo test --release -p apsis-1pn -- --ignored`, so any regression
+that would invalidate the paper's headline figure fails the build.
 
-Beyond Mercury, the library ships ~200 unit tests covering energy
-conservation on canonical scenarios (Kepler, Pythagorean three-body,
-figure-eight), IAS15 determinism on seeded close encounters, and
-conservation-contract assertions on the public API.
+### 5.2 Cross-implementation parity — REBOUND IAS15
+
+A reproducible parity portfolio compares `apsis` IAS15 against
+REBOUND's IAS15 on canonical scenarios. Each scenario carries an
+*a priori* protocol notebook (initial conditions, integrator settings,
+metrics, and tolerances declared before the run) and a self-contained
+Python harness under [`../validation/rebound-parity/`](../../validation/rebound-parity/).
+Both scenarios pass at f64 machine epsilon:
+
+| Scenario | Horizon | Gated metrics | Worst observed | Protocol |
+| --- | --- | --- | --- | --- |
+| Kepler ($e = 0.5$) | 100 orbits | 7 (orbital elements + energy) | 1–3 ULP | [2026-04-25](experiments/2026-04-25-rebound-parity-kepler.md) |
+| Figure-8 (Chenciner–Montgomery) | 10 periods | 12 (3 evidentiary tiers) | 1 ULP | [2026-04-26](experiments/2026-04-26-rebound-parity-figure8.md) |
+
+The figure-8 parity scenario in particular drove an architecture audit
+of the IAS15 controller against the algorithmic specification in Rein
+& Spiegel (2015); the audit is documented in
+[`experiments/2026-04-26-ias15-warmstart-bug.md`](experiments/2026-04-26-ias15-warmstart-bug.md)
+and is the canonical reference for the controller-level invariants
+the implementation now upholds.
+
+### 5.3 Unit-test surface
+
+Beyond the two reference signals, the library ships **241 unit tests**
+covering energy conservation on canonical scenarios (Kepler,
+Pythagorean three-body, figure-eight), IAS15 determinism on seeded
+close encounters, conservation-contract assertions on the public API,
+and direct unit tests pinning the IAS15 warmstart against the
+analytical Pascal-triangle transformation derived in Everhart (1985).
+The 1PN plugin ships a further 13 tests, including the Mercury-precession
+gate.
 
 ---
 
@@ -155,7 +189,7 @@ conservation-contract assertions on the public API.
 ## 7. Further reading
 
 | Topic | Document |
-|---|---|
+| --- | --- |
 | Integrator contracts & execution profiles | [`integrator.md`](integrator.md) |
 | Plummer softening derivation | [`softening.md`](softening.md) |
 | Wall-time budget vs steps-per-frame | [`adr/001-wall-time-budget.md`](adr/001-wall-time-budget.md) |
@@ -163,3 +197,7 @@ conservation-contract assertions on the public API.
 | Integrator execution profile & force-model compatibility | [`adr/003-integrator-execution-profile.md`](adr/003-integrator-execution-profile.md) |
 | IAS15 per-phase wall-time breakdown (experiment) | [`experiments/2026-04-22-ias15-phase-profile.md`](experiments/2026-04-22-ias15-phase-profile.md) |
 | Picard noise-floor null result (experiment) | [`experiments/2026-04-22-picard-noise-floor.md`](experiments/2026-04-22-picard-noise-floor.md) |
+| Operational-domain benchmarks (experiment) | [`experiments/2026-04-24-operational-domain-benchmarks.md`](experiments/2026-04-24-operational-domain-benchmarks.md) |
+| Kepler cross-implementation parity protocol | [`experiments/2026-04-25-rebound-parity-kepler.md`](experiments/2026-04-25-rebound-parity-kepler.md) |
+| Figure-8 cross-implementation parity protocol | [`experiments/2026-04-26-rebound-parity-figure8.md`](experiments/2026-04-26-rebound-parity-figure8.md) |
+| IAS15 controller architecture audit | [`experiments/2026-04-26-ias15-warmstart-bug.md`](experiments/2026-04-26-ias15-warmstart-bug.md) |

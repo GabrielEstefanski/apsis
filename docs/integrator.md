@@ -96,22 +96,70 @@ arrives.
 
 ## Scenario stiffness signal (IAS15 only)
 
-IAS15's adaptive controller has a hard floor at `DT_MIN = 1e-12`.
-When the controller wants to shrink below the floor (typically due
-to close-encounter geometry below the softening length or N too
-high for the controller to resolve at the configured ε), it accepts
-a degraded step and increments `AdaptiveStats.degraded`.
+IAS15's adaptive controller has a hard floor at `DT_MIN` $= 10^{-12}$.
+When the controller wants to shrink below the floor (typically due to
+close-encounter geometry below the softening length or $N$ too high
+for the controller to resolve at the configured $\epsilon$), it
+accepts a degraded step and increments `AdaptiveStats.degraded`.
 
-Each such floor-hit emits a `warn_diag!` event with the current
-`dt`, the running count, and a hint. The log rate is thinned:
-first three occurrences verbatim, then every power of two
-(4, 8, 16, ...). This keeps the signal visible at low frequency
-without drowning stderr on pathological scenes.
+Each such floor-hit emits a `warn_diag!` event with the current `dt`,
+the running count, and a hint. The log rate is thinned: first three
+occurrences verbatim, then every power of two ($4, 8, 16, \ldots$).
+This keeps the signal visible at low frequency without drowning stderr
+on pathological scenes.
 
-Degraded accepts triggered by the cooperative deadline (physics
-thread budget exhausted) do not emit a log — they are expected in
-interactive precision runs and not a scenario indictment. Both
-causes still accumulate into the unified `degraded` counter.
+Degraded accepts triggered by the cooperative deadline (physics-thread
+budget exhausted) do not emit a log — they are expected in interactive
+precision runs and not a scenario indictment. Both causes still
+accumulate into the unified `degraded` counter.
+
+### Diagnostic counters in `AdaptiveStats`
+
+`AdaptiveStats` (returned by `Integrator::adaptive_stats()`) carries
+four cumulative counters in addition to the substep tally; together
+they are the cheapest signal of controller health and are surfaced
+unconditionally (no feature flag, single `saturating_add` per accept):
+
+| Field | Healthy regime | What an elevated value means |
+| --- | --- | --- |
+| `rejections` | $\ll$ `substeps` | Controller is rejecting at a rate the spec's halving cannot keep up with |
+| `picard_iters` / `attempts` | $\sim 2$–$3$ | Predictor–corrector is starting too far from the converged $b$ |
+| `picard_stagnations` | $\ll$ `substeps` | Picard residual saturating above `PICARD_TOL` — typically a sign of warmstart bias against the true $b$ |
+| `shrink_grow_cycles` | $\ll$ `substeps` | Controller chatter; the dt proposal alternates between shrinking and growing on consecutive accepts |
+| `degraded` | $0$ | Floor or deadline escape clauses fired |
+
+A run that disagrees on any of these by orders of magnitude from the
+healthy regime is a controller-health regression, even when the gated
+energy and angular-momentum metrics still pass at machine precision.
+This is the methodological observation that motivated the figure-8
+parity scenario in the validation portfolio: invariant-passing alone
+is insufficient evidence of an honest cross-implementation match for
+adaptive integrators (see
+[`experiments/2026-04-26-ias15-warmstart-bug.md`](experiments/2026-04-26-ias15-warmstart-bug.md)
+for the full argument).
+
+For investigations that need finer resolution than these counters
+provide, the optional `ias15-diag` Cargo feature compiles in a
+per-attempt trace — one tab-separated line per controller decision,
+gated at runtime by the env var `APSIS_IAS15_TRACE=1` and throttled
+by `APSIS_IAS15_TRACE_CAP` (default 2000 events) so cascade scenarios
+do not bury the diagnostic in $10^{8}$ duplicate lines.
+
+## First-Same-As-Last (FSAL)
+
+The IAS15 sub-step ends with a force evaluation at the accepted
+end-of-step body positions; that result is also the next sub-step's
+start-of-step $a_0$. Re-evaluating forces a second time at the same
+positions is unnecessary work, so the integrator caches the post-accept
+acceleration buffer and reuses it on the next call (the canonical FSAL
+property of any explicit/implicit method whose stage-0 evaluation
+coincides with the previous step's stage-end). The cache is invalidated
+whenever any precondition that ties the cached $a_0$ to the next call's
+parameters can change: capacity resize, `recenter_bodies` translation,
+buffer-length mismatch, or a difference in `g_factor` or in the
+perturbation count. The optimisation is bit-identical to the
+non-cached path on the canonical parity scenarios (Kepler, figure-8) —
+it elides the duplicate evaluation, not the result.
 
 ## Further reading
 

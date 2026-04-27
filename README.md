@@ -2,11 +2,16 @@
 
 *Verified Extension Contracts for N-Body Simulation in Rust*
 
-A Rust N-body gravitational simulation library with an adaptive IAS15-style
-integrator (in the sense of Rein & Spiegel, 2015) and a compiler-enforced
-public extension API. Validated by an out-of-tree companion crate reproducing
-Mercury's perihelion precession to **4.4 parts per million** of the
-General-Relativistic prediction.
+A Rust N-body gravitational simulation library with an adaptive IAS15
+integrator (Rein & Spiegel, 2015), audited at the controller level
+against the algorithmic specification, and a compiler-enforced public
+extension API. Validated against two independent reference signals: an
+out-of-tree companion crate reproducing Mercury's perihelion precession
+to **4.4 parts per million** of the General-Relativistic prediction, and
+a cross-implementation parity portfolio — Kepler ($e = 0.5$, 100 orbits)
+and the Chenciner–Montgomery figure-8 (10 periods) — against REBOUND's
+IAS15 implementation, with all gated invariant metrics agreeing at
+**1 ULP** of f64 machine epsilon.
 
 > **Scope.** The solver is currently 2D. 3D is a planned, deliberately
 > breaking change — the current surface is frozen at 2D so the API-contract
@@ -114,9 +119,11 @@ let mercury = Body::rocky(3e-6)
 
 See [`crates/apsis/examples/`](crates/apsis/examples/)
 and [`crates/apsis-1pn/examples/`](crates/apsis-1pn/examples/)
-for seven runnable examples covering Kepler 2-body, the solar system
-integrated long, the three-body figure-eight, the Pythagorean problem, the
-Mercury perihelion test, and preset enumeration.
+for ten runnable examples covering the Kepler 2-body problem, the solar
+system integrated long, the three-body figure-eight, the Pythagorean
+close-encounter problem, the Mercury perihelion test, preset
+enumeration, scaling benchmarks, and the apsis side of each
+cross-implementation parity scenario.
 
 ## Architecture: library-first, app-as-side
 
@@ -185,18 +192,33 @@ positioning is narrow and deliberate.
 
 What is verified in CI:
 
-- **200 unit tests** in the core covering energy conservation on canonical
-  scenarios (Kepler circular, Pythagorean three-body, figure-eight), IAS15
-  determinism on seeded close encounters, and conservation-contract
-  assertions on the public API.
-- **11 tests in the 1PN plugin**: 7 unit (sign convention, magnitude,
-  additivity, speed-of-light limit), 2 release-mode integration
-  (`mercury_precession_matches_gr_within_one_percent`,
-  `baseline_newtonian_kepler_is_closed`), and 2 debug-mode contract
-  (softened-system-warns, unsoftened-system-silent).
+- **241 unit tests** in the core covering energy conservation on canonical
+  scenarios (Kepler circular, Pythagorean three-body, figure-eight),
+  IAS15 determinism on seeded close encounters, conservation-contract
+  assertions on the public API, and direct unit tests pinning the IAS15
+  warmstart against the analytical Pascal-triangle transformation
+  derived in Everhart (1985).
+- **13 tests in the 1PN plugin**: 7 unit (sign convention, magnitude,
+  additivity, speed-of-light limit), 4 in the Mercury-precession gate,
+  and 2 debug-mode contract (softened-system-warns, unsoftened-system-silent).
 - **Release-mode Phase-3 gate**: `cargo test --release -p apsis-1pn
   -- --ignored` asserts Mercury's precession within 1 % of GR over 300
   orbits. 4.4 ppm is the achieved figure.
+- **Cross-implementation parity portfolio**: against REBOUND's IAS15
+  on two canonical scenarios, with all gated invariant metrics
+  (energy, angular momentum, orbital elements where defined, linear
+  momentum and centre-of-mass for the figure-8) agreeing at 1 ULP.
+  Each scenario carries an *a priori* protocol notebook
+  (initial conditions, integrator settings, and tolerances declared
+  before the run) and a self-contained Python harness:
+  - **Kepler ($e = 0.5$, 100 orbits):** seven gated metrics at 1–3 ULP;
+    informational $\lvert\Delta r\rvert$ at $2.18 \times 10^{-12}$.
+    Notebook: [`docs/experiments/2026-04-25-rebound-parity-kepler.md`](docs/experiments/2026-04-25-rebound-parity-kepler.md).
+  - **Figure-8 (Chenciner–Montgomery, 10 periods):** twelve gated metrics
+    organised in three evidentiary tiers (hard physical invariants,
+    construction-level sanity, geometric coherence) at 1 ULP;
+    informational $\lvert\Delta r\rvert$ at $9.44 \times 10^{-13}$.
+    Notebook: [`docs/experiments/2026-04-26-rebound-parity-figure8.md`](docs/experiments/2026-04-26-rebound-parity-figure8.md).
 - **Workspace isolation**: `cargo build -p apsis` resolves no
   UI dependency.
 
@@ -219,10 +241,24 @@ trail directly:
   `003-integrator-execution-profile.md` on why the default is
   Yoshida-4 rather than IAS15 for render-loop contexts.
 - [`docs/experiments/`](docs/experiments/) — lab-notebook entries for
-  reproducible experiments run during development: the IAS15
-  phase-profile breakdown, a null-result on the Picard noise floor,
-  and the solar-system stutter diagnosis that motivated the
-  versioned baseline harness.
+  reproducible experiments run during development. Each entry pairs an
+  *a priori* protocol with the executed run and a post-mortem analysis;
+  the directory currently records:
+  - the IAS15 phase-profile breakdown,
+  - a null result on the Picard noise floor,
+  - the operational-domain benchmark suite that motivated the
+    versioned baseline harness,
+  - the Kepler and figure-8 cross-implementation parity protocols
+    (the notebooks the validation portfolio is anchored to), and
+  - the IAS15 controller architecture audit
+    ([`2026-04-26-ias15-warmstart-bug.md`](docs/experiments/2026-04-26-ias15-warmstart-bug.md)),
+    which documents the three controller divergences from
+    Rein & Spiegel (2015) that the figure-8 parity scenario
+    surfaced and the line-by-line resolution.
+- [`validation/`](validation/) — runnable cross-implementation harnesses
+  one directory per reference tool (currently REBOUND), each with its
+  own Python `run.py` orchestrator and a comparator that emits a
+  structured JSON report alongside the CSV outputs.
 
 ## License
 
@@ -238,11 +274,18 @@ release.)*
 - Rein, H., & Spiegel, D. S. (2015). *IAS15: a fast, adaptive,
   high-order integrator for gravitational dynamics, accurate to machine
   precision over a billion orbits.* **MNRAS, 446(2), 1424–1437.**
+- Everhart, E. (1985). *An efficient integrator that uses Gauss–Radau
+  spacings.* In A. Carusi & G. B. Valsecchi (Eds.), *Dynamics of Comets:
+  Their Origin and Evolution*, **Astrophysics and Space Science Library
+  115**, 185–202. Springer.
 - Rein, H., & Liu, S.-F. (2012). *REBOUND: an open-source multi-purpose
   N-body code for collisional dynamics.* **A&A, 537, A128.**
 - Tamayo, D., Rein, H., Shi, P., & Hernandez, D. M. (2020). *REBOUNDx: a
   library for adding conservative and dissipative forces to otherwise
   symplectic N-body integrations.* **MNRAS, 491(2), 2885–2901.**
+- Chenciner, A., & Montgomery, R. (2000). *A remarkable periodic
+  solution of the three-body problem in the case of equal masses.*
+  **Annals of Mathematics, 152(3), 881–901.**
 - Will, C. M. (1993). *Theory and Experiment in Gravitational Physics.*
   Cambridge University Press.
 - Einstein, A. (1915). *Explanation of the perihelion motion of Mercury
