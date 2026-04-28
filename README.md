@@ -1,61 +1,143 @@
 # APSIS
 
-*Verified Extension Contracts for N-Body Simulation in Rust*
+*A Federated Model for Composable N-Body Force Artifacts*
 
-A Rust N-body gravitational simulation library with an adaptive IAS15
-integrator (Rein & Spiegel, 2015), audited at the controller level
-against the algorithmic specification, and a compiler-enforced public
-extension API. Validated against two independent reference signals: an
-out-of-tree companion crate reproducing Mercury's perihelion precession
-to **4.4 parts per million** of the General-Relativistic prediction, and
-a cross-implementation parity portfolio — Kepler ($e = 0.5$, 100 orbits)
-and the Chenciner–Montgomery figure-8 (10 periods) — against REBOUND's
-IAS15 implementation, with all gated invariant metrics agreeing at
-**1 ULP** of f64 machine epsilon.
+APSIS treats N-body force perturbations as first-class scientific
+artifacts. The model is *federated*: each force is an independent
+Rust crate — developed, versioned, and cited separately, without
+central integration into a monolithic codebase. Every force ships
+with a Python binding through `apsis-py-core`'s cross-extension
+transport, preserving the same contract across the FFI without
+reimplementing physics. A simulation's physical model is therefore
+not embedded in code, but in its dependency graph: `Cargo.toml`
+declares the forces, `Cargo.lock` pins them bit-precisely. The
+simulator is infrastructure for composing those artifacts.
 
-> **Scope.** The solver is currently 2D. 3D is a planned, deliberately
-> breaking change — the current surface is frozen at 2D so the API-contract
-> machinery can be exercised end-to-end against a real physical result
-> before the coordinate dimension changes.
->
-> *Status: pre-release (`v0.1.0` alpha). Public API is stabilised but not yet
-> tagged; citation DOI pending first Zenodo release.*
+The core integrator is IAS15 (Rein & Spiegel, 2015), audited against
+the algorithmic specification §2–3 and validated against REBOUND's
+IAS15 on Kepler ($e = 0.5$, 100 orbits) and the Chenciner–Montgomery
+figure-8 (10 periods); all gated invariant metrics agree at **1 ULP**
+of f64 machine epsilon. The first downstream artifact,
+[`apsis-1pn`](crates/apsis-1pn/), reproduces Mercury's perihelion
+precession to **4.4 ppm** of the GR prediction over 500 orbits, gated
+in CI.
+
+> **Status.** Pre-release (`v0.1.0` alpha). The integrator and contract
+> machinery are 2D; the 3D port is the next breaking-change milestone
+> (v0.2). Public API stabilised but not yet tagged; citation DOI pending
+> first Zenodo release.
 
 ---
 
 ## Statement of need
 
-N-body gravitational simulation in solar-system-scale physics is dominated by
-a small number of mature C/Fortran codes — REBOUND (Rein & Spiegel, 2012),
-MERCURY (Chambers, 1999), NBODY6/7 (Aarseth, 2003) — each with decades of
-community validation. This library does not seek to replace them.
+A force perturbation in a published N-body simulation lives in the
+methods section of a paper and, sometimes, in a fork of an established
+framework. The fork is not citable; the prose drifts; the next group
+reimplements the same effect from scratch. The framework — REBOUND
+(Rein & Liu, 2012), REBOUNDx (Tamayo et al., 2020), MERCURIUS
+(Rein et al., 2019), NBODY6/7 (Aarseth, 2003) — is mature, citable,
+and validated, but it absorbs every extension into a single binary
+with one citation covering everything.
 
-It fills a narrower niche: **a Rust-native N-body library providing an
-adaptive IAS15-style integrator behind a public API whose invariants are
-promoted to type-level, CI-enforced contracts.** To the authors' knowledge,
-the specific combination — Rust, a validated IAS15 implementation, and
-extension contracts enforced by compilation rather than convention — is
-not currently available elsewhere. Concretely, the claim means:
+APSIS replaces that publication path. A force is a Cargo crate
+declaring its physical preconditions on the gravitational kernel via
+the `KernelRequirements` type — the 1PN crate declares
+`exact_and_smooth()`; future crates declare a different combination
+of exactness and continuity invariants depending on the physics. The
+core matches the declared requirements against the active kernel at
+`System::add_perturbation` and emits a structured diagnostic for each
+violated invariant. Forgetting a precondition surfaces as a
+registration warning, not as a wrong number in a paper.
 
-- Physical preconditions (exact `1/r` gravity, determinism seed, softening
-  contracts) are declared in code at the type of each extension point, not
-  left to prose in a methods section. Forgetting them surfaces as a build-time
-  warning, not a silently-wrong result at publication time.
-- Third-party physics extensions compose against the core through a
-  `PerturbationForce` trait in an out-of-tree crate, with nothing in the
-  core reaching for `pub(crate)` or internals. The contract is
-  **compilation**, not convention.
-- Validation uses the canonical test physicists have reached for a century:
-  the perihelion precession of Mercury. The out-of-tree
-  [`apsis-1pn`](crates/apsis-1pn/) crate reproduces the textbook
-  43 arcsec/century result at 4.4 ppm relative error, on an isolated build
-  that never touches the core's sources.
+Operationally: `Cargo.toml` declares the forces a paper uses,
+`Cargo.lock` pins them bit-precisely, and a follow-up paper extending
+the model adds one line. This is reproducibility at the
+force-composition level, distinct from script-level reproducibility —
+the latter captures the configuration but not the physics
+implementation.
 
-This is a **software-methods** contribution, not a new-physics contribution.
+> APSIS does not attempt to replace mature integrators or optimize
+> numerical performance. Its contribution is orthogonal: defining how
+> physical models are structured, published, and composed.
+
+The IAS15 integrator and the Mercury 4.4 ppm result are evidence that
+the contract machinery operates against numerics meeting the field's
+precision floor — not the headline claim. Use REBOUND/REBOUNDx when
+the simulator is the primary tool; use APSIS when the perturbation is.
+
+## Kernel invariants
+
+The APSIS core guarantees, independently of any registered perturbation:
+
+- **deterministic integration** given identical initial conditions,
+  integrator, and seed;
+- **bitwise-consistent Newtonian force evaluation** —
+  `compute(bodies)` returns the same accelerations to f64 ULP across
+  calls with identical state;
+- **additive-only perturbation composition** — a registered
+  perturbation accumulates into a scratch buffer; it cannot read or
+  mutate the base force evaluation.
+
+These are the invariants `KernelRequirements` declarations are
+matched against (§ Statement of need); they hold across every
+integrator (Velocity Verlet, Yoshida-4, Wisdom-Holman, IAS15) for
+the entire lifetime of a `System`. Phase 1 of the v0.2 milestone
+turns these guarantees into typed contracts with CI tests asserting
+each one directly.
 
 ## Quickstart
 
-Prerequisites: Rust 1.85+ (`rustup install stable`).
+### Python
+
+APSIS is not a simulation library — it is a runtime for composing
+physics distributed as crates. Each force lives in its own
+pip-installable package and is registered with a system at runtime;
+the simulation script is a *composition* of physics, not a
+*configuration* of a monolith. The example below composes two crates:
+the `apsis` runtime and `apsis-1pn`, a force crate implementing the
+1PN relativistic correction — the effect responsible for Mercury's
+perihelion precession.
+
+`pip install apsis apsis-1pn` will work from v0.2.0. Today, build
+from source via [`maturin`](https://github.com/PyO3/maturin):
+
+```bash
+git clone https://github.com/gabrielbragaestefanski/apsis && cd apsis
+pip install maturin
+maturin develop --release --manifest-path crates/apsis-py/Cargo.toml
+maturin develop --release --manifest-path crates/apsis-1pn-py/Cargo.toml
+```
+
+Then:
+
+```python
+import apsis
+import apsis_1pn  # the 1PN force, distributed as an independent package
+
+sun = apsis.Body.star(mass=1.0).unsoftened()
+mercury = apsis.Body.rocky(
+    mass=1.66e-7, position=(0.387, 0.0), velocity=(0.0, 1.61),
+).unsoftened()
+
+sys = apsis.System(
+    bodies=[sun, mercury], units=apsis.units.SOLAR,
+    integrator="ias15", dt=1e-3, exact_gravity=True,
+)
+sys.add_perturbation(apsis_1pn.PostNewtonian1PN.solar_units())
+sys.integrate_for(100.0)
+
+print(sys)
+```
+
+Adding a force is `pip install apsis-yourforce` and one extra import.
+Reproducing a paper's physical model is reading its
+`requirements.txt`. The runtime never changes; the composition does.
+
+### Rust
+
+The same Mercury 1PN scenario as a runnable example, with the GR
+comparison printed inline (Rust 1.85+):
 
 ```bash
 git clone https://github.com/gabrielbragaestefanski/apsis
@@ -125,18 +207,25 @@ close-encounter problem, the Mercury perihelion test, preset
 enumeration, scaling benchmarks, and the apsis side of each
 cross-implementation parity scenario.
 
-## Architecture: library-first, app-as-side
+## Architecture: federation, library-first
 
-The workspace is three crates deliberately split by role:
+The workspace is six crates split by role: a UI-free physics core, a
+Python façade, and a federation of independently citable extension
+points. The core does not know the app or the bindings exist; CI
+enforces the separation.
 
 | crate | role | dependencies |
 |---|---|---|
-| [`apsis`](crates/apsis/) | The library. Physics, integrators, public API. | Zero UI: `cargo tree -p apsis` resolves no `egui`/`wgpu`/`eframe`. |
-| [`apsis-1pn`](crates/apsis-1pn/) | Out-of-tree companion crate: 1PN correction via `PerturbationForce`. | **Only** `apsis`. Reviewed as the paper's Phase-3 gate. |
-| [`apsis-app`](crates/apsis-app/) | Optional interactive egui/wgpu shell. **Not** part of the library's validated surface. | `egui`, `wgpu`, `eframe`. |
+| [`apsis`](crates/apsis/) | The library. Physics, integrators, public extension API. | Zero UI: `cargo tree -p apsis` resolves no `egui`/`wgpu`/`eframe`. |
+| [`apsis-py`](crates/apsis-py/) | Python binding (PyO3, abi3-py39). Façade-only. | `apsis`, `pyo3`, `numpy`. |
+| [`apsis-py-core`](crates/apsis-py-core/) | Cross-extension transport (rlib): `Box<dyn PerturbationForce>` ↔ `PyCapsule`. | `apsis`, `pyo3`. |
+| [`apsis-1pn`](crates/apsis-1pn/) | First downstream force crate: 1PN Schwarzschild correction. Reference implementation of the federation contract. | **Only** `apsis`. |
+| [`apsis-1pn-py`](crates/apsis-1pn-py/) | Python binding for `apsis-1pn`. Reference implementation of the contract at the Rust/Python boundary. | `apsis-1pn`, `apsis-py-core`. |
+| [`apsis-app`](crates/apsis-app/) | Optional interactive egui/wgpu shell. Not part of the library's validated surface. | `apsis`, `egui`, `wgpu`, `eframe`. |
 
-The direction is `apsis-app` → `apsis`; the core does not
-know the app exists. CI enforces the separation.
+Direction: every binding and every force crate depends on `apsis`
+through the public extension API only — never `pub(crate)`, never
+core internals. Adding a force is adding a crate.
 
 ## Fine-physics guardrail
 
@@ -152,17 +241,21 @@ The only upstream signal is a quantitative comparison against an analytic
 prediction — which is exactly the step a researcher is likely to skip when
 the simulator *looks* correct under every usual check.
 
-The library surfaces the trap at the type level. Perturbations whose signal
-measures a deviation from `1/r` (GR, J2 oblateness, tidal dissipation)
+The library surfaces the trap at the type level. Perturbations whose
+derivation depends on the bit-exact `1/r` kernel (GR, tidal dissipation)
+or on a smooth Hamiltonian (any symplectic-splitting derivation)
 override
 
 ```rust
-fn requires_exact_gravity(&self) -> bool { true }
+fn kernel_requirements(&self) -> KernelRequirements {
+    KernelRequirements::exact_and_smooth()
+}
 ```
 
-on the `PerturbationForce` trait. Registering such a perturbation into a
-system with softened bodies emits a `warn_diag!` diagnostic at registration
-time, with per-body softening statistics. Dismiss by
+on the `PerturbationForce` trait. Registering such a perturbation into
+a system with softened bodies emits a `warn_diag!` diagnostic at
+registration time, with per-body softening statistics naming the
+violated invariant. Dismiss by
 
 ```rust
 let sun = Body::star(1.0).unsoftened();             // per body
@@ -174,19 +267,23 @@ the *intent*, not the field assignment.
 
 ## What this library is NOT
 
-Honest scope for reviewers. This library **does not** provide:
+APSIS occupies a different *category* of system from the established
+N-body codes — not a feature-thin alternative to them. The
+[orthogonality declaration](#statement-of-need) makes this concrete:
+APSIS does not replace mature integrators or chase numerical performance.
 
-- Symplectic composition integrators beyond 4th order Yoshida (no SABA, no
-  higher-order splittings).
-- A hybrid close-encounter regime switcher (no MERCURIUS equivalent).
-- Stellar evolution, hydrodynamics, or collisionless large-N (no GADGET
-  equivalent).
-- 3D integration (see the Scope note at the top — a planned breaking
-  change, not a regression).
-- Python bindings (possible via `pyo3` as future work; out of scope for v1).
+For research where the simulator is the primary tool — solar-system
+integration with extra forces, hybrid close-encounter regimes,
+collisionless large-N, stellar evolution, hydrodynamics — use REBOUND,
+MERCURIUS, NBODY6/7, or GADGET. APSIS is the tool when **the perturbation
+is the scientific contribution** and the question is how to publish,
+version, and compose it. APSIS trades ecosystem maturity for
+composability and publication clarity; the choice between the two is
+a property of the research question, not of the codebase.
 
-For any of the above, use REBOUND, MERCURY, or NBODY6. This library's
-positioning is narrow and deliberate.
+Out of scope at v0.1: 3D integration (planned v0.2), symplectic
+compositions beyond Yoshida-4, MERCURIUS-style close-encounter switching,
+stellar evolution, hydrodynamics, collisionless large-N.
 
 ## Validation
 
