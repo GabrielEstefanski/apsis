@@ -1,7 +1,37 @@
 //! Python binding for [`apsis_1pn`].
 //!
-//! Exposes the first post-Newtonian gravitational correction as an
-//! `apsis.Perturbation` plugin. A researcher writes:
+//! **This crate proves that the apsis perturbation extension model is
+//! preserved across both Rust and Python boundaries** — without
+//! duplicating physics, breaking ownership semantics, or requiring
+//! kernel modification. A `Box<dyn PerturbationForce>` constructed in
+//! [`apsis_1pn`] crosses into Python via a typed
+//! [`PyCapsule`](pyo3::types::PyCapsule) (transport defined in
+//! [`apsis_py_core`]), travels in the pure-Python `apsis.Perturbation`
+//! wrapper, and is unwrapped at `System.add_perturbation` back into
+//! Rust. The 1PN formula itself is implemented exactly once, in
+//! [`apsis_1pn`]; this crate is plumbing only.
+//!
+//! Treat this crate as the **template** when writing Python bindings
+//! for new perturbation crates: every factory below is a one-liner
+//! built on [`apsis_py_core::box_into_capsule`].
+//!
+//! See [`README`](https://github.com/gabrielbragaestefanski/apsis/tree/master/crates/apsis-1pn-py)
+//! for the full extension-contract specification, the critical kernel
+//! precondition, and the rationale.
+//!
+//! # ⚠ Critical precondition
+//!
+//! Attaching 1PN to a softened-gravity system **invalidates the
+//! physical model**. For Mercury-like orbits, the numerical apsidal
+//! precession from Plummer softening alone is ~2 × 10³ larger than
+//! the relativistic signal *and inverts its sign* — energy and
+//! angular momentum stay conserved at machine precision while the
+//! trajectory is physically wrong. **This is not a numerical error —
+//! it is a model violation.** Pass `exact_gravity=True` or call
+//! `Body.<material>(...).unsoftened()`; a violation emits a structured
+//! warning at registration.
+//!
+//! # Use
 //!
 //! ```python
 //! import apsis
@@ -22,12 +52,6 @@
 //! )
 //! sys.add_perturbation(apsis_1pn.PostNewtonian1PN.solar_units())
 //! ```
-//!
-//! Each factory builds a `Box<dyn PerturbationForce>` in core, wraps it
-//! in a `PyCapsule` via [`apsis_py_core::box_into_capsule`], and hands
-//! the capsule to `apsis.Perturbation(capsule, label)` (the pure-Python
-//! wrapper class defined in `apsis/__init__.py`). No physics lives
-//! here — the 1PN formula is in [`apsis_1pn`].
 
 use apsis_1pn::PostNewtonian1PN;
 use apsis_py_core::box_into_capsule;
