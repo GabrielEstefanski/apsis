@@ -240,6 +240,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "apsis-1pn-py"
+version = "0.1.0"
+dependencies = [
+ "apsis",
+ "apsis-1pn",
+ "apsis-py-core",
+ "pyo3",
+]
+
+[[package]]
 name = "apsis-app"
 version = "0.1.0"
 dependencies = [
@@ -265,7 +275,16 @@ name = "apsis-py"
 version = "0.1.0"
 dependencies = [
  "apsis",
+ "apsis-py-core",
  "numpy",
+ "pyo3",
+]
+
+[[package]]
+name = "apsis-py-core"
+version = "0.1.0"
+dependencies = [
+ "apsis",
  "pyo3",
 ]
 

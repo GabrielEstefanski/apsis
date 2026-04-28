@@ -24,10 +24,25 @@ from apsis._native import (
 )
 from apsis._native import units as units
 
+
+class Perturbation:
+    """Pure-Python wrapper for a non-gravitational force plugin.
+
+    Constructed only by perturbation crates (``apsis_1pn``, ...). Pass to
+    :meth:`System.add_perturbation` exactly once.
+    """
+
+    def __init__(self, _capsule: object, _label: str) -> None: ...
+    @property
+    def label(self) -> str: ...
+    def __repr__(self) -> str: ...
+
+
 __all__ = [
     "AdaptiveStats",
     "Body",
     "IntegratorKind",
+    "Perturbation",
     "Stats",
     "System",
     "Trajectory",

@@ -540,6 +540,33 @@ def test_system_units_snapshot_is_immutable_across_integration() -> None:
     assert sys.units == apsis.units.SOLAR
 
 
+# ── Perturbation transport (without a concrete impl) ────────────────────────
+
+
+def test_perturbation_class_is_a_pure_python_wrapper() -> None:
+    """``apsis.Perturbation`` is the user-facing class that perturbation crates
+    construct. Defined in pure Python so cross-extension type identity is
+    actually shared (PyO3 cannot share #[pyclass] objects across cdylibs)."""
+    assert apsis.Perturbation.__module__ == "apsis"
+
+
+def test_add_perturbation_rejects_non_perturbation_objects() -> None:
+    """Anything without a ``_capsule`` attribute is rejected at the boundary."""
+    sys = _two_body_kepler_system()
+    with pytest.raises(ValueError, match="perturbation"):
+        sys.add_perturbation("not a perturbation")  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="perturbation"):
+        sys.add_perturbation(42)  # type: ignore[arg-type]
+
+
+def test_add_perturbation_rejects_perturbation_with_non_capsule_attribute() -> None:
+    """A ``Perturbation``-shaped object with a non-capsule ``_capsule`` is rejected."""
+    sys = _two_body_kepler_system()
+    fake = apsis.Perturbation(_capsule="not a capsule", _label="fake")
+    with pytest.raises(ValueError, match="PyCapsule"):
+        sys.add_perturbation(fake)
+
+
 # ── Diagnostics: Stats / AdaptiveStats / Trajectory parallel arrays ──────────
 
 

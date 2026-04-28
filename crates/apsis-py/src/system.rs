@@ -13,6 +13,7 @@ use pyo3::types::PyAny;
 use crate::body::PyBody;
 use crate::convert::value_error;
 use crate::integrator::{IntegratorKind as PyIntegratorKind, resolve as resolve_integrator};
+use crate::perturbation::take_perturbation_from_python;
 use crate::stats::{PyAdaptiveStats, PyStats};
 use crate::trajectory::{PyTrajectory, TrajectoryBuffers};
 use crate::units::PyUnitSystem;
@@ -475,6 +476,23 @@ impl PySystem {
     /// across the shift.
     fn recenter_com(&mut self) {
         self.inner.recenter_com();
+    }
+
+    /// Attach a non-gravitational perturbation force constructed by a
+    /// downstream binding crate (`apsis_1pn`, future radiation /
+    /// drag / J2 packages). The perturbation is consumed by the call —
+    /// the same `Perturbation` instance cannot be attached twice; build
+    /// a fresh one for each system.
+    ///
+    /// The kernel-requirement check inside the core fires here: if the
+    /// perturbation declares `Exactness::Exact` and the active kernel
+    /// reports `Softened`, a structured warning is emitted naming the
+    /// violated invariant. Use `System(..., exact_gravity=True)` or
+    /// `Body.<material>(...).unsoftened()` to silence it.
+    fn add_perturbation(&mut self, perturbation: &Bound<'_, PyAny>) -> PyResult<()> {
+        let boxed = take_perturbation_from_python(perturbation)?;
+        self.inner.add_perturbation(boxed);
+        Ok(())
     }
 
     fn __repr__(&self) -> String {

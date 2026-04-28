@@ -1,0 +1,44 @@
+[package]
+name = "apsis-1pn-py"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+readme = "README.md"
+description = "Python bindings for apsis-1pn — first post-Newtonian gravitational correction as a pluggable apsis Perturbation."
+
+# ── Crate layout ──────────────────────────────────────────────────────────────
+#
+# Independent extension module. The Python package name is `apsis_1pn`
+# (set in `pyproject.toml` via `tool.maturin.module-name`); a researcher
+# writes `import apsis_1pn` alongside `import apsis`.
+#
+# This crate's reason to exist is the project's architectural thesis:
+# every additional force is a *separately citable* component. Bundling
+# the 1PN correction into apsis-py would erase the boundary that makes
+# the kernel/perturbation pluggability a concrete claim rather than a
+# slogan. New perturbations (radiation pressure, J2, drag, …) get their
+# own crate by the same rule.
+
+[lib]
+name = "apsis_1pn"
+crate-type = ["cdylib"]
+
+# ── Dependencies ──────────────────────────────────────────────────────────────
+#
+# `apsis-1pn`     — the actual physics impl (PostNewtonian1PN, C_SOLAR_UNITS)
+# `apsis-py-core` — for `PyPerturbation`, the cross-extension wrapper that
+#                   `apsis.System.add_perturbation(...)` accepts. The wrapper
+#                   lives in an rlib-only crate so this crate (a cdylib) can
+#                   link it without colliding on `PyInit__native`.
+# `pyo3`          — same version + features as apsis-py; abi3-py39 keeps
+#                   the wheel matrix at 1× per platform.
+
+[dependencies]
+apsis = { path = "../apsis" }
+apsis-1pn = { path = "../apsis-1pn" }
+apsis-py-core = { path = "../apsis-py-core" }
+pyo3 = { version = "0.23", features = ["extension-module", "abi3-py39"] }

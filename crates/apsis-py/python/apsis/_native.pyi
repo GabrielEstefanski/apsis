@@ -328,6 +328,16 @@ class System:
     def adaptive_stats(self) -> AdaptiveStats | None:
         """Controller counters for adaptive integrators; ``None`` for fixed-step."""
 
+    def add_perturbation(self, perturbation: object) -> None:
+        """Attach a non-gravitational force built by a downstream crate.
+
+        Accepts an :class:`apsis.Perturbation` (pure-Python wrapper carrying
+        an opaque capsule from a perturbation crate). The perturbation is
+        consumed by the call; build a fresh one for each system.
+        Kernel-requirement violations (e.g. attaching a 1PN correction to a
+        softened-gravity system) emit structured warnings.
+        """
+
     def __repr__(self) -> str: ...
 
 # ── Trajectory ────────────────────────────────────────────────────────────────
