@@ -83,7 +83,7 @@
 //! next try. See `Attempt::snapshot` / `Attempt::restore`.
 
 use crate::domain::body::Body;
-use crate::physics::integrator::dense::{DenseSnapshot, predict_ias15};
+use crate::physics::integrator::dense::{DenseSnapshot, predict_ias15, predict_v_ias15};
 use crate::physics::integrator::helpers::{apply_perturbations, evaluate, scale_acc_and_pe};
 use crate::physics::integrator::traits::{
     Integrator, IntegratorContext, IntegratorKind, StepResult,
@@ -1553,14 +1553,23 @@ impl Ias15 {
 
             for stage in 1..=7 {
                 let s = H[stage];
-                // Predict positions at node `s`.
+                // Predict position AND velocity at node `s` per R&S 2015
+                // §2 / eq. 11. Velocity prediction is load-bearing for
+                // velocity-dependent perturbations (1PN, drag, radiation,
+                // Poynting–Robertson): omitting it leaves `body.(vx, vy)`
+                // stale across all seven Gauss–Radau nodes and biases
+                // each evaluation by `O(a · dt)`, accumulating to ~10⁻³
+                // relative precession error on Mercury 1PN at 500 orbits.
                 for i in 0..n {
                     let (px, py) = predict_ias15(x0[i], v0[i], a0[i], &self.b[i], s, dt_try);
+                    let (vx, vy) = predict_v_ias15(v0[i], a0[i], &self.b[i], s, dt_try);
                     bodies[i].x = px;
                     bodies[i].y = py;
+                    bodies[i].vx = vx;
+                    bodies[i].vy = vy;
                 }
 
-                // Evaluate acceleration at predicted positions.
+                // Evaluate acceleration at predicted (x, v).
                 let raw_pe = time_phase!(evaluate, { evaluate(bodies, ctx.force, acc) });
                 let _ = scale_acc_and_pe(acc, ctx.g_factor, raw_pe);
                 apply_perturbations(bodies, acc, ctx.perturbations);
