@@ -1,0 +1,112 @@
+//! Python binding for [`apsis_1pn`].
+//!
+//! Exposes the first post-Newtonian gravitational correction as an
+//! `apsis.Perturbation` plugin. A researcher writes:
+//!
+//! ```python
+//! import apsis
+//! import apsis_1pn
+//!
+//! sun = apsis.Body.star(mass=1.0).unsoftened()
+//! mercury = (apsis.Body.rocky(mass=1.66e-7)
+//!            .at((0.387, 0.0))
+//!            .with_velocity((0.0, 1.61))
+//!            .unsoftened())
+//!
+//! sys = apsis.System(
+//!     bodies=[sun, mercury],
+//!     units=apsis.units.SOLAR,
+//!     integrator="ias15",
+//!     dt=1e-3,
+//!     exact_gravity=True,
+//! )
+//! sys.add_perturbation(apsis_1pn.PostNewtonian1PN.solar_units())
+//! ```
+//!
+//! Each factory builds a `Box<dyn PerturbationForce>` in core, wraps it
+//! in a `PyCapsule` via [`apsis_py_core::box_into_capsule`], and hands
+//! the capsule to `apsis.Perturbation(capsule, label)` (the pure-Python
+//! wrapper class defined in `apsis/__init__.py`). No physics lives
+//! here — the 1PN formula is in [`apsis_1pn`].
+
+use apsis_1pn::PostNewtonian1PN;
+use apsis_py_core::box_into_capsule;
+use pyo3::exceptions::PyValueError;
+use pyo3::prelude::*;
+
+/// Construct an `apsis.Perturbation` instance from a freshly-built
+/// boxed perturbation. Imports `apsis.Perturbation` once per call;
+/// the cost is negligible compared to the enclosing simulation work.
+fn wrap_in_apsis_perturbation(
+    py: Python<'_>,
+    inner: Box<dyn apsis::physics::integrator::PerturbationForce>,
+    label: &str,
+) -> PyResult<PyObject> {
+    let capsule = box_into_capsule(py, inner)?;
+    let apsis = py.import("apsis")?;
+    let perturbation_cls = apsis.getattr("Perturbation")?;
+    let result = perturbation_cls.call1((capsule, label))?;
+    Ok(result.into())
+}
+
+/// First post-Newtonian gravitational correction (Schwarzschild,
+/// test-particle form, applied pairwise).
+///
+/// Use the named factories to construct an instance in the appropriate
+/// unit system; the result is a fully-formed `apsis.Perturbation` ready
+/// to attach via `System.add_perturbation(...)`.
+///
+/// # Kernel preconditions
+///
+/// 1PN is derived around the bit-exact Newtonian potential. Attaching
+/// it to a softened-gravity system substitutes a different unperturbed
+/// Hamiltonian whose apsidal precession alone is ~2 × 10³ larger than
+/// the 1PN signal for a Mercury-like orbit, silently inverting the
+/// sign of the measured precession. Either pass `exact_gravity=True`
+/// to `apsis.System(...)` or call `Body.<material>(...).unsoftened()`
+/// on every body.
+#[pyclass(module = "apsis_1pn", name = "PostNewtonian1PN")]
+pub struct PyPostNewtonian1PN;
+
+#[pymethods]
+impl PyPostNewtonian1PN {
+    /// 1PN calibrated for the simulator's canonical solar-system units
+    /// (`G = 1`, length = AU, mass = M_sun, time chosen so that
+    /// `c = `[`apsis_1pn::C_SOLAR_UNITS`]).
+    #[staticmethod]
+    fn solar_units(py: Python<'_>) -> PyResult<PyObject> {
+        wrap_in_apsis_perturbation(
+            py,
+            Box::new(PostNewtonian1PN::solar_units()),
+            "PostNewtonian1PN(solar_units)",
+        )
+    }
+
+    /// 1PN with an explicit speed of light in the caller's unit system.
+    /// Use when running outside canonical solar units — geometric units
+    /// (`c = 1`), SI, or a custom system — so the relativistic
+    /// correction matches the rest of the integration's unit choice.
+    #[staticmethod]
+    #[pyo3(signature = (*, c))]
+    fn with_c(py: Python<'_>, c: f64) -> PyResult<PyObject> {
+        if !c.is_finite() || c <= 0.0 {
+            return Err(PyValueError::new_err(format!(
+                "c: expected a strictly positive finite float, got {c}"
+            )));
+        }
+        wrap_in_apsis_perturbation(
+            py,
+            Box::new(PostNewtonian1PN::with_c(c)),
+            &format!("PostNewtonian1PN(c={c})"),
+        )
+    }
+}
+
+/// `apsis_1pn._native`: the Rust-built extension module.
+#[pymodule]
+fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add("__version__", env!("CARGO_PKG_VERSION"))?;
+    m.add_class::<PyPostNewtonian1PN>()?;
+    m.add("C_SOLAR_UNITS", apsis_1pn::C_SOLAR_UNITS)?;
+    Ok(())
+}

@@ -21,7 +21,11 @@ description = "Python bindings for the apsis N-body simulation library."
 # without conflicts.
 
 [lib]
-name = "apsis"
+name = "apsis_py"
+# Pure cdylib. Cross-crate pyclasses live in `apsis-py-core` (rlib only)
+# rather than being shared from this crate, because PyO3 fails with a
+# duplicate `PyInit__native` linker symbol if a downstream cdylib pulls
+# in another cdylib's `#[pymodule]` entry through an rlib link.
 crate-type = ["cdylib"]
 
 # ── Dependencies ──────────────────────────────────────────────────────────────
@@ -41,6 +45,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 apsis = { path = "../apsis" }
+apsis-py-core = { path = "../apsis-py-core" }
 pyo3 = { version = "0.23", features = ["extension-module", "abi3-py39"] }
 numpy = "0.23"
 

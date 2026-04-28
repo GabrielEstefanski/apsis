@@ -4,7 +4,9 @@ members = [
     "crates/apsis",
     "crates/apsis-app",
     "crates/apsis-1pn",
+    "crates/apsis-1pn-py",
     "crates/apsis-py",
+    "crates/apsis-py-core",
 ]
 
 # `apsis-py` is a Python extension module (`cdylib` + PyO3). Building

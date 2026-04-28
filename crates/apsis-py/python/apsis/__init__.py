@@ -51,10 +51,54 @@ from apsis._native import (
 )
 from apsis._native import units
 
+
+class Perturbation:
+    """User-facing wrapper for a non-gravitational force plugin.
+
+    Researchers never construct ``Perturbation`` directly. Each
+    perturbation crate (``apsis_1pn``, future radiation / drag /
+    multipole packages) provides factory methods that return a fully
+    formed instance:
+
+    .. code-block:: python
+
+        import apsis
+        import apsis_1pn
+
+        sys = apsis.System(bodies=[...], units=apsis.units.SOLAR, ...)
+        sys.add_perturbation(apsis_1pn.PostNewtonian1PN.solar_units())
+
+    Why a pure-Python class rather than a PyO3 ``#[pyclass]``: cross-extension
+    type identity in PyO3 is unreliable (each ``cdylib`` registers its own
+    Python class object even when the underlying Rust type is shared via an
+    ``rlib``). Defining the user-facing class once, here, gives every
+    perturbation crate the same ``apsis.Perturbation`` to pass into
+    ``System.add_perturbation``. The boxed Rust trait object travels in the
+    ``_capsule`` attribute (an opaque ``PyCapsule``) which the
+    ``System.add_perturbation`` boundary unwraps via the shared helpers in
+    the ``apsis-py-core`` Rust crate.
+    """
+
+    __slots__ = ("_capsule", "_label")
+
+    def __init__(self, _capsule: object, _label: str) -> None:
+        self._capsule = _capsule
+        self._label = _label
+
+    @property
+    def label(self) -> str:
+        """Human-readable label set by the constructing crate."""
+        return self._label
+
+    def __repr__(self) -> str:
+        return f"Perturbation(label={self._label!r})"
+
+
 __all__ = [
     "AdaptiveStats",
     "Body",
     "IntegratorKind",
+    "Perturbation",
     "Stats",
     "System",
     "Trajectory",

@@ -1,0 +1,79 @@
+# ── Build system ──────────────────────────────────────────────────────────────
+
+[build-system]
+requires = ["maturin>=1.7,<2.0"]
+build-backend = "maturin"
+
+# ── Project metadata (PEP 621) ────────────────────────────────────────────────
+#
+# Independent package from `apsis` itself. The thesis: every additional
+# force is a separately citable component. A researcher writes
+# `pip install apsis apsis-1pn`, just like `rebound + reboundx`.
+
+[project]
+name = "apsis-1pn"
+description = "First post-Newtonian gravitational correction as an apsis Perturbation plugin."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "Apache-2.0" }
+authors = [
+    { name = "Gabriel Braga Estefanski", email = "gabrielbragaestefanski@gmail.com" },
+]
+keywords = [
+    "n-body",
+    "astrophysics",
+    "post-newtonian",
+    "general-relativity",
+    "mercury-precession",
+    "apsis",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Rust",
+    "Topic :: Scientific/Engineering :: Astronomy",
+    "Topic :: Scientific/Engineering :: Physics",
+    "Typing :: Typed",
+]
+dependencies = [
+    "apsis",
+]
+dynamic = ["version"]
+
+[project.optional-dependencies]
+dev = [
+    "pytest >= 7.0",
+    "numpy >= 1.20",
+]
+
+[project.urls]
+Homepage = "https://github.com/GabrielEstefanski/gravity-sim"
+Source = "https://github.com/GabrielEstefanski/gravity-sim"
+Issues = "https://github.com/GabrielEstefanski/gravity-sim/issues"
+
+# ── Maturin configuration ─────────────────────────────────────────────────────
+
+[tool.maturin]
+features = ["pyo3/extension-module"]
+python-source = "python"
+module-name = "apsis_1pn._native"
+strip = true
+
+# ── Pyright (mirrors the apsis-py setup so IDE behaviour is uniform) ──────────
+
+[tool.pyright]
+include = ["python", "tests"]
+exclude = ["**/__pycache__", "**/.venv"]
+extraPaths = ["python"]
+typeCheckingMode = "strict"
+reportMissingImports = "warning"
+reportMissingTypeStubs = "warning"
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"

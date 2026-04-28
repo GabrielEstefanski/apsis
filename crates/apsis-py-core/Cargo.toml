@@ -1,0 +1,34 @@
+[package]
+name = "apsis-py-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+description = "Shared pyclass types reused across apsis Python binding crates."
+
+# ── Crate layout ──────────────────────────────────────────────────────────────
+#
+# `rlib`-only on purpose. Cross-crate pyclass sharing in PyO3 fails with
+# duplicate `PyInit_<name>` symbols if the upstream crate is itself a
+# `cdylib` exporting a `#[pymodule]` — the linker pulls the entry point
+# in twice when the downstream crate is built. Keeping every shared
+# pyclass here, in a crate that has no `#[pymodule]` of its own, is the
+# canonical PyO3 workaround (see <https://pyo3.rs/main/faq#two-pymodules>).
+#
+# What lives here: pyclass types whose Python identity must be the same
+# across multiple extension modules. `Perturbation` is the first because
+# `apsis.System.add_perturbation(p)` and `apsis_1pn.PostNewtonian1PN.solar_units()`
+# need to agree on what a `Perturbation` is at the Python type level.
+# Other types (Body, System, UnitSystem, …) stay in `apsis-py` because
+# only that crate constructs them.
+
+[lib]
+name = "apsis_py_core"
+crate-type = ["rlib"]
+
+[dependencies]
+apsis = { path = "../apsis" }
+pyo3 = { version = "0.23", features = ["abi3-py39"] }
