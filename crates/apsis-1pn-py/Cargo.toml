@@ -8,7 +8,7 @@ repository.workspace = true
 homepage.workspace = true
 rust-version.workspace = true
 readme = "README.md"
-description = "Python bindings for apsis-1pn — first post-Newtonian gravitational correction as a pluggable apsis Perturbation."
+description = "Python bindings for apsis-1pn. Proves that the apsis perturbation extension contract is preserved across the Rust/Python boundary via the apsis-py-core PyCapsule transport, without duplicating physics."
 
 # ── Crate layout ──────────────────────────────────────────────────────────────
 #

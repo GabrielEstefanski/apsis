@@ -9,7 +9,8 @@ homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 rust-version.workspace = true
-description = "First post-Newtonian (Schwarzschild) gravitational correction as an out-of-tree extension for APSIS. Reproduces Mercury's perihelion precession to 4.4 ppm of GR."
+readme = "README.md"
+description = "Out-of-tree perturbation crate for apsis. Proves the perturbation extension contract is buildable, not just documented. Test-particle 1PN; reproduces Mercury's perihelion precession to 4.4 ppm of GR (CI-gated)."
 
 [lib]
 path = "src/lib.rs"

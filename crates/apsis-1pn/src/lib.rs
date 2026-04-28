@@ -1,18 +1,37 @@
-//! First post-Newtonian (1PN) gravitational correction — out-of-tree plugin
-//! demonstrating the [`PerturbationForce`] extension point of `apsis`.
+//! Out-of-tree perturbation crate for `apsis`.
 //!
-//! # What this crate is for
+//! **This crate proves that the perturbation extension contract is
+//! buildable, not just documented.** It compiles against the public API
+//! alone — no `pub(crate)` access, no patches to core sources, no
+//! dependency other than `apsis` itself. A future change to that API
+//! that breaks this crate fails CI loudly rather than quietly.
 //!
-//! This crate's reason to exist is to *prove*, against the workspace's
-//! published API surface, that an external consumer can extend the physics
-//! of the simulator **without any `pub(crate)` access, without touching the
-//! core sources, and without any dependency other than `apsis`
-//! itself**. It is the concrete answer to the paper's Phase 3 claim of a
-//! "public API with an out-of-tree demonstration".
+//! Treat this crate as the **template** when writing new perturbation
+//! crates (radiation pressure, J2 oblateness, drag, …). See the
+//! crate-level README for the full extension-contract specification
+//! and the rationale.
 //!
-//! If a future change to the core breaks the API this crate depends on, the
-//! CI build of `apsis-1pn` fails — surfacing the contract violation
-//! loudly instead of quietly.
+//! # ⚠ Critical precondition
+//!
+//! Attaching 1PN to a softened-gravity system **invalidates the physical
+//! model**. For Mercury-like orbits, the numerical apsidal precession
+//! induced by Plummer softening alone is ~2 × 10³ larger than the
+//! relativistic signal *and inverts its sign*. Energy and angular
+//! momentum stay conserved at machine precision while the trajectory
+//! is physically wrong.
+//!
+//! **This is not a numerical error — it is a model violation.**
+//!
+//! Call [`Body::unsoftened`](apsis::domain::body::Body::unsoftened) on
+//! every body or
+//! [`System::with_exact_gravity`](apsis::core::system::System::with_exact_gravity)
+//! system-wide. The contract is enforced once, in the core: a violation
+//! emits a structured warning at registration naming the failed invariant.
+//!
+//! # Validation signal
+//!
+//! With the contract enforced, this crate reproduces Mercury's textbook
+//! 43 arcsec/century rate to **4.4 ppm**, gated in CI under `mercury-gate`.
 //!
 //! # Physics
 //!
