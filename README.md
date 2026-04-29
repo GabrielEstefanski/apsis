@@ -19,9 +19,10 @@ IAS15 on Kepler ($e = 0.5$, 100 orbits) and the Chenciner–Montgomery
 figure-8 (10 periods); all gated invariant metrics agree at **1 ULP**
 of f64 machine epsilon. The first downstream artifact,
 [`apsis-1pn`](crates/apsis-1pn/), reproduces Mercury's perihelion
-precession to **~1 ppm** of the GR prediction over 500 orbits — at
-the f64 noise floor of the test-particle 1PN approximation — gated
-in CI at 10 ppm.
+precession to **~1 ppm** of the GR prediction over 500 orbits on
+developer hardware — at the f64 noise floor of the test-particle
+1PN approximation — gated in CI at 100 ppm to absorb cross-platform
+LLVM / libm variance.
 
 > **Status.** Pre-release (`v0.1.0` alpha). The integrator and contract
 > machinery are 2D; the 3D port is the next breaking-change milestone
@@ -300,12 +301,15 @@ What is verified in CI:
   additivity, speed-of-light limit), 4 in the Mercury-precession gate,
   and 2 debug-mode contract (softened-system-warns, unsoftened-system-silent).
 - **Release-mode Mercury gate**: `cargo test --release -p apsis-1pn
-  -- --ignored` asserts Mercury's precession within 10 ppm of GR over
-  500 orbits. Achieved figure: **~1 ppm** (at the f64 noise floor of
-  the test-particle 1PN approximation; the prior `9caaef2` controller
-  refactor exposed a latent velocity-prediction flaw that, once fixed,
-  moved the residual error from a 4.4 ppm systematic bias to ~1 ppm
-  stochastic round-off — see `docs/experiments/2026-04-28-ias15-velocity-prediction-bug.md`).
+  -- --ignored` asserts Mercury's precession within 100 ppm of GR over
+  500 orbits. Achieved figure on developer hardware: **~1 ppm** (at
+  the f64 noise floor of the test-particle 1PN approximation; the
+  prior `9caaef2` controller refactor exposed a latent velocity-
+  prediction flaw that, once fixed, moved the residual error from a
+  4.4 ppm systematic bias to ~1 ppm stochastic round-off). The 100 ppm
+  threshold absorbs cross-platform LLVM / libm variance that pushes
+  the floor up to ~30 ppm on alternate runners — see
+  `docs/experiments/2026-04-28-ias15-velocity-prediction-bug.md`.
 - **Cross-implementation parity portfolio**: against REBOUND's IAS15
   on two canonical scenarios, with all gated invariant metrics
   (energy, angular momentum, orbital elements where defined, linear
