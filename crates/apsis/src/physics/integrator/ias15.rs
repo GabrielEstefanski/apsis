@@ -691,17 +691,18 @@ fn decide_dt(
 
 /// Per-body polynomial state for one substep (coefficients of the
 /// series expansion of the acceleration within the step). Index 0..7
-/// is the coefficient order; the pair is (x-component, y-component).
-type BodyCoeffs = [(f64, f64); 7];
+/// is the coefficient order; the value is the 3D acceleration
+/// coefficient.
+type BodyCoeffs = [crate::math::Vec3; 7];
 
 // Layout guard: the snapshot path uses `copy_from_slice` for tight
 // memcpy semantics and would silently copy padding if a future
-// refactor (e.g. adding a third component for 3D, or re-typing
-// the tuple) broke the tight 7·16-byte packing. Caught at compile
-// time — zero runtime cost.
+// refactor broke the tight packing. `Vec3` is `#[repr(C)]` with three
+// `f64` fields and no padding, so `BodyCoeffs` packs as 7 × 24 = 168
+// bytes. Caught at compile time — zero runtime cost.
 const _: () = {
     assert!(
-        std::mem::size_of::<BodyCoeffs>() == 7 * 16,
+        std::mem::size_of::<BodyCoeffs>() == 7 * 24,
         "BodyCoeffs layout changed — verify snapshot copy_from_slice still hits \
          the intended byte range"
     );
@@ -724,9 +725,9 @@ pub struct Ias15 {
     /// Compensated-summation carry terms for the `b` coefficients.
     csb: Vec<BodyCoeffs>,
     /// Compensated-summation carry for positions.
-    csx: Vec<(f64, f64)>,
+    csx: Vec<crate::math::Vec3>,
     /// Compensated-summation carry for velocities.
-    csv: Vec<(f64, f64)>,
+    csv: Vec<crate::math::Vec3>,
 
     /// Step size proposed for the next attempt. Seeded from the caller's
     /// `dt` on first use; thereafter driven by the error controller.
@@ -842,9 +843,9 @@ pub struct Ias15 {
     // Left in a possibly-stale state between calls: the Picard
     // implementation always re-fills them via `clear() + extend`
     // before reading, so the previous run's contents cannot leak.
-    pic_x0: Vec<(f64, f64)>,
-    pic_v0: Vec<(f64, f64)>,
-    pic_b6_old: Vec<(f64, f64)>,
+    pic_x0: Vec<crate::math::Vec3>,
+    pic_v0: Vec<crate::math::Vec3>,
+    pic_b6_old: Vec<crate::math::Vec3>,
 
     // ── Rejection-rollback snapshot buffers ──────────────────────────
     //
@@ -873,13 +874,13 @@ pub struct Ias15 {
     // rollback semantics without silently corrupting compensated-
     // summation carries. Cost is 32 bytes of memcpy per sub-step at
     // N=2, well inside the wash of the bigger `b`/`e`/`csb` copies.
-    snap_x: Vec<(f64, f64)>,
-    snap_v: Vec<(f64, f64)>,
+    snap_x: Vec<crate::math::Vec3>,
+    snap_v: Vec<crate::math::Vec3>,
     snap_b: Vec<BodyCoeffs>,
     snap_e: Vec<BodyCoeffs>,
     snap_csb: Vec<BodyCoeffs>,
-    snap_csx: Vec<(f64, f64)>,
-    snap_csv: Vec<(f64, f64)>,
+    snap_csx: Vec<crate::math::Vec3>,
+    snap_csv: Vec<crate::math::Vec3>,
     snapshot_valid: bool,
 }
 
@@ -941,12 +942,12 @@ impl Ias15 {
 
     fn ensure_capacity(&mut self, n: usize) {
         if self.b.len() != n {
-            self.b = vec![[(0.0, 0.0); 7]; n];
-            self.e = vec![[(0.0, 0.0); 7]; n];
-            self.g = vec![[(0.0, 0.0); 7]; n];
-            self.csb = vec![[(0.0, 0.0); 7]; n];
-            self.csx = vec![(0.0, 0.0); n];
-            self.csv = vec![(0.0, 0.0); n];
+            self.b = vec![[crate::math::Vec3::ZERO; 7]; n];
+            self.e = vec![[crate::math::Vec3::ZERO; 7]; n];
+            self.g = vec![[crate::math::Vec3::ZERO; 7]; n];
+            self.csb = vec![[crate::math::Vec3::ZERO; 7]; n];
+            self.csx = vec![crate::math::Vec3::ZERO; n];
+            self.csv = vec![crate::math::Vec3::ZERO; n];
             self.dt_last_accepted = 0.0;
             // Reset dt_next too: a value from a different body count is
             // physically meaningless (different acceleration regime) and
@@ -960,13 +961,13 @@ impl Ias15 {
             // `copy_from_slice` and element-wise fills without reallocating.
             // Invalidate until the first capture so a premature
             // `restore_snapshot` is caught by the debug assertion.
-            self.snap_x = vec![(0.0, 0.0); n];
-            self.snap_v = vec![(0.0, 0.0); n];
-            self.snap_b = vec![[(0.0, 0.0); 7]; n];
-            self.snap_e = vec![[(0.0, 0.0); 7]; n];
-            self.snap_csb = vec![[(0.0, 0.0); 7]; n];
-            self.snap_csx = vec![(0.0, 0.0); n];
-            self.snap_csv = vec![(0.0, 0.0); n];
+            self.snap_x = vec![crate::math::Vec3::ZERO; n];
+            self.snap_v = vec![crate::math::Vec3::ZERO; n];
+            self.snap_b = vec![[crate::math::Vec3::ZERO; 7]; n];
+            self.snap_e = vec![[crate::math::Vec3::ZERO; 7]; n];
+            self.snap_csb = vec![[crate::math::Vec3::ZERO; 7]; n];
+            self.snap_csx = vec![crate::math::Vec3::ZERO; n];
+            self.snap_csv = vec![crate::math::Vec3::ZERO; n];
             self.snapshot_valid = false;
 
             // FSAL cache is tied to the body count: a resize means the
@@ -992,10 +993,10 @@ impl Ias15 {
         debug_assert_eq!(self.snap_x.len(), bodies.len(), "snapshot buffer size mismatch");
 
         for (dst, src) in self.snap_x.iter_mut().zip(bodies.iter()) {
-            *dst = (src.x, src.y);
+            *dst = crate::math::Vec3::new(src.x, src.y, src.z);
         }
         for (dst, src) in self.snap_v.iter_mut().zip(bodies.iter()) {
-            *dst = (src.vx, src.vy);
+            *dst = crate::math::Vec3::new(src.vx, src.vy, src.vz);
         }
         self.snap_b.copy_from_slice(&self.b);
         self.snap_e.copy_from_slice(&self.e);
@@ -1023,12 +1024,14 @@ impl Ias15 {
         debug_assert_eq!(self.snap_x.len(), bodies.len(), "snapshot buffer size mismatch");
 
         for (b, src) in bodies.iter_mut().zip(self.snap_x.iter()) {
-            b.x = src.0;
-            b.y = src.1;
+            b.x = src.x;
+            b.y = src.y;
+            b.z = src.z;
         }
         for (b, src) in bodies.iter_mut().zip(self.snap_v.iter()) {
-            b.vx = src.0;
-            b.vy = src.1;
+            b.vx = src.x;
+            b.vy = src.y;
+            b.vz = src.z;
         }
         self.b.copy_from_slice(&self.snap_b);
         self.e.copy_from_slice(&self.snap_e);
@@ -1059,16 +1062,19 @@ impl Integrator for Ias15 {
         let n = bodies.len();
         self.ensure_capacity(n);
 
-        // 3D-port invariant (commit 3): IAS15's internal Picard loop and
-        // its Gauss–Radau b/e/g buffers still operate on 2D `(f64, f64)`
-        // tuples. The integrator treats `acc.x, acc.y` as the in-plane
-        // dynamic state and ignores `acc.z` until the dedicated buffer
-        // migration (commit 4). Until then, every input must be planar.
+        // Defensive contract: every input kinematic component must be
+        // finite. NaN/inf in `body.{x, y, z, vx, vy, vz}` would propagate
+        // through the Picard substep predictor and the Gauss–Radau b/e/g
+        // buffers without producing a usable signal at any controller
+        // level. Cheap to assert in debug, free in release.
         debug_assert!(
-            bodies.iter().all(|b| b.z == 0.0 && b.vz == 0.0),
-            "IAS15: out-of-plane state (z != 0 or vz != 0) is not yet \
-             supported; the b/e/g substep buffers migrate to Vec3 in \
-             the dedicated IAS15 buffer commit"
+            bodies.iter().all(|b| b.x.is_finite()
+                && b.y.is_finite()
+                && b.z.is_finite()
+                && b.vx.is_finite()
+                && b.vy.is_finite()
+                && b.vz.is_finite()),
+            "IAS15: non-finite input state — NaN/inf in body kinematics"
         );
 
         // Caller's `dt_hint` is the *first-call seed* for the controller,
@@ -1136,13 +1142,13 @@ impl Integrator for Ias15 {
             && acc.len() == n
             && self.cached_g_factor == ctx.g_factor
             && self.cached_perturbation_count == ctx.perturbations.len();
-        let a0: Vec<(f64, f64)> = if fsal_valid {
-            time_phase!(a0_clone, { acc.iter().map(|a| (a.x, a.y)).collect() })
+        let a0: Vec<crate::math::Vec3> = if fsal_valid {
+            time_phase!(a0_clone, { acc.clone() })
         } else {
             let raw_pe = time_phase!(evaluate, { evaluate(bodies, ctx.force, acc) });
             scale_acc_and_pe(acc, ctx.g_factor, raw_pe);
             apply_perturbations(bodies, acc, ctx.perturbations);
-            time_phase!(a0_clone, { acc.iter().map(|a| (a.x, a.y)).collect() })
+            time_phase!(a0_clone, { acc.clone() })
         };
 
         // ── Rejection retry loop ─────────────────────────────────────────
@@ -1449,8 +1455,8 @@ impl Integrator for Ias15 {
             return;
         }
         for (i, b) in bodies.iter_mut().enumerate() {
-            add_cs(&mut b.x, &mut self.csx[i].0, -dx);
-            add_cs(&mut b.y, &mut self.csx[i].1, -dy);
+            add_cs(&mut b.x, &mut self.csx[i].x, -dx);
+            add_cs(&mut b.y, &mut self.csx[i].y, -dy);
         }
         // FSAL cache invalidation (same reason as the early-return
         // branch above): even with the compensation-aware shift, body
@@ -1512,7 +1518,7 @@ impl Ias15 {
         bodies: &mut [Body],
         ctx: &mut IntegratorContext<'_>,
         acc: &mut Vec<crate::math::Vec3>,
-        a0: &[(f64, f64)],
+        a0: &[crate::math::Vec3],
         dt_try: f64,
     ) -> (bool, f64, u32) {
         let mut x0 = std::mem::take(&mut self.pic_x0);
@@ -1534,11 +1540,11 @@ impl Ias15 {
         bodies: &mut [Body],
         ctx: &mut IntegratorContext<'_>,
         acc: &mut Vec<crate::math::Vec3>,
-        a0: &[(f64, f64)],
+        a0: &[crate::math::Vec3],
         dt_try: f64,
-        x0: &mut Vec<(f64, f64)>,
-        v0: &mut Vec<(f64, f64)>,
-        b6_old: &mut Vec<(f64, f64)>,
+        x0: &mut Vec<crate::math::Vec3>,
+        v0: &mut Vec<crate::math::Vec3>,
+        b6_old: &mut Vec<crate::math::Vec3>,
     ) -> (bool, f64, u32) {
         let n = bodies.len();
 
@@ -1548,9 +1554,9 @@ impl Ias15 {
         // once and the rest reuse. In steady-state (constant body count)
         // these loops are zero-alloc.
         x0.clear();
-        x0.extend(bodies.iter().map(|b| (b.x, b.y)));
+        x0.extend(bodies.iter().map(|b| crate::math::Vec3::new(b.x, b.y, b.z)));
         v0.clear();
-        v0.extend(bodies.iter().map(|b| (b.vx, b.vy)));
+        v0.extend(bodies.iter().map(|b| crate::math::Vec3::new(b.vx, b.vy, b.vz)));
 
         let mut last_residual = f64::INFINITY;
         let mut no_improve: u32 = 0;
@@ -1573,12 +1579,14 @@ impl Ias15 {
                 // each evaluation by `O(a · dt)`, accumulating to ~10⁻³
                 // relative precession error on Mercury 1PN at 500 orbits.
                 for i in 0..n {
-                    let (px, py) = predict_ias15(x0[i], v0[i], a0[i], &self.b[i], s, dt_try);
-                    let (vx, vy) = predict_v_ias15(v0[i], a0[i], &self.b[i], s, dt_try);
-                    bodies[i].x = px;
-                    bodies[i].y = py;
-                    bodies[i].vx = vx;
-                    bodies[i].vy = vy;
+                    let p = predict_ias15(x0[i], v0[i], a0[i], &self.b[i], s, dt_try);
+                    let v = predict_v_ias15(v0[i], a0[i], &self.b[i], s, dt_try);
+                    bodies[i].x = p.x;
+                    bodies[i].y = p.y;
+                    bodies[i].z = p.z;
+                    bodies[i].vx = v.x;
+                    bodies[i].vy = v.y;
+                    bodies[i].vz = v.z;
                 }
 
                 // Evaluate acceleration at predicted (x, v).
@@ -1634,10 +1642,15 @@ impl Ias15 {
                 let mut sum_sq = 0.0_f64;
                 let mut count: usize = 0;
                 for i in 0..n {
-                    let db6x = self.b[i][6].0 - b6_old[i].0;
-                    let db6y = self.b[i][6].1 - b6_old[i].1;
-                    let db6 = (db6x * db6x + db6y * db6y).sqrt();
-                    let a_mag = (a0[i].0 * a0[i].0 + a0[i].1 * a0[i].1).sqrt();
+                    // `(x² + y²) + z²` left to right. Re-associating
+                    // shifts ULPs and is observable on the Picard
+                    // residual; keep the explicit form. See
+                    // docs/experiments/2026-04-29-3d-port-baseline.md.
+                    let db6x = self.b[i][6].x - b6_old[i].x;
+                    let db6y = self.b[i][6].y - b6_old[i].y;
+                    let db6z = self.b[i][6].z - b6_old[i].z;
+                    let db6 = (db6x * db6x + db6y * db6y + db6z * db6z).sqrt();
+                    let a_mag = (a0[i].x * a0[i].x + a0[i].y * a0[i].y + a0[i].z * a0[i].z).sqrt();
                     if a_mag > 0.0 {
                         let rel = db6 / a_mag;
                         sum_sq += rel * rel;
@@ -1704,7 +1717,7 @@ impl Ias15 {
     /// Advance positions and velocities to the end of the accepted
     /// attempt using compensated summation (Neumaier-style) so the
     /// integrator's round-off error stays O(ε) rather than O(ε·N_steps).
-    fn advance_state(&mut self, bodies: &mut [Body], a0: &[(f64, f64)], dt: f64) {
+    fn advance_state(&mut self, bodies: &mut [Body], a0: &[crate::math::Vec3], dt: f64) {
         let n = bodies.len();
         for i in 0..n {
             let bi = &self.b[i];
@@ -1720,57 +1733,80 @@ impl Ias15 {
             // 10⁹-orbit round-off budget the module advertises.
             let dx = dt
                 * dt
-                * (bi[6].0 / 72.0
-                    + bi[5].0 / 56.0
-                    + bi[4].0 / 42.0
-                    + bi[3].0 / 30.0
-                    + bi[2].0 / 20.0
-                    + bi[1].0 / 12.0
-                    + bi[0].0 / 6.0
-                    + a0[i].0 * 0.5);
+                * (bi[6].x / 72.0
+                    + bi[5].x / 56.0
+                    + bi[4].x / 42.0
+                    + bi[3].x / 30.0
+                    + bi[2].x / 20.0
+                    + bi[1].x / 12.0
+                    + bi[0].x / 6.0
+                    + a0[i].x * 0.5);
             let dy = dt
                 * dt
-                * (bi[6].1 / 72.0
-                    + bi[5].1 / 56.0
-                    + bi[4].1 / 42.0
-                    + bi[3].1 / 30.0
-                    + bi[2].1 / 20.0
-                    + bi[1].1 / 12.0
-                    + bi[0].1 / 6.0
-                    + a0[i].1 * 0.5);
+                * (bi[6].y / 72.0
+                    + bi[5].y / 56.0
+                    + bi[4].y / 42.0
+                    + bi[3].y / 30.0
+                    + bi[2].y / 20.0
+                    + bi[1].y / 12.0
+                    + bi[0].y / 6.0
+                    + a0[i].y * 0.5);
+            let dz = dt
+                * dt
+                * (bi[6].z / 72.0
+                    + bi[5].z / 56.0
+                    + bi[4].z / 42.0
+                    + bi[3].z / 30.0
+                    + bi[2].z / 20.0
+                    + bi[1].z / 12.0
+                    + bi[0].z / 6.0
+                    + a0[i].z * 0.5);
 
             // Full-step velocity increment (same ascending-magnitude rule):
             //   Δv/dt = a₀ + b₀/2 + b₁/3 + b₂/4 + b₃/5 + b₄/6 + b₅/7 + b₆/8
             let dvx = dt
-                * (bi[6].0 / 8.0
-                    + bi[5].0 / 7.0
-                    + bi[4].0 / 6.0
-                    + bi[3].0 / 5.0
-                    + bi[2].0 / 4.0
-                    + bi[1].0 / 3.0
-                    + bi[0].0 / 2.0
-                    + a0[i].0);
+                * (bi[6].x / 8.0
+                    + bi[5].x / 7.0
+                    + bi[4].x / 6.0
+                    + bi[3].x / 5.0
+                    + bi[2].x / 4.0
+                    + bi[1].x / 3.0
+                    + bi[0].x / 2.0
+                    + a0[i].x);
             let dvy = dt
-                * (bi[6].1 / 8.0
-                    + bi[5].1 / 7.0
-                    + bi[4].1 / 6.0
-                    + bi[3].1 / 5.0
-                    + bi[2].1 / 4.0
-                    + bi[1].1 / 3.0
-                    + bi[0].1 / 2.0
-                    + a0[i].1);
+                * (bi[6].y / 8.0
+                    + bi[5].y / 7.0
+                    + bi[4].y / 6.0
+                    + bi[3].y / 5.0
+                    + bi[2].y / 4.0
+                    + bi[1].y / 3.0
+                    + bi[0].y / 2.0
+                    + a0[i].y);
+            let dvz = dt
+                * (bi[6].z / 8.0
+                    + bi[5].z / 7.0
+                    + bi[4].z / 6.0
+                    + bi[3].z / 5.0
+                    + bi[2].z / 4.0
+                    + bi[1].z / 3.0
+                    + bi[0].z / 2.0
+                    + a0[i].z);
 
             // First integrate the v·dt contribution to position.
             let vdt_x = bodies[i].vx * dt;
             let vdt_y = bodies[i].vy * dt;
+            let vdt_z = bodies[i].vz * dt;
 
-            add_cs(&mut bodies[i].x, &mut self.csx[i].0, vdt_x);
-            add_cs(&mut bodies[i].y, &mut self.csx[i].1, vdt_y);
-            add_cs(&mut bodies[i].x, &mut self.csx[i].0, dx);
-            add_cs(&mut bodies[i].y, &mut self.csx[i].1, dy);
+            add_cs(&mut bodies[i].x, &mut self.csx[i].x, vdt_x);
+            add_cs(&mut bodies[i].y, &mut self.csx[i].y, vdt_y);
+            add_cs(&mut bodies[i].z, &mut self.csx[i].z, vdt_z);
+            add_cs(&mut bodies[i].x, &mut self.csx[i].x, dx);
+            add_cs(&mut bodies[i].y, &mut self.csx[i].y, dy);
+            add_cs(&mut bodies[i].z, &mut self.csx[i].z, dz);
 
-            add_cs(&mut bodies[i].vx, &mut self.csv[i].0, dvx);
-            add_cs(&mut bodies[i].vy, &mut self.csv[i].1, dvy);
+            add_cs(&mut bodies[i].vx, &mut self.csv[i].x, dvx);
+            add_cs(&mut bodies[i].vy, &mut self.csv[i].y, dvy);
+            add_cs(&mut bodies[i].vz, &mut self.csv[i].z, dvz);
         }
     }
 
@@ -1801,13 +1837,14 @@ impl Ias15 {
     /// producing a ratio that was a noise-to-signal measurement
     /// rather than a truncation estimate. See the diagnostic write-
     /// up referenced in `picard_loop_inner`.
-    fn truncation_error(&self, a0: &[(f64, f64)]) -> f64 {
+    fn truncation_error(&self, a0: &[crate::math::Vec3]) -> f64 {
         let mut sum_sq = 0.0_f64;
         let mut count: usize = 0;
         for (i, row) in self.b.iter().enumerate() {
             let b = row[6];
-            let b6 = (b.0 * b.0 + b.1 * b.1).sqrt();
-            let a_mag = (a0[i].0 * a0[i].0 + a0[i].1 * a0[i].1).sqrt();
+            // Same `(x² + y²) + z²` reduction as the Picard residual.
+            let b6 = (b.x * b.x + b.y * b.y + b.z * b.z).sqrt();
+            let a_mag = (a0[i].x * a0[i].x + a0[i].y * a0[i].y + a0[i].z * a0[i].z).sqrt();
             if a_mag > 0.0 {
                 let rel = b6 / a_mag;
                 sum_sq += rel * rel;
@@ -1892,81 +1929,133 @@ impl Ias15 {
 
         for i in 0..self.b.len() {
             let be = [
-                (self.b[i][0].0 - self.e[i][0].0, self.b[i][0].1 - self.e[i][0].1),
-                (self.b[i][1].0 - self.e[i][1].0, self.b[i][1].1 - self.e[i][1].1),
-                (self.b[i][2].0 - self.e[i][2].0, self.b[i][2].1 - self.e[i][2].1),
-                (self.b[i][3].0 - self.e[i][3].0, self.b[i][3].1 - self.e[i][3].1),
-                (self.b[i][4].0 - self.e[i][4].0, self.b[i][4].1 - self.e[i][4].1),
-                (self.b[i][5].0 - self.e[i][5].0, self.b[i][5].1 - self.e[i][5].1),
-                (self.b[i][6].0 - self.e[i][6].0, self.b[i][6].1 - self.e[i][6].1),
+                crate::math::Vec3::new(
+                    self.b[i][0].x - self.e[i][0].x,
+                    self.b[i][0].y - self.e[i][0].y,
+                    self.b[i][0].z - self.e[i][0].z,
+                ),
+                crate::math::Vec3::new(
+                    self.b[i][1].x - self.e[i][1].x,
+                    self.b[i][1].y - self.e[i][1].y,
+                    self.b[i][1].z - self.e[i][1].z,
+                ),
+                crate::math::Vec3::new(
+                    self.b[i][2].x - self.e[i][2].x,
+                    self.b[i][2].y - self.e[i][2].y,
+                    self.b[i][2].z - self.e[i][2].z,
+                ),
+                crate::math::Vec3::new(
+                    self.b[i][3].x - self.e[i][3].x,
+                    self.b[i][3].y - self.e[i][3].y,
+                    self.b[i][3].z - self.e[i][3].z,
+                ),
+                crate::math::Vec3::new(
+                    self.b[i][4].x - self.e[i][4].x,
+                    self.b[i][4].y - self.e[i][4].y,
+                    self.b[i][4].z - self.e[i][4].z,
+                ),
+                crate::math::Vec3::new(
+                    self.b[i][5].x - self.e[i][5].x,
+                    self.b[i][5].y - self.e[i][5].y,
+                    self.b[i][5].z - self.e[i][5].z,
+                ),
+                crate::math::Vec3::new(
+                    self.b[i][6].x - self.e[i][6].x,
+                    self.b[i][6].y - self.e[i][6].y,
+                    self.b[i][6].z - self.e[i][6].z,
+                ),
             ];
 
             let b = self.b[i];
 
             // e[0] = q · (b0 + 2 b1 + 3 b2 + 4 b3 + 5 b4 + 6 b5 + 7 b6)
             let e0_x = q
-                * (b[0].0
-                    + 2.0 * b[1].0
-                    + 3.0 * b[2].0
-                    + 4.0 * b[3].0
-                    + 5.0 * b[4].0
-                    + 6.0 * b[5].0
-                    + 7.0 * b[6].0);
+                * (b[0].x
+                    + 2.0 * b[1].x
+                    + 3.0 * b[2].x
+                    + 4.0 * b[3].x
+                    + 5.0 * b[4].x
+                    + 6.0 * b[5].x
+                    + 7.0 * b[6].x);
             let e0_y = q
-                * (b[0].1
-                    + 2.0 * b[1].1
-                    + 3.0 * b[2].1
-                    + 4.0 * b[3].1
-                    + 5.0 * b[4].1
-                    + 6.0 * b[5].1
-                    + 7.0 * b[6].1);
+                * (b[0].y
+                    + 2.0 * b[1].y
+                    + 3.0 * b[2].y
+                    + 4.0 * b[3].y
+                    + 5.0 * b[4].y
+                    + 6.0 * b[5].y
+                    + 7.0 * b[6].y);
+            let e0_z = q
+                * (b[0].z
+                    + 2.0 * b[1].z
+                    + 3.0 * b[2].z
+                    + 4.0 * b[3].z
+                    + 5.0 * b[4].z
+                    + 6.0 * b[5].z
+                    + 7.0 * b[6].z);
 
             // e[1] = q² · (b1 + 3 b2 + 6 b3 + 10 b4 + 15 b5 + 21 b6)
             let e1_x = q2
-                * (b[1].0
-                    + 3.0 * b[2].0
-                    + 6.0 * b[3].0
-                    + 10.0 * b[4].0
-                    + 15.0 * b[5].0
-                    + 21.0 * b[6].0);
+                * (b[1].x
+                    + 3.0 * b[2].x
+                    + 6.0 * b[3].x
+                    + 10.0 * b[4].x
+                    + 15.0 * b[5].x
+                    + 21.0 * b[6].x);
             let e1_y = q2
-                * (b[1].1
-                    + 3.0 * b[2].1
-                    + 6.0 * b[3].1
-                    + 10.0 * b[4].1
-                    + 15.0 * b[5].1
-                    + 21.0 * b[6].1);
+                * (b[1].y
+                    + 3.0 * b[2].y
+                    + 6.0 * b[3].y
+                    + 10.0 * b[4].y
+                    + 15.0 * b[5].y
+                    + 21.0 * b[6].y);
+            let e1_z = q2
+                * (b[1].z
+                    + 3.0 * b[2].z
+                    + 6.0 * b[3].z
+                    + 10.0 * b[4].z
+                    + 15.0 * b[5].z
+                    + 21.0 * b[6].z);
 
             // e[2] = q³ · (b2 + 4 b3 + 10 b4 + 20 b5 + 35 b6)
-            let e2_x = q3 * (b[2].0 + 4.0 * b[3].0 + 10.0 * b[4].0 + 20.0 * b[5].0 + 35.0 * b[6].0);
-            let e2_y = q3 * (b[2].1 + 4.0 * b[3].1 + 10.0 * b[4].1 + 20.0 * b[5].1 + 35.0 * b[6].1);
+            let e2_x = q3 * (b[2].x + 4.0 * b[3].x + 10.0 * b[4].x + 20.0 * b[5].x + 35.0 * b[6].x);
+            let e2_y = q3 * (b[2].y + 4.0 * b[3].y + 10.0 * b[4].y + 20.0 * b[5].y + 35.0 * b[6].y);
+            let e2_z = q3 * (b[2].z + 4.0 * b[3].z + 10.0 * b[4].z + 20.0 * b[5].z + 35.0 * b[6].z);
 
             // e[3] = q⁴ · (b3 + 5 b4 + 15 b5 + 35 b6)
-            let e3_x = q4 * (b[3].0 + 5.0 * b[4].0 + 15.0 * b[5].0 + 35.0 * b[6].0);
-            let e3_y = q4 * (b[3].1 + 5.0 * b[4].1 + 15.0 * b[5].1 + 35.0 * b[6].1);
+            let e3_x = q4 * (b[3].x + 5.0 * b[4].x + 15.0 * b[5].x + 35.0 * b[6].x);
+            let e3_y = q4 * (b[3].y + 5.0 * b[4].y + 15.0 * b[5].y + 35.0 * b[6].y);
+            let e3_z = q4 * (b[3].z + 5.0 * b[4].z + 15.0 * b[5].z + 35.0 * b[6].z);
 
             // e[4] = q⁵ · (b4 + 6 b5 + 21 b6)
-            let e4_x = q5 * (b[4].0 + 6.0 * b[5].0 + 21.0 * b[6].0);
-            let e4_y = q5 * (b[4].1 + 6.0 * b[5].1 + 21.0 * b[6].1);
+            let e4_x = q5 * (b[4].x + 6.0 * b[5].x + 21.0 * b[6].x);
+            let e4_y = q5 * (b[4].y + 6.0 * b[5].y + 21.0 * b[6].y);
+            let e4_z = q5 * (b[4].z + 6.0 * b[5].z + 21.0 * b[6].z);
 
             // e[5] = q⁶ · (b5 + 7 b6)
-            let e5_x = q6 * (b[5].0 + 7.0 * b[6].0);
-            let e5_y = q6 * (b[5].1 + 7.0 * b[6].1);
+            let e5_x = q6 * (b[5].x + 7.0 * b[6].x);
+            let e5_y = q6 * (b[5].y + 7.0 * b[6].y);
+            let e5_z = q6 * (b[5].z + 7.0 * b[6].z);
 
             // e[6] = q⁷ · b6   (only column where the diagonal is the full transform)
-            let e6_x = q7 * b[6].0;
-            let e6_y = q7 * b[6].1;
+            let e6_x = q7 * b[6].x;
+            let e6_y = q7 * b[6].y;
+            let e6_z = q7 * b[6].z;
 
-            self.e[i][0] = (e0_x, e0_y);
-            self.e[i][1] = (e1_x, e1_y);
-            self.e[i][2] = (e2_x, e2_y);
-            self.e[i][3] = (e3_x, e3_y);
-            self.e[i][4] = (e4_x, e4_y);
-            self.e[i][5] = (e5_x, e5_y);
-            self.e[i][6] = (e6_x, e6_y);
+            self.e[i][0] = crate::math::Vec3::new(e0_x, e0_y, e0_z);
+            self.e[i][1] = crate::math::Vec3::new(e1_x, e1_y, e1_z);
+            self.e[i][2] = crate::math::Vec3::new(e2_x, e2_y, e2_z);
+            self.e[i][3] = crate::math::Vec3::new(e3_x, e3_y, e3_z);
+            self.e[i][4] = crate::math::Vec3::new(e4_x, e4_y, e4_z);
+            self.e[i][5] = crate::math::Vec3::new(e5_x, e5_y, e5_z);
+            self.e[i][6] = crate::math::Vec3::new(e6_x, e6_y, e6_z);
 
             for k in 0..7 {
-                self.b[i][k] = (self.e[i][k].0 + be[k].0, self.e[i][k].1 + be[k].1);
+                self.b[i][k] = crate::math::Vec3::new(
+                    self.e[i][k].x + be[k].x,
+                    self.e[i][k].y + be[k].y,
+                    self.e[i][k].z + be[k].z,
+                );
             }
         }
     }
@@ -1980,13 +2069,15 @@ impl Ias15 {
         for i in 0..self.b.len() {
             let bi = self.b[i];
             for j in 0..7 {
-                let mut gx = bi[j].0;
-                let mut gy = bi[j].1;
+                let mut gx = bi[j].x;
+                let mut gy = bi[j].y;
+                let mut gz = bi[j].z;
                 for k in (j + 1)..7 {
-                    gx += D_MAT[k][j] * bi[k].0;
-                    gy += D_MAT[k][j] * bi[k].1;
+                    gx += D_MAT[k][j] * bi[k].x;
+                    gy += D_MAT[k][j] * bi[k].y;
+                    gz += D_MAT[k][j] * bi[k].z;
                 }
-                self.g[i][j] = (gx, gy);
+                self.g[i][j] = crate::math::Vec3::new(gx, gy, gz);
             }
         }
     }
@@ -1995,34 +2086,42 @@ impl Ias15 {
     /// via Newton divided differences of (F - F₀); then propagate the
     /// delta back into b₀..b_{n-1} using c_mat. Compensated summation
     /// keeps round-off under control across many Picard iterations.
-    fn update_g_and_b(&mut self, stage: usize, a0: &[(f64, f64)], acc_n: &[crate::math::Vec3]) {
+    fn update_g_and_b(
+        &mut self,
+        stage: usize,
+        a0: &[crate::math::Vec3],
+        acc_n: &[crate::math::Vec3],
+    ) {
         let n = stage - 1; // index of the g coefficient we're updating
         let hn = H[stage];
 
         for i in 0..self.g.len() {
             // Compute Newton divided difference of order n+1 for body i.
-            // `acc_n` is 3D but the IAS15 b/g substep buffers are still 2D
-            // (commit 4 territory); read only the in-plane components.
-            let dfx = acc_n[i].x - a0[i].0;
-            let dfy = acc_n[i].y - a0[i].1;
+            let dfx = acc_n[i].x - a0[i].x;
+            let dfy = acc_n[i].y - a0[i].y;
+            let dfz = acc_n[i].z - a0[i].z;
 
-            let (mut tx, mut ty) = (dfx / hn, dfy / hn);
+            let (mut tx, mut ty, mut tz) = (dfx / hn, dfy / hn, dfz / hn);
             for k in 0..n {
-                tx = (tx - self.g[i][k].0) / (hn - H[k + 1]);
-                ty = (ty - self.g[i][k].1) / (hn - H[k + 1]);
+                tx = (tx - self.g[i][k].x) / (hn - H[k + 1]);
+                ty = (ty - self.g[i][k].y) / (hn - H[k + 1]);
+                tz = (tz - self.g[i][k].z) / (hn - H[k + 1]);
             }
 
-            let dgx = tx - self.g[i][n].0;
-            let dgy = ty - self.g[i][n].1;
-            self.g[i][n] = (tx, ty);
+            let dgx = tx - self.g[i][n].x;
+            let dgy = ty - self.g[i][n].y;
+            let dgz = tz - self.g[i][n].z;
+            self.g[i][n] = crate::math::Vec3::new(tx, ty, tz);
 
             // Propagate Δg_n into b₀..b_n using compensated summation.
             for j in 0..=n {
                 let coeff = if j == n { 1.0 } else { C_MAT[n][j] };
                 let dbx = coeff * dgx;
                 let dby = coeff * dgy;
-                add_cs(&mut self.b[i][j].0, &mut self.csb[i][j].0, dbx);
-                add_cs(&mut self.b[i][j].1, &mut self.csb[i][j].1, dby);
+                let dbz = coeff * dgz;
+                add_cs(&mut self.b[i][j].x, &mut self.csb[i][j].x, dbx);
+                add_cs(&mut self.b[i][j].y, &mut self.csb[i][j].y, dby);
+                add_cs(&mut self.b[i][j].z, &mut self.csb[i][j].z, dbz);
             }
         }
     }
@@ -2039,12 +2138,14 @@ fn add_cs(p: &mut f64, csp: &mut f64, inp: f64) {
     *p = t;
 }
 
-fn restore_xv(bodies: &mut [Body], x: &[(f64, f64)], v: &[(f64, f64)]) {
+fn restore_xv(bodies: &mut [Body], x: &[crate::math::Vec3], v: &[crate::math::Vec3]) {
     for (i, b) in bodies.iter_mut().enumerate() {
-        b.x = x[i].0;
-        b.y = x[i].1;
-        b.vx = v[i].0;
-        b.vy = v[i].1;
+        b.x = x[i].x;
+        b.y = x[i].y;
+        b.z = x[i].z;
+        b.vx = v[i].x;
+        b.vy = v[i].y;
+        b.vz = v[i].z;
     }
 }
 
@@ -2444,8 +2545,8 @@ mod tests {
         let mut ias = Ias15::new();
         ias.ensure_capacity(1);
         for k in 0..7 {
-            ias.b[0][k] = (b_x[k], b_y[k]);
-            ias.e[0][k] = (b_x[k], b_y[k]);
+            ias.b[0][k] = crate::math::Vec3::new(b_x[k], b_y[k], 0.0);
+            ias.e[0][k] = crate::math::Vec3::new(b_x[k], b_y[k], 0.0);
         }
         ias
     }
@@ -2507,19 +2608,24 @@ mod tests {
         for &q in &[0.1_f64, 0.5, 1.0, 2.0, 10.0] {
             // Reset state for each q in the loop (keep be = 0, b = 0).
             for k in 0..7 {
-                ias.b[0][k] = (0.0, 0.0);
-                ias.e[0][k] = (0.0, 0.0);
+                ias.b[0][k] = crate::math::Vec3::ZERO;
+                ias.e[0][k] = crate::math::Vec3::ZERO;
             }
             ias.warmstart_b(q, 1.0);
             for k in 0..7 {
                 assert_eq!(
-                    ias.b[0][k].0, 0.0,
+                    ias.b[0][k].x, 0.0,
                     "b[{}].x non-zero at q={} from zero input — round-off injection regression",
                     k, q,
                 );
                 assert_eq!(
-                    ias.b[0][k].1, 0.0,
+                    ias.b[0][k].y, 0.0,
                     "b[{}].y non-zero at q={} from zero input — round-off injection regression",
+                    k, q,
+                );
+                assert_eq!(
+                    ias.b[0][k].z, 0.0,
+                    "b[{}].z non-zero at q={} from zero input — round-off injection regression",
                     k, q,
                 );
             }
@@ -2549,7 +2655,7 @@ mod tests {
         let mut ias = ias15_with_b(b_x, [0.0; 7]);
         ias.warmstart_b(q, 1.0);
 
-        let new_x: [f64; 7] = std::array::from_fn(|k| ias.b[0][k].0);
+        let new_x: [f64; 7] = std::array::from_fn(|k| ias.b[0][k].x);
 
         for &u_new in &[0.0_f64, 0.25, 0.5, 0.75, 1.0] {
             let u_old = 1.0 + q * u_new;
@@ -2585,8 +2691,8 @@ mod tests {
         let ref_y = pascal_warmstart_reference(b_y, q);
 
         for k in 0..7 {
-            let diff_x = (ias.b[0][k].0 - ref_x[k]).abs();
-            let diff_y = (ias.b[0][k].1 - ref_y[k]).abs();
+            let diff_x = (ias.b[0][k].x - ref_x[k]).abs();
+            let diff_y = (ias.b[0][k].y - ref_y[k]).abs();
             // Tolerance: ~50× f64 ULP scaled by the largest summand
             // for that coefficient (so the bound is meaningful for
             // both the q⁷·b₆ column with magnitude ~1 and the q¹·…
@@ -2597,7 +2703,7 @@ mod tests {
                 "b[{}].x at q={}: got {:.18e}, expected {:.18e}, diff {:.3e}",
                 k,
                 q,
-                ias.b[0][k].0,
+                ias.b[0][k].x,
                 ref_x[k],
                 diff_x,
             );
@@ -2606,7 +2712,7 @@ mod tests {
                 "b[{}].y at q={}: got {:.18e}, expected {:.18e}, diff {:.3e}",
                 k,
                 q,
-                ias.b[0][k].1,
+                ias.b[0][k].y,
                 ref_y[k],
                 diff_y,
             );
@@ -2632,14 +2738,14 @@ mod tests {
         let ref_y = pascal_warmstart_reference(b_y, q);
 
         for k in 0..7 {
-            let diff_x = (ias.b[0][k].0 - ref_x[k]).abs();
-            let diff_y = (ias.b[0][k].1 - ref_y[k]).abs();
+            let diff_x = (ias.b[0][k].x - ref_x[k]).abs();
+            let diff_y = (ias.b[0][k].y - ref_y[k]).abs();
             assert!(
                 diff_x <= 1e-13_f64 * ref_x[k].abs().max(1.0),
                 "b[{}].x at q={}: got {:.18e}, expected {:.18e}, diff {:.3e}",
                 k,
                 q,
-                ias.b[0][k].0,
+                ias.b[0][k].x,
                 ref_x[k],
                 diff_x,
             );
@@ -2648,7 +2754,7 @@ mod tests {
                 "b[{}].y at q={}: got {:.18e}, expected {:.18e}, diff {:.3e}",
                 k,
                 q,
-                ias.b[0][k].1,
+                ias.b[0][k].y,
                 ref_y[k],
                 diff_y,
             );
@@ -2673,8 +2779,8 @@ mod tests {
             let mut ias = ias15_with_b(b_x, b_y);
             ias.warmstart_b(q, 1.0);
 
-            let new_x: [f64; 7] = std::array::from_fn(|k| ias.b[0][k].0);
-            let new_y: [f64; 7] = std::array::from_fn(|k| ias.b[0][k].1);
+            let new_x: [f64; 7] = std::array::from_fn(|k| ias.b[0][k].x);
+            let new_y: [f64; 7] = std::array::from_fn(|k| ias.b[0][k].y);
 
             for &u_new in &[0.0_f64, 0.1, 0.25, 0.5, 0.75, 0.9, 1.0] {
                 // Old coordinate corresponding to this u_new.
@@ -2735,20 +2841,20 @@ mod tests {
         let mut ias = Ias15::new();
         ias.ensure_capacity(1);
         for k in 0..7 {
-            ias.b[0][k] = (b_x[k], 0.0);
-            ias.e[0][k] = (e_x[k], 0.0);
+            ias.b[0][k] = crate::math::Vec3::new(b_x[k], 0.0, 0.0);
+            ias.e[0][k] = crate::math::Vec3::new(e_x[k], 0.0, 0.0);
         }
         ias.warmstart_b(q, 1.0);
 
         let pascal = pascal_warmstart_reference(b_x, q);
         for k in 0..7 {
             let expected = pascal[k] + (b_x[k] - e_x[k]);
-            let diff = (ias.b[0][k].0 - expected).abs();
+            let diff = (ias.b[0][k].x - expected).abs();
             assert!(
                 diff <= 1e-13_f64 * expected.abs().max(1.0),
                 "be-correction lost at b[{}]: got {:.18e}, expected {:.18e}, diff {:.3e}",
                 k,
-                ias.b[0][k].0,
+                ias.b[0][k].x,
                 expected,
                 diff,
             );

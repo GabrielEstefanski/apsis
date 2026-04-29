@@ -214,9 +214,10 @@ impl PhysicsHandle {
         // Clone snap to release the borrow before mutating bodies.
         let snap = snap.clone();
         for (i, body) in self.bodies.iter_mut().enumerate() {
-            let (x, y) = snap.interpolate(i, h);
-            body.x = x;
-            body.y = y;
+            let p = snap.interpolate(i, h);
+            body.x = p.x;
+            body.y = p.y;
+            body.z = p.z;
         }
     }
 

@@ -45,19 +45,15 @@ impl System {
         // evaluation, which equals the start-of-this-step acceleration for all
         // four integrators (VV, Y4, WH each end with a force eval; IAS15 does too).
         // Skipped on the very first step when scratch_acc is empty.
-        let pre_x0: Vec<(f64, f64)>;
-        let pre_v0: Vec<(f64, f64)>;
-        let pre_a0: Vec<(f64, f64)>;
+        let pre_x0: Vec<crate::math::Vec3>;
+        let pre_v0: Vec<crate::math::Vec3>;
+        let pre_a0: Vec<crate::math::Vec3>;
         let need_order2 =
             !self.scratch_acc.is_empty() && self.integrator.kind() != IntegratorKind::Ias15;
         if need_order2 {
-            pre_x0 = self.bodies.iter().map(|b| (b.x, b.y)).collect();
-            pre_v0 = self.bodies.iter().map(|b| (b.vx, b.vy)).collect();
-            // DenseSnapshot still carries 2D tuples; project the Vec3 acc
-            // buffer down for the Order-2 fallback. With z=vz=0 in the
-            // current scenarios this is a faithful capture of the dynamic
-            // state; will be widened to 3D in the IAS15 buffer migration.
-            pre_a0 = self.scratch_acc.iter().map(|a| (a.x, a.y)).collect();
+            pre_x0 = self.bodies.iter().map(|b| crate::math::Vec3::new(b.x, b.y, b.z)).collect();
+            pre_v0 = self.bodies.iter().map(|b| crate::math::Vec3::new(b.vx, b.vy, b.vz)).collect();
+            pre_a0 = self.scratch_acc.clone();
         } else {
             pre_x0 = Vec::new();
             pre_v0 = Vec::new();

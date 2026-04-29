@@ -90,6 +90,48 @@ each assertion site are not committed to the repository — this
 document is the evidence of record. After commit 4 lands, the
 instrumentation is re-applied transiently to verify, then stripped.
 
+## Post-migration verification (commit 4)
+
+Re-running the same instrumentation on the same hardware after the
+IAS15 buffer migration produced identical values to the baseline at
+every measurement site:
+
+| Gate | Baseline | Post commit 4 | Δ |
+|------|----------|---------------|---|
+| Mercury 1PN `rel_err` | 1.075879e−6 | 1.075879e−6 | bit-exact |
+| Newtonian Kepler closure `drift` | 1.049457e−14 | 1.049457e−14 | bit-exact |
+| IAS15 Kepler `e=0.5` peak | 2.664535e−15 | 2.664535e−15 | bit-exact |
+| IAS15 Kepler `e=0.5` drift | 6.145135e−16 | 6.145135e−16 | bit-exact |
+| IAS15 Kepler `e=0.5` slope | −4.890143e−19 | −4.890143e−19 | bit-exact |
+| IAS15 high-e `e=0.9` peak | 1.065814e−14 | 1.065814e−14 | bit-exact |
+| IAS15 Pythagorean peak | 1.122362e−12 | 1.122362e−12 | bit-exact |
+| BH-vs-direct (8 components) | 0.0 | 0.0 | bit-exact |
+
+Every quantitative gate produced its baseline value to the last
+printed digit. The acceptance contract holds: the IAS15 buffer
+migration introduced zero numerical drift for planar input.
+
+The mechanism that delivered this is the discipline applied at every
+re-association site:
+
+* `b₆.length_squared()` is **not** used for the Picard residual or
+  truncation-error norms. The hand-written `b.x*b.x + b.y*b.y +
+  b.z*b.z` reproduces the pre-port `b.x*b.x + b.y*b.y` reduction
+  followed by an addition of an exactly-zero `b.z*b.z` (IEEE-754
+  exact additive identity) for `z = 0` inputs.
+* `update_g_and_b`, `advance_state`, `warmstart_b`, and
+  `recompute_g_from_b` write their three-axis arithmetic in the same
+  scalar form as the original two-axis code, with the third axis
+  appended; they do **not** consolidate into Vec3 ops. The cost is
+  ~70 lines of explicit per-axis algebra; the benefit is the
+  bit-exact preservation table above.
+* The persistent integrator buffers (`b/e/g/csb/csx/csv/pic_*/snap_*`)
+  start as `Vec3::ZERO` from `ensure_capacity`. With planar input
+  (`z = vz = 0` on every body), every `.z` slot they accumulate is
+  also exactly zero, so memory layout changes (24-byte rows where
+  there used to be 16-byte rows) do not propagate into observable
+  state.
+
 ## Not captured (rationale)
 
 Tests that assert booleans or use `assert_relative_eq!(_, _, epsilon
