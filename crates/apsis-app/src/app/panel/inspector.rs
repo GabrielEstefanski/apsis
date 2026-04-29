@@ -157,7 +157,7 @@ impl SimulationApp {
             metric(ui, "T  (period)", &t_str, TEXT_PRI);
 
             // Specific angular momentum
-            metric(ui, "h  (ang. mom.)", &format!("{:.4e}", el.h), TEXT_DIM);
+            metric(ui, "h  (ang. mom.)", &format!("{:.4e}", el.h_vec.length()), TEXT_DIM);
 
             // Specific orbital energy
             metric(ui, "ε  (orb. energy)", &format!("{:.4e}", el.energy), TEXT_DIM);
