@@ -219,8 +219,9 @@ fn truncated_kernel_energy_spikes_are_in_bijection_with_r_cut_crossings() {
     // (the cached kinetic/potential fields are still at their default),
     // and pairing that against the first post-step value would look like
     // a spurious spike.
-    let mut sys_smooth =
-        System::new(two_body_eccentric(), UnitSystem::canonical()).with_integrator(IntegratorKind::Yoshida4).with_dt(DT);
+    let mut sys_smooth = System::new(two_body_eccentric(), UnitSystem::canonical())
+        .with_integrator(IntegratorKind::Yoshida4)
+        .with_dt(DT);
     sys_smooth.step();
 
     let mut baseline_samples: Vec<Sample> = Vec::with_capacity(N_STEPS);

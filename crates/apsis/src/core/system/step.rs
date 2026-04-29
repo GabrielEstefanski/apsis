@@ -134,8 +134,7 @@ impl System {
             match self.dt_mode {
                 DtMode::Fixed => self.user_dt,
                 DtMode::Adaptive => {
-                    let stats =
-                        AccelerationStats::new(self.last_diag.max_acc, self.last_diag.jerk);
+                    let stats = AccelerationStats::new(self.last_diag.max_acc, self.last_diag.jerk);
                     self.dt_ctrl.update(self.user_dt, self.rel_energy_error, stats)
                 },
             }

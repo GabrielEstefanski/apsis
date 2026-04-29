@@ -4,7 +4,9 @@
 //! rigidly about that axis. For three equal masses at `-d`, `0`, `+d`
 //! the angular velocity that balances gravity on each outer body is
 //!
-//!     ω² = G·m / d³ + G·m / (4d³) = 5·G·m / (4·d³)
+//! ```text
+//! ω² = G·m / d³ + G·m / (4d³) = 5·G·m / (4·d³)
+//! ```
 //!
 //! and the outer-body tangential speed is `v = ω·d = √(5·G·m / (4·d))`.
 //! The middle body sits on the rotation axis with zero velocity.

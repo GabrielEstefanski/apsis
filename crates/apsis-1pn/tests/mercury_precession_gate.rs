@@ -38,8 +38,9 @@ fn mercury_precession_matches_gr_within_one_percent() {
     let v_peri = (2.0 / r_peri - 1.0 / A).sqrt();
     let mercury = Body::rocky(M_MERCURY).at(r_peri, 0.0).with_velocity(0.0, v_peri).unsoftened();
 
-    let mut sys =
-        System::new(vec![sun, mercury], UnitSystem::canonical()).with_integrator(IntegratorKind::Ias15).with_dt(1e-4);
+    let mut sys = System::new(vec![sun, mercury], UnitSystem::canonical())
+        .with_integrator(IntegratorKind::Ias15)
+        .with_dt(1e-4);
     sys.add_perturbation(Box::new(PostNewtonian1PN::solar_units()));
 
     let el0 = compute_elements(sys.bodies(), 1, 0, 1.0).unwrap();
@@ -87,9 +88,11 @@ fn softened_system_triggers_diagnostic() {
     });
 
     // Default softening left in place — this is the trap.
-    let mut sys =
-        System::new(vec![Body::star(1.0), Body::rocky(1e-7).at(0.4, 0.0).with_velocity(0.0, 1.5)], UnitSystem::canonical())
-            .with_integrator(IntegratorKind::Ias15);
+    let mut sys = System::new(
+        vec![Body::star(1.0), Body::rocky(1e-7).at(0.4, 0.0).with_velocity(0.0, 1.5)],
+        UnitSystem::canonical(),
+    )
+    .with_integrator(IntegratorKind::Ias15);
     sys.add_perturbation(Box::new(PostNewtonian1PN::solar_units()));
 
     let events = captured.lock().unwrap().clone();
@@ -120,10 +123,12 @@ fn exact_gravity_system_stays_silent() {
         }
     });
 
-    let mut sys =
-        System::new(vec![Body::star(1.0), Body::rocky(1e-7).at(0.4, 0.0).with_velocity(0.0, 1.5)], UnitSystem::canonical())
-            .with_exact_gravity()
-            .with_integrator(IntegratorKind::Ias15);
+    let mut sys = System::new(
+        vec![Body::star(1.0), Body::rocky(1e-7).at(0.4, 0.0).with_velocity(0.0, 1.5)],
+        UnitSystem::canonical(),
+    )
+    .with_exact_gravity()
+    .with_integrator(IntegratorKind::Ias15);
     sys.add_perturbation(Box::new(PostNewtonian1PN::solar_units()));
 
     let events = captured.lock().unwrap().clone();
@@ -154,8 +159,9 @@ fn baseline_newtonian_kepler_is_closed() {
     let mut mercury = Body::rocky(M_MERCURY).at(r_peri, 0.0).with_velocity(0.0, v_peri);
     mercury.softening = 0.0;
 
-    let mut sys =
-        System::new(vec![sun, mercury], UnitSystem::canonical()).with_integrator(IntegratorKind::Ias15).with_dt(1e-4);
+    let mut sys = System::new(vec![sun, mercury], UnitSystem::canonical())
+        .with_integrator(IntegratorKind::Ias15)
+        .with_dt(1e-4);
     // No perturbation attached → pure Keplerian 2-body.
 
     let el0 = compute_elements(sys.bodies(), 1, 0, 1.0).unwrap();

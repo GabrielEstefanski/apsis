@@ -77,8 +77,9 @@ fn main() {
     let mercury = Body::rocky(M_MERCURY).at(r_peri, 0.0).with_velocity(0.0, v_peri).unsoftened();
 
     // ── Build the simulation ────────────────────────────────────────────────
-    let mut sys =
-        System::new(vec![sun, mercury], UnitSystem::canonical()).with_integrator(IntegratorKind::Ias15).with_dt(1e-4);
+    let mut sys = System::new(vec![sun, mercury], UnitSystem::canonical())
+        .with_integrator(IntegratorKind::Ias15)
+        .with_dt(1e-4);
 
     // Attach the out-of-tree 1PN perturbation. Everything below this line
     // uses only the public API of `apsis`; `apsis-1pn` has

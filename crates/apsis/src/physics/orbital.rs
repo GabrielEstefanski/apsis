@@ -670,8 +670,12 @@ mod tests {
         assert!(rel(a.e, b.e) < tol, "{label}: e {} vs {}", a.e, b.e);
         assert!(rel(a.energy, b.energy) < tol, "{label}: ε {} vs {}", a.energy, b.energy);
         assert!(rel(a.h, b.h) < tol, "{label}: h {} vs {}", a.h, b.h);
-        assert!(rel(a.omega, b.omega) < tol || (a.e < 1e-6 && b.e < 1e-6),
-            "{label}: ω {} vs {}", a.omega, b.omega);
+        assert!(
+            rel(a.omega, b.omega) < tol || (a.e < 1e-6 && b.e < 1e-6),
+            "{label}: ω {} vs {}",
+            a.omega,
+            b.omega
+        );
         assert_eq!(a.orbit_type, b.orbit_type, "{label}: orbit_type");
     }
 
@@ -712,8 +716,7 @@ mod tests {
         let m = 1e6;
         let gm = G * m;
         let v_peri = (gm * 1.5 / r_peri).sqrt();
-        let bodies =
-            vec![body(0.0, 0.0, 0.0, 0.0, m), body(r_peri, 0.0, 0.0, v_peri, 1e-10)];
+        let bodies = vec![body(0.0, 0.0, 0.0, 0.0, m), body(r_peri, 0.0, 0.0, v_peri, 1e-10)];
         let inv = compute_invariants(&bodies, 1, 0, G).unwrap();
         let gm = G * (bodies[1].mass + bodies[0].mass);
         let el = elements_anchored_to_body(&inv, 0, gm, &bodies[1], &bodies[0]);
@@ -723,8 +726,7 @@ mod tests {
         let r = (rx * rx + ry * ry).sqrt();
         let nu = ry.atan2(rx) - el.omega;
         let r_orbit = el.a * (1.0 - el.e * el.e) / (1.0 + el.e * nu.cos());
-        assert!((r - r_orbit).abs() / r < 1e-12,
-            "body off orbit: r={r}, r_orbit={r_orbit}");
+        assert!((r - r_orbit).abs() / r < 1e-12, "body off orbit: r={r}, r_orbit={r_orbit}");
     }
 
     /// Retrograde body: sign(h·(r·v)) governs which side of the orbit
@@ -736,8 +738,7 @@ mod tests {
         let gm = G * m;
         let v_peri = (gm * 1.5 / r_peri).sqrt();
         // Sign of v_y inverted → retrograde
-        let bodies =
-            vec![body(0.0, 0.0, 0.0, 0.0, m), body(r_peri, 0.0, 0.0, -v_peri, 1e-10)];
+        let bodies = vec![body(0.0, 0.0, 0.0, 0.0, m), body(r_peri, 0.0, 0.0, -v_peri, 1e-10)];
         let inv = compute_invariants(&bodies, 1, 0, G).unwrap();
         let gm = G * (bodies[1].mass + bodies[0].mass);
         let el = elements_anchored_to_body(&inv, 0, gm, &bodies[1], &bodies[0]);
@@ -747,8 +748,10 @@ mod tests {
         let r = (rx * rx + ry * ry).sqrt();
         let nu = ry.atan2(rx) - el.omega;
         let r_orbit = el.a * (1.0 - el.e * el.e) / (1.0 + el.e * nu.cos());
-        assert!((r - r_orbit).abs() / r < 1e-12,
-            "retrograde body off orbit: r={r}, r_orbit={r_orbit}");
+        assert!(
+            (r - r_orbit).abs() / r < 1e-12,
+            "retrograde body off orbit: r={r}, r_orbit={r_orbit}"
+        );
     }
 
     /// When fed *smoothed* invariants whose (a, e) drift slightly from
@@ -761,8 +764,7 @@ mod tests {
         let m = 1e6;
         let gm_kep = G * m;
         let v_peri = (gm_kep * 1.5 / r_peri).sqrt();
-        let bodies =
-            vec![body(0.0, 0.0, 0.0, 0.0, m), body(r_peri, 0.0, 0.0, v_peri, 1e-10)];
+        let bodies = vec![body(0.0, 0.0, 0.0, 0.0, m), body(r_peri, 0.0, 0.0, v_peri, 1e-10)];
         // Real invariants of the body's orbit.
         let inv_true = compute_invariants(&bodies, 1, 0, G).unwrap();
         // Simulate smoothed invariants drifted by 1% in energy and h.
@@ -784,8 +786,10 @@ mod tests {
         // precision, because anchoring depends only on r and the
         // smoothed (a, e) — it does not require the orbit to be the
         // body's *true* orbit.
-        assert!((r - r_orbit).abs() / r < 1e-12,
-            "drifted-invariant anchored orbit: r={r}, r_orbit={r_orbit}");
+        assert!(
+            (r - r_orbit).abs() / r < 1e-12,
+            "drifted-invariant anchored orbit: r={r}, r_orbit={r_orbit}"
+        );
     }
 
     /// Near-circular bypass: when e < ANCHOR_MIN_E, ω must depend only
@@ -820,8 +824,10 @@ mod tests {
         let displaced = body(0.0, r * 1.1, -v, 0.0, 1e-10);
         let el_displaced = elements_anchored_to_body(&inv, 0, gm_pair, &displaced, &primary);
 
-        assert_eq!(el_at_peri.omega, el_displaced.omega,
-            "low-e bypass must produce constant ω across body positions");
+        assert_eq!(
+            el_at_peri.omega, el_displaced.omega,
+            "low-e bypass must produce constant ω across body positions"
+        );
         assert_eq!(el_at_peri.a, el_displaced.a);
         assert_eq!(el_at_peri.e, el_displaced.e);
     }
@@ -845,8 +851,10 @@ mod tests {
         let displaced = body(0.0, r, -v, 0.0, 1e-10);
         let el_b = elements_anchored_to_body(&inv, 0, gm_pair, &displaced, &primary);
 
-        assert_ne!(el_a.omega, el_b.omega,
-            "above threshold, anchor must rotate ω to keep body on orbit");
+        assert_ne!(
+            el_a.omega, el_b.omega,
+            "above threshold, anchor must rotate ω to keep body on orbit"
+        );
     }
 
     #[test]

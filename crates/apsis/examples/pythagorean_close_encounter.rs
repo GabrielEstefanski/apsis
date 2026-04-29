@@ -28,7 +28,9 @@ fn main() {
         b.softening = 0.0;
     }
 
-    let mut sys = System::new(bodies, UnitSystem::canonical()).with_integrator(IntegratorKind::Ias15).with_dt(0.1);
+    let mut sys = System::new(bodies, UnitSystem::canonical())
+        .with_integrator(IntegratorKind::Ias15)
+        .with_dt(0.1);
 
     println!("Pythagorean 3-body @ IAS15 (unsoftened)");
     println!("  starting E  = {:+.6e}", sys.energy());
