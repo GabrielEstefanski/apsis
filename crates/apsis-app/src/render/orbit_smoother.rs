@@ -106,12 +106,10 @@ struct SmoothState {
     last_t_sim: f64,
     /// Smoothed specific orbital energy.
     energy: f64,
-    /// Smoothed specific angular momentum (z-component).
-    h: f64,
-    /// Smoothed Laplace–Runge–Lenz x-component.
-    ex: f64,
-    /// Smoothed Laplace–Runge–Lenz y-component.
-    ey: f64,
+    /// Smoothed specific angular momentum vector (3D).
+    h_vec: apsis::math::Vec3,
+    /// Smoothed eccentricity (Laplace–Runge–Lenz) vector (3D).
+    e_vec: apsis::math::Vec3,
 }
 
 impl SmoothState {
@@ -121,14 +119,13 @@ impl SmoothState {
             gm,
             last_t_sim: t_sim,
             energy: inv.energy,
-            h: inv.h,
-            ex: inv.ex,
-            ey: inv.ey,
+            h_vec: inv.h_vec,
+            e_vec: inv.e_vec,
         }
     }
 
     fn invariants(&self) -> OrbitInvariants {
-        OrbitInvariants { energy: self.energy, h: self.h, ex: self.ex, ey: self.ey }
+        OrbitInvariants { energy: self.energy, h_vec: self.h_vec, e_vec: self.e_vec }
     }
 }
 
@@ -227,10 +224,33 @@ impl OrbitSmoother {
                 } else {
                     0.0
                 };
+                // Lerp each component of `h_vec` and `e_vec`
+                // independently. These vectors carry magnitude as a
+                // physical quantity (`|h_vec|` is the conserved
+                // angular momentum, `|e_vec|` is the eccentricity), so
+                // component-wise lerp is the correct EMA: the
+                // recovered magnitudes and the recovered angles
+                // (`atan2` of components) are well-defined for any
+                // intermediate state. Renormalising after lerp would
+                // invent magnitude information and break the
+                // smoother's contract that the cached state is a
+                // faithful weighted average of recent observations.
+                //
+                // Angular continuity (`π → −π` wrap of the recovered
+                // `ω` / `Ω` between frames) is the responsibility of
+                // any unwrap layer above this — see the
+                // `physics::orbital` module-level docs.
                 st.energy = lerp(st.energy, inv.energy, alpha);
-                st.h = lerp(st.h, inv.h, alpha);
-                st.ex = lerp(st.ex, inv.ex, alpha);
-                st.ey = lerp(st.ey, inv.ey, alpha);
+                st.h_vec = apsis::math::Vec3::new(
+                    lerp(st.h_vec.x, inv.h_vec.x, alpha),
+                    lerp(st.h_vec.y, inv.h_vec.y, alpha),
+                    lerp(st.h_vec.z, inv.h_vec.z, alpha),
+                );
+                st.e_vec = apsis::math::Vec3::new(
+                    lerp(st.e_vec.x, inv.e_vec.x, alpha),
+                    lerp(st.e_vec.y, inv.e_vec.y, alpha),
+                    lerp(st.e_vec.z, inv.e_vec.z, alpha),
+                );
                 st.last_t_sim = t_sim;
                 st.invariants()
             },

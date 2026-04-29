@@ -175,7 +175,7 @@ impl SimRecorder {
                     nan_if_inf(o.a),
                     o.e,
                     nan_if_inf(o.period),
-                    o.h,
+                    o.h_vec.z,
                     o.energy,
                     o.omega.to_degrees(),
                     o.orbit_type.label(),

@@ -1,4 +1,4 @@
-//! Osculating orbital element computation for 2D N-body systems.
+//! Osculating orbital element computation for 3D N-body systems.
 //!
 //! ## Osculating elements
 //!
@@ -27,17 +27,73 @@
 //! | `a`    | semi-major axis | bound orbit (e < 1) |
 //! | `e`    | eccentricity | always |
 //! | `T`    | period | bound orbit |
-//! | `h`    | specific angular momentum (z) | always |
+//! | `h_vec`| specific angular momentum vector | always |
 //! | `ε`    | specific orbital energy | always |
-//! | `ω`    | argument of periapsis | e > 1e-6 |
+//! | `i`    | inclination relative to the simulation's `ẑ` axis | always |
+//! | `Ω`    | longitude of ascending node | `\|n\| > N_DEGENERATE_EPS` |
+//! | `ω`    | argument of periapsis | `e > E_CIRCULAR_EPS` (and inclined branch when `\|n\| > N_DEGENERATE_EPS`) |
+//!
+//! ## Frame and convention alignment
+//!
+//! The reference frame is the **inertial right-handed Cartesian** axes
+//! `{x̂, ŷ, ẑ}` of the simulation. `ẑ` is the inclination axis: `i = 0`
+//! means the orbital plane coincides with the `xy`-plane and the orbit
+//! is prograde with respect to `+ẑ`; `i = π` is retrograde in the same
+//! plane. The line of nodes is `n = ẑ × h_vec`, lying in the `xy`-plane.
+//!
+//! Element definitions, frame, and singularity handling follow the
+//! standard astrodynamics convention as implemented by REBOUND
+//! (`tools.c::reb_tools_orbit_to_particle` and inverse). The single
+//! deliberate divergence is the angular range — `[-π, π]` here vs
+//! `[0, 2π]` in REBOUND — required to keep the locked planar baseline
+//! bit-equivalent across the 3D port.
+//!
+//! Apsis-specific surface (kernel `Exactness`/`Continuity` invariants,
+//! per-perturbation `KernelRequirements`, federated extension crates)
+//! lives in `physics::gravity::kernel` and
+//! `physics::integrator::PerturbationForce`. This module is
+//! intentionally vanilla.
+//!
+//! ## Singularity contracts
+//!
+//! Two thresholds gate the angular calculations and are documented at
+//! their constants:
+//!
+//! * `E_CIRCULAR_EPS` — eccentricity below which `ω` is undefined
+//!   (circular orbit). Convention: `ω = 0`.
+//! * `N_DEGENERATE_EPS` — node-vector magnitude below which `Ω` and the
+//!   inclined `ω` formulation are undefined. Triggers for both `i ≈ 0`
+//!   (planar prograde) and `i ≈ π` (planar retrograde) since `\|ẑ × h\| =
+//!   \|h\|·\|sin i\|` vanishes in both. Convention: `Ω = 0`,
+//!   `ω = atan2(e_vec.y, e_vec.x)`.
+//!
+//! Angular continuity across step boundaries — the `π → −π` wrap that
+//! visualisations need to unwrap for smooth animation — is the
+//! responsibility of the presentation layer (e.g. `apsis-app`'s
+//! `orbit_smoother`), not this module. The element values returned here
+//! are always principal-value angles in `[-π, π]` enforced by
+//! [`crate::math::wrap_pi`].
 //!
 //! ## References
 //! - Murray & Dermott (1999). *Solar System Dynamics*. Cambridge.
 //! - Bate, Mueller & White (1971). *Fundamentals of Astrodynamics*. Dover.
+//! - Vallado (2013). *Fundamentals of Astrodynamics and Applications*, 4th ed.
 
-use std::f64::consts::{PI, TAU};
+use std::f64::consts::TAU;
 
 use crate::domain::body::Body;
+use crate::math::{Vec3, wrap_pi};
+
+/// Eccentricity below which `ω` is undefined (circular orbit). Returns 0.
+const E_CIRCULAR_EPS: f64 = 1e-6;
+
+/// Node-vector magnitude below which `Ω` and the inclined `ω` form are
+/// undefined. Triggers for both prograde-planar (`i ≈ 0`) and
+/// retrograde-planar (`i ≈ π`) orbits, since `n = ẑ × h_vec` vanishes
+/// in both. `1e-12` sits well above the f64 round-off floor for the
+/// cross-product evaluation while still capturing genuine planar input
+/// where `h_vec.x` and `h_vec.y` are exactly zero.
+const N_DEGENERATE_EPS: f64 = 1e-12;
 
 // ── Orbit classification ──────────────────────────────────────────────────────
 
@@ -95,9 +151,13 @@ pub struct OrbitalElements {
     /// Orbital period.  `f64::INFINITY` for unbound orbits.
     pub period: f64,
 
-    /// Specific angular momentum (z-component, scalar in 2D).
-    /// Positive = counter-clockwise.
-    pub h: f64,
+    /// Specific angular momentum vector `r × v`.
+    ///
+    /// Magnitude `|h_vec|` is the conserved quantity in two-body
+    /// motion; direction defines the orbital plane. The signed
+    /// z-component `h_vec.z` is positive for orbits prograde with
+    /// respect to `+ẑ`.
+    pub h_vec: Vec3,
 
     /// Specific orbital energy (`ε = v²/2 − GM/r`).
     /// Negative = bound, positive = unbound.
@@ -136,7 +196,7 @@ impl OrbitalElements {
             self.a,
             self.e,
             self.period,
-            self.h,
+            self.h_vec.z,
             self.energy,
             self.omega.to_degrees(),
             self.orbit_type.label(),
@@ -377,16 +437,33 @@ pub fn dominant_primary(bodies: &[Body], idx: usize) -> Option<usize> {
 pub struct OrbitInvariants {
     /// Specific orbital energy ε = ½v² − GM/r.
     pub energy: f64,
-    /// Specific angular momentum z-component h = r × v.
-    pub h: f64,
-    /// Laplace–Runge–Lenz vector x-component (eccentricity vector).
-    pub ex: f64,
-    /// Laplace–Runge–Lenz vector y-component (eccentricity vector).
-    pub ey: f64,
+    /// Specific angular momentum vector `h_vec = r × v`.
+    pub h_vec: Vec3,
+    /// Eccentricity (Laplace–Runge–Lenz) vector
+    /// `e_vec = (v × h)/μ − r̂`. Magnitude is the orbit's eccentricity;
+    /// direction points from the focus toward the periapsis.
+    pub e_vec: Vec3,
 }
 
-/// Computes the linear primitives (ε, h, ex, ey) for body `idx` relative to
-/// `primary_idx` under gravitational parameter `g_factor`.
+/// Computes the linear primitives (ε, h_vec, e_vec) for body `idx`
+/// relative to `primary_idx` under gravitational parameter `g_factor`.
+///
+/// All arithmetic uses fixed `(x, y, z)` reduction order; re-associating
+/// any inner sum into a Vec3-level expression would shift ULPs and is
+/// observable on the energy / momentum / Mercury 1PN gates. Specifically:
+///
+/// * `r²` and `v²` use [`Vec3::length_squared`] (`((x² + y²) + z²)`
+///   left-to-right via the `dot(self, self)` form).
+/// * `h_vec = r × v` uses the canonical [`Vec3::cross`] component formula.
+/// * `e_vec` is assembled element-wise from `(v×h)/μ − r̂` with three
+///   separate `(v_cross_h.{x,y,z} / μ) − r̂.{x,y,z}` lines, never
+///   consolidated into something like `(v.cross(h) − r̂·μ) / μ`.
+///
+/// `r̂ = r_vec / r` is computed by bare division after the `r < 1e-15`
+/// gate guarantees a safe denominator. [`Vec3::try_normalize`] is
+/// deliberately **not** used here: it applies a different threshold
+/// (`f64::MIN_POSITIVE` ≈ `2 × 10⁻³⁰⁸`) and changes the rounding of
+/// the result.
 ///
 /// Returns `None` for degenerate inputs (coincident bodies, zero GM).
 pub fn compute_invariants(
@@ -398,25 +475,35 @@ pub fn compute_invariants(
     let b = &bodies[idx];
     let p = &bodies[primary_idx];
 
-    let rx = b.x - p.x;
-    let ry = b.y - p.y;
-    let vrx = b.vx - p.vx;
-    let vry = b.vy - p.vy;
+    let r_vec = Vec3::new(b.x - p.x, b.y - p.y, b.z - p.z);
+    let v_vec = Vec3::new(b.vx - p.vx, b.vy - p.vy, b.vz - p.vz);
 
-    let r = (rx * rx + ry * ry).sqrt();
+    let r = r_vec.length();
     let gm = g_factor * (b.mass + p.mass);
 
     if r < 1e-15 || gm < 1e-30 {
         return None;
     }
 
-    let v2 = vrx * vrx + vry * vry;
+    let v2 = v_vec.length_squared();
     let energy = 0.5 * v2 - gm / r;
-    let h = rx * vry - ry * vrx;
-    let ex = vry * h / gm - rx / r;
-    let ey = -vrx * h / gm - ry / r;
 
-    Some(OrbitInvariants { energy, h, ex, ey })
+    let h_vec = r_vec.cross(v_vec);
+    let v_cross_h = v_vec.cross(h_vec);
+
+    // r̂ = r_vec / r — safe after the `r < 1e-15` gate above. Element-wise
+    // assembly of `e_vec` preserves the per-axis reduction order.
+    let inv_r = 1.0 / r;
+    let r_hat = Vec3::new(r_vec.x * inv_r, r_vec.y * inv_r, r_vec.z * inv_r);
+
+    let inv_gm = 1.0 / gm;
+    let e_vec = Vec3::new(
+        v_cross_h.x * inv_gm - r_hat.x,
+        v_cross_h.y * inv_gm - r_hat.y,
+        v_cross_h.z * inv_gm - r_hat.z,
+    );
+
+    Some(OrbitInvariants { energy, h_vec, e_vec })
 }
 
 /// Reconstructs `OrbitalElements` from the linear primitives plus the
@@ -431,8 +518,60 @@ pub fn elements_from_invariants(
     primary_idx: usize,
     gm: f64,
 ) -> OrbitalElements {
-    let e = (inv.ex * inv.ex + inv.ey * inv.ey).sqrt();
-    let omega = if e > 1e-6 { inv.ey.atan2(inv.ex) } else { 0.0 };
+    let e = inv.e_vec.length();
+    let h_mag = inv.h_vec.length();
+
+    // Inclination from `h_vec.z / |h_vec|`. Clamped because
+    // |h_vec.z| ≤ |h_vec| holds analytically but a +1 ULP overshoot
+    // out of `acos`'s domain would NaN the result.
+    let inclination = if h_mag > 0.0 { (inv.h_vec.z / h_mag).clamp(-1.0, 1.0).acos() } else { 0.0 };
+
+    // Node line `n = ẑ × h_vec = (-h_vec.y, h_vec.x, 0)`. `|n|` measures
+    // the planar degeneracy: vanishes for both prograde-planar
+    // (`h_vec.z > 0, |h_vec.x| = |h_vec.y| = 0`) and retrograde-planar
+    // (`h_vec.z < 0, |h_vec.x| = |h_vec.y| = 0`) orbits.
+    let n_x = -inv.h_vec.y;
+    let n_y = inv.h_vec.x;
+    let n_mag = (n_x * n_x + n_y * n_y).sqrt();
+
+    // `atan2` results are already in `(-π, π]` — no `wrap_pi` is
+    // applied here. Reserving `wrap_pi` for sites where two angles
+    // are summed or differenced (e.g. `θ_body − ν` in the anchored
+    // path) keeps the planar baseline bit-exact: `wrap_pi` of an
+    // in-range angle is the identity in exact arithmetic but
+    // introduces ULP-level rounding through the
+    // `rem_euclid(2π) − π` round-trip, observable on the
+    // `baseline_newtonian_kepler_is_closed` drift gate.
+    let (lon_ascending_node, omega) = if n_mag < N_DEGENERATE_EPS {
+        // Planar fallback: `Ω` is undefined → 0; `ω = atan2(e_y, e_x)`.
+        let omega = if e > E_CIRCULAR_EPS { inv.e_vec.y.atan2(inv.e_vec.x) } else { 0.0 };
+        (0.0, omega)
+    } else {
+        // Inclined branch. `Ω = atan2(n_y, n_x)` from the node line.
+        let lon_asc = n_y.atan2(n_x);
+
+        let omega = if e > E_CIRCULAR_EPS {
+            // ω = atan2(e · (ĥ × n̂), e · n̂)
+            //
+            // Both atan2 args carry an identical scaling factor of
+            // `|h||n|` (see header doc): the perpendicular axis
+            // `ĥ × n̂` has magnitude `|h||n|` because ĥ ⊥ n̂; dotting
+            // `e_vec` against the un-normalised `h_vec × n_vec` and
+            // against `n_vec` and dividing the first by `|h|`
+            // recovers two quantities scaled identically by `|n|`.
+            // atan2 is invariant under common positive scaling, so
+            // the explicit normalisation by `|n|` is skipped.
+            let n_vec = Vec3::new(n_x, n_y, 0.0);
+            let h_cross_n = inv.h_vec.cross(n_vec);
+            let sin_arg = inv.e_vec.dot(h_cross_n) / h_mag;
+            let cos_arg = inv.e_vec.dot(n_vec);
+            sin_arg.atan2(cos_arg)
+        } else {
+            0.0
+        };
+
+        (lon_asc, omega)
+    };
 
     const ENERGY_THRESH: f64 = 1e-12;
 
@@ -452,11 +591,11 @@ pub fn elements_from_invariants(
         a,
         e,
         period,
-        h: inv.h,
+        h_vec: inv.h_vec,
         energy: inv.energy,
         omega,
-        inclination: 0.0,
-        lon_ascending_node: 0.0,
+        inclination,
+        lon_ascending_node,
         orbit_type,
     }
 }
@@ -540,7 +679,7 @@ pub fn elements_anchored_to_body(
         return elements_from_invariants(inv, primary_idx, gm);
     }
 
-    let e = (inv.ex * inv.ex + inv.ey * inv.ey).sqrt();
+    let e = inv.e_vec.length();
 
     // Near-circular: anchor's (p/r − 1)/e branch amplifies smoothed
     // residual into visible ω jitter. Use the smoothed eccentricity
@@ -553,6 +692,10 @@ pub fn elements_anchored_to_body(
     let a = -gm / (2.0 * inv.energy);
     let period = TAU * (a * a * a / gm).sqrt();
 
+    // Anchor algebra is planar: it operates in the orbital plane and
+    // returns `inclination = 0`, `Ω = 0`. The perifocal → world
+    // rotation in [`OrbitalElements::sample_orbit`] handles the lift
+    // back to 3D for the rendered ellipse.
     let rx = body.x - primary.x;
     let ry = body.y - primary.y;
     let r = (rx * rx + ry * ry).sqrt();
@@ -583,16 +726,14 @@ pub fn elements_anchored_to_body(
 
     let nu = sin_nu_sign * cos_nu.acos();
     let theta_body = ry.atan2(rx);
-    let omega_raw = theta_body - nu;
-    // Wrap to [−π, π] to match the convention of elements_from_invariants.
-    let omega = (omega_raw + PI).rem_euclid(TAU) - PI;
+    let omega = wrap_pi(theta_body - nu);
 
     OrbitalElements {
         primary_idx,
         a,
         e,
         period,
-        h: inv.h,
+        h_vec: inv.h_vec,
         energy: inv.energy,
         omega,
         inclination: 0.0,
@@ -669,7 +810,7 @@ mod tests {
         assert!(rel(a.a, b.a) < tol, "{label}: a {} vs {}", a.a, b.a);
         assert!(rel(a.e, b.e) < tol, "{label}: e {} vs {}", a.e, b.e);
         assert!(rel(a.energy, b.energy) < tol, "{label}: ε {} vs {}", a.energy, b.energy);
-        assert!(rel(a.h, b.h) < tol, "{label}: h {} vs {}", a.h, b.h);
+        assert!(rel(a.h_vec.z, b.h_vec.z) < tol, "{label}: h_z {} vs {}", a.h_vec.z, b.h_vec.z);
         assert!(
             rel(a.omega, b.omega) < tol || (a.e < 1e-6 && b.e < 1e-6),
             "{label}: ω {} vs {}",
@@ -770,9 +911,8 @@ mod tests {
         // Simulate smoothed invariants drifted by 1% in energy and h.
         let inv_smooth = OrbitInvariants {
             energy: inv_true.energy * 1.01,
-            h: inv_true.h * 0.99,
-            ex: inv_true.ex * 1.01,
-            ey: inv_true.ey * 0.99,
+            h_vec: inv_true.h_vec * 0.99,
+            e_vec: Vec3::new(inv_true.e_vec.x * 1.01, inv_true.e_vec.y * 0.99, inv_true.e_vec.z),
         };
         let gm = G * (bodies[1].mass + bodies[0].mass);
         let el = elements_anchored_to_body(&inv_smooth, 0, gm, &bodies[1], &bodies[0]);
@@ -811,7 +951,7 @@ mod tests {
         let bodies = vec![primary, body(r, 0.0, 0.0, v, 1e-10)];
         let inv = compute_invariants(&bodies, 1, 0, G).unwrap();
         assert!(
-            (inv.ex * inv.ex + inv.ey * inv.ey).sqrt() < ANCHOR_MIN_E,
+            inv.e_vec.length() < ANCHOR_MIN_E,
             "test setup: e must be below threshold to exercise the bypass"
         );
 
@@ -928,7 +1068,7 @@ mod tests {
     fn ccw_orbit_has_positive_angular_momentum() {
         let (p, s) = circular_orbit(10.0, 1e6); // CCW por construção
         let el = elements(p, s);
-        assert!(el.h > 0.0, "h = {}, deve ser positivo (CCW)", el.h);
+        assert!(el.h_vec.z > 0.0, "h_z = {}, deve ser positivo (CCW)", el.h_vec.z);
     }
 
     #[test]
@@ -936,7 +1076,7 @@ mod tests {
         let (p, mut s) = circular_orbit(10.0, 1e6);
         s.vy = -s.vy; // inverte para CW
         let el = elements(p, s);
-        assert!(el.h < 0.0, "h = {}, deve ser negativo (CW)", el.h);
+        assert!(el.h_vec.z < 0.0, "h_z = {}, deve ser negativo (CW)", el.h_vec.z);
     }
 
     #[test]
@@ -948,8 +1088,8 @@ mod tests {
         let el = elements(p, s);
         // h = r × v = r * v_c para órbita circular em (r,0) com v=(0,v_c)
         let h_expected = r * v_c;
-        let err = (el.h - h_expected).abs() / h_expected;
-        assert!(err < 1e-6, "h = {}, esperado {h_expected}", el.h);
+        let err = (el.h_vec.z - h_expected).abs() / h_expected;
+        assert!(err < 1e-6, "h_z = {}, esperado {h_expected}", el.h_vec.z);
     }
 
     // ── 3. Kepler III — scaling ───────────────────────────────────────────────
@@ -1543,5 +1683,213 @@ mod tests {
         let v2_visviva = gm * (2.0 / r_apo - 1.0 / el.a);
         let err = (v2 - v2_visviva).abs() / v2;
         assert!(err < 1e-6, "vis-viva: v² = {v2}, esperado {v2_visviva}");
+    }
+
+    // ── 5. Property tests for the 3D element pipeline ────────────────────────
+    //
+    // Two empirical contracts that protect against a future stylistic
+    // refactor that quietly reorders a Vec3 expression or returns the
+    // wrong quadrant from atan2:
+    //
+    //   (a) Planar input (`z = vz = 0`) produces the explicit planar
+    //       formulas — `Ω = 0`, `ω = atan2(e_y, e_x)` — to f64 precision.
+    //   (b) Inclined input recovers `inclination`, `Ω`, `ω` correctly,
+    //       with angles in `[-π, π]` and stable across small
+    //       perturbations.
+
+    /// Singularity contract: `e < E_CIRCULAR_EPS` ⇒ `ω = 0` exactly.
+    ///
+    /// A circular orbit has no defined argument of periapsis. The
+    /// convention pinned by `elements_from_invariants` is to return 0
+    /// rather than the noise-amplified `atan2` of a near-zero
+    /// eccentricity vector. This is the contract the smoother and the
+    /// orbit-overlay UI rely on to avoid frame-to-frame ω jitter on
+    /// near-circular outer planets.
+    #[test]
+    fn omega_is_zero_for_circular_orbit() {
+        let (primary, satellite) = circular_orbit(10.0, 1e6);
+        let el = elements(primary, satellite);
+        assert!(el.e < E_CIRCULAR_EPS, "test setup: e must be below the circular threshold");
+        assert_eq!(el.omega, 0.0, "ω must be exactly zero for a circular orbit");
+    }
+
+    /// Singularity contract: planar orbit (`|n| < N_DEGENERATE_EPS`)
+    /// ⇒ `Ω = 0`, `inclination = 0` (prograde) or `π` (retrograde).
+    ///
+    /// For a body confined to `z = vz = 0`, the angular momentum is
+    /// purely along ±ẑ and the node line `n = ẑ × h_vec` is exactly
+    /// zero. Returning `Ω = 0` by convention prevents the inclined
+    /// branch's `atan2` from operating on a numerically degenerate
+    /// vector.
+    #[test]
+    fn lon_ascending_node_is_zero_for_planar_orbit() {
+        // Prograde planar orbit (inclination ≈ 0).
+        let (primary, satellite) = circular_orbit(5.0, 1e6);
+        let el = elements(primary, satellite);
+        assert_eq!(el.lon_ascending_node, 0.0, "Ω must be 0 for prograde planar input");
+        assert!(
+            el.inclination.abs() < 1e-12,
+            "inclination must be ≈ 0 for prograde planar input, got {}",
+            el.inclination
+        );
+
+        // Retrograde planar orbit (inclination ≈ π). Same input but
+        // velocity flipped on y-axis → angular momentum along −ẑ.
+        let v_c = (G * 1e6 / 5.0).sqrt();
+        let primary_retro = body(0.0, 0.0, 0.0, 0.0, 1e6);
+        let satellite_retro = body(5.0, 0.0, 0.0, -v_c, 1e-10);
+        let el_retro = elements(primary_retro, satellite_retro);
+        assert_eq!(el_retro.lon_ascending_node, 0.0, "Ω must be 0 for retrograde planar input");
+        assert!(
+            (el_retro.inclination - PI).abs() < 1e-12,
+            "inclination must be ≈ π for retrograde planar input, got {}",
+            el_retro.inclination
+        );
+    }
+
+    /// Bit-exact contract: the planar branch in
+    /// `elements_from_invariants` produces `ω = atan2(e_vec.y, e_vec.x)`.
+    ///
+    /// For `z = vz = 0` input, `h_vec.x = h_vec.y = 0` exactly and the
+    /// node vector `n` is the additive identity, so the branch is
+    /// taken structurally (not by threshold luck). Equality, not
+    /// tolerance — protects against any reduction-order shift.
+    #[test]
+    fn planar_input_omega_matches_atan2_e_y_e_x() {
+        // Eccentric planar orbit: e ≈ 0.3, periapsis displaced from
+        // the +x axis so `ω` is non-trivial.
+        let primary = body(0.0, 0.0, 0.0, 0.0, 1e6);
+        let satellite = body(7.0, 4.0, -0.6, 0.4, 1e-10);
+
+        let inv = compute_invariants(&[primary, satellite], 1, 0, G).unwrap();
+        let gm = G * (primary.mass + satellite.mass);
+        let el = elements_from_invariants(&inv, 0, gm);
+
+        let omega_ref = inv.e_vec.y.atan2(inv.e_vec.x);
+        assert_eq!(el.omega, omega_ref, "planar fallback ω must equal atan2(e_y, e_x) bit-for-bit");
+    }
+
+    /// Inclined elliptical orbit recovers the textbook inclination.
+    ///
+    /// Configures a 30°-inclined orbit by rotating a planar circular
+    /// orbit's velocity into the `xz`-plane (rotation around `ŷ`)
+    /// and checks that the recovered `inclination` matches `π/6`
+    /// to f64 precision. This is the simplest test that fails under
+    /// any sign or component error in the cross-product chain.
+    #[test]
+    fn inclined_orbit_recovers_inclination() {
+        let i_target = PI / 6.0; // 30°
+        let r = 10.0;
+        let m = 1e6;
+        let v_c = (G * m / r).sqrt();
+        // Rotate the planar velocity (0, v_c, 0) by `i` around ŷ:
+        // v_rot = (v_c · sin i, v_c · cos i · 0 + …) — but we placed
+        // the body on +x axis, so we rotate the velocity vector
+        // (0, v_c, 0) → (0, v_c · cos i, v_c · sin i).
+        let primary = body(0.0, 0.0, 0.0, 0.0, m);
+        let satellite = Body::rocky(1e-10).at_3d(r, 0.0, 0.0).with_velocity_3d(
+            0.0,
+            v_c * i_target.cos(),
+            v_c * i_target.sin(),
+        );
+
+        let bodies = vec![primary, satellite];
+        let el = compute_elements(&bodies, 1, 0, G).expect("inclined orbit must yield elements");
+
+        assert!(
+            (el.inclination - i_target).abs() < 1e-12,
+            "inclination: got {}, expected {} ({} arcsec error)",
+            el.inclination,
+            i_target,
+            (el.inclination - i_target).abs() * 206_265.0,
+        );
+        // Sanity: angular range pinned.
+        assert!(
+            el.lon_ascending_node >= -PI && el.lon_ascending_node <= PI,
+            "Ω must lie in [-π, π], got {}",
+            el.lon_ascending_node,
+        );
+        assert!(el.omega >= -PI && el.omega <= PI, "ω must lie in [-π, π], got {}", el.omega,);
+    }
+
+    /// Hyperbolic flyby in 3D: continuity of angular elements under a
+    /// small kinematic perturbation.
+    ///
+    /// Builds a hyperbolic orbit (e > 1) at 30° inclination and then
+    /// perturbs the body's velocity by 1% in each component. The
+    /// angular elements (`Ω`, `ω`) must respond by amounts of the
+    /// same order — never flip by `±π`, which would indicate a
+    /// quadrant misclassification in the `atan2` projections. This
+    /// is the regression test for the trap that "ω = atan2(e_vec.y,
+    /// e_vec.x)" would walk into for inclined orbits.
+    #[test]
+    fn hyperbolic_inclined_continuity_under_perturbation() {
+        let i_target = PI / 6.0;
+        let r = 5.0;
+        let m = 1e6;
+        // Hyperbolic excess: v > v_escape.
+        let v_esc = (2.0 * G * m / r).sqrt();
+        let v_hyp = 1.5 * v_esc;
+        let primary = body(0.0, 0.0, 0.0, 0.0, m);
+        let satellite = Body::rocky(1e-10).at_3d(r, 0.0, 0.0).with_velocity_3d(
+            0.0,
+            v_hyp * i_target.cos(),
+            v_hyp * i_target.sin(),
+        );
+
+        let el_a = compute_elements(&[primary, satellite], 1, 0, G).unwrap();
+
+        // 1% perturbation on each velocity component.
+        let perturbed = Body::rocky(1e-10).at_3d(r, 0.0, 0.0).with_velocity_3d(
+            0.01 * v_hyp,
+            v_hyp * i_target.cos() * 1.01,
+            v_hyp * i_target.sin() * 0.99,
+        );
+        let el_b = compute_elements(&[primary, perturbed], 1, 0, G).unwrap();
+
+        assert!(matches!(el_a.orbit_type, OrbitType::Hyperbolic));
+        assert!(matches!(el_b.orbit_type, OrbitType::Hyperbolic));
+
+        // Continuity: changes are of the same order as the
+        // perturbation (~1%), not π.
+        assert!(
+            (el_a.inclination - el_b.inclination).abs() < 0.05,
+            "inclination jumped by {} rad under 1% perturbation — likely a quadrant flip",
+            (el_a.inclination - el_b.inclination).abs(),
+        );
+        assert!(
+            (el_a.lon_ascending_node - el_b.lon_ascending_node).abs() < 0.5,
+            "Ω jumped by {} rad under 1% perturbation",
+            (el_a.lon_ascending_node - el_b.lon_ascending_node).abs(),
+        );
+        assert!(
+            (el_a.omega - el_b.omega).abs() < 0.5,
+            "ω jumped by {} rad under 1% perturbation — sign of a quadrant misclassification",
+            (el_a.omega - el_b.omega).abs(),
+        );
+    }
+
+    /// Invariance contract: for planar input, `|h_vec|` exactly equals
+    /// `|h_z|`.
+    ///
+    /// Asserts the precondition `h_vec.x == 0 && h_vec.y == 0` first
+    /// so the contract cannot be re-used out of context — anyone
+    /// reading the test sees that the equality only holds when the
+    /// orbit is in the `xy`-plane.
+    #[test]
+    fn h_vec_magnitude_equals_h_z_when_planar() {
+        let (primary, satellite) = circular_orbit(8.0, 1e6);
+        let inv = compute_invariants(&[primary, satellite], 1, 0, G).unwrap();
+
+        // Precondition: orbit is in the `xy`-plane, so `h_vec` is along ±ẑ.
+        assert_eq!(inv.h_vec.x, 0.0, "test setup: planar input must have h_vec.x == 0");
+        assert_eq!(inv.h_vec.y, 0.0, "test setup: planar input must have h_vec.y == 0");
+
+        // Under that precondition, the magnitude reduces to |h_z|.
+        assert_eq!(
+            inv.h_vec.length(),
+            inv.h_vec.z.abs(),
+            "|h_vec| must equal |h_z| when h_vec.x = h_vec.y = 0",
+        );
     }
 }

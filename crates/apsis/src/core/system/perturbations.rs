@@ -26,10 +26,10 @@ impl System {
     /// For the canonical case — a 1PN correction declaring
     /// `required_exactness = Exact` against a Plummer kernel with any
     /// softened body — the simulator emits an Exactness-violation warning
-    /// that also carries the legacy `softened_bodies` / `max_softening`
-    /// fields used by downstream log consumers. The numerical apsidal
-    /// precession from Plummer softening would otherwise silently dominate
-    /// the physical signal by orders of magnitude.
+    /// that carries `softened_bodies` and `max_softening` fields for log
+    /// consumers. The numerical apsidal precession from Plummer softening
+    /// would otherwise silently dominate the physical signal by orders of
+    /// magnitude.
     ///
     /// Dismiss the warning by adjusting the configuration:
     ///
