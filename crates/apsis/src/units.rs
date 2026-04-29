@@ -187,7 +187,8 @@ impl UnitSystem {
     /// derivation, not by definition.
     #[inline]
     pub fn g(&self) -> f64 {
-        G_SI * self.mass_kg * self.time_s * self.time_s / (self.length_m * self.length_m * self.length_m)
+        G_SI * self.mass_kg * self.time_s * self.time_s
+            / (self.length_m * self.length_m * self.length_m)
     }
 
     // ── Explicit conversions ─────────────────────────────────────────────
@@ -295,18 +296,15 @@ pub enum UnitError {
 impl fmt::Display for UnitError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::InvalidLength(v) => write!(
-                f,
-                "length scale must be a strictly positive finite f64, got {v}"
-            ),
-            Self::InvalidTime(v) => write!(
-                f,
-                "time scale must be a strictly positive finite f64, got {v}"
-            ),
-            Self::InvalidMass(v) => write!(
-                f,
-                "mass scale must be a strictly positive finite f64, got {v}"
-            ),
+            Self::InvalidLength(v) => {
+                write!(f, "length scale must be a strictly positive finite f64, got {v}")
+            },
+            Self::InvalidTime(v) => {
+                write!(f, "time scale must be a strictly positive finite f64, got {v}")
+            },
+            Self::InvalidMass(v) => {
+                write!(f, "mass scale must be a strictly positive finite f64, got {v}")
+            },
         }
     }
 }
@@ -395,18 +393,9 @@ mod tests {
     #[test]
     fn custom_rejects_invalid_scales() {
         for bad in [0.0, -1.0, f64::INFINITY, f64::NAN] {
-            assert!(matches!(
-                UnitSystem::custom(bad, 1.0, 1.0),
-                Err(UnitError::InvalidLength(_))
-            ));
-            assert!(matches!(
-                UnitSystem::custom(1.0, bad, 1.0),
-                Err(UnitError::InvalidTime(_))
-            ));
-            assert!(matches!(
-                UnitSystem::custom(1.0, 1.0, bad),
-                Err(UnitError::InvalidMass(_))
-            ));
+            assert!(matches!(UnitSystem::custom(bad, 1.0, 1.0), Err(UnitError::InvalidLength(_))));
+            assert!(matches!(UnitSystem::custom(1.0, bad, 1.0), Err(UnitError::InvalidTime(_))));
+            assert!(matches!(UnitSystem::custom(1.0, 1.0, bad), Err(UnitError::InvalidMass(_))));
         }
     }
 

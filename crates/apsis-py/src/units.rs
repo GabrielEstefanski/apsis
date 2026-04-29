@@ -194,11 +194,9 @@ impl PyUnitSystem {
         // labels-are-metadata contract. Construction rejects NaN, so the
         // bit pattern is a stable hash key.
         let mut h: u64 = 0;
-        for v in [
-            self.inner.length_scale_si(),
-            self.inner.time_scale_si(),
-            self.inner.mass_scale_si(),
-        ] {
+        for v in
+            [self.inner.length_scale_si(), self.inner.time_scale_si(), self.inner.mass_scale_si()]
+        {
             h = h.wrapping_mul(0x100000001b3).wrapping_add(v.to_bits());
         }
         h
