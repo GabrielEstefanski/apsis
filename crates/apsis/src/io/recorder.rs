@@ -126,7 +126,7 @@ impl SimRecorder {
             sw,
             "t,ke_total,pe_total,E_total,dE_rel,\
              Lz_total,dLz_abs,dLz_rel,\
-             com_x,com_y,com_vx,com_vy,\
+             com_x,com_y,com_z,com_vx,com_vy,com_vz,\
              theta,steps"
         )?;
 
@@ -212,7 +212,7 @@ impl SimRecorder {
         writeln!(
             self.system_writer,
             "{t:.6e},{:.6e},{:.6e},{:.6e},{:.4e},{:.6e},{:.4e},{:.4e},\
-             {:.6e},{:.6e},{:.6e},{:.6e},{:.4},{}",
+             {:.6e},{:.6e},{:.6e},{:.6e},{:.6e},{:.6e},{:.4},{}",
             metrics.kinetic,
             metrics.potential,
             metrics.total_energy,
@@ -222,8 +222,10 @@ impl SimRecorder {
             metrics.rel_angular_momentum_error,
             metrics.com_x,
             metrics.com_y,
+            metrics.com_z,
             metrics.com_vx,
             metrics.com_vy,
+            metrics.com_vz,
             metrics.theta,
             metrics.steps,
         )?;
