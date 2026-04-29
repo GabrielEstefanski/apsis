@@ -26,7 +26,10 @@ use pyo3::types::{PyCapsule, PyCapsuleMethods};
 /// Capsule type tag. Bumping the suffix is the breaking-change marker
 /// when the underlying transport contract changes — every consumer
 /// has to recompile against the new name.
-const CAPSULE_NAME: &CStr = c_str!("apsis_perturbation_box_v1");
+///
+/// `_v2`: `PerturbationForce::accumulate` migrated from
+/// `&mut [(f64, f64)]` to `&mut [apsis::math::Vec3]` for the 3D port.
+const CAPSULE_NAME: &CStr = c_str!("apsis_perturbation_box_v2");
 
 /// Capsule payload. The `Mutex<Option<...>>` shape gives us:
 /// - `Send + Sync` so PyO3's `PyCapsule::new` accepts it
@@ -58,8 +61,9 @@ pub fn take_box_from_capsule(
 ) -> PyResult<Box<dyn PerturbationForce>> {
     if capsule.name()?.map(|n| n != CAPSULE_NAME).unwrap_or(true) {
         return Err(PyValueError::new_err(
-            "perturbation: capsule type tag does not match apsis_perturbation_box_v1; \
-             this object did not come from an apsis-compatible perturbation crate",
+            "perturbation: capsule type tag does not match apsis_perturbation_box_v2; \
+             this object did not come from an apsis-compatible perturbation crate \
+             (rebuild against apsis ≥ 0.2 for the 3D-port Vec3 contract)",
         ));
     }
 

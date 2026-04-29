@@ -67,7 +67,7 @@ pub struct RenderState {
     /// published so the render-side
     /// [`AccelerationMagnitudeField`](crate::domain::field::acceleration::AccelerationMagnitudeField)
     /// can paint bodies by |a| without needing to recompute forces.
-    pub accelerations: Vec<(f64, f64)>,
+    pub accelerations: Vec<crate::math::Vec3>,
 
     /// Dense-output snapshot from the most recently completed sub-step.
     /// The render thread uses this to interpolate body positions at any
@@ -137,7 +137,7 @@ pub struct PhysicsHandle {
     orbital_elements: Vec<Option<OrbitalElements>>,
     softening_scale: f64,
     sim_rate: f64,
-    accelerations: Vec<(f64, f64)>,
+    accelerations: Vec<crate::math::Vec3>,
     /// Pending COM shift published by the physics thread this frame.
     /// Consumed by TrailRecorder on the UI thread.
     pending_com_shift: (f32, f32),
@@ -287,7 +287,7 @@ impl PhysicsHandle {
         &self.orbital_elements
     }
     /// Accelerations from the last completed physics step (one per body).
-    pub fn accelerations(&self) -> &[(f64, f64)] {
+    pub fn accelerations(&self) -> &[crate::math::Vec3] {
         &self.accelerations
     }
     pub fn t(&self) -> f64 {

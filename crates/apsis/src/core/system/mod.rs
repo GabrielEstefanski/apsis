@@ -91,7 +91,7 @@ pub struct System {
     pub(crate) force_model: Box<dyn ForceModel>,
 
     /// Scratch buffer for accelerations — reused every step.
-    pub(crate) scratch_acc: Vec<(f64, f64)>,
+    pub(crate) scratch_acc: Vec<crate::math::Vec3>,
 
     /// Active integration algorithm (trait object).
     pub(crate) integrator: Box<dyn Integrator>,

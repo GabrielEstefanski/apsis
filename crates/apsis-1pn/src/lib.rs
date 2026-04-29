@@ -80,6 +80,7 @@
 #![allow(clippy::needless_range_loop)]
 
 use apsis::domain::body::Body;
+use apsis::math::Vec3;
 use apsis::physics::gravity::kernel::KernelRequirements;
 use apsis::physics::integrator::PerturbationForce;
 
@@ -163,7 +164,7 @@ impl PerturbationForce for PostNewtonian1PN {
         KernelRequirements::exact_and_smooth()
     }
 
-    fn accumulate(&self, bodies: &[Body], scratch_acc: &mut [(f64, f64)]) {
+    fn accumulate(&self, bodies: &[Body], scratch_acc: &mut [Vec3]) {
         debug_assert_eq!(
             bodies.len(),
             scratch_acc.len(),
@@ -177,19 +178,17 @@ impl PerturbationForce for PostNewtonian1PN {
         //     a_1PN = (G m_j / c² r²) · [ (4 G m_j / r − v²) n̂ + 4 (n̂·v) v ]
         //
         // where n̂ points FROM SOURCE TO RECEIVER. The vector we compute below
-        // (`rhat_*`) points FROM RECEIVER TO SOURCE, i.e. r̂ = −n̂. Substituting
+        // (`rhat`) points FROM RECEIVER TO SOURCE, i.e. r̂ = −n̂. Substituting
         // r̂ = −n̂ flips the sign of the whole bracket (both n̂ and n̂·v change
         // sign; the outer product n̂·v × v inherits one flip), so in this
         // crate's convention the expression is applied with an overall
         // minus sign.
         for i in 0..bodies.len() {
             let b_i = &bodies[i];
-            let vx_i = b_i.vx;
-            let vy_i = b_i.vy;
-            let v2_i = vx_i * vx_i + vy_i * vy_i;
+            let v_i = Vec3::new(b_i.vx, b_i.vy, b_i.vz);
+            let v2_i = v_i.length_squared();
 
-            let mut ax = 0.0_f64;
-            let mut ay = 0.0_f64;
+            let mut a = Vec3::ZERO;
 
             for j in 0..bodies.len() {
                 if i == j {
@@ -198,29 +197,34 @@ impl PerturbationForce for PostNewtonian1PN {
                 let b_j = &bodies[j];
                 let dx = b_j.x - b_i.x;
                 let dy = b_j.y - b_i.y;
-                let r2 = dx * dx + dy * dy;
+                let dz = b_j.z - b_i.z;
+                let r2 = dx * dx + dy * dy + dz * dz;
                 if r2 < 1e-30 {
                     continue;
                 }
                 let r = r2.sqrt();
                 let inv_r = r.recip();
-                let rhat_x = dx * inv_r; // points receiver → source
-                let rhat_y = dy * inv_r;
+                let rhat = Vec3::new(dx * inv_r, dy * inv_r, dz * inv_r); // receiver → source
 
                 let gm_over_r = b_j.mass * inv_r; // G = 1
                 let pref = b_j.mass / (c2 * r2); //  G m_j / (c² r²)
 
-                let rhat_dot_v = rhat_x * vx_i + rhat_y * vy_i;
+                let rhat_dot_v = rhat.dot(v_i);
                 let scalar_rhat = 4.0 * gm_over_r - v2_i; // (4GM/r − v²)
                 let scalar_v = 4.0 * rhat_dot_v; // 4 (r̂·v)
 
                 // Minus sign: see block comment above — our r̂ is −n̂.
-                ax -= pref * (scalar_rhat * rhat_x + scalar_v * vx_i);
-                ay -= pref * (scalar_rhat * rhat_y + scalar_v * vy_i);
+                //
+                // Per-axis scalar form `pref · (scalar_rhat · r̂ +
+                // scalar_v · v)` is load-bearing: re-associating into
+                // Vec3 ops shifts ULPs and moves the Mercury 1PN gate
+                // floor by ~10² ppm.
+                a.x -= pref * (scalar_rhat * rhat.x + scalar_v * v_i.x);
+                a.y -= pref * (scalar_rhat * rhat.y + scalar_v * v_i.y);
+                a.z -= pref * (scalar_rhat * rhat.z + scalar_v * v_i.z);
             }
 
-            scratch_acc[i].0 += ax;
-            scratch_acc[i].1 += ay;
+            scratch_acc[i] += a;
         }
     }
 }
@@ -253,9 +257,9 @@ mod tests {
     #[test]
     fn isolated_body_feels_no_pn_force() {
         let bodies = vec![Body::star(1.0)];
-        let mut acc = vec![(0.0, 0.0)];
+        let mut acc = vec![Vec3::ZERO];
         PostNewtonian1PN::solar_units().accumulate(&bodies, &mut acc);
-        assert_eq!(acc[0], (0.0, 0.0));
+        assert_eq!(acc[0], Vec3::ZERO);
     }
 
     /// 1PN perturbation is additive: register twice and the effect doubles.
@@ -266,16 +270,17 @@ mod tests {
             vec![Body::star(1.0), Body::rocky(1e-6).at(0.5, 0.0).with_velocity(0.0, 1.414)];
         let pn = PostNewtonian1PN::solar_units();
 
-        let mut once = vec![(0.0, 0.0); 2];
+        let mut once = vec![Vec3::ZERO; 2];
         pn.accumulate(&bodies, &mut once);
 
-        let mut twice = vec![(0.0, 0.0); 2];
+        let mut twice = vec![Vec3::ZERO; 2];
         pn.accumulate(&bodies, &mut twice);
         pn.accumulate(&bodies, &mut twice);
 
         for i in 0..2 {
-            assert!((twice[i].0 - 2.0 * once[i].0).abs() < 1e-14, "body {i} ax not additive");
-            assert!((twice[i].1 - 2.0 * once[i].1).abs() < 1e-14, "body {i} ay not additive");
+            assert!((twice[i].x - 2.0 * once[i].x).abs() < 1e-14, "body {i} ax not additive");
+            assert!((twice[i].y - 2.0 * once[i].y).abs() < 1e-14, "body {i} ay not additive");
+            assert!((twice[i].z - 2.0 * once[i].z).abs() < 1e-14, "body {i} az not additive");
         }
     }
 
@@ -286,11 +291,12 @@ mod tests {
         let bodies =
             vec![Body::star(1.0), Body::rocky(1e-6).at(0.387, 0.0).with_velocity(0.0, 2.07)];
         let pn = PostNewtonian1PN::with_c(1e20);
-        let mut acc = vec![(0.0, 0.0); 2];
+        let mut acc = vec![Vec3::ZERO; 2];
         pn.accumulate(&bodies, &mut acc);
-        for (ax, ay) in acc {
-            assert!(ax.abs() < 1e-30, "ax={ax} should be ~0 at c→∞");
-            assert!(ay.abs() < 1e-30, "ay={ay} should be ~0 at c→∞");
+        for a in acc {
+            assert!(a.x.abs() < 1e-30, "ax={} should be ~0 at c→∞", a.x);
+            assert!(a.y.abs() < 1e-30, "ay={} should be ~0 at c→∞", a.y);
+            assert!(a.z.abs() < 1e-30, "az={} should be ~0 at c→∞", a.z);
         }
     }
 
@@ -312,21 +318,26 @@ mod tests {
         let mercury = Body::rocky(M_MERCURY).at(r_peri, 0.0).with_velocity(0.0, v_peri);
 
         let bodies = vec![sun, mercury];
-        let mut acc = vec![(0.0, 0.0); 2];
+        let mut acc = vec![Vec3::ZERO; 2];
         PostNewtonian1PN::solar_units().accumulate(&bodies, &mut acc);
 
         // Mercury is at (+r_peri, 0); "outward from Sun" = +x direction.
         assert!(
-            acc[1].0 > 0.0,
+            acc[1].x > 0.0,
             "1PN correction on Mercury at perihelion must point outward (+x), got ax = {}",
-            acc[1].0,
+            acc[1].x,
         );
         // Tangential velocity is in +y; with n̂·v = 0 the v-term vanishes,
         // so the correction is purely radial.
         assert!(
-            acc[1].1.abs() < 1e-20,
+            acc[1].y.abs() < 1e-20,
             "ay should be ~0 at purely-tangential perihelion, got {}",
-            acc[1].1,
+            acc[1].y,
+        );
+        assert!(
+            acc[1].z.abs() < 1e-20,
+            "az should be ~0 in the orbital plane (z = vz = 0), got {}",
+            acc[1].z,
         );
     }
 
@@ -360,10 +371,10 @@ mod tests {
         let mercury = Body::rocky(M_MERCURY).at(r_peri, 0.0).with_velocity(0.0, v_peri);
 
         let bodies = vec![sun, mercury];
-        let mut acc = vec![(0.0, 0.0); 2];
+        let mut acc = vec![Vec3::ZERO; 2];
         PostNewtonian1PN::solar_units().accumulate(&bodies, &mut acc);
 
-        let a_pn = (acc[1].0.powi(2) + acc[1].1.powi(2)).sqrt();
+        let a_pn = acc[1].length();
         let a_newt = 1.0 / (r_peri * r_peri); // G M / r²
         let ratio = a_pn / a_newt;
 

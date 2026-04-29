@@ -55,7 +55,7 @@ impl System {
     }
 
     /// Accelerations computed during the last integration step.
-    pub fn last_accelerations(&self) -> &[(f64, f64)] {
+    pub fn last_accelerations(&self) -> &[crate::math::Vec3] {
         &self.scratch_acc
     }
 

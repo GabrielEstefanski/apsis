@@ -342,7 +342,7 @@ pub trait Integrator: Send {
         bodies: &mut [Body],
         ctx: &mut IntegratorContext<'_>,
         dt_hint: f64,
-        acc: &mut Vec<(f64, f64)>,
+        acc: &mut Vec<crate::math::Vec3>,
     ) -> StepResult;
 
     /// Which algorithm this integrator represents.

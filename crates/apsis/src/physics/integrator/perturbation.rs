@@ -22,6 +22,7 @@
 //! and emits a structured diagnostic for every invariant violation.
 
 use crate::domain::body::Body;
+use crate::math::Vec3;
 use crate::physics::gravity::kernel::{Exactness, KernelRequirements};
 
 pub trait PerturbationForce: Send + Sync {
@@ -30,7 +31,7 @@ pub trait PerturbationForce: Send + Sync {
     /// `scratch_acc[i]` corresponds to `bodies[i]`. Implementations must
     /// **add** to existing values, not overwrite, so multiple perturbations
     /// compose correctly.
-    fn accumulate(&self, bodies: &[Body], scratch_acc: &mut [(f64, f64)]);
+    fn accumulate(&self, bodies: &[Body], scratch_acc: &mut [Vec3]);
 
     /// Accumulates accelerations for a sub-slice of bodies starting at
     /// global index `offset` within `System::bodies`.
@@ -42,7 +43,7 @@ pub trait PerturbationForce: Send + Sync {
     /// The default implementation ignores `offset` and delegates to
     /// [`Self::accumulate`] — correct for perturbations that derive params
     /// dynamically from the body slice rather than from a pre-indexed vec.
-    fn accumulate_offset(&self, bodies: &[Body], scratch_acc: &mut [(f64, f64)], offset: usize) {
+    fn accumulate_offset(&self, bodies: &[Body], scratch_acc: &mut [Vec3], offset: usize) {
         let _ = offset;
         self.accumulate(bodies, scratch_acc);
     }
