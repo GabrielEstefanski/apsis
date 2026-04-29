@@ -340,8 +340,7 @@ impl SimulationApp {
                 // reset), the cached invariants are stale: drop everything
                 // and let the smoother cold-start. NaN sentinel = first
                 // frame; skip the comparison.
-                if !self.orbit_smoother_last_t.is_nan()
-                    && t_sim < self.orbit_smoother_last_t - 1e-9
+                if !self.orbit_smoother_last_t.is_nan() && t_sim < self.orbit_smoother_last_t - 1e-9
                 {
                     self.orbit_smoother.clear();
                 }

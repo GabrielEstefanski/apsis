@@ -59,7 +59,7 @@ const V3: (f64, f64) = (-0.93240737, -0.86473146);
 /// Chenciner & Montgomery (2000); refined values in the literature
 /// (Simó 2002) differ in the 10th digit and have no effect on parity
 /// metrics, only on the absolute time labelling.
-const PERIOD: f64 = 6.3259_139_870;
+const PERIOD: f64 = 6.325_913_987_0;
 
 /// Default number of orbital periods integrated for the gated baseline.
 /// Overridable via `--periods` for the 50T informational extension.
@@ -116,16 +116,9 @@ fn main() {
     writeln!(w, "# integrator: IAS15 (apsis)").unwrap();
     writeln!(w, "# units: canonical (G = 1)").unwrap();
     writeln!(w, "# mass={MASS}, period={PERIOD:.18e}").unwrap();
-    writeln!(
-        w,
-        "# n_periods={n_periods}, samples_per_period={SAMPLES_PER_PERIOD}, dt0={dt0:.18e}"
-    )
-    .unwrap();
-    writeln!(
-        w,
-        "sample,t,x0,y0,vx0,vy0,x1,y1,vx1,vy1,x2,y2,vx2,vy2,e_total"
-    )
-    .unwrap();
+    writeln!(w, "# n_periods={n_periods}, samples_per_period={SAMPLES_PER_PERIOD}, dt0={dt0:.18e}")
+        .unwrap();
+    writeln!(w, "sample,t,x0,y0,vx0,vy0,x1,y1,vx1,vy1,x2,y2,vx2,vy2,e_total").unwrap();
 
     write_sample(&mut w, 0, &sys);
     for n in 1..total_samples {
@@ -135,11 +128,7 @@ fn main() {
     }
 
     w.flush().unwrap();
-    eprintln!(
-        "wrote {} samples to {}",
-        total_samples,
-        cli.output_path.display()
-    );
+    eprintln!("wrote {} samples to {}", total_samples, cli.output_path.display());
 }
 
 // ── Output helper ───────────────────────────────────────────────────────── //
@@ -195,10 +184,9 @@ fn parse_cli() -> Cli {
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--output" | "-o" => {
-                output_path = Some(PathBuf::from(
-                    args.next().expect("--output requires a path argument"),
-                ));
-            }
+                output_path =
+                    Some(PathBuf::from(args.next().expect("--output requires a path argument")));
+            },
             "--periods" => {
                 n_periods = args
                     .next()
@@ -206,7 +194,7 @@ fn parse_cli() -> Cli {
                     .parse()
                     .expect("--periods must be a positive integer");
                 assert!(n_periods >= 1, "--periods must be ≥ 1");
-            }
+            },
             other => panic!("unknown argument: {other}"),
         }
     }

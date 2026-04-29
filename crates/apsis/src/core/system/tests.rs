@@ -57,7 +57,8 @@ fn two_body_circular_system(integrator: IntegratorKind, dt: f64) -> System {
         Body::rocky(1.0).at(-1.0, 0.0).with_velocity(0.0, -0.5),
         Body::rocky(1.0).at(1.0, 0.0).with_velocity(0.0, 0.5),
     ];
-    let mut sys = System::new(bodies, UnitSystem::canonical()).with_theta(0.5).with_dt(dt).with_max_depth(10);
+    let mut sys =
+        System::new(bodies, UnitSystem::canonical()).with_theta(0.5).with_dt(dt).with_max_depth(10);
     sys.set_integrator(integrator);
     sys
 }
@@ -67,7 +68,10 @@ fn two_body_deterministic_system() -> System {
         Body::rocky(1.0).at(-1.0, 0.0).with_velocity(0.0, -0.5),
         Body::rocky(1.0).at(1.0, 0.0).with_velocity(0.0, 0.5),
     ];
-    let mut sys = System::new(bodies, UnitSystem::canonical()).with_theta(0.5).with_dt(0.01).with_max_depth(10);
+    let mut sys = System::new(bodies, UnitSystem::canonical())
+        .with_theta(0.5)
+        .with_dt(0.01)
+        .with_max_depth(10);
     // Replay/determinism tests use a fixed-step, stateless integrator.
     // IAS15 (the project default) carries warm-start state (b, e, csb, dt_next)
     // that is intentionally not serialised in snapshots — reloading resets it
@@ -187,7 +191,10 @@ mod wh_guard {
             Body::star(1000.0).at(0.0, 0.0).with_velocity(0.0, 0.0),
             Body::rocky(1.0).at(10.0, 0.0).with_velocity(0.0, 10.0),
         ];
-        let mut sys = System::new(bodies, UnitSystem::canonical()).with_theta(0.5).with_dt(0.01).with_max_depth(10);
+        let mut sys = System::new(bodies, UnitSystem::canonical())
+            .with_theta(0.5)
+            .with_dt(0.01)
+            .with_max_depth(10);
         sys.set_integrator(IntegratorKind::WisdomHolman);
         assert!(sys.is_wh_suitable());
     }
@@ -198,7 +205,10 @@ mod wh_guard {
             Body::rocky(1.0).at(-1.0, 0.0).with_velocity(0.0, -0.5),
             Body::rocky(1.0).at(1.0, 0.0).with_velocity(0.0, 0.5),
         ];
-        let mut sys = System::new(bodies, UnitSystem::canonical()).with_theta(0.5).with_dt(0.01).with_max_depth(10);
+        let mut sys = System::new(bodies, UnitSystem::canonical())
+            .with_theta(0.5)
+            .with_dt(0.01)
+            .with_max_depth(10);
         sys.set_integrator(IntegratorKind::WisdomHolman);
         assert!(!sys.is_wh_suitable());
     }
@@ -210,7 +220,10 @@ mod wh_guard {
             Body::rocky(1.0).at(1.0, 0.0).with_velocity(0.0, 0.5),
             Body::rocky(1.0).at(0.0, 1.0).with_velocity(0.5, 0.0),
         ];
-        let mut sys = System::new(bodies, UnitSystem::canonical()).with_theta(0.5).with_dt(0.01).with_max_depth(10);
+        let mut sys = System::new(bodies, UnitSystem::canonical())
+            .with_theta(0.5)
+            .with_dt(0.01)
+            .with_max_depth(10);
         sys.set_integrator(IntegratorKind::WisdomHolman);
         assert!(!sys.is_wh_suitable());
     }
@@ -222,7 +235,11 @@ mod wh_guard {
             Body::rocky(1.0).at(10.0, 0.0).with_velocity(0.0, 1.0),
         ];
         assert!(
-            System::new(bodies, UnitSystem::canonical()).with_theta(0.5).with_dt(0.01).with_max_depth(10).is_wh_suitable()
+            System::new(bodies, UnitSystem::canonical())
+                .with_theta(0.5)
+                .with_dt(0.01)
+                .with_max_depth(10)
+                .is_wh_suitable()
         );
     }
 
@@ -233,7 +250,11 @@ mod wh_guard {
             Body::rocky(1.0).at(10.0, 0.0).with_velocity(0.0, 1.0),
         ];
         assert!(
-            !System::new(bodies, UnitSystem::canonical()).with_theta(0.5).with_dt(0.01).with_max_depth(10).is_wh_suitable()
+            !System::new(bodies, UnitSystem::canonical())
+                .with_theta(0.5)
+                .with_dt(0.01)
+                .with_max_depth(10)
+                .is_wh_suitable()
         );
     }
 
@@ -241,7 +262,11 @@ mod wh_guard {
     fn single_body_is_not_suitable() {
         let bodies = vec![Body::rocky(1.0).at(0.0, 0.0).with_velocity(0.0, 0.0)];
         assert!(
-            !System::new(bodies, UnitSystem::canonical()).with_theta(0.5).with_dt(0.01).with_max_depth(10).is_wh_suitable()
+            !System::new(bodies, UnitSystem::canonical())
+                .with_theta(0.5)
+                .with_dt(0.01)
+                .with_max_depth(10)
+                .is_wh_suitable()
         );
     }
 
@@ -251,7 +276,10 @@ mod wh_guard {
             Body::rocky(1.0).at(-1.0, 0.0).with_velocity(0.0, -0.5),
             Body::rocky(1.0).at(1.0, 0.0).with_velocity(0.0, 0.5),
         ];
-        let mut sys = System::new(bodies, UnitSystem::canonical()).with_theta(0.5).with_dt(0.01).with_max_depth(10);
+        let mut sys = System::new(bodies, UnitSystem::canonical())
+            .with_theta(0.5)
+            .with_dt(0.01)
+            .with_max_depth(10);
         sys.set_integrator(IntegratorKind::WisdomHolman);
         for _ in 0..100 {
             sys.step();
@@ -268,10 +296,15 @@ mod wh_guard {
             Body::rocky(1.0).at(-1.0, 0.0).with_velocity(0.0, -0.5),
             Body::rocky(1.0).at(1.0, 0.0).with_velocity(0.0, 0.5),
         ];
-        let mut sys_wh =
-            System::new(bodies.clone(), UnitSystem::canonical()).with_theta(0.5).with_dt(0.01).with_max_depth(10);
+        let mut sys_wh = System::new(bodies.clone(), UnitSystem::canonical())
+            .with_theta(0.5)
+            .with_dt(0.01)
+            .with_max_depth(10);
         sys_wh.set_integrator(IntegratorKind::WisdomHolman);
-        let mut sys_y4 = System::new(bodies, UnitSystem::canonical()).with_theta(0.5).with_dt(0.01).with_max_depth(10);
+        let mut sys_y4 = System::new(bodies, UnitSystem::canonical())
+            .with_theta(0.5)
+            .with_dt(0.01)
+            .with_max_depth(10);
         sys_y4.set_integrator(IntegratorKind::Yoshida4);
 
         for _ in 0..100 {
@@ -336,7 +369,10 @@ mod benchmarks {
         let mut b2 = Body::rocky(1.0).at(r_peri / 2.0, 0.0).with_velocity(0.0, v_peri / 2.0);
         b2.softening = 0.0;
 
-        let mut sys = System::new(vec![b1, b2], UnitSystem::canonical()).with_theta(0.5).with_dt(dt).with_max_depth(10);
+        let mut sys = System::new(vec![b1, b2], UnitSystem::canonical())
+            .with_theta(0.5)
+            .with_dt(dt)
+            .with_max_depth(10);
         sys.set_integrator(integrator);
         for _ in 0..n_steps {
             sys.step();
@@ -401,7 +437,10 @@ mod benchmarks {
                 b
             })
             .collect();
-        let mut sys = System::new(bodies, UnitSystem::canonical()).with_theta(0.5).with_dt(DT).with_max_depth(10);
+        let mut sys = System::new(bodies, UnitSystem::canonical())
+            .with_theta(0.5)
+            .with_dt(DT)
+            .with_max_depth(10);
         sys.set_integrator(IntegratorKind::Yoshida4);
         for _ in 0..STEPS {
             sys.step();
@@ -439,7 +478,10 @@ mod benchmarks {
                     b
                 })
                 .collect();
-            let mut sys = System::new(bodies, UnitSystem::canonical()).with_theta(0.5).with_dt(dt).with_max_depth(10);
+            let mut sys = System::new(bodies, UnitSystem::canonical())
+                .with_theta(0.5)
+                .with_dt(dt)
+                .with_max_depth(10);
             sys.set_integrator(integrator);
             for _ in 0..steps {
                 sys.step();
@@ -476,7 +518,10 @@ mod benchmarks {
         for b in &mut bodies {
             b.softening = 0.0;
         }
-        let mut sys = System::new(bodies.to_vec(), UnitSystem::canonical()).with_theta(0.5).with_dt(dt).with_max_depth(10);
+        let mut sys = System::new(bodies.to_vec(), UnitSystem::canonical())
+            .with_theta(0.5)
+            .with_dt(dt)
+            .with_max_depth(10);
         sys.set_integrator(IntegratorKind::Yoshida4);
         sys
     }
@@ -777,7 +822,10 @@ mod integrator_force_compat {
                 Body::rocky(1.0).at(theta.cos(), theta.sin()).with_velocity(0.0, 0.0)
             })
             .collect();
-        System::new(bodies, UnitSystem::canonical()).with_theta(0.5).with_dt(0.01).with_max_depth(10)
+        System::new(bodies, UnitSystem::canonical())
+            .with_theta(0.5)
+            .with_dt(0.01)
+            .with_max_depth(10)
     }
 
     #[test]
@@ -854,7 +902,10 @@ mod integrator_force_compat {
             Body::rocky(1.0).at(-1.0, 0.0).with_velocity(0.0, -0.5),
             Body::rocky(1.0).at(1.0, 0.0).with_velocity(0.0, 0.5),
         ];
-        let mut sys = System::new(bodies, UnitSystem::canonical()).with_theta(0.5).with_dt(0.01).with_max_depth(10);
+        let mut sys = System::new(bodies, UnitSystem::canonical())
+            .with_theta(0.5)
+            .with_dt(0.01)
+            .with_max_depth(10);
 
         sys.set_integrator(IntegratorKind::Ias15);
 

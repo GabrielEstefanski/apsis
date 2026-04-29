@@ -330,7 +330,11 @@ fn diag_emit_warmstart(ias: &Ias15, q: f64, dt_try: f64) {
     }
     eprintln!(
         "[ias15-diag]\twarmstart\tev={}\tdt_try={:.6e}\tq={:.6e}\tb_norm={:.6e}\te_norm={:.6e}",
-        id, dt_try, q, b_norm_sq.sqrt(), e_norm_sq.sqrt(),
+        id,
+        dt_try,
+        q,
+        b_norm_sq.sqrt(),
+        e_norm_sq.sqrt(),
     );
 }
 
@@ -1395,11 +1399,7 @@ impl Integrator for Ias15 {
     /// still 0); otherwise the value computed by `optimal_dt` after the
     /// most-recent accept.
     fn proposed_next_dt(&self) -> Option<f64> {
-        if self.dt_next > 0.0 {
-            Some(self.dt_next)
-        } else {
-            None
-        }
+        if self.dt_next > 0.0 { Some(self.dt_next) } else { None }
     }
 
     /// Apply a uniform translation `(-dx, -dy)` while keeping IAS15's
@@ -1662,8 +1662,7 @@ impl Ias15 {
                 no_improve += 1;
                 if no_improve >= 2 {
                     restore_xv(bodies, x0, v0);
-                    self.picard_stagnations_total =
-                        self.picard_stagnations_total.saturating_add(1);
+                    self.picard_stagnations_total = self.picard_stagnations_total.saturating_add(1);
                     return (true, residual, iters);
                 }
             } else {
@@ -1884,22 +1883,42 @@ impl Ias15 {
             let b = self.b[i];
 
             // e[0] = q · (b0 + 2 b1 + 3 b2 + 4 b3 + 5 b4 + 6 b5 + 7 b6)
-            let e0_x = q * (b[0].0 + 2.0 * b[1].0 + 3.0 * b[2].0 + 4.0 * b[3].0
-                + 5.0 * b[4].0 + 6.0 * b[5].0 + 7.0 * b[6].0);
-            let e0_y = q * (b[0].1 + 2.0 * b[1].1 + 3.0 * b[2].1 + 4.0 * b[3].1
-                + 5.0 * b[4].1 + 6.0 * b[5].1 + 7.0 * b[6].1);
+            let e0_x = q
+                * (b[0].0
+                    + 2.0 * b[1].0
+                    + 3.0 * b[2].0
+                    + 4.0 * b[3].0
+                    + 5.0 * b[4].0
+                    + 6.0 * b[5].0
+                    + 7.0 * b[6].0);
+            let e0_y = q
+                * (b[0].1
+                    + 2.0 * b[1].1
+                    + 3.0 * b[2].1
+                    + 4.0 * b[3].1
+                    + 5.0 * b[4].1
+                    + 6.0 * b[5].1
+                    + 7.0 * b[6].1);
 
             // e[1] = q² · (b1 + 3 b2 + 6 b3 + 10 b4 + 15 b5 + 21 b6)
-            let e1_x = q2 * (b[1].0 + 3.0 * b[2].0 + 6.0 * b[3].0 + 10.0 * b[4].0
-                + 15.0 * b[5].0 + 21.0 * b[6].0);
-            let e1_y = q2 * (b[1].1 + 3.0 * b[2].1 + 6.0 * b[3].1 + 10.0 * b[4].1
-                + 15.0 * b[5].1 + 21.0 * b[6].1);
+            let e1_x = q2
+                * (b[1].0
+                    + 3.0 * b[2].0
+                    + 6.0 * b[3].0
+                    + 10.0 * b[4].0
+                    + 15.0 * b[5].0
+                    + 21.0 * b[6].0);
+            let e1_y = q2
+                * (b[1].1
+                    + 3.0 * b[2].1
+                    + 6.0 * b[3].1
+                    + 10.0 * b[4].1
+                    + 15.0 * b[5].1
+                    + 21.0 * b[6].1);
 
             // e[2] = q³ · (b2 + 4 b3 + 10 b4 + 20 b5 + 35 b6)
-            let e2_x = q3 * (b[2].0 + 4.0 * b[3].0 + 10.0 * b[4].0
-                + 20.0 * b[5].0 + 35.0 * b[6].0);
-            let e2_y = q3 * (b[2].1 + 4.0 * b[3].1 + 10.0 * b[4].1
-                + 20.0 * b[5].1 + 35.0 * b[6].1);
+            let e2_x = q3 * (b[2].0 + 4.0 * b[3].0 + 10.0 * b[4].0 + 20.0 * b[5].0 + 35.0 * b[6].0);
+            let e2_y = q3 * (b[2].1 + 4.0 * b[3].1 + 10.0 * b[4].1 + 20.0 * b[5].1 + 35.0 * b[6].1);
 
             // e[3] = q⁴ · (b3 + 5 b4 + 15 b5 + 35 b6)
             let e3_x = q4 * (b[3].0 + 5.0 * b[4].0 + 15.0 * b[5].0 + 35.0 * b[6].0);
@@ -2049,8 +2068,10 @@ mod tests {
         let mut b2 = Body::rocky(1.0).at(r_peri / 2.0, 0.0).with_velocity(0.0, v_peri / 2.0);
         b2.softening = 0.0;
 
-        let mut sys =
-            System::new(vec![b1, b2], UnitSystem::canonical()).with_theta(0.5).with_dt(dt_budget).with_max_depth(10);
+        let mut sys = System::new(vec![b1, b2], UnitSystem::canonical())
+            .with_theta(0.5)
+            .with_dt(dt_budget)
+            .with_max_depth(10);
         sys.set_integrator(IntegratorKind::Ias15);
 
         let mut peak = 0.0_f64;
@@ -2138,7 +2159,10 @@ mod tests {
         let mut b2 = Body::rocky(1.0).at(r_peri / 2.0, 0.0).with_velocity(0.0, v_peri / 2.0);
         b2.softening = 0.0;
 
-        let mut sys = System::new(vec![b1, b2], UnitSystem::canonical()).with_theta(0.5).with_dt(DT).with_max_depth(10);
+        let mut sys = System::new(vec![b1, b2], UnitSystem::canonical())
+            .with_theta(0.5)
+            .with_dt(DT)
+            .with_max_depth(10);
         sys.set_integrator(IntegratorKind::Ias15);
 
         let period = 2.0 * std::f64::consts::PI * (A.powi(3) / MU).sqrt();
@@ -2189,7 +2213,10 @@ mod tests {
             b.softening = 0.0;
         }
 
-        let mut sys = System::new(bodies, UnitSystem::canonical()).with_theta(0.5).with_dt(DT).with_max_depth(10);
+        let mut sys = System::new(bodies, UnitSystem::canonical())
+            .with_theta(0.5)
+            .with_dt(DT)
+            .with_max_depth(10);
         sys.set_integrator(IntegratorKind::Ias15);
 
         let n_steps = (T_END / DT).ceil() as u64;
@@ -2244,8 +2271,10 @@ mod tests {
         let mut b2 = Body::rocky(1.0).at(r_peri / 2.0, 0.0).with_velocity(0.0, v_peri / 2.0);
         b2.softening = 0.0;
 
-        let mut sys =
-            System::new(vec![b1, b2], UnitSystem::canonical()).with_theta(0.5).with_dt(dt_budget).with_max_depth(10);
+        let mut sys = System::new(vec![b1, b2], UnitSystem::canonical())
+            .with_theta(0.5)
+            .with_dt(dt_budget)
+            .with_max_depth(10);
         sys.set_integrator(IntegratorKind::Ias15);
 
         let t0 = sys.t();
@@ -2411,15 +2440,19 @@ mod tests {
         let q6 = q5 * q;
         let q7 = q6 * q;
         [
-            q  * (b[0] + 2.0 * b[1] + 3.0 * b[2] + 4.0 * b[3]
-                + 5.0 * b[4] + 6.0 * b[5] + 7.0 * b[6]),
-            q2 * (b[1] + 3.0 * b[2] + 6.0 * b[3] + 10.0 * b[4]
-                + 15.0 * b[5] + 21.0 * b[6]),
+            q * (b[0]
+                + 2.0 * b[1]
+                + 3.0 * b[2]
+                + 4.0 * b[3]
+                + 5.0 * b[4]
+                + 6.0 * b[5]
+                + 7.0 * b[6]),
+            q2 * (b[1] + 3.0 * b[2] + 6.0 * b[3] + 10.0 * b[4] + 15.0 * b[5] + 21.0 * b[6]),
             q3 * (b[2] + 4.0 * b[3] + 10.0 * b[4] + 20.0 * b[5] + 35.0 * b[6]),
             q4 * (b[3] + 5.0 * b[4] + 15.0 * b[5] + 35.0 * b[6]),
             q5 * (b[4] + 6.0 * b[5] + 21.0 * b[6]),
             q6 * (b[5] + 7.0 * b[6]),
-            q7 *  b[6],
+            q7 * b[6],
         ]
     }
 
@@ -2434,13 +2467,7 @@ mod tests {
         let u5 = u4 * u;
         let u6 = u5 * u;
         let u7 = u6 * u;
-        b[0] * u
-            + b[1] * u2
-            + b[2] * u3
-            + b[3] * u4
-            + b[4] * u5
-            + b[5] * u6
-            + b[6] * u7
+        b[0] * u + b[1] * u2 + b[2] * u3 + b[3] * u4 + b[4] * u5 + b[5] * u6 + b[6] * u7
     }
 
     #[test]
@@ -2510,7 +2537,9 @@ mod tests {
             assert!(
                 diff <= 1e-12 * scale,
                 "q=1 polynomial continuation failed at u_new={}: got {:.18e}, expected {:.18e}",
-                u_new, got, expected,
+                u_new,
+                got,
+                expected,
             );
         }
     }
@@ -2543,12 +2572,20 @@ mod tests {
             assert!(
                 diff_x <= 1e-13_f64 * ref_x[k].abs().max(1.0),
                 "b[{}].x at q={}: got {:.18e}, expected {:.18e}, diff {:.3e}",
-                k, q, ias.b[0][k].0, ref_x[k], diff_x,
+                k,
+                q,
+                ias.b[0][k].0,
+                ref_x[k],
+                diff_x,
             );
             assert!(
                 diff_y <= 1e-13_f64 * ref_y[k].abs().max(1.0),
                 "b[{}].y at q={}: got {:.18e}, expected {:.18e}, diff {:.3e}",
-                k, q, ias.b[0][k].1, ref_y[k], diff_y,
+                k,
+                q,
+                ias.b[0][k].1,
+                ref_y[k],
+                diff_y,
             );
         }
     }
@@ -2577,12 +2614,20 @@ mod tests {
             assert!(
                 diff_x <= 1e-13_f64 * ref_x[k].abs().max(1.0),
                 "b[{}].x at q={}: got {:.18e}, expected {:.18e}, diff {:.3e}",
-                k, q, ias.b[0][k].0, ref_x[k], diff_x,
+                k,
+                q,
+                ias.b[0][k].0,
+                ref_x[k],
+                diff_x,
             );
             assert!(
                 diff_y <= 1e-13_f64 * ref_y[k].abs().max(1.0),
                 "b[{}].y at q={}: got {:.18e}, expected {:.18e}, diff {:.3e}",
-                k, q, ias.b[0][k].1, ref_y[k], diff_y,
+                k,
+                q,
+                ias.b[0][k].1,
+                ref_y[k],
+                diff_y,
             );
         }
     }
@@ -2628,12 +2673,20 @@ mod tests {
                 assert!(
                     diff_x <= 1e-12 * scale_x,
                     "polynomial mismatch at q={}, u_new={}: x got {:.18e}, expected {:.18e}, diff {:.3e}",
-                    q, u_new, got_x, expected_x, diff_x,
+                    q,
+                    u_new,
+                    got_x,
+                    expected_x,
+                    diff_x,
                 );
                 assert!(
                     diff_y <= 1e-12 * scale_y,
                     "polynomial mismatch at q={}, u_new={}: y got {:.18e}, expected {:.18e}, diff {:.3e}",
-                    q, u_new, got_y, expected_y, diff_y,
+                    q,
+                    u_new,
+                    got_y,
+                    expected_y,
+                    diff_y,
                 );
             }
         }
@@ -2671,7 +2724,10 @@ mod tests {
             assert!(
                 diff <= 1e-13_f64 * expected.abs().max(1.0),
                 "be-correction lost at b[{}]: got {:.18e}, expected {:.18e}, diff {:.3e}",
-                k, ias.b[0][k].0, expected, diff,
+                k,
+                ias.b[0][k].0,
+                expected,
+                diff,
             );
         }
     }
