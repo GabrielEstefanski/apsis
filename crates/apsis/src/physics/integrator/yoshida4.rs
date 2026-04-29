@@ -12,6 +12,7 @@
 //! - Yoshida (1990). *Phys. Lett. A* 150, 262–268.
 
 use crate::domain::body::Body;
+use crate::math::Vec3;
 use crate::physics::integrator::coefficients::{Y4_C, Y4_D};
 use crate::physics::integrator::helpers::{apply_perturbations, evaluate, scale_acc_and_pe};
 use crate::physics::integrator::primitives::{drift, kick};
@@ -28,7 +29,7 @@ impl Integrator for Yoshida4 {
         bodies: &mut [Body],
         ctx: &mut IntegratorContext<'_>,
         dt: f64,
-        acc: &mut Vec<(f64, f64)>,
+        acc: &mut Vec<Vec3>,
     ) -> StepResult {
         // Three DKD sub-steps with Yoshida coefficients.
         for i in 0..3 {

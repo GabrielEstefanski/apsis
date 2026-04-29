@@ -53,7 +53,11 @@ impl System {
         if need_order2 {
             pre_x0 = self.bodies.iter().map(|b| (b.x, b.y)).collect();
             pre_v0 = self.bodies.iter().map(|b| (b.vx, b.vy)).collect();
-            pre_a0 = self.scratch_acc.clone();
+            // DenseSnapshot still carries 2D tuples; project the Vec3 acc
+            // buffer down for the Order-2 fallback. With z=vz=0 in the
+            // current scenarios this is a faithful capture of the dynamic
+            // state; will be widened to 3D in the IAS15 buffer migration.
+            pre_a0 = self.scratch_acc.iter().map(|a| (a.x, a.y)).collect();
         } else {
             pre_x0 = Vec::new();
             pre_v0 = Vec::new();
@@ -212,7 +216,7 @@ impl System {
             return;
         }
         if self.scratch_acc.len() < self.bodies.len() {
-            self.scratch_acc.resize(self.bodies.len(), (0.0, 0.0));
+            self.scratch_acc.resize(self.bodies.len(), crate::math::Vec3::ZERO);
         }
         let raw_potential = self.force_model.compute(&self.bodies, &mut self.scratch_acc);
         self.last_potential = self.g_factor * raw_potential;

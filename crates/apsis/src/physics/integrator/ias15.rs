@@ -1054,10 +1054,22 @@ impl Integrator for Ias15 {
         bodies: &mut [Body],
         ctx: &mut IntegratorContext<'_>,
         dt_hint: f64,
-        acc: &mut Vec<(f64, f64)>,
+        acc: &mut Vec<crate::math::Vec3>,
     ) -> StepResult {
         let n = bodies.len();
         self.ensure_capacity(n);
+
+        // 3D-port invariant (commit 3): IAS15's internal Picard loop and
+        // its Gauss–Radau b/e/g buffers still operate on 2D `(f64, f64)`
+        // tuples. The integrator treats `acc.x, acc.y` as the in-plane
+        // dynamic state and ignores `acc.z` until the dedicated buffer
+        // migration (commit 4). Until then, every input must be planar.
+        debug_assert!(
+            bodies.iter().all(|b| b.z == 0.0 && b.vz == 0.0),
+            "IAS15: out-of-plane state (z != 0 or vz != 0) is not yet \
+             supported; the b/e/g substep buffers migrate to Vec3 in \
+             the dedicated IAS15 buffer commit"
+        );
 
         // Caller's `dt_hint` is the *first-call seed* for the controller,
         // not a per-call hard cap. Capping `dt_try` at `dt_hint` on every
@@ -1125,12 +1137,12 @@ impl Integrator for Ias15 {
             && self.cached_g_factor == ctx.g_factor
             && self.cached_perturbation_count == ctx.perturbations.len();
         let a0: Vec<(f64, f64)> = if fsal_valid {
-            time_phase!(a0_clone, { acc.clone() })
+            time_phase!(a0_clone, { acc.iter().map(|a| (a.x, a.y)).collect() })
         } else {
             let raw_pe = time_phase!(evaluate, { evaluate(bodies, ctx.force, acc) });
             scale_acc_and_pe(acc, ctx.g_factor, raw_pe);
             apply_perturbations(bodies, acc, ctx.perturbations);
-            time_phase!(a0_clone, { acc.clone() })
+            time_phase!(a0_clone, { acc.iter().map(|a| (a.x, a.y)).collect() })
         };
 
         // ── Rejection retry loop ─────────────────────────────────────────
@@ -1499,7 +1511,7 @@ impl Ias15 {
         &mut self,
         bodies: &mut [Body],
         ctx: &mut IntegratorContext<'_>,
-        acc: &mut Vec<(f64, f64)>,
+        acc: &mut Vec<crate::math::Vec3>,
         a0: &[(f64, f64)],
         dt_try: f64,
     ) -> (bool, f64, u32) {
@@ -1521,7 +1533,7 @@ impl Ias15 {
         &mut self,
         bodies: &mut [Body],
         ctx: &mut IntegratorContext<'_>,
-        acc: &mut Vec<(f64, f64)>,
+        acc: &mut Vec<crate::math::Vec3>,
         a0: &[(f64, f64)],
         dt_try: f64,
         x0: &mut Vec<(f64, f64)>,
@@ -1983,14 +1995,16 @@ impl Ias15 {
     /// via Newton divided differences of (F - F₀); then propagate the
     /// delta back into b₀..b_{n-1} using c_mat. Compensated summation
     /// keeps round-off under control across many Picard iterations.
-    fn update_g_and_b(&mut self, stage: usize, a0: &[(f64, f64)], acc_n: &[(f64, f64)]) {
+    fn update_g_and_b(&mut self, stage: usize, a0: &[(f64, f64)], acc_n: &[crate::math::Vec3]) {
         let n = stage - 1; // index of the g coefficient we're updating
         let hn = H[stage];
 
         for i in 0..self.g.len() {
             // Compute Newton divided difference of order n+1 for body i.
-            let dfx = acc_n[i].0 - a0[i].0;
-            let dfy = acc_n[i].1 - a0[i].1;
+            // `acc_n` is 3D but the IAS15 b/g substep buffers are still 2D
+            // (commit 4 territory); read only the in-plane components.
+            let dfx = acc_n[i].x - a0[i].0;
+            let dfy = acc_n[i].y - a0[i].1;
 
             let (mut tx, mut ty) = (dfx / hn, dfy / hn);
             for k in 0..n {

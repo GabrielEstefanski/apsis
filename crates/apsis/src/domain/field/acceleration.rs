@@ -18,7 +18,7 @@ impl BodyField for AccelerationMagnitudeField {
     fn sample(&self, i: usize, ctx: &FieldContext) -> f64 {
         // Accelerations may not be published yet (first frame after load).
         match ctx.accelerations.get(i) {
-            Some(&(ax, ay)) => (ax * ax + ay * ay).sqrt(),
+            Some(a) => a.length(),
             None => 0.0,
         }
     }
