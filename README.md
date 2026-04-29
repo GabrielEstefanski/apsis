@@ -19,8 +19,9 @@ IAS15 on Kepler ($e = 0.5$, 100 orbits) and the Chenciner–Montgomery
 figure-8 (10 periods); all gated invariant metrics agree at **1 ULP**
 of f64 machine epsilon. The first downstream artifact,
 [`apsis-1pn`](crates/apsis-1pn/), reproduces Mercury's perihelion
-precession to **4.4 ppm** of the GR prediction over 500 orbits, gated
-in CI.
+precession to **~1 ppm** of the GR prediction over 500 orbits — at
+the f64 noise floor of the test-particle 1PN approximation — gated
+in CI at 10 ppm.
 
 > **Status.** Pre-release (`v0.1.0` alpha). The integrator and contract
 > machinery are 2D; the 3D port is the next breaking-change milestone
@@ -61,8 +62,8 @@ implementation.
 > numerical performance. Its contribution is orthogonal: defining how
 > physical models are structured, published, and composed.
 
-The IAS15 integrator and the Mercury 4.4 ppm result are evidence that
-the contract machinery operates against numerics meeting the field's
+The IAS15 integrator and the Mercury ~1 ppm result are evidence
+that the contract machinery operates against numerics at the field's
 precision floor — not the headline claim. Use REBOUND/REBOUNDx when
 the simulator is the primary tool; use APSIS when the perturbation is.
 
@@ -154,8 +155,8 @@ Mercury + Sun + 1PN @ IAS15
   ...
 ── GR comparison over 500 orbits ──
   predicted Δω      = +2.509427e-04 rad  (+51.7606 arcsec)
-  measured  Δω      = +2.509438e-04 rad  (+51.7609 arcsec)
-  relative error    = +4.449e-06
+  measured  Δω      = +2.509424e-04 rad  (+51.7606 arcsec)
+  relative error    = -1.076e-06
   rate              = 42.983 arcsec/century  (GR expects 43)
 ```
 
@@ -298,9 +299,13 @@ What is verified in CI:
 - **13 tests in the 1PN plugin**: 7 unit (sign convention, magnitude,
   additivity, speed-of-light limit), 4 in the Mercury-precession gate,
   and 2 debug-mode contract (softened-system-warns, unsoftened-system-silent).
-- **Release-mode Phase-3 gate**: `cargo test --release -p apsis-1pn
-  -- --ignored` asserts Mercury's precession within 1 % of GR over 300
-  orbits. 4.4 ppm is the achieved figure.
+- **Release-mode Mercury gate**: `cargo test --release -p apsis-1pn
+  -- --ignored` asserts Mercury's precession within 10 ppm of GR over
+  500 orbits. Achieved figure: **~1 ppm** (at the f64 noise floor of
+  the test-particle 1PN approximation; the prior `9caaef2` controller
+  refactor exposed a latent velocity-prediction flaw that, once fixed,
+  moved the residual error from a 4.4 ppm systematic bias to ~1 ppm
+  stochastic round-off — see `docs/experiments/2026-04-28-ias15-velocity-prediction-bug.md`).
 - **Cross-implementation parity portfolio**: against REBOUND's IAS15
   on two canonical scenarios, with all gated invariant metrics
   (energy, angular momentum, orbital elements where defined, linear

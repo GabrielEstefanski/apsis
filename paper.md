@@ -42,9 +42,10 @@ The mechanism is demonstrated end-to-end by `apsis-1pn`, an
 out-of-tree crate implementing the first-post-Newtonian
 Schwarzschild correction. With the contract enforced, `apsis-1pn`
 reproduces Mercury's perihelion precession to within
-$4.4 \times 10^{-6}$ of the closed-form general-relativistic
-prediction over 500 orbital periods under the adaptive Gauss–Radau
-IAS15 scheme [@ReinSpiegel2015]. With the Plummer softening
+$\sim 10^{-6}$ of the closed-form general-relativistic prediction
+over 500 orbital periods under the adaptive Gauss–Radau IAS15 scheme
+[@ReinSpiegel2015], at the f64 noise floor of the test-particle 1PN
+approximation. With the Plummer softening
 contract violated, the same machinery measures a precession three
 orders of magnitude larger and of the wrong sign — caught by the
 registration warning, never as a numerical artifact.
@@ -182,8 +183,9 @@ orbital periods under the adaptive Gauss–Radau IAS15 scheme
 the accumulated longitude of periastron drifts by 42.983 arcseconds
 per century against the closed-form general-relativistic prediction
 $6\pi GM / (c^2 a (1 - e^2))$ = 43.000 arcseconds per century
-[@Will1993], a relative error of $4.4 \times 10^{-6}$, stable over the
-integration window and monotonic in step count. With the library's
+[@Will1993], a relative error of $\sim 10^{-6}$ saturated at the f64
+noise floor with the energy invariant flat at machine precision over
+the integration window. With the library's
 default Plummer softening left in place — Exactness violated — the
 drift is $-83\,128$ arcseconds per century: three orders of magnitude
 larger than the relativistic effect and of the wrong sign, while energy
