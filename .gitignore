@@ -1,6 +1,7 @@
 /target
+/target-3d
 .venv
 /memory
 /saves
 /records
-/outtarget-3d/
+/out
