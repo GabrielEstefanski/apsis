@@ -2087,12 +2087,7 @@ impl Ias15 {
     /// via Newton divided differences of (F - F₀); then propagate the
     /// delta back into b₀..b_{n-1} using c_mat. Compensated summation
     /// keeps round-off under control across many Picard iterations.
-    fn update_g_and_b(
-        &mut self,
-        stage: usize,
-        a0: &[Vec3],
-        acc_n: &[Vec3],
-    ) {
+    fn update_g_and_b(&mut self, stage: usize, a0: &[Vec3], acc_n: &[Vec3]) {
         let n = stage - 1; // index of the g coefficient we're updating
         let hn = H[stage];
 
