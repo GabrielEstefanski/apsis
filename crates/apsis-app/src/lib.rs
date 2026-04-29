@@ -95,7 +95,10 @@ pub fn run() {
     }
 
     // ── Interactive GUI mode ───────────────────────────────────────────────
-    let system = System::new(vec![], UnitSystem::canonical()).with_theta(0.6).with_dt(1e-4).with_max_depth(32);
+    let system = System::new(vec![], UnitSystem::canonical())
+        .with_theta(0.6)
+        .with_dt(1e-4)
+        .with_max_depth(32);
 
     let app = SimulationApp::new(system);
 

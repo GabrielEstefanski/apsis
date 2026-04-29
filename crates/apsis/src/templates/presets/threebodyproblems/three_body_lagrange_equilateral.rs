@@ -9,7 +9,9 @@
 //! Lagrange's equilateral solution is *only* linearly stable when one
 //! mass strongly dominates the other two — Routh's criterion requires
 //!
-//!     27·(m₁·m₂ + m₂·m₃ + m₃·m₁) < (m₁ + m₂ + m₃)²
+//! ```text
+//! 27·(m₁·m₂ + m₂·m₃ + m₃·m₁) < (m₁ + m₂ + m₃)²
+//! ```
 //!
 //! which fails for equal masses. This preset deliberately exhibits the
 //! unstable case: rounding-noise perturbations grow exponentially and

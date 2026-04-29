@@ -424,7 +424,7 @@ mod tests {
 
         let mut s = OrbitSmoother::new();
         let _ = s.smoothed(&bodies, &names, 1, 0, &[], 1.0, 0.0);
-        assert!(s.cache.get("comet").is_none(), "hyperbolic state must not enter cache");
+        assert!(!s.cache.contains_key("comet"), "hyperbolic state must not enter cache");
     }
 
     /// Changing the primary key must reset the cache for that body —

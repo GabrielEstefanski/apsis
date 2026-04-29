@@ -74,7 +74,8 @@ fn classify(median_ms: f64) -> &'static str {
 fn measure(scenario: &Scenario, integrator: IntegratorKind, n: usize) -> Option<Row> {
     let bodies = (scenario.build)(n, SEED);
     let dt = (scenario.dt_hint)(n);
-    let mut sys = System::new(bodies, UnitSystem::canonical()).with_integrator(integrator).with_dt(dt);
+    let mut sys =
+        System::new(bodies, UnitSystem::canonical()).with_integrator(integrator).with_dt(dt);
 
     // Warm-up.
     for _ in 0..WARMUP_STEPS {
