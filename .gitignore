@@ -1,8 +1,9 @@
 /target
+/target-3d
 /.claude
 .venv
 /memory
 /saves
 /records
 .claude
-/outtarget-3d/
+/out

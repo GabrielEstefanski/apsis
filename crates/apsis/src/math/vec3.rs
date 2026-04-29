@@ -57,6 +57,48 @@ impl Vec3 {
         self.length_squared().sqrt()
     }
 
+    /// Squared Euclidean distance to `rhs`.
+    ///
+    /// Equivalent to `(self - rhs).length_squared()` but spelled directly
+    /// at the call site. Prefer this over `.length()` whenever the
+    /// comparison only needs `r²` (e.g. neighbour cutoffs, BH opening
+    /// criterion) — saves one `sqrt`.
+    #[inline]
+    pub fn distance_squared(self, rhs: Self) -> f64 {
+        (self - rhs).length_squared()
+    }
+
+    /// Euclidean distance to `rhs`.
+    ///
+    /// Equivalent to `(self - rhs).length()`.
+    #[inline]
+    pub fn distance(self, rhs: Self) -> f64 {
+        self.distance_squared(rhs).sqrt()
+    }
+
+    /// Unit vector along `self`. **Caller must ensure the vector is non-zero.**
+    ///
+    /// Returns NaN components when `self == Vec3::ZERO`. Use
+    /// [`try_normalize`](Self::try_normalize) when the input is not
+    /// already validated by the caller (e.g. force kernels that gate on
+    /// `r² < 1e-30` already protect this path; collision normals from
+    /// arbitrary input do not).
+    #[inline]
+    pub fn normalize(self) -> Self {
+        self / self.length()
+    }
+
+    /// Unit vector along `self`, or `None` when `self` is at or below the
+    /// f64 normalisation floor.
+    ///
+    /// The threshold is chosen so the division `1 / length` cannot
+    /// overflow into infinity for any finite, non-subnormal input.
+    #[inline]
+    pub fn try_normalize(self) -> Option<Self> {
+        let len_sq = self.length_squared();
+        if len_sq > f64::MIN_POSITIVE { Some(self / len_sq.sqrt()) } else { None }
+    }
+
     #[inline]
     pub fn is_finite(self) -> bool {
         self.x.is_finite() && self.y.is_finite() && self.z.is_finite()
@@ -258,11 +300,73 @@ mod tests {
     }
 
     #[test]
+    fn distance_matches_length_of_difference() {
+        let a = Vec3::new(1.0, 2.0, 3.0);
+        let b = Vec3::new(4.0, 6.0, 15.0);
+        // Δ = (3, 4, 12) → length 13, length_squared 169.
+        assert_eq!(a.distance_squared(b), 169.0);
+        assert_eq!(a.distance(b), 13.0);
+        assert_eq!(a.distance_squared(b), (a - b).length_squared());
+        assert_eq!(a.distance(b), (a - b).length());
+    }
+
+    #[test]
+    fn distance_is_symmetric() {
+        let a = Vec3::new(1.0, 2.0, 3.0);
+        let b = Vec3::new(-2.0, 5.0, 1.5);
+        assert_eq!(a.distance(b), b.distance(a));
+        assert_eq!(a.distance_squared(b), b.distance_squared(a));
+    }
+
+    #[test]
+    fn normalize_returns_unit_vector() {
+        let v = Vec3::new(3.0, 4.0, 12.0); // length 13
+        let u = v.normalize();
+        assert!((u.length() - 1.0).abs() < 1e-15);
+        assert!((u.x - 3.0 / 13.0).abs() < 1e-15);
+        assert!((u.y - 4.0 / 13.0).abs() < 1e-15);
+        assert!((u.z - 12.0 / 13.0).abs() < 1e-15);
+    }
+
+    #[test]
+    fn normalize_axis_aligned_recovers_basis() {
+        let ex = Vec3::new(2.5, 0.0, 0.0).normalize();
+        assert_eq!(ex, Vec3::new(1.0, 0.0, 0.0));
+    }
+
+    #[test]
+    fn try_normalize_returns_some_for_nonzero() {
+        let v = Vec3::new(3.0, 4.0, 12.0);
+        let u = v.try_normalize().unwrap();
+        assert!((u.length() - 1.0).abs() < 1e-15);
+    }
+
+    #[test]
+    fn try_normalize_returns_none_for_zero() {
+        assert_eq!(Vec3::ZERO.try_normalize(), None);
+    }
+
+    #[test]
+    fn try_normalize_returns_none_for_subnormal_length() {
+        // length_squared at or below f64::MIN_POSITIVE rejects.
+        let tiny = Vec3::new(f64::MIN_POSITIVE.sqrt() * 0.5, 0.0, 0.0);
+        assert!(tiny.try_normalize().is_none());
+    }
+
+    #[test]
+    fn is_finite_rejects_nan_and_inf() {
+        assert!(Vec3::new(1.0, 2.0, 3.0).is_finite());
+        assert!(!Vec3::new(f64::NAN, 0.0, 0.0).is_finite());
+        assert!(!Vec3::new(0.0, f64::INFINITY, 0.0).is_finite());
+        assert!(!Vec3::new(0.0, 0.0, f64::NEG_INFINITY).is_finite());
+    }
+
+    #[test]
     fn repr_c_layout_matches_array() {
         assert_eq!(std::mem::size_of::<Vec3>(), 3 * std::mem::size_of::<f64>());
         assert_eq!(std::mem::align_of::<Vec3>(), std::mem::align_of::<f64>());
         let v = Vec3::new(1.0, 2.0, 3.0);
-        let arr: [f64; 3] = unsafe { std::mem::transmute(v) };
+        let arr: [f64; 3] = v.into();
         assert_eq!(arr, [1.0, 2.0, 3.0]);
     }
 }
