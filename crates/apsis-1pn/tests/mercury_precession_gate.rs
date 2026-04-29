@@ -1,18 +1,27 @@
-//! Integration test — Phase 3 gate for the out-of-tree plugin claim.
+//! Integration test — paper-grade gate on the headline 1PN validation
+//! number.
 //!
 //! Runs the Mercury perihelion scenario at release-level fidelity and
-//! asserts the measured precession matches GR within 1 % relative error.
+//! asserts the measured precession matches GR within 10 ppm
+//! (`rel_err < 10⁻⁵`). The threshold is the CI-protected number cited
+//! in `README.md` and `paper.md` — a regression past 10 ppm degrades
+//! the paper claim and must fail the build, not a soft warning.
 //!
-//! If this test fails, one of three things is true:
+//! If this test fails, one of four things is true:
 //!
 //! 1. Someone changed the 1PN formula and broke the sign or coefficients.
 //! 2. Someone broke the [`PerturbationForce`] contract in `apsis`
 //!    (e.g. the integrator stopped summing perturbation accelerations).
-//! 3. The simulator's Newtonian 2-body integration regressed below
-//!    machine-precision quality — in which case the GR signal gets
-//!    swamped by numerical noise.
+//! 3. Someone regressed the IAS15 substep velocity prediction
+//!    (`predict_v_ias15` in `crate::physics::integrator::dense`) —
+//!    velocity-dependent perturbations integrate against stale `v` and
+//!    accumulate `O(a · dt)` per-substep bias.
+//!    See `docs/experiments/2026-04-28-ias15-velocity-prediction-bug.md`.
+//! 4. The simulator's Newtonian 2-body integration regressed below
+//!    machine-precision quality — the GR signal is swamped by
+//!    numerical noise.
 //!
-//! All three failure modes are things a reviewer of the paper would want
+//! All four failure modes are things a reviewer of the paper would want
 //! caught automatically.
 
 use std::f64::consts::PI;
@@ -26,11 +35,15 @@ use apsis_1pn::PostNewtonian1PN;
 
 #[test]
 #[ignore = "release-mode integration test; run with `cargo test --release -- --ignored`"]
-fn mercury_precession_matches_gr_within_one_percent() {
+fn mercury_precession_matches_gr_within_10ppm() {
     const A: f64 = 0.387_098;
     const E: f64 = 0.205_63;
     const M_MERCURY: f64 = 1.660_114e-7;
-    const N_ORBITS: u64 = 300;
+    // 500 orbits matches the README / paper.md regime. At shorter runs
+    // the absolute error floor (f64 round-off in osculating-element
+    // extraction) dominates the ratio; the prior 300-orbit form gave
+    // `rel_err ≈ 10⁻⁴`, numerically above the tightened threshold.
+    const N_ORBITS: u64 = 500;
 
     // Softening zeroed so the Newtonian baseline is bit-exact Keplerian.
     let sun = Body::star(1.0).unsoftened();
@@ -62,8 +75,9 @@ fn mercury_precession_matches_gr_within_one_percent() {
     let predicted = 6.0 * PI / (c * c * A * (1.0 - E * E)) * (N_ORBITS as f64);
 
     let rel_err = (measured - predicted).abs() / predicted.abs();
+    // 10 ppm. Margin: ~10× over the achieved ~1 ppm post-fix.
     assert!(
-        rel_err < 1e-2,
+        rel_err < 1e-5,
         "Mercury precession off by {rel_err:.3e} — measured {measured:.3e} rad vs predicted {predicted:.3e} rad"
     );
 }
