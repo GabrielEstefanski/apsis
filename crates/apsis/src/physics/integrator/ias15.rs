@@ -83,6 +83,7 @@
 //! next try. See `Attempt::snapshot` / `Attempt::restore`.
 
 use crate::domain::body::Body;
+use crate::math::Vec3;
 use crate::physics::integrator::dense::{DenseSnapshot, predict_ias15, predict_v_ias15};
 use crate::physics::integrator::helpers::{apply_perturbations, evaluate, scale_acc_and_pe};
 use crate::physics::integrator::traits::{
@@ -693,7 +694,7 @@ fn decide_dt(
 /// series expansion of the acceleration within the step). Index 0..7
 /// is the coefficient order; the value is the 3D acceleration
 /// coefficient.
-type BodyCoeffs = [crate::math::Vec3; 7];
+type BodyCoeffs = [Vec3; 7];
 
 // Layout guard: the snapshot path uses `copy_from_slice` for tight
 // memcpy semantics and would silently copy padding if a future
@@ -725,9 +726,9 @@ pub struct Ias15 {
     /// Compensated-summation carry terms for the `b` coefficients.
     csb: Vec<BodyCoeffs>,
     /// Compensated-summation carry for positions.
-    csx: Vec<crate::math::Vec3>,
+    csx: Vec<Vec3>,
     /// Compensated-summation carry for velocities.
-    csv: Vec<crate::math::Vec3>,
+    csv: Vec<Vec3>,
 
     /// Step size proposed for the next attempt. Seeded from the caller's
     /// `dt` on first use; thereafter driven by the error controller.
@@ -843,9 +844,9 @@ pub struct Ias15 {
     // Left in a possibly-stale state between calls: the Picard
     // implementation always re-fills them via `clear() + extend`
     // before reading, so the previous run's contents cannot leak.
-    pic_x0: Vec<crate::math::Vec3>,
-    pic_v0: Vec<crate::math::Vec3>,
-    pic_b6_old: Vec<crate::math::Vec3>,
+    pic_x0: Vec<Vec3>,
+    pic_v0: Vec<Vec3>,
+    pic_b6_old: Vec<Vec3>,
 
     // ── Rejection-rollback snapshot buffers ──────────────────────────
     //
@@ -874,13 +875,13 @@ pub struct Ias15 {
     // rollback semantics without silently corrupting compensated-
     // summation carries. Cost is 32 bytes of memcpy per sub-step at
     // N=2, well inside the wash of the bigger `b`/`e`/`csb` copies.
-    snap_x: Vec<crate::math::Vec3>,
-    snap_v: Vec<crate::math::Vec3>,
+    snap_x: Vec<Vec3>,
+    snap_v: Vec<Vec3>,
     snap_b: Vec<BodyCoeffs>,
     snap_e: Vec<BodyCoeffs>,
     snap_csb: Vec<BodyCoeffs>,
-    snap_csx: Vec<crate::math::Vec3>,
-    snap_csv: Vec<crate::math::Vec3>,
+    snap_csx: Vec<Vec3>,
+    snap_csv: Vec<Vec3>,
     snapshot_valid: bool,
 }
 
@@ -942,12 +943,12 @@ impl Ias15 {
 
     fn ensure_capacity(&mut self, n: usize) {
         if self.b.len() != n {
-            self.b = vec![[crate::math::Vec3::ZERO; 7]; n];
-            self.e = vec![[crate::math::Vec3::ZERO; 7]; n];
-            self.g = vec![[crate::math::Vec3::ZERO; 7]; n];
-            self.csb = vec![[crate::math::Vec3::ZERO; 7]; n];
-            self.csx = vec![crate::math::Vec3::ZERO; n];
-            self.csv = vec![crate::math::Vec3::ZERO; n];
+            self.b = vec![[Vec3::ZERO; 7]; n];
+            self.e = vec![[Vec3::ZERO; 7]; n];
+            self.g = vec![[Vec3::ZERO; 7]; n];
+            self.csb = vec![[Vec3::ZERO; 7]; n];
+            self.csx = vec![Vec3::ZERO; n];
+            self.csv = vec![Vec3::ZERO; n];
             self.dt_last_accepted = 0.0;
             // Reset dt_next too: a value from a different body count is
             // physically meaningless (different acceleration regime) and
@@ -961,13 +962,13 @@ impl Ias15 {
             // `copy_from_slice` and element-wise fills without reallocating.
             // Invalidate until the first capture so a premature
             // `restore_snapshot` is caught by the debug assertion.
-            self.snap_x = vec![crate::math::Vec3::ZERO; n];
-            self.snap_v = vec![crate::math::Vec3::ZERO; n];
-            self.snap_b = vec![[crate::math::Vec3::ZERO; 7]; n];
-            self.snap_e = vec![[crate::math::Vec3::ZERO; 7]; n];
-            self.snap_csb = vec![[crate::math::Vec3::ZERO; 7]; n];
-            self.snap_csx = vec![crate::math::Vec3::ZERO; n];
-            self.snap_csv = vec![crate::math::Vec3::ZERO; n];
+            self.snap_x = vec![Vec3::ZERO; n];
+            self.snap_v = vec![Vec3::ZERO; n];
+            self.snap_b = vec![[Vec3::ZERO; 7]; n];
+            self.snap_e = vec![[Vec3::ZERO; 7]; n];
+            self.snap_csb = vec![[Vec3::ZERO; 7]; n];
+            self.snap_csx = vec![Vec3::ZERO; n];
+            self.snap_csv = vec![Vec3::ZERO; n];
             self.snapshot_valid = false;
 
             // FSAL cache is tied to the body count: a resize means the
@@ -993,10 +994,10 @@ impl Ias15 {
         debug_assert_eq!(self.snap_x.len(), bodies.len(), "snapshot buffer size mismatch");
 
         for (dst, src) in self.snap_x.iter_mut().zip(bodies.iter()) {
-            *dst = crate::math::Vec3::new(src.x, src.y, src.z);
+            *dst = Vec3::new(src.x, src.y, src.z);
         }
         for (dst, src) in self.snap_v.iter_mut().zip(bodies.iter()) {
-            *dst = crate::math::Vec3::new(src.vx, src.vy, src.vz);
+            *dst = Vec3::new(src.vx, src.vy, src.vz);
         }
         self.snap_b.copy_from_slice(&self.b);
         self.snap_e.copy_from_slice(&self.e);
@@ -1057,7 +1058,7 @@ impl Integrator for Ias15 {
         bodies: &mut [Body],
         ctx: &mut IntegratorContext<'_>,
         dt_hint: f64,
-        acc: &mut Vec<crate::math::Vec3>,
+        acc: &mut Vec<Vec3>,
     ) -> StepResult {
         let n = bodies.len();
         self.ensure_capacity(n);
@@ -1142,7 +1143,7 @@ impl Integrator for Ias15 {
             && acc.len() == n
             && self.cached_g_factor == ctx.g_factor
             && self.cached_perturbation_count == ctx.perturbations.len();
-        let a0: Vec<crate::math::Vec3> = if fsal_valid {
+        let a0: Vec<Vec3> = if fsal_valid {
             time_phase!(a0_clone, { acc.clone() })
         } else {
             let raw_pe = time_phase!(evaluate, { evaluate(bodies, ctx.force, acc) });
@@ -1517,8 +1518,8 @@ impl Ias15 {
         &mut self,
         bodies: &mut [Body],
         ctx: &mut IntegratorContext<'_>,
-        acc: &mut Vec<crate::math::Vec3>,
-        a0: &[crate::math::Vec3],
+        acc: &mut Vec<Vec3>,
+        a0: &[Vec3],
         dt_try: f64,
     ) -> (bool, f64, u32) {
         let mut x0 = std::mem::take(&mut self.pic_x0);
@@ -1539,12 +1540,12 @@ impl Ias15 {
         &mut self,
         bodies: &mut [Body],
         ctx: &mut IntegratorContext<'_>,
-        acc: &mut Vec<crate::math::Vec3>,
-        a0: &[crate::math::Vec3],
+        acc: &mut Vec<Vec3>,
+        a0: &[Vec3],
         dt_try: f64,
-        x0: &mut Vec<crate::math::Vec3>,
-        v0: &mut Vec<crate::math::Vec3>,
-        b6_old: &mut Vec<crate::math::Vec3>,
+        x0: &mut Vec<Vec3>,
+        v0: &mut Vec<Vec3>,
+        b6_old: &mut Vec<Vec3>,
     ) -> (bool, f64, u32) {
         let n = bodies.len();
 
@@ -1554,9 +1555,9 @@ impl Ias15 {
         // once and the rest reuse. In steady-state (constant body count)
         // these loops are zero-alloc.
         x0.clear();
-        x0.extend(bodies.iter().map(|b| crate::math::Vec3::new(b.x, b.y, b.z)));
+        x0.extend(bodies.iter().map(|b| Vec3::new(b.x, b.y, b.z)));
         v0.clear();
-        v0.extend(bodies.iter().map(|b| crate::math::Vec3::new(b.vx, b.vy, b.vz)));
+        v0.extend(bodies.iter().map(|b| Vec3::new(b.vx, b.vy, b.vz)));
 
         let mut last_residual = f64::INFINITY;
         let mut no_improve: u32 = 0;
@@ -1717,7 +1718,7 @@ impl Ias15 {
     /// Advance positions and velocities to the end of the accepted
     /// attempt using compensated summation (Neumaier-style) so the
     /// integrator's round-off error stays O(ε) rather than O(ε·N_steps).
-    fn advance_state(&mut self, bodies: &mut [Body], a0: &[crate::math::Vec3], dt: f64) {
+    fn advance_state(&mut self, bodies: &mut [Body], a0: &[Vec3], dt: f64) {
         let n = bodies.len();
         for i in 0..n {
             let bi = &self.b[i];
@@ -1837,7 +1838,7 @@ impl Ias15 {
     /// producing a ratio that was a noise-to-signal measurement
     /// rather than a truncation estimate. See the diagnostic write-
     /// up referenced in `picard_loop_inner`.
-    fn truncation_error(&self, a0: &[crate::math::Vec3]) -> f64 {
+    fn truncation_error(&self, a0: &[Vec3]) -> f64 {
         let mut sum_sq = 0.0_f64;
         let mut count: usize = 0;
         for (i, row) in self.b.iter().enumerate() {
@@ -1929,37 +1930,37 @@ impl Ias15 {
 
         for i in 0..self.b.len() {
             let be = [
-                crate::math::Vec3::new(
+                Vec3::new(
                     self.b[i][0].x - self.e[i][0].x,
                     self.b[i][0].y - self.e[i][0].y,
                     self.b[i][0].z - self.e[i][0].z,
                 ),
-                crate::math::Vec3::new(
+                Vec3::new(
                     self.b[i][1].x - self.e[i][1].x,
                     self.b[i][1].y - self.e[i][1].y,
                     self.b[i][1].z - self.e[i][1].z,
                 ),
-                crate::math::Vec3::new(
+                Vec3::new(
                     self.b[i][2].x - self.e[i][2].x,
                     self.b[i][2].y - self.e[i][2].y,
                     self.b[i][2].z - self.e[i][2].z,
                 ),
-                crate::math::Vec3::new(
+                Vec3::new(
                     self.b[i][3].x - self.e[i][3].x,
                     self.b[i][3].y - self.e[i][3].y,
                     self.b[i][3].z - self.e[i][3].z,
                 ),
-                crate::math::Vec3::new(
+                Vec3::new(
                     self.b[i][4].x - self.e[i][4].x,
                     self.b[i][4].y - self.e[i][4].y,
                     self.b[i][4].z - self.e[i][4].z,
                 ),
-                crate::math::Vec3::new(
+                Vec3::new(
                     self.b[i][5].x - self.e[i][5].x,
                     self.b[i][5].y - self.e[i][5].y,
                     self.b[i][5].z - self.e[i][5].z,
                 ),
-                crate::math::Vec3::new(
+                Vec3::new(
                     self.b[i][6].x - self.e[i][6].x,
                     self.b[i][6].y - self.e[i][6].y,
                     self.b[i][6].z - self.e[i][6].z,
@@ -2042,16 +2043,16 @@ impl Ias15 {
             let e6_y = q7 * b[6].y;
             let e6_z = q7 * b[6].z;
 
-            self.e[i][0] = crate::math::Vec3::new(e0_x, e0_y, e0_z);
-            self.e[i][1] = crate::math::Vec3::new(e1_x, e1_y, e1_z);
-            self.e[i][2] = crate::math::Vec3::new(e2_x, e2_y, e2_z);
-            self.e[i][3] = crate::math::Vec3::new(e3_x, e3_y, e3_z);
-            self.e[i][4] = crate::math::Vec3::new(e4_x, e4_y, e4_z);
-            self.e[i][5] = crate::math::Vec3::new(e5_x, e5_y, e5_z);
-            self.e[i][6] = crate::math::Vec3::new(e6_x, e6_y, e6_z);
+            self.e[i][0] = Vec3::new(e0_x, e0_y, e0_z);
+            self.e[i][1] = Vec3::new(e1_x, e1_y, e1_z);
+            self.e[i][2] = Vec3::new(e2_x, e2_y, e2_z);
+            self.e[i][3] = Vec3::new(e3_x, e3_y, e3_z);
+            self.e[i][4] = Vec3::new(e4_x, e4_y, e4_z);
+            self.e[i][5] = Vec3::new(e5_x, e5_y, e5_z);
+            self.e[i][6] = Vec3::new(e6_x, e6_y, e6_z);
 
             for k in 0..7 {
-                self.b[i][k] = crate::math::Vec3::new(
+                self.b[i][k] = Vec3::new(
                     self.e[i][k].x + be[k].x,
                     self.e[i][k].y + be[k].y,
                     self.e[i][k].z + be[k].z,
@@ -2077,7 +2078,7 @@ impl Ias15 {
                     gy += D_MAT[k][j] * bi[k].y;
                     gz += D_MAT[k][j] * bi[k].z;
                 }
-                self.g[i][j] = crate::math::Vec3::new(gx, gy, gz);
+                self.g[i][j] = Vec3::new(gx, gy, gz);
             }
         }
     }
@@ -2089,8 +2090,8 @@ impl Ias15 {
     fn update_g_and_b(
         &mut self,
         stage: usize,
-        a0: &[crate::math::Vec3],
-        acc_n: &[crate::math::Vec3],
+        a0: &[Vec3],
+        acc_n: &[Vec3],
     ) {
         let n = stage - 1; // index of the g coefficient we're updating
         let hn = H[stage];
@@ -2111,7 +2112,7 @@ impl Ias15 {
             let dgx = tx - self.g[i][n].x;
             let dgy = ty - self.g[i][n].y;
             let dgz = tz - self.g[i][n].z;
-            self.g[i][n] = crate::math::Vec3::new(tx, ty, tz);
+            self.g[i][n] = Vec3::new(tx, ty, tz);
 
             // Propagate Δg_n into b₀..b_n using compensated summation.
             for j in 0..=n {
@@ -2138,7 +2139,7 @@ fn add_cs(p: &mut f64, csp: &mut f64, inp: f64) {
     *p = t;
 }
 
-fn restore_xv(bodies: &mut [Body], x: &[crate::math::Vec3], v: &[crate::math::Vec3]) {
+fn restore_xv(bodies: &mut [Body], x: &[Vec3], v: &[Vec3]) {
     for (i, b) in bodies.iter_mut().enumerate() {
         b.x = x[i].x;
         b.y = x[i].y;
@@ -2545,8 +2546,8 @@ mod tests {
         let mut ias = Ias15::new();
         ias.ensure_capacity(1);
         for k in 0..7 {
-            ias.b[0][k] = crate::math::Vec3::new(b_x[k], b_y[k], 0.0);
-            ias.e[0][k] = crate::math::Vec3::new(b_x[k], b_y[k], 0.0);
+            ias.b[0][k] = Vec3::new(b_x[k], b_y[k], 0.0);
+            ias.e[0][k] = Vec3::new(b_x[k], b_y[k], 0.0);
         }
         ias
     }
@@ -2608,8 +2609,8 @@ mod tests {
         for &q in &[0.1_f64, 0.5, 1.0, 2.0, 10.0] {
             // Reset state for each q in the loop (keep be = 0, b = 0).
             for k in 0..7 {
-                ias.b[0][k] = crate::math::Vec3::ZERO;
-                ias.e[0][k] = crate::math::Vec3::ZERO;
+                ias.b[0][k] = Vec3::ZERO;
+                ias.e[0][k] = Vec3::ZERO;
             }
             ias.warmstart_b(q, 1.0);
             for k in 0..7 {
@@ -2841,8 +2842,8 @@ mod tests {
         let mut ias = Ias15::new();
         ias.ensure_capacity(1);
         for k in 0..7 {
-            ias.b[0][k] = crate::math::Vec3::new(b_x[k], 0.0, 0.0);
-            ias.e[0][k] = crate::math::Vec3::new(e_x[k], 0.0, 0.0);
+            ias.b[0][k] = Vec3::new(b_x[k], 0.0, 0.0);
+            ias.e[0][k] = Vec3::new(e_x[k], 0.0, 0.0);
         }
         ias.warmstart_b(q, 1.0);
 

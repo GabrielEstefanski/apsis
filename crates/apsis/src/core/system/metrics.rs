@@ -2,6 +2,7 @@
 
 use crate::core::metrics::Metrics;
 use crate::core::system::System;
+use crate::math::Vec3;
 use crate::physics::energy::{angular_momentum_z, center_of_mass_state, total_energy};
 
 impl System {
@@ -55,7 +56,7 @@ impl System {
     }
 
     /// Accelerations computed during the last integration step.
-    pub fn last_accelerations(&self) -> &[crate::math::Vec3] {
+    pub fn last_accelerations(&self) -> &[Vec3] {
         &self.scratch_acc
     }
 

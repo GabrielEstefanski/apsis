@@ -43,6 +43,7 @@ use crate::core::adaptive::{DtAdaptationConfig, DtController, DtMode, ThetaContr
 use crate::core::diagnostics::{DiagnosticsComputer, SimulationDiagnostics};
 use crate::core::hooks::HookRegistry;
 use crate::domain::body::Body;
+use crate::math::Vec3;
 use crate::physics::integrator::{
     ForceModel, GravityForceModel, Integrator, IntegratorKind, PerturbationForce, make_integrator,
 };
@@ -91,7 +92,7 @@ pub struct System {
     pub(crate) force_model: Box<dyn ForceModel>,
 
     /// Scratch buffer for accelerations — reused every step.
-    pub(crate) scratch_acc: Vec<crate::math::Vec3>,
+    pub(crate) scratch_acc: Vec<Vec3>,
 
     /// Active integration algorithm (trait object).
     pub(crate) integrator: Box<dyn Integrator>,

@@ -20,6 +20,7 @@
 //! - Wisdom & Holman (1991). *Astron. J.* 102, 1528–1538.
 
 use crate::domain::body::Body;
+use crate::math::Vec3;
 use crate::physics::integrator::helpers::{
     apply_perturbations_planets, evaluate, scale_acc_and_pe,
 };
@@ -73,7 +74,7 @@ impl WisdomHolman {
         bodies: &mut [Body],
         ctx: &mut IntegratorContext<'_>,
         dt: f64,
-        acc: &mut Vec<crate::math::Vec3>,
+        acc: &mut Vec<Vec3>,
         mu: f64,
     ) -> f64 {
         let total_m0 = bodies[0].mass;
@@ -120,7 +121,7 @@ impl Integrator for WisdomHolman {
         bodies: &mut [Body],
         ctx: &mut IntegratorContext<'_>,
         dt: f64,
-        acc: &mut Vec<crate::math::Vec3>,
+        acc: &mut Vec<Vec3>,
     ) -> StepResult {
         // Fallback to Yoshida4 if the system is not hierarchical.
         if !Self::is_suitable_for(bodies) {
