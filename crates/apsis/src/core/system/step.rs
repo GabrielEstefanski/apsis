@@ -43,14 +43,26 @@ impl System {
 
         // Capture pre-step kinematics for Order-2 dense-output fallback.
         // `scratch_acc` holds a(t₀) from the previous step's end-of-step force
-        // evaluation, which equals the start-of-this-step acceleration for all
-        // four integrators (VV, Y4, WH each end with a force eval; IAS15 does too).
+        // evaluation, which equals the start-of-this-step acceleration for
+        // VV / Y4 / IAS15 — each ends with a body-aligned force evaluation.
+        // Wisdom–Holman is the exception: its end-of-step `wh_kick` evaluates
+        // forces on `bodies[1..]` only and leaves `scratch_acc` sized at
+        // `bodies.len() - 1`. Synthesising an Order-2 snapshot from a
+        // body-misaligned `scratch_acc` produces a `DenseSnapshot` whose
+        // internal arrays disagree on length, which then panics at the
+        // renderer when `interpolate(i, h)` indexes `a0[N - 1]` while
+        // `a0.len() == N - 1`. Until WH publishes its own body-aligned
+        // dense output, gate the Order-2 path on shape consistency: no
+        // synthetic snapshot when the scratch is misaligned, and the
+        // renderer falls back to "snap to integer step" — visually
+        // equivalent to the pre-dense-output WH behaviour.
         // Skipped on the very first step when scratch_acc is empty.
         let pre_x0: Vec<Vec3>;
         let pre_v0: Vec<Vec3>;
         let pre_a0: Vec<Vec3>;
-        let need_order2 =
-            !self.scratch_acc.is_empty() && self.integrator.kind() != IntegratorKind::Ias15;
+        let need_order2 = !self.scratch_acc.is_empty()
+            && self.integrator.kind() != IntegratorKind::Ias15
+            && self.scratch_acc.len() == self.bodies.len();
         if need_order2 {
             pre_x0 = self.bodies.iter().map(|b| Vec3::new(b.x, b.y, b.z)).collect();
             pre_v0 = self.bodies.iter().map(|b| Vec3::new(b.vx, b.vy, b.vz)).collect();
