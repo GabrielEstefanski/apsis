@@ -1,11 +1,28 @@
 //! Formal contract for the federated perturbation model.
 //!
-//! This module is the **executable specification** of the federation thesis
-//! in `paper.md`: every guarantee the simulator makes to a perturbation
-//! author, and every assumption the simulator imposes back, is named here
-//! and gated by a CI test whose name matches the guarantee. Reading this
-//! module top-to-bottom is reading the contract; running its tests is
-//! verifying the contract.
+//! This module is the **executable specification** referenced from
+//! `paper.md` § *Design and validation* under the heading *Executable
+//! contract surface*. Every guarantee the simulator makes to a
+//! perturbation author, and every assumption the simulator imposes
+//! back, is named here and gated by a CI test whose name matches the
+//! guarantee. Reading this module top-to-bottom is reading the
+//! contract; running `cargo test -p apsis --lib contract` is verifying
+//! the contract.
+//!
+//! The reverse direction — paper claim → in-code gate — is what makes
+//! the federation thesis mechanically auditable. A reviewer reading
+//! the *Executable contract surface* paragraph in `paper.md` can match
+//! every guarantee class named there to a sub-heading below
+//! (*Kernel invariants*, *Composition rules*, *Failure model*) and
+//! every individual property to a test name in the `tests` sub-module
+//! at the foot of this file. The `paper.md` § *Design and validation* §§
+//! *Counter-tests* discussion of Exactness and Continuity violations
+//! is the kernel-precondition class instantiated at two specific
+//! invariants; the `apsis-1pn` integration tests
+//! (`crates/apsis-1pn/tests/mercury_precession_gate.rs`,
+//! `crates/apsis-1pn/tests/kernel_continuity_counter_test.rs`) carry
+//! the quantitative gates for those two; the tests below carry the
+//! generic gates that any federated extension can rely on.
 //!
 //! ## What this contract is, and why it exists
 //!
@@ -52,8 +69,8 @@
 //!    (core integrator + perturbations), not just to the bare Newtonian
 //!    kernel. A perturbation author can rely on
 //!    `(bodies, perturbations, dt) → trajectory` being a pure function.
-//!    - test: [`tests::invariant_determinism_bit_exact`] (positive)
-//!    - test: [`tests::invariant_determinism_distinguishes_distinct_inputs`]
+//!    - test: `tests::invariant_determinism_bit_exact` (positive)
+//!    - test: `tests::invariant_determinism_distinguishes_distinct_inputs`
 //!      (negative — proves the determinism test is observing trajectory
 //!      state, not returning a fixed value)
 //!
@@ -62,7 +79,7 @@
 //!    perturbation registration: attaching a no-op perturbation produces
 //!    a trajectory bit-equal to the bare run. Perturbations are *added*
 //!    to Newton, never substituted for it.
-//!    - test: [`tests::invariant_newtonian_consistency_under_null_perturbation_attach`]
+//!    - test: `tests::invariant_newtonian_consistency_under_null_perturbation_attach`
 //!
 //! 3. **Read-only access to base dynamics.** Perturbations cannot
 //!    mutate body state, force-model state, or any other system field.
@@ -72,7 +89,7 @@
 //!    bypass. The escape hatch (`Cell`/`RefCell`/atomic via interior
 //!    mutability) is a contract violation rather than a structural one,
 //!    and is gated by:
-//!    - test: [`tests::invariant_perturbation_is_pure_function_of_state`]
+//!    - test: `tests::invariant_perturbation_is_pure_function_of_state`
 //!      (`accumulate` invoked twice on the same instance with identical
 //!      input produces identical output — proves no observable internal
 //!      state evolution between calls).
@@ -84,7 +101,7 @@
 //!    IEEE-754 addition is commutative (`a + b == b + a` exactly), so
 //!    the property holds at machine precision; any deviation indicates
 //!    iteration order has leaked into the dynamics.
-//!    - test: [`tests::composition_commutative_two_perturbations`]
+//!    - test: `tests::composition_commutative_two_perturbations`
 //!
 //! 5. **Associativity at the accumulator step (within ULP for N ≥ 3).**
 //!    Iterating three perturbations against the same starting buffer in
@@ -95,8 +112,8 @@
 //!    statement lives at this per-call level, where the envelope is
 //!    bounded by `~few × ULP × max_contribution`.
 //!
-//!    The trajectory-level corollary ("registering [A,B,C] vs [C,B,A]
-//!    produces equivalent science") is downstream of this and held by
+//!    The trajectory-level corollary (registering `[A, B, C]` vs
+//!    `[C, B, A]` produces equivalent science) is downstream of this and held by
 //!    the validation portfolio rather than the contract: an adaptive
 //!    integrator amplifies ULP-level acceleration differences through
 //!    substep-schedule divergence and chaotic phase drift, so a
@@ -104,7 +121,7 @@
 //!    on the composition operator. Robust trajectory-level parity is
 //!    measured by orbital invariants (Δa, Δe, ΔE, ΔLz), not point-by-
 //!    point position drift.
-//!    - test: [`tests::composition_associative_three_perturbations`]
+//!    - test: `tests::composition_associative_three_perturbations`
 //!
 //! 6. **Additive composition (sentinel-checked).** Each perturbation
 //!    contributes by `+=` to the accumulator slice; no perturbation may
@@ -113,7 +130,7 @@
 //!    equals `sentinel + expected_contribution`. A perturbation that
 //!    overwrites would lose the sentinel; one that resets and re-adds
 //!    its own contribution would also be detected.
-//!    - test: [`tests::composition_perturbation_is_additive_via_sentinel`]
+//!    - test: `tests::composition_perturbation_is_additive_via_sentinel`
 //!
 //! 7. **Union of kernel requirements.** A composed system's effective
 //!    `KernelRequirements` is the set-union of the individual
@@ -121,7 +138,7 @@
 //!    perturbation B (requires `Smooth`) against a kernel that violates
 //!    both produces one `Exactness` diagnostic and one `Continuity`
 //!    diagnostic — neither is suppressed by the presence of the other.
-//!    - test: [`tests::composition_kernel_requirements_take_union`]
+//!    - test: `tests::composition_kernel_requirements_take_union`
 //!
 //! ### Failure model — what the system promises when a configuration is invalid
 //!
@@ -131,8 +148,8 @@
 //!    structured diagnostic, with `violated_invariant` carrying the
 //!    name of the violated invariant. Neither suppressed (silent
 //!    failure) nor multiplied beyond the count of distinct violations.
-//!    - test: [`tests::failure_exactness_violation_emits_exactly_one_warning`]
-//!    - test: [`tests::failure_continuity_violation_emits_exactly_one_warning`]
+//!    - test: `tests::failure_exactness_violation_emits_exactly_one_warning`
+//!    - test: `tests::failure_continuity_violation_emits_exactly_one_warning`
 //!
 //! 9. **Repeated registration produces a faithful audit log.**
 //!    Registering the same violating perturbation N times produces
@@ -143,7 +160,7 @@
 //!    of repeat events into "× N" badges is a consumer concern (the
 //!    [`Event::coalesce_key`](crate::core::log::Event::coalesce_key)
 //!    field exists for that purpose) and is outside the contract.
-//!    - test: [`tests::failure_repeated_registration_does_not_collapse_audit_trail`]
+//!    - test: `tests::failure_repeated_registration_does_not_collapse_audit_trail`
 //!
 //! 10. **Silent acceptance is structurally impossible.** Emission goes
 //!     through the structured log bus regardless of subscriber state:
@@ -152,7 +169,7 @@
 //!     subsequent subscriber-attached registration still observes the
 //!     warning. The bus is always live; the contract does not depend
 //!     on a subscriber being present at any specific moment.
-//!     - test: [`tests::failure_silent_acceptance_is_impossible`]
+//!     - test: `tests::failure_silent_acceptance_is_impossible`
 //!
 //! ## What this contract does NOT guarantee
 //!
@@ -205,10 +222,10 @@
 //! Any future change that swaps the storage for a `HashSet`, `HashMap`,
 //! `BTreeSet`-by-pointer-address, or any other container with non-stable
 //! iteration order silently breaks determinism. The test
-//! [`tests::invariant_determinism_bit_exact`] is the load-bearing guard:
+//! `tests::invariant_determinism_bit_exact` is the load-bearing guard:
 //! such a regression would surface as a bit-difference between two
 //! identical runs, not as a compile error. The
-//! [`tests::composition_commutative_two_perturbations`] test (next
+//! `tests::composition_commutative_two_perturbations` test (next
 //! commit) does NOT cover this — commutativity is symmetry under
 //! reordering, while determinism is sameness under no reordering.
 
