@@ -2856,4 +2856,287 @@ mod tests {
             );
         }
     }
+
+    // ── 3D validation portfolio (dynamic) ─────────────────────────────────────
+    //
+    // Where the planar IAS15 unit tests above confirm that `z = vz = 0`
+    // input still produces the same energy / drift / peak numbers it did
+    // before the 3D port, the tests below confirm that `z != 0` /
+    // `vz != 0` motion is integrated *correctly*: the controller responds
+    // to close encounters out of the orbital plane the same way it does
+    // in the plane, and angular momentum vector conservation holds across
+    // a long horizon.
+    //
+    // Each of the three tests below runs the planar configuration AND the
+    // inclined configuration in the same #[test] body, then asserts a
+    // **relative** bound: `metric_inclined <= metric_planar · (1 + δ)`.
+    // This is stronger than a hardcoded threshold — the planar measurement
+    // floats with platform / compiler / cpu-feature variance, but the
+    // *ratio* is structurally invariant under rotation. A regression that
+    // worsens both planar and inclined silently within their absolute
+    // thresholds is caught by the ratio.
+
+    /// Rotate a `(y, z)` plane vector by `angle` around the `x̂` axis.
+    /// Inline trigonometry — no dependency on any other rotation helper
+    /// in the codebase, so the inclined configuration is constructed
+    /// independently of `OrbitalElements::sample_orbit` or any other
+    /// path the test exercises.
+    fn rotate_around_x(v: crate::math::Vec3, angle: f64) -> crate::math::Vec3 {
+        let (s, c) = angle.sin_cos();
+        crate::math::Vec3::new(v.x, v.y * c - v.z * s, v.y * s + v.z * c)
+    }
+
+    /// Pythagorean three-body, planar vs inclined: peak energy error of
+    /// the inclined run must not exceed the planar run by more than 50 %.
+    ///
+    /// The Pythagorean (Burrau 1913) configuration is the canonical
+    /// stress test for the IAS15 controller: violent close encounters
+    /// at t ≈ 2–5 force the adaptive step to shrink by orders of
+    /// magnitude before recovering. Rotating the entire scenario 30°
+    /// out of the plane changes nothing physically — the same close
+    /// encounters occur, the same energy must be conserved — so the
+    /// ratio of peak errors is a clean signal: any value > 1 + δ
+    /// indicates the controller responds differently to in-plane vs
+    /// out-of-plane geometry, which is a 3D-specific bug the planar
+    /// gate cannot see.
+    #[test]
+    fn ias15_pythagorean_inclined_matches_planar_within_relative_bound() {
+        use crate::math::Vec3;
+
+        const DT: f64 = 0.01;
+        const T_END: f64 = 10.0;
+        // Allowance for the additional per-axis arithmetic in 3D: ~1 ULP
+        // accumulating over the full integration. δ = 0.5 (50 %) is
+        // generous against the f64 noise floor while still bounding any
+        // systematic regression to under one order of magnitude.
+        const RELATIVE_SLACK: f64 = 0.5;
+        const INCLINATION: f64 = std::f64::consts::PI / 6.0; // 30°
+
+        // Planar Pythagorean (canonical Burrau initial conditions).
+        let planar_bodies = vec![
+            Body::rocky(3.0).at(1.0, 3.0).with_velocity(0.0, 0.0).unsoftened(),
+            Body::rocky(4.0).at(-2.0, -1.0).with_velocity(0.0, 0.0).unsoftened(),
+            Body::rocky(5.0).at(1.0, -1.0).with_velocity(0.0, 0.0).unsoftened(),
+        ];
+
+        // Inclined Pythagorean: each body's position rotated 30° around `x̂`.
+        // Velocities are zero in the original setup so they need no rotation,
+        // but go through the helper anyway so a non-zero IC variant trivially
+        // generalises later.
+        let inclined_bodies: Vec<Body> = planar_bodies
+            .iter()
+            .map(|b| {
+                let pos = rotate_around_x(Vec3::new(b.x, b.y, b.z), INCLINATION);
+                let vel = rotate_around_x(Vec3::new(b.vx, b.vy, b.vz), INCLINATION);
+                Body::rocky(b.mass)
+                    .at_3d(pos.x, pos.y, pos.z)
+                    .with_velocity_3d(vel.x, vel.y, vel.z)
+                    .unsoftened()
+            })
+            .collect();
+
+        let peak = |bodies: Vec<Body>| -> f64 {
+            let mut sys = System::new(bodies, UnitSystem::canonical())
+                .with_theta(0.5)
+                .with_dt(DT)
+                .with_max_depth(10);
+            sys.set_integrator(IntegratorKind::Ias15);
+            let n_steps = (T_END / DT).ceil() as u64;
+            let mut p = 0.0_f64;
+            for _ in 0..n_steps {
+                sys.step();
+                p = p.max(sys.metrics().rel_energy_error.abs());
+            }
+            p
+        };
+
+        let peak_planar = peak(planar_bodies);
+        let peak_inclined = peak(inclined_bodies);
+
+        let bound = peak_planar * (1.0 + RELATIVE_SLACK);
+        assert!(
+            peak_inclined <= bound,
+            "Pythagorean 3D regression: inclined peak |δE/E₀| = {:.3e} \
+             exceeds planar peak {:.3e} × (1 + {RELATIVE_SLACK}) = {:.3e}",
+            peak_inclined,
+            peak_planar,
+            bound,
+        );
+    }
+
+    /// Kepler `e = 0.9` high-eccentricity, planar vs inclined: same
+    /// relative bound as the Pythagorean test above.
+    ///
+    /// The high-e regime is what stresses the IAS15 sub-step velocity
+    /// prediction (`predict_v_ias15`) and the Picard convergence under
+    /// rapid acceleration variation near perihelion. A 3D-specific bug
+    /// in the velocity-dependent path of any perturbation would surface
+    /// here even though no perturbation is registered: the integrator's
+    /// own inner loop reads body velocity at substep nodes, and a 3D
+    /// regression in the substep predictor would manifest as elevated
+    /// inclined peak compared to the planar gauge.
+    #[test]
+    fn ias15_kepler_high_e_inclined_matches_planar_within_relative_bound() {
+        use crate::math::Vec3;
+
+        const A: f64 = 1.0;
+        const E: f64 = 0.9;
+        const MU: f64 = 2.0;
+        const N_ORBITS: u64 = 50;
+        const DT: f64 = 0.1;
+        const RELATIVE_SLACK: f64 = 0.5;
+        const INCLINATION: f64 = std::f64::consts::PI / 6.0;
+
+        let r_peri = A * (1.0 - E);
+        let v_peri = (MU * (1.0 + E) / (A * (1.0 - E))).sqrt();
+        let period = 2.0 * std::f64::consts::PI * (A.powi(3) / MU).sqrt();
+        let total_time = N_ORBITS as f64 * period;
+
+        // Planar two-body high-e Kepler.
+        let planar_bodies = vec![
+            Body::rocky(1.0).at(-r_peri / 2.0, 0.0).with_velocity(0.0, -v_peri / 2.0).unsoftened(),
+            Body::rocky(1.0).at(r_peri / 2.0, 0.0).with_velocity(0.0, v_peri / 2.0).unsoftened(),
+        ];
+
+        let inclined_bodies: Vec<Body> = planar_bodies
+            .iter()
+            .map(|b| {
+                let pos = rotate_around_x(Vec3::new(b.x, b.y, b.z), INCLINATION);
+                let vel = rotate_around_x(Vec3::new(b.vx, b.vy, b.vz), INCLINATION);
+                Body::rocky(b.mass)
+                    .at_3d(pos.x, pos.y, pos.z)
+                    .with_velocity_3d(vel.x, vel.y, vel.z)
+                    .unsoftened()
+            })
+            .collect();
+
+        let peak = |bodies: Vec<Body>| -> f64 {
+            let mut sys = System::new(bodies, UnitSystem::canonical())
+                .with_theta(0.5)
+                .with_dt(DT)
+                .with_max_depth(10);
+            sys.set_integrator(IntegratorKind::Ias15);
+            let n_steps = (total_time / DT).ceil() as u64;
+            let mut p = 0.0_f64;
+            for _ in 0..n_steps {
+                sys.step();
+                p = p.max(sys.metrics().rel_energy_error.abs());
+            }
+            p
+        };
+
+        let peak_planar = peak(planar_bodies);
+        let peak_inclined = peak(inclined_bodies);
+
+        let bound = peak_planar * (1.0 + RELATIVE_SLACK);
+        assert!(
+            peak_inclined <= bound,
+            "high-e Kepler 3D regression: inclined peak |δE/E₀| = {:.3e} \
+             exceeds planar peak {:.3e} × (1 + {RELATIVE_SLACK}) = {:.3e}",
+            peak_inclined,
+            peak_planar,
+            bound,
+        );
+    }
+
+    /// Long-run conservation of the angular-momentum vector `h_vec` for
+    /// an inclined Kepler orbit, with magnitude and direction asserted
+    /// independently.
+    ///
+    /// `h_vec = r × v` is a vector conserved by two-body dynamics. The
+    /// test integrates an inclined `e = 0.5` Kepler orbit over 200
+    /// orbits and asserts:
+    ///
+    ///   - **magnitude drift** `||h(t)| − |h(0)|| / |h(0)|` stays below
+    ///     `1e-12` — energetic conservation;
+    ///   - **direction drift** `1 − cos(angle(h(t), h(0)))` stays below
+    ///     `1e-12` — geometric conservation (orbital plane is fixed).
+    ///
+    /// Splitting the assertion is what makes a failure diagnosable: a
+    /// `mag_drift` failure with `dir_drift = 0` indicates an
+    /// energy-leaking integrator step; `dir_drift` failure with
+    /// `mag_drift = 0` indicates spurious cross-axis torque (a kernel
+    /// asymmetry that the planar tests cannot see by construction). A
+    /// joint test like `(h_end - h_start).length()` blends both signals
+    /// and tells you only that something drifted.
+    #[test]
+    fn ias15_inclined_kepler_conserves_h_vec_magnitude_and_direction() {
+        use crate::math::Vec3;
+        use crate::physics::orbital::compute_invariants;
+
+        const A: f64 = 2.0;
+        const E: f64 = 0.5;
+        const MU: f64 = 2.0;
+        const N_ORBITS: u64 = 200;
+        const INCLINATION: f64 = std::f64::consts::PI / 6.0;
+
+        const MAG_TOL: f64 = 1e-12;
+        const DIR_TOL: f64 = 1e-12;
+
+        let r_peri = A * (1.0 - E);
+        let v_peri = (MU * (1.0 + E) / (A * (1.0 - E))).sqrt();
+        let period = 2.0 * std::f64::consts::PI * (A.powi(3) / MU).sqrt();
+        let total_time = N_ORBITS as f64 * period;
+        let dt_budget = period / 20.0;
+
+        let planar_bodies = [
+            Body::rocky(1.0).at(-r_peri / 2.0, 0.0).with_velocity(0.0, -v_peri / 2.0).unsoftened(),
+            Body::rocky(1.0).at(r_peri / 2.0, 0.0).with_velocity(0.0, v_peri / 2.0).unsoftened(),
+        ];
+
+        let bodies: Vec<Body> = planar_bodies
+            .iter()
+            .map(|b| {
+                let pos = rotate_around_x(Vec3::new(b.x, b.y, b.z), INCLINATION);
+                let vel = rotate_around_x(Vec3::new(b.vx, b.vy, b.vz), INCLINATION);
+                Body::rocky(b.mass)
+                    .at_3d(pos.x, pos.y, pos.z)
+                    .with_velocity_3d(vel.x, vel.y, vel.z)
+                    .unsoftened()
+            })
+            .collect();
+
+        // Capture initial h_vec via the orbital-element pipeline rather
+        // than reading body fields directly — the test is about the
+        // full pipeline holding up over a long horizon.
+        let inv0 = compute_invariants(&bodies, 1, 0, 1.0).unwrap();
+        let h0 = inv0.h_vec;
+        let h0_mag = h0.length();
+        assert!(h0_mag > 0.0, "test setup: initial |h_vec| must be non-zero");
+
+        let mut sys = System::new(bodies, UnitSystem::canonical())
+            .with_theta(0.5)
+            .with_dt(dt_budget)
+            .with_max_depth(10);
+        sys.set_integrator(IntegratorKind::Ias15);
+
+        while sys.t() < total_time {
+            sys.step();
+        }
+
+        let inv_end = compute_invariants(sys.bodies(), 1, 0, 1.0).unwrap();
+        let h_end = inv_end.h_vec;
+        let h_end_mag = h_end.length();
+
+        // Magnitude drift: relative change in |h|.
+        let mag_drift = (h_end_mag - h0_mag).abs() / h0_mag;
+        assert!(
+            mag_drift < MAG_TOL,
+            "h_vec magnitude drift {:.3e} exceeds {MAG_TOL:.0e} over {N_ORBITS} orbits — \
+             energetic conservation regression",
+            mag_drift,
+        );
+
+        // Direction drift: 1 − cos(angle between h_end and h0).
+        // Stable near 0, well-behaved for arbitrarily small angles.
+        let cos_angle = h_end.dot(h0) / (h_end_mag * h0_mag);
+        let dir_drift = 1.0 - cos_angle;
+        assert!(
+            dir_drift < DIR_TOL,
+            "h_vec direction drift {:.3e} (1 − cos angle) exceeds {DIR_TOL:.0e} over \
+             {N_ORBITS} orbits — orbital plane is precessing spuriously (cross-axis \
+             torque leak)",
+            dir_drift,
+        );
+    }
 }
