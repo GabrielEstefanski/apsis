@@ -267,8 +267,10 @@ impl PySystem {
             t: Vec::with_capacity(n_samples),
             x: Vec::with_capacity(n_samples * n_bodies),
             y: Vec::with_capacity(n_samples * n_bodies),
+            z: Vec::with_capacity(n_samples * n_bodies),
             vx: Vec::with_capacity(n_samples * n_bodies),
             vy: Vec::with_capacity(n_samples * n_bodies),
+            vz: Vec::with_capacity(n_samples * n_bodies),
             energy: Vec::with_capacity(n_samples),
             dt: Vec::with_capacity(n_samples),
             energy_drift: Vec::with_capacity(n_samples),
@@ -601,8 +603,10 @@ fn record_state(sys: &CoreSystem, buf: &mut TrajectoryBuffers) {
     for b in sys.bodies() {
         buf.x.push(b.x);
         buf.y.push(b.y);
+        buf.z.push(b.z);
         buf.vx.push(b.vx);
         buf.vy.push(b.vy);
+        buf.vz.push(b.vz);
     }
 }
 

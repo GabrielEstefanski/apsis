@@ -81,17 +81,36 @@ def test_body_factories_accept_kwargs_only() -> None:
     """
     sun = apsis.Body.star(mass=1.0, position=(0.5, -0.25), velocity=(0.0, 1.0))
     assert sun.mass == 1.0
-    assert sun.position == (0.5, -0.25)
-    assert sun.velocity == (0.0, 1.0)
+    # 2-tuple input pads `z` (and `vz`) with zero; the getter returns
+    # the full 3-tuple.
+    assert sun.position == (0.5, -0.25, 0.0)
+    assert sun.velocity == (0.0, 1.0, 0.0)
     assert sun.material == "star"
+
+
+def test_body_factories_accept_3d_position_and_velocity() -> None:
+    """Position and velocity kwargs accept a 3-tuple for out-of-plane orbits."""
+    body = apsis.Body.rocky(
+        mass=3e-6,
+        position=(1.0, 2.0, 3.0),
+        velocity=(0.4, 0.5, 0.6),
+    )
+    assert body.position == (1.0, 2.0, 3.0)
+    assert body.velocity == (0.4, 0.5, 0.6)
+    assert body.x == 1.0
+    assert body.y == 2.0
+    assert body.z == 3.0
+    assert body.vx == 0.4
+    assert body.vy == 0.5
+    assert body.vz == 0.6
 
 
 def test_body_builder_methods_return_new_instances() -> None:
     """Builder methods produce fresh ``Body`` objects, leaving the original unchanged."""
     base = apsis.Body.rocky(mass=1e-6)
-    placed = base.at((1.0, 2.0))
-    assert base.position == (0.0, 0.0)
-    assert placed.position == (1.0, 2.0)
+    placed = base.at((1.0, 2.0, 3.0))
+    assert base.position == (0.0, 0.0, 0.0)
+    assert placed.position == (1.0, 2.0, 3.0)
     assert base is not placed
 
 
@@ -111,11 +130,11 @@ def test_body_rejects_non_positive_mass() -> None:
 
 
 def test_body_rejects_malformed_position() -> None:
-    """Position that is not a 2-element sequence raises ``ValueError``."""
+    """Position that is not a 2- or 3-element sequence raises ``ValueError``."""
     with pytest.raises(ValueError, match="position"):
         apsis.Body.star(mass=1.0, position=(1.0,))  # type: ignore[arg-type]
     with pytest.raises(ValueError, match="position"):
-        apsis.Body.star(mass=1.0, position=(1.0, 2.0, 3.0))  # type: ignore[arg-type]
+        apsis.Body.star(mass=1.0, position=(1.0, 2.0, 3.0, 4.0))  # type: ignore[arg-type]
 
 
 # ── System ────────────────────────────────────────────────────────────────────
@@ -211,8 +230,10 @@ def test_sample_returns_trajectory_with_expected_shape() -> None:
     assert traj.energy.shape == (64,)
     assert traj.x.shape == (64, 2)
     assert traj.y.shape == (64, 2)
+    assert traj.z.shape == (64, 2)
     assert traj.vx.shape == (64, 2)
     assert traj.vy.shape == (64, 2)
+    assert traj.vz.shape == (64, 2)
 
 
 def test_sample_arrays_are_float64() -> None:
@@ -220,9 +241,43 @@ def test_sample_arrays_are_float64() -> None:
     sys = _two_body_kepler_system()
     traj = sys.sample(duration=1.0, n_samples=8)
 
-    for arr in (traj.t, traj.energy, traj.x, traj.y, traj.vx, traj.vy):
+    for arr in (traj.t, traj.energy, traj.x, traj.y, traj.z, traj.vx, traj.vy, traj.vz):
         assert isinstance(arr, np.ndarray)
         assert arr.dtype == np.float64
+
+
+def test_sample_z_components_are_zero_for_planar_input() -> None:
+    """Bodies confined to the xy-plane keep ``z`` and ``vz`` identically zero
+    across every sample. This is the contract that lets researchers ignore
+    the third component when their problem is planar."""
+    sys = _two_body_kepler_system()
+    traj = sys.sample(duration=1.0, n_samples=16)
+
+    assert np.all(traj.z == 0.0), "planar input must produce z = 0 everywhere"
+    assert np.all(traj.vz == 0.0), "planar input must produce vz = 0 everywhere"
+
+
+def test_sample_records_3d_motion_for_inclined_input() -> None:
+    """An inclined orbit (`vz != 0` initially) populates the 3D arrays with
+    real motion, not zeros."""
+    primary = apsis.Body.star(mass=1.0).unsoftened()
+    inclined = (apsis.Body.rocky(mass=1e-6)
+                .at((1.0, 0.0, 0.0))
+                .with_velocity((0.0, 0.7, 0.7))
+                .unsoftened())
+    sys = apsis.System(
+        bodies=[primary, inclined],
+        units=apsis.units.CANONICAL,
+        integrator="ias15",
+        dt=1e-3,
+    )
+
+    traj = sys.sample(duration=1.0, n_samples=8)
+
+    # The inclined body must explore non-zero z over the integration.
+    assert np.any(traj.z[:, 1] != 0.0), "inclined orbit produced no z motion"
+    # Sanity: the central body stays at the origin (no kick yet).
+    assert np.all(traj.z[:, 0] == 0.0)
 
 
 def test_sample_time_axis_is_monotonic_and_brackets_duration() -> None:
@@ -261,12 +316,14 @@ def test_sample_initial_row_matches_system_state() -> None:
 
     expected_energy = -0.5 * 3e-6
     assert traj.energy[0] == pytest.approx(expected_energy, rel=1e-9)
-    for k, (px, py) in enumerate(pre_positions):
+    for k, (px, py, pz) in enumerate(pre_positions):
         assert traj.x[0, k] == pytest.approx(px)
         assert traj.y[0, k] == pytest.approx(py)
-    for k, (vx, vy) in enumerate(pre_velocities):
+        assert traj.z[0, k] == pytest.approx(pz)
+    for k, (vx, vy, vz) in enumerate(pre_velocities):
         assert traj.vx[0, k] == pytest.approx(vx)
         assert traj.vy[0, k] == pytest.approx(vy)
+        assert traj.vz[0, k] == pytest.approx(vz)
 
 
 def test_sample_rejects_invalid_arguments() -> None:
