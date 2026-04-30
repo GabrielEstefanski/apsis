@@ -225,6 +225,62 @@ continuity measurement, and non-negotiable warning-emission on both
 registrations. The full suite completes in under twenty seconds on
 commodity hardware.
 
+**Executable contract surface.** The kernel-precondition mechanism
+demonstrated above is one of three guarantee classes the library
+publishes to a perturbation author. The full surface is formalised in
+`apsis::contract`: every guarantee is named in the module-level
+documentation, every guarantee is gated by a continuous-integration
+test whose name matches the guarantee, and every test is co-located
+with the prose. Reading the module top-to-bottom reads the contract;
+running `cargo test -p apsis --lib contract` verifies it. The library
+distinguishes itself from comparable surfaces in REBOUND/REBOUNDx
+[@ReinLiu2012; @Tamayo2020] not on test count — REBOUND has a wider
+validation portfolio measured by problem count — but on **shape**:
+that a reviewer can mechanically check the claims the contract makes.
+
+The three classes are:
+
+*Kernel invariants* — the simulation is deterministic at the system
+level (the bare integrator and any registered perturbations together);
+attaching a no-op perturbation produces a trajectory bit-equal to the
+bare-Newton run; perturbation evaluation is a pure function of
+`(bodies, scratch_acc)`. Four tests, including a negative test that
+proves the determinism check observes trajectory state rather than
+returning a fixed value.
+
+*Composition rules* — registration is commutative at the IEEE-754
+accumulator step for $N = 2$; associative within the IEEE-754 summation
+envelope for $N \ge 3$; additive (perturbations contribute by `+=`,
+never overwrite, verified by sentinel pre-population of the
+accumulator); the system's effective `KernelRequirements` is the
+set-union of the individual perturbations'. Four tests. The
+trajectory-level corollary of associativity (registering $[A, B, C]$
+versus $[C, B, A]$ produces equivalent science) is not asserted at the
+contract level — adaptive integrators amplify ULP-level acceleration
+differences through chaotic substep selection, so a trajectory-level
+gate would measure integrator behaviour rather than the composition
+operator. The associativity claim therefore lives at the per-call
+accumulator level, where the IEEE-754 statement is well-defined.
+
+*Failure model* — exactly one warning per violated invariant per
+registration; repeated registration produces a faithful audit trail
+rather than silent coalescing; emission is unconditional on subscriber
+state, so a registration with no consumer attached completes normally
+and a subsequent subscriber-attached registration still observes the
+warning. Four tests. The two demonstrated counter-tests above are
+specific instances of the first guarantee (one Exactness diagnostic on
+softening violation; one Continuity diagnostic on truncated-Plummer
+violation); the remaining tests pin the audit-trail and
+no-silent-acceptance properties that the kernel-precondition
+demonstration alone would not exhibit.
+
+Twelve tests in total at `crates/apsis/src/contract.rs`. The same
+file holds the prose statement of every guarantee, the rationale for
+the invariants the contract does *not* extend to (cross-platform
+bit-exactness, cross-thread determinism, build-flag invariance), and
+the load-bearing iteration-order property of the perturbation storage
+that a future refactor must not break.
+
 **Run configuration.** All measurements correspond to: IAS15 with
 initial timestep $10^{-4} \cdot T$ and adaptivity enabled for the
 Exactness counter-test (Sun–Mercury standard orbital elements,
@@ -235,7 +291,10 @@ at fixed $dt = 10^{-3} \cdot T$ for the Continuity counter-test
 $R_c = 1$, $\alpha = 0.8$, 60 simulation-unit integration). Sources
 at `crates/apsis-1pn/tests/mercury_precession_gate.rs` and
 `crates/apsis-1pn/tests/kernel_continuity_counter_test.rs`; both
-reproduce on a clean checkout per the §Availability command.
+reproduce on a clean checkout per the §Availability command. The
+twelve composition-contract tests run under
+`cargo test -p apsis --lib contract` and live in
+`crates/apsis/src/contract.rs`.
 
 Two formally distinct invariants (Exactness, Continuity), when
 violated, produce two formally distinct and quantitatively separable
