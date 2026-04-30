@@ -1892,4 +1892,257 @@ mod tests {
             "|h_vec| must equal |h_z| when h_vec.x = h_vec.y = 0",
         );
     }
+
+    // ── 6. 3D validation portfolio (algebraic) ────────────────────────────────
+    //
+    // The planar tests above cover regression: they confirm that `z = vz = 0`
+    // input still produces the same numbers it did before the 3D port. The
+    // tests below cover the complementary direction: that `z ≠ 0` /
+    // `vz ≠ 0` input is *handled correctly*, not just propagated as zeros.
+    //
+    // These three tests are deliberately structural rather than statistical:
+    //   - cross-axis isolation: motion in z must NOT contaminate x / y
+    //   - h_vec direction: r × v orientation must match the right-hand rule
+    //   - (i, Ω, ω) round-trip: orbital elements must invert correctly,
+    //     including at quadrant boundaries where atan2 is fragile
+    //
+    // The (i, Ω, ω) test deliberately constructs orbits via a test-local
+    // Euler rotation written from scratch — NOT through `sample_orbit` —
+    // so the reference comes from an independent implementation rather
+    // than from the same code path the test exercises.
+
+    /// Apply the standard 3-1-3 Euler rotation `R_z(Ω) R_x(i) R_z(ω)` to a
+    /// perifocal-frame vector, mapping it to the inertial frame. Written
+    /// from scratch so the reference is independent of any rotation in
+    /// `apsis::physics::orbital`. Convention: right-handed, i ∈ [0, π],
+    /// Ω, ω ∈ [-π, π].
+    fn perifocal_to_inertial(perifocal: Vec3, omega: f64, i: f64, lon_asc: f64) -> Vec3 {
+        let (sw, cw) = omega.sin_cos();
+        let (si, ci) = i.sin_cos();
+        let (so, co) = lon_asc.sin_cos();
+
+        // First R_z(ω): rotates within the orbital plane around ẑ_pf.
+        let x1 = perifocal.x * cw - perifocal.y * sw;
+        let y1 = perifocal.x * sw + perifocal.y * cw;
+        let z1 = perifocal.z;
+
+        // Then R_x(i): tilts the plane around x̂.
+        let x2 = x1;
+        let y2 = y1 * ci - z1 * si;
+        let z2 = y1 * si + z1 * ci;
+
+        // Finally R_z(Ω): rotates the line of nodes into place around ẑ.
+        let x3 = x2 * co - y2 * so;
+        let y3 = x2 * so + y2 * co;
+        let z3 = z2;
+
+        Vec3::new(x3, y3, z3)
+    }
+
+    /// Cross-axis isolation: a body moving purely along ẑ must keep `x` and
+    /// `y` exactly at their initial values across the entire integration.
+    ///
+    /// This is the cheapest test that catches accidental coupling between
+    /// the z-axis acceleration and the in-plane components — a `dx` term
+    /// receiving a contribution from `dz`, an `acc.x` accumulator
+    /// receiving the wrong index, or a Vec3 swizzle bug. Two equal-mass
+    /// bodies on the z-axis fall toward each other under gravity that
+    /// must be purely along ẑ; any non-zero `x` or `y` after integration
+    /// is a coupling leak.
+    #[test]
+    fn pure_z_motion_preserves_xy_components() {
+        use crate::core::system::System;
+        use crate::physics::integrator::IntegratorKind;
+        use crate::units::UnitSystem;
+
+        let m = 1.0;
+        let z0 = 1.0;
+        let mut a = Body::rocky(m).at_3d(0.0, 0.0, z0).with_velocity_3d(0.0, 0.0, -0.05);
+        let mut b = Body::rocky(m).at_3d(0.0, 0.0, -z0).with_velocity_3d(0.0, 0.0, 0.05);
+        a.softening = 0.0;
+        b.softening = 0.0;
+
+        let mut sys = System::new(vec![a, b], UnitSystem::canonical())
+            .with_integrator(IntegratorKind::Ias15)
+            .with_dt(1e-3);
+
+        for _ in 0..200 {
+            sys.step();
+        }
+
+        for (k, body) in sys.bodies().iter().enumerate() {
+            // The integrator must not introduce any in-plane motion. The
+            // bound here is the f64 round-off floor — anything above 1e-14
+            // indicates a structural coupling, not a tolerance failure.
+            assert!(
+                body.x.abs() < 1e-14,
+                "body {k}: x drifted to {} from a pure-z initial condition",
+                body.x,
+            );
+            assert!(
+                body.y.abs() < 1e-14,
+                "body {k}: y drifted to {} from a pure-z initial condition",
+                body.y,
+            );
+            assert!(
+                body.vx.abs() < 1e-14,
+                "body {k}: vx drifted to {} from a pure-z initial condition",
+                body.vx,
+            );
+            assert!(
+                body.vy.abs() < 1e-14,
+                "body {k}: vy drifted to {} from a pure-z initial condition",
+                body.vy,
+            );
+        }
+    }
+
+    /// `h_vec = r × v` must point in the direction prescribed by the
+    /// right-hand rule for a circular orbit tilted out of the `xy`-plane.
+    ///
+    /// Setup: body at `(R, 0, 0)` with velocity rotated 60° around `x̂`
+    /// from the planar `(0, v_c, 0)`. The orbital plane is then tilted
+    /// 60° from the `xy`-plane and `h_vec` should sit perpendicular to
+    /// the velocity direction within that plane:
+    ///
+    ///   `h_vec / |h_vec| = (0, -sin(i), cos(i))`
+    ///
+    /// A bug that swaps a cross-product component (e.g.,
+    /// `(r × v).x = ry · vz` written as `rx · vz`) flips this direction
+    /// detectably, even though the magnitude `|h_vec|` would be unchanged.
+    #[test]
+    fn h_vec_direction_matches_right_hand_rule_for_inclined_circular() {
+        let m = 1e6;
+        let r = 4.0;
+        let v_c = (G * m / r).sqrt();
+        let i = std::f64::consts::FRAC_PI_3; // 60°
+        let (sin_i, cos_i) = i.sin_cos();
+
+        let primary = body(0.0, 0.0, 0.0, 0.0, m);
+        let satellite =
+            Body::rocky(1e-10).at_3d(r, 0.0, 0.0).with_velocity_3d(0.0, v_c * cos_i, v_c * sin_i);
+
+        let inv = compute_invariants(&[primary, satellite], 1, 0, G).unwrap();
+        let h_mag = inv.h_vec.length();
+
+        // Analytic prediction: r × v with r = (R, 0, 0) and
+        // v = (0, v_c·cos i, v_c·sin i) is (0, -R·v_c·sin i, R·v_c·cos i).
+        let expected = Vec3::new(0.0, -sin_i, cos_i);
+        let unit = inv.h_vec / h_mag;
+
+        // Component-wise comparison rather than dot-product — the test
+        // localises a swizzle bug to the offending axis.
+        assert!(
+            (unit.x - expected.x).abs() < 1e-12,
+            "h.x direction off: {} vs {}",
+            unit.x,
+            expected.x
+        );
+        assert!(
+            (unit.y - expected.y).abs() < 1e-12,
+            "h.y direction off: {} vs {}",
+            unit.y,
+            expected.y
+        );
+        assert!(
+            (unit.z - expected.z).abs() < 1e-12,
+            "h.z direction off: {} vs {}",
+            unit.z,
+            expected.z
+        );
+    }
+
+    /// `compute_invariants → elements_from_invariants` round-trip: build
+    /// an orbit with prescribed `(i, Ω, ω)` via the independent Euler
+    /// rotation, recover the elements, and assert the recovered angles
+    /// match the input.
+    ///
+    /// Two sub-cases:
+    ///
+    ///   - **mid-quadrant** `(i, Ω, ω) = (30°, 45°, 60°)` — sanity that
+    ///     the algebra works in a generic regime.
+    ///   - **quadrant-boundary** `(i, Ω, ω) = (60°, π − ε, −π + ε)` —
+    ///     `Ω` and `ω` sit on opposite sides of the wrap; recovery must
+    ///     stay close to the input value (no spurious flip by `±π`,
+    ///     no atan2 quadrant misclassification).
+    ///
+    /// The quadrant-boundary case is what catches sign errors in the
+    /// `n` vector or in `e_vec · (h × n)` that the mid-quadrant case
+    /// would silently absorb.
+    #[test]
+    fn orbital_elements_round_trip_under_3d_rotation() {
+        // Reference Keplerian orbit in the perifocal frame: periapsis on
+        // +x̂_pf, body at the periapsis (true anomaly 0). For a circular
+        // orbit `e ≈ 0` makes `ω` undefined, so we use a moderately
+        // eccentric configuration where `ω` is meaningful.
+        let m = 1.0;
+        let a = 1.0;
+        let e = 0.3;
+        let r_peri = a * (1.0 - e);
+        let v_peri = (G * m * (1.0 + e) / (a * (1.0 - e))).sqrt();
+
+        let cases = [
+            ("mid-quadrant", PI / 6.0, PI / 4.0, PI / 3.0),
+            ("quadrant-boundary", PI / 3.0, PI - 0.01, -PI + 0.01),
+        ];
+
+        for (label, i_target, lon_asc_target, omega_target) in cases {
+            // Perifocal-frame state at periapsis: position on +x̂, velocity on +ŷ.
+            let r_pf = Vec3::new(r_peri, 0.0, 0.0);
+            let v_pf = Vec3::new(0.0, v_peri, 0.0);
+
+            // Map to inertial via R_z(Ω) R_x(i) R_z(ω) — independent of
+            // anything in `physics::orbital`.
+            let r_inertial = perifocal_to_inertial(r_pf, omega_target, i_target, lon_asc_target);
+            let v_inertial = perifocal_to_inertial(v_pf, omega_target, i_target, lon_asc_target);
+
+            let primary = body(0.0, 0.0, 0.0, 0.0, m);
+            let satellite = Body::rocky(1e-10)
+                .at_3d(r_inertial.x, r_inertial.y, r_inertial.z)
+                .with_velocity_3d(v_inertial.x, v_inertial.y, v_inertial.z);
+
+            let el = compute_elements(&[primary, satellite], 1, 0, G)
+                .expect("elements must be computable");
+
+            // Tolerance: 1e-9 rad ≈ 0.2 milli-arcsec at 1 AU — captures
+            // rotation-algebra correctness without being defeated by the
+            // trig chain ULPs (sin/cos × cross × dot accumulates ~1 ULP).
+            // A real bug surfaces as residuals ≥ 1e-3 (atan2 quadrant flip
+            // ⇒ ~π) or ≥ 1 (sign error).
+            assert!(
+                (el.inclination - i_target).abs() < 1e-9,
+                "{label}: i recovered as {} rad, expected {i_target} rad",
+                el.inclination,
+            );
+
+            // Ω and ω are in `[-π, π]`; near the boundary, a recovered
+            // value `+π − ε` and an input `-π + ε` are almost-identical
+            // points but their plain difference is ~2π. Compare via the
+            // wrapped difference so a true π-flip surfaces as a > 1
+            // residual while the boundary equivalence reads as ~0.
+            let omega_diff = ((el.omega - omega_target + PI).rem_euclid(TAU) - PI).abs();
+            assert!(
+                omega_diff < 1e-9,
+                "{label}: ω recovered as {} rad, expected {omega_target} rad (wrapped diff {})",
+                el.omega,
+                omega_diff,
+            );
+            let lon_asc_diff =
+                ((el.lon_ascending_node - lon_asc_target + PI).rem_euclid(TAU) - PI).abs();
+            assert!(
+                lon_asc_diff < 1e-9,
+                "{label}: Ω recovered as {} rad, expected {lon_asc_target} rad (wrapped diff {})",
+                el.lon_ascending_node,
+                lon_asc_diff,
+            );
+
+            // Eccentricity is rotation-invariant — sanity check that the
+            // 3D round-trip preserves the magnitude as well as the angles.
+            assert!(
+                (el.e - e).abs() < 1e-9,
+                "{label}: e recovered as {} (expected {e}); rotation should not change e",
+                el.e,
+            );
+        }
+    }
 }
