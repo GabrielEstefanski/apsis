@@ -79,16 +79,49 @@
 //!
 //! ### `CompositionRules` — what the system promises about multi-perturbation registration
 //!
-//! Filled by the next commit in this series. Stub here for shape:
+//! 4. **Commutativity (bit-exact for N = 2).** Registering two
+//!    perturbations in either order produces bit-equal trajectories.
+//!    IEEE-754 addition is commutative (`a + b == b + a` exactly), so
+//!    the property holds at machine precision; any deviation indicates
+//!    iteration order has leaked into the dynamics.
+//!    - test: [`tests::composition_commutative_two_perturbations`]
 //!
-//! 4. Commutativity. Registration order does not affect the trajectory.
-//! 5. Associativity. Composing three or more perturbations is
-//!    well-defined and order-invariant under any associativity.
-//! 6. Additive composition. Each perturbation contributes by `+=` to the
-//!    accumulator slice; no perturbation may overwrite or read existing
-//!    values to compute its own.
-//! 7. Union of kernel requirements. A composed system's effective
-//!    `KernelRequirements` is the union of the individual perturbations'.
+//! 5. **Associativity at the accumulator step (within ULP for N ≥ 3).**
+//!    Iterating three perturbations against the same starting buffer in
+//!    two different orders produces accumulator slices that agree to
+//!    within the IEEE-754 summation envelope. IEEE-754 addition is
+//!    **not** associative — `(a+b)+c` and `a+(b+c)` differ by ULP — so
+//!    a bit-exact assertion would be physically wrong. The contract
+//!    statement lives at this per-call level, where the envelope is
+//!    bounded by `~few × ULP × max_contribution`.
+//!
+//!    The trajectory-level corollary ("registering [A,B,C] vs [C,B,A]
+//!    produces equivalent science") is downstream of this and held by
+//!    the validation portfolio rather than the contract: an adaptive
+//!    integrator amplifies ULP-level acceleration differences through
+//!    substep-schedule divergence and chaotic phase drift, so a
+//!    trajectory-level assertion would gate on integrator behavior, not
+//!    on the composition operator. Robust trajectory-level parity is
+//!    measured by orbital invariants (Δa, Δe, ΔE, ΔLz), not point-by-
+//!    point position drift.
+//!    - test: [`tests::composition_associative_three_perturbations`]
+//!
+//! 6. **Additive composition (sentinel-checked).** Each perturbation
+//!    contributes by `+=` to the accumulator slice; no perturbation may
+//!    overwrite or zero existing values. Tested by pre-populating the
+//!    accumulator with a non-zero sentinel and asserting the output
+//!    equals `sentinel + expected_contribution`. A perturbation that
+//!    overwrites would lose the sentinel; one that resets and re-adds
+//!    its own contribution would also be detected.
+//!    - test: [`tests::composition_perturbation_is_additive_via_sentinel`]
+//!
+//! 7. **Union of kernel requirements.** A composed system's effective
+//!    `KernelRequirements` is the set-union of the individual
+//!    perturbations'. Registering perturbation A (requires `Exact`) and
+//!    perturbation B (requires `Smooth`) against a kernel that violates
+//!    both produces one `Exactness` diagnostic and one `Continuity`
+//!    diagnostic — neither is suppressed by the presence of the other.
+//!    - test: [`tests::composition_kernel_requirements_take_union`]
 //!
 //! ### Failure model — what the system promises when a configuration is invalid
 //!
@@ -160,9 +193,16 @@
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+    use std::sync::Mutex;
+
+    use crate::core::log::{Event, Level, subscribe, unsubscribe};
     use crate::core::system::System;
     use crate::domain::body::Body;
     use crate::math::Vec3;
+    use crate::physics::gravity::kernel::{
+        Continuity, Exactness, KernelRequirements, TruncatedPlummerKernel,
+    };
     use crate::physics::integrator::{IntegratorKind, PerturbationForce};
     use crate::units::UnitSystem;
 
@@ -214,6 +254,52 @@ mod tests {
 
     impl PerturbationForce for NullPerturbation {
         fn accumulate(&self, _bodies: &[Body], _acc: &mut [Vec3]) {}
+    }
+
+    /// Stateless perturbation with a third dynamical signature: a
+    /// position-dependent radial pull. Combined with `LinearDrag`
+    /// (velocity-dependent) and `ConstantPush` (constant) it gives the
+    /// associativity test three terms that are dynamically distinct, so
+    /// no two of them collapse into a single effective contribution.
+    struct RadialPull(f64);
+
+    impl PerturbationForce for RadialPull {
+        fn accumulate(&self, bodies: &[Body], acc: &mut [Vec3]) {
+            for (b, a) in bodies.iter().zip(acc.iter_mut()) {
+                a.x -= self.0 * b.x;
+                a.y -= self.0 * b.y;
+                a.z -= self.0 * b.z;
+            }
+        }
+    }
+
+    /// Test fake whose only purpose is to declare a kernel requirement.
+    /// Contributes nothing dynamically; used by the union-of-requirements
+    /// test where the dynamical effect is irrelevant and only the
+    /// registration-time precondition check is exercised.
+    struct DeclaresExactnessRequirement;
+
+    impl PerturbationForce for DeclaresExactnessRequirement {
+        fn accumulate(&self, _bodies: &[Body], _acc: &mut [Vec3]) {}
+        fn kernel_requirements(&self) -> KernelRequirements {
+            KernelRequirements { required_exactness: Some(Exactness::Exact), min_continuity: None }
+        }
+    }
+
+    /// Sibling fake declaring only the continuity half of the canonical
+    /// 1PN-style requirement set. Pairs with
+    /// `DeclaresExactnessRequirement` to verify that the system's
+    /// effective requirements are the union of the individuals'.
+    struct DeclaresContinuityRequirement;
+
+    impl PerturbationForce for DeclaresContinuityRequirement {
+        fn accumulate(&self, _bodies: &[Body], _acc: &mut [Vec3]) {}
+        fn kernel_requirements(&self) -> KernelRequirements {
+            KernelRequirements {
+                required_exactness: None,
+                min_continuity: Some(Continuity::Smooth),
+            }
+        }
     }
 
     // ── System fixture ────────────────────────────────────────────────────────
@@ -388,6 +474,213 @@ mod tests {
              on two calls with identical input — observable internal state is \
              evolving between calls, which violates the contract that perturbation \
              evaluation is a pure function of (bodies, scratch_acc)"
+        );
+    }
+
+    // ── CompositionRules ──────────────────────────────────────────────────────
+
+    /// **Invariant 4.** Two-perturbation registration is commutative,
+    /// bit-for-bit. IEEE-754 addition is exactly commutative, so the
+    /// per-step accumulator value `(0 + A) + B` is bit-equal to
+    /// `(0 + B) + A`. Any deviation indicates that registration order
+    /// has leaked into the integrator path beyond the accumulation step
+    /// — for example, a per-perturbation seed, a per-perturbation
+    /// scratch buffer keyed on insertion order, or a stable-sort that
+    /// is not actually stable.
+    #[test]
+    fn composition_commutative_two_perturbations() {
+        const N_STEPS: u64 = 200;
+
+        let run = |order_swapped: bool| {
+            let mut sys = fixture_system();
+            if order_swapped {
+                sys.add_perturbation(Box::new(ConstantPush(Vec3::new(0.0, 0.0, 1e-6))));
+                sys.add_perturbation(Box::new(LinearDrag(1e-4)));
+            } else {
+                sys.add_perturbation(Box::new(LinearDrag(1e-4)));
+                sys.add_perturbation(Box::new(ConstantPush(Vec3::new(0.0, 0.0, 1e-6))));
+            }
+            for _ in 0..N_STEPS {
+                sys.step();
+            }
+            snapshot(&sys)
+        };
+
+        let forward = run(false);
+        let reversed = run(true);
+
+        assert_eq!(
+            forward, reversed,
+            "swapping registration order of two perturbations produced different \
+             trajectories — IEEE-754 commutativity guarantees bit-equality at the \
+             accumulator step, so this is registration order leaking into the \
+             integrator"
+        );
+    }
+
+    /// **Invariant 5.** Iterating three perturbations against the same
+    /// starting buffer in two different orders produces accumulator
+    /// slices that agree within the IEEE-754 summation envelope. The
+    /// contract statement lives here — at the per-call accumulator
+    /// level, where the envelope is bounded by `~few × ULP ×
+    /// max(|accumulator|, |contribution|)` — not at the trajectory
+    /// level, where adaptive-integrator substep divergence and chaotic
+    /// phase drift amplify ULP-level differences into observable
+    /// separation that is a property of the integrator, not of the
+    /// composition operator. Trajectory-level parity across registration
+    /// orders is a downstream corollary held by the validation portfolio
+    /// against orbital invariants (Δa, Δe, ΔE, ΔLz), not point-by-point
+    /// position drift.
+    ///
+    /// Three perturbations with dynamically distinct signatures
+    /// (constant, velocity-dependent, position-dependent) ensure no two
+    /// terms collapse into a single contribution that would trivially
+    /// satisfy the associativity statement.
+    #[test]
+    fn composition_associative_three_perturbations() {
+        let primary = Body::star(1.0).at(0.0, 0.0).with_velocity(0.0, 0.0);
+        let satellite = Body::rocky(1e-6).at(1.0, 0.0).with_velocity(0.0, 1.0);
+        let bodies = [primary, satellite];
+
+        let drag = LinearDrag(1e-4);
+        let push = ConstantPush(Vec3::new(0.0, 0.0, 1e-6));
+        let pull = RadialPull(1e-5);
+
+        let sentinel = Vec3::new(0.5, -0.25, 1e-3);
+
+        let mut acc_forward = vec![sentinel; bodies.len()];
+        drag.accumulate(&bodies, &mut acc_forward);
+        push.accumulate(&bodies, &mut acc_forward);
+        pull.accumulate(&bodies, &mut acc_forward);
+
+        let mut acc_reversed = vec![sentinel; bodies.len()];
+        pull.accumulate(&bodies, &mut acc_reversed);
+        push.accumulate(&bodies, &mut acc_reversed);
+        drag.accumulate(&bodies, &mut acc_reversed);
+
+        // Eight ULPs of the largest accumulator entry. With sentinel
+        // ~0.5 the floor is ~9e-16: large enough to absorb any
+        // re-association of a 4-term sum (sentinel + 3 contributions),
+        // small enough that a non-IEEE reordering bug stands out.
+        let tolerance = 8.0 * f64::EPSILON * sentinel.x.abs().max(1.0);
+
+        for (i, (a, b)) in acc_forward.iter().zip(acc_reversed.iter()).enumerate() {
+            let dx = (a.x - b.x).abs();
+            let dy = (a.y - b.y).abs();
+            let dz = (a.z - b.z).abs();
+            assert!(
+                dx <= tolerance && dy <= tolerance && dz <= tolerance,
+                "body {i}: per-call accumulator differs across summation order beyond \
+                 the IEEE-754 envelope: dx={dx:.3e} dy={dy:.3e} dz={dz:.3e} \
+                 (tolerance {tolerance:.3e}) — composition operator is not behaving \
+                 as a sum of additive contributions",
+            );
+        }
+    }
+
+    /// **Invariant 6.** Perturbation contributions accumulate by `+=`,
+    /// not by overwrite. Pre-fill the accumulator with a non-zero
+    /// sentinel, run the perturbation, and assert the result equals
+    /// `sentinel + expected_contribution`. A perturbation that
+    /// overwrites would lose the sentinel; one that resets and re-adds
+    /// its own contribution would also be detected (the sentinel would
+    /// not be present in the output).
+    ///
+    /// The closed-form `expected_contribution` for `ConstantPush(c)` is
+    /// `c` for every body — so for sentinel `s` and contribution `c`
+    /// the contract requires `acc[i] == s + c` exactly. IEEE-754
+    /// addition gives bit-equality here.
+    #[test]
+    fn composition_perturbation_is_additive_via_sentinel() {
+        let primary = Body::star(1.0).at(0.0, 0.0).with_velocity(0.0, 0.0);
+        let satellite = Body::rocky(1e-6).at(1.0, 0.0).with_velocity(0.0, 1.0);
+        let bodies = [primary, satellite];
+
+        let sentinel = Vec3::new(7.0, 8.0, 9.0);
+        let push_value = Vec3::new(0.5, -0.25, 1e-3);
+        let p = ConstantPush(push_value);
+
+        let mut acc = vec![sentinel; bodies.len()];
+        p.accumulate(&bodies, &mut acc);
+
+        let expected = sentinel + push_value;
+        for (i, a) in acc.iter().enumerate() {
+            assert_eq!(
+                *a, expected,
+                "body {i}: perturbation overwrote the sentinel instead of adding to it. \
+                 acc[i] = {a:?}, expected sentinel + contribution = {expected:?} — \
+                 the contract requires `accumulate` to add, not assign"
+            );
+        }
+    }
+
+    /// **Invariant 7.** A composed system's effective `KernelRequirements`
+    /// is the set-union of the individuals'. Registering perturbation A
+    /// (requires `Exact`, no continuity constraint) and perturbation B
+    /// (requires `Smooth`, no exactness constraint) against
+    /// `TruncatedPlummerKernel` (provides `Modified, C0`, violating
+    /// both) emits exactly one Exactness diagnostic and exactly one
+    /// Continuity diagnostic — neither suppressed by the presence of
+    /// the other.
+    ///
+    /// The bus is process-global; concurrent unit tests share it. The
+    /// filter below keys on the `violated_invariant` field — set only
+    /// by `System::emit_kernel_requirement_violation`, no other code
+    /// path in the crate — so traffic from unrelated tests is excluded
+    /// without a per-test marker.
+    #[test]
+    fn composition_kernel_requirements_take_union() {
+        let captured: Arc<Mutex<Vec<Event>>> = Arc::new(Mutex::new(Vec::new()));
+        let sink = captured.clone();
+        let id = subscribe(move |event: &Event| {
+            if event.level != Level::Warn {
+                return;
+            }
+            if event.fields.iter().any(|(k, _)| *k == "violated_invariant") {
+                sink.lock().unwrap().push(event.clone());
+            }
+        });
+
+        let kernel = Arc::new(TruncatedPlummerKernel::new(1.0));
+        let mut sys = fixture_system().with_kernel(kernel);
+        sys.add_perturbation(Box::new(DeclaresExactnessRequirement));
+        sys.add_perturbation(Box::new(DeclaresContinuityRequirement));
+
+        let events = captured.lock().unwrap().clone();
+        unsubscribe(id);
+
+        let invariants: Vec<String> = events
+            .iter()
+            .filter_map(|ev| {
+                ev.fields.iter().find_map(|(k, v)| {
+                    if *k == "violated_invariant" {
+                        Some(v.trim_matches('"').to_string())
+                    } else {
+                        None
+                    }
+                })
+            })
+            .collect();
+
+        let exactness_count = invariants.iter().filter(|s| *s == "Exactness").count();
+        let continuity_count = invariants.iter().filter(|s| *s == "Continuity").count();
+
+        assert_eq!(
+            exactness_count, 1,
+            "expected exactly one Exactness diagnostic from the union of \
+             requirements, got {exactness_count}: {invariants:?}",
+        );
+        assert_eq!(
+            continuity_count, 1,
+            "expected exactly one Continuity diagnostic from the union of \
+             requirements, got {continuity_count}: {invariants:?}",
+        );
+        assert_eq!(
+            invariants.len(),
+            2,
+            "expected exactly two invariant-violation diagnostics in total \
+             (one per registered perturbation), got {}: {invariants:?}",
+            invariants.len(),
         );
     }
 }
