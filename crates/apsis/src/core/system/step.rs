@@ -7,6 +7,7 @@ use crate::core::hooks::{
 };
 use crate::core::system::System;
 use crate::core::system::helpers::compute_closeness;
+use crate::math::Vec3;
 use crate::physics::energy::{angular_momentum_z, kinetic_energy, total_energy};
 use crate::physics::integrator::IntegratorContext;
 use crate::physics::integrator::{DenseSnapshot, IntegratorKind};
@@ -45,14 +46,14 @@ impl System {
         // evaluation, which equals the start-of-this-step acceleration for all
         // four integrators (VV, Y4, WH each end with a force eval; IAS15 does too).
         // Skipped on the very first step when scratch_acc is empty.
-        let pre_x0: Vec<(f64, f64)>;
-        let pre_v0: Vec<(f64, f64)>;
-        let pre_a0: Vec<(f64, f64)>;
+        let pre_x0: Vec<Vec3>;
+        let pre_v0: Vec<Vec3>;
+        let pre_a0: Vec<Vec3>;
         let need_order2 =
             !self.scratch_acc.is_empty() && self.integrator.kind() != IntegratorKind::Ias15;
         if need_order2 {
-            pre_x0 = self.bodies.iter().map(|b| (b.x, b.y)).collect();
-            pre_v0 = self.bodies.iter().map(|b| (b.vx, b.vy)).collect();
+            pre_x0 = self.bodies.iter().map(|b| Vec3::new(b.x, b.y, b.z)).collect();
+            pre_v0 = self.bodies.iter().map(|b| Vec3::new(b.vx, b.vy, b.vz)).collect();
             pre_a0 = self.scratch_acc.clone();
         } else {
             pre_x0 = Vec::new();
@@ -212,7 +213,7 @@ impl System {
             return;
         }
         if self.scratch_acc.len() < self.bodies.len() {
-            self.scratch_acc.resize(self.bodies.len(), (0.0, 0.0));
+            self.scratch_acc.resize(self.bodies.len(), Vec3::ZERO);
         }
         let raw_potential = self.force_model.compute(&self.bodies, &mut self.scratch_acc);
         self.last_potential = self.g_factor * raw_potential;

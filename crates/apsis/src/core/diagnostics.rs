@@ -1,4 +1,5 @@
 use crate::domain::body::Body;
+use crate::math::Vec3;
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SimulationDiagnostics {
@@ -9,7 +10,7 @@ pub struct SimulationDiagnostics {
 
 #[derive(Debug, Clone)]
 pub struct DiagnosticsComputer {
-    last_acc: Vec<(f64, f64)>,
+    last_acc: Vec<Vec3>,
 }
 
 impl Default for DiagnosticsComputer {
@@ -25,7 +26,7 @@ impl DiagnosticsComputer {
 
     pub fn compute(
         &mut self,
-        acc: &[(f64, f64)],
+        acc: &[Vec3],
         bodies: &[Body],
         current_dt: f64,
     ) -> SimulationDiagnostics {
@@ -37,26 +38,23 @@ impl DiagnosticsComputer {
         let mut max_vel = 0.0_f64;
 
         for i in 0..n {
-            let (ax, ay) = acc[i];
-            let a2 = ax * ax + ay * ay;
-            max_acc = max_acc.max(a2.sqrt());
+            let a = acc[i];
+            max_acc = max_acc.max(a.length());
 
             if has_last {
-                let (lax, lay) = self.last_acc[i];
-                let dax = ax - lax;
-                let day = ay - lay;
-                let j = (dax * dax + day * day).sqrt() / current_dt;
+                let da = a - self.last_acc[i];
+                let j = da.length() / current_dt;
                 max_jerk = max_jerk.max(j);
             }
         }
 
         for b in bodies {
-            let v2 = b.vx * b.vx + b.vy * b.vy;
+            let v2 = b.vx * b.vx + b.vy * b.vy + b.vz * b.vz;
             max_vel = max_vel.max(v2.sqrt());
         }
 
         if self.last_acc.len() != n {
-            self.last_acc.resize(n, (0.0, 0.0));
+            self.last_acc.resize(n, Vec3::ZERO);
         }
         self.last_acc.copy_from_slice(acc);
 

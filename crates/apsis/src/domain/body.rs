@@ -16,8 +16,10 @@ pub const EPS_BASE: f64 = 0.02;
 pub struct Body {
     pub x: f64,
     pub y: f64,
+    pub z: f64,
     pub vx: f64,
     pub vy: f64,
+    pub vz: f64,
     pub mass: f64,
 
     /// Gravitational softening length ε for this body.
@@ -144,8 +146,10 @@ impl Body {
         Self {
             x: 0.0,
             y: 0.0,
+            z: 0.0,
             vx: 0.0,
             vy: 0.0,
+            vz: 0.0,
             mass,
             softening,
             physical_radius,
@@ -162,7 +166,8 @@ impl Body {
     //
     //     Body::rocky(3e-6).at(1.0, 0.0).with_velocity(0.0, 1.0)
 
-    /// Position in simulation coordinates.
+    /// Position in simulation coordinates. `z` is left at its current value
+    /// (default `0.0`); use [`at_3d`](Self::at_3d) for explicit 3D placement.
     #[inline]
     #[must_use]
     pub fn at(mut self, x: f64, y: f64) -> Self {
@@ -171,12 +176,34 @@ impl Body {
         self
     }
 
-    /// Velocity in simulation coordinates.
+    /// Position in 3D simulation coordinates.
+    #[inline]
+    #[must_use]
+    pub fn at_3d(mut self, x: f64, y: f64, z: f64) -> Self {
+        self.x = x;
+        self.y = y;
+        self.z = z;
+        self
+    }
+
+    /// Velocity in simulation coordinates. `vz` is left at its current value
+    /// (default `0.0`); use [`with_velocity_3d`](Self::with_velocity_3d) for
+    /// explicit 3D motion.
     #[inline]
     #[must_use]
     pub fn with_velocity(mut self, vx: f64, vy: f64) -> Self {
         self.vx = vx;
         self.vy = vy;
+        self
+    }
+
+    /// Velocity in 3D simulation coordinates.
+    #[inline]
+    #[must_use]
+    pub fn with_velocity_3d(mut self, vx: f64, vy: f64, vz: f64) -> Self {
+        self.vx = vx;
+        self.vy = vy;
+        self.vz = vz;
         self
     }
 
@@ -412,10 +439,51 @@ mod tests {
         let b = Body::rocky(3e-6).at(1.0, 0.0).with_velocity(0.0, 1.0);
         assert_eq!(b.x, 1.0);
         assert_eq!(b.y, 0.0);
+        assert_eq!(b.z, 0.0);
         assert_eq!(b.vx, 0.0);
         assert_eq!(b.vy, 1.0);
+        assert_eq!(b.vz, 0.0);
         assert_eq!(b.mass, 3e-6);
         assert_eq!(b.material, Material::Rocky);
+    }
+
+    #[test]
+    fn material_constructors_default_z_and_vz_to_zero() {
+        let b = Body::star(1.0);
+        assert_eq!(b.z, 0.0);
+        assert_eq!(b.vz, 0.0);
+    }
+
+    #[test]
+    fn at_leaves_z_untouched() {
+        let b = Body::rocky(1.0).at_3d(0.0, 0.0, 5.0).at(1.0, 2.0);
+        assert_eq!(b.x, 1.0);
+        assert_eq!(b.y, 2.0);
+        assert_eq!(b.z, 5.0);
+    }
+
+    #[test]
+    fn at_3d_sets_all_three_components() {
+        let b = Body::rocky(1.0).at_3d(1.0, 2.0, 3.0);
+        assert_eq!(b.x, 1.0);
+        assert_eq!(b.y, 2.0);
+        assert_eq!(b.z, 3.0);
+    }
+
+    #[test]
+    fn with_velocity_leaves_vz_untouched() {
+        let b = Body::rocky(1.0).with_velocity_3d(0.0, 0.0, 7.0).with_velocity(1.0, 2.0);
+        assert_eq!(b.vx, 1.0);
+        assert_eq!(b.vy, 2.0);
+        assert_eq!(b.vz, 7.0);
+    }
+
+    #[test]
+    fn with_velocity_3d_sets_all_three_components() {
+        let b = Body::rocky(1.0).with_velocity_3d(1.0, 2.0, 3.0);
+        assert_eq!(b.vx, 1.0);
+        assert_eq!(b.vy, 2.0);
+        assert_eq!(b.vz, 3.0);
     }
 
     #[test]

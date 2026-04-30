@@ -12,15 +12,17 @@
 //! [`helpers::evaluate`](super::helpers::evaluate) wrapper.
 
 use crate::domain::body::Body;
+use crate::math::Vec3;
 
 /// Apply a velocity kick: `v += a · dt`.
 ///
 /// Pass `0.5 * dt` for a half-kick (VV), or any scaled `w · dt` for
 /// Yoshida sub-steps (including negative w for the middle sub-step).
-pub fn kick(bodies: &mut [Body], acc: &[(f64, f64)], dt: f64) {
-    for (body, &(ax, ay)) in bodies.iter_mut().zip(acc.iter()) {
-        body.vx += ax * dt;
-        body.vy += ay * dt;
+pub fn kick(bodies: &mut [Body], acc: &[Vec3], dt: f64) {
+    for (body, a) in bodies.iter_mut().zip(acc.iter()) {
+        body.vx += a.x * dt;
+        body.vy += a.y * dt;
+        body.vz += a.z * dt;
     }
 }
 
@@ -29,5 +31,6 @@ pub fn drift(bodies: &mut [Body], dt: f64) {
     for body in bodies.iter_mut() {
         body.x += body.vx * dt;
         body.y += body.vy * dt;
+        body.z += body.vz * dt;
     }
 }

@@ -38,7 +38,7 @@ use apsis::domain::materials::Material;
 use pyo3::prelude::*;
 use pyo3::types::PyAny;
 
-use crate::convert::{value_error, xy_pair};
+use crate::convert::{value_error, xyz_triple};
 
 /// Point-mass body with kinematics, mass, softening, and material class.
 ///
@@ -105,14 +105,16 @@ impl PyBody {
         let mut inner = CoreBody::of(mass, material);
 
         if let Some(obj) = position {
-            let (x, y) = xy_pair("position", obj)?;
+            let (x, y, z) = xyz_triple("position", obj)?;
             inner.x = x;
             inner.y = y;
+            inner.z = z;
         }
         if let Some(obj) = velocity {
-            let (vx, vy) = xy_pair("velocity", obj)?;
+            let (vx, vy, vz) = xyz_triple("velocity", obj)?;
             inner.vx = vx;
             inner.vy = vy;
+            inner.vz = vz;
         }
         if let Some(eps) = softening {
             if !eps.is_finite() || eps < 0.0 {
@@ -244,21 +246,27 @@ impl PyBody {
     // Each method takes a single 2-tuple (no positional-swap risk) and
     // returns a fresh `Body`; the Python view is value-typed.
 
-    /// Place the body at `position = (x, y)`. Returns a new `Body`.
+    /// Place the body at `position = (x, y)` or `(x, y, z)`. Returns a
+    /// new `Body`. A 2-element sequence is treated as planar input with
+    /// `z = 0`.
     fn at(&self, position: &Bound<'_, PyAny>) -> PyResult<Self> {
-        let (x, y) = xy_pair("position", position)?;
+        let (x, y, z) = xyz_triple("position", position)?;
         let mut inner = self.inner;
         inner.x = x;
         inner.y = y;
+        inner.z = z;
         Ok(Self { inner })
     }
 
-    /// Set the body's velocity to `(vx, vy)`. Returns a new `Body`.
+    /// Set the body's velocity to `(vx, vy)` or `(vx, vy, vz)`. Returns
+    /// a new `Body`. A 2-element sequence is treated as planar input
+    /// with `vz = 0`.
     fn with_velocity(&self, velocity: &Bound<'_, PyAny>) -> PyResult<Self> {
-        let (vx, vy) = xy_pair("velocity", velocity)?;
+        let (vx, vy, vz) = xyz_triple("velocity", velocity)?;
         let mut inner = self.inner;
         inner.vx = vx;
         inner.vy = vy;
+        inner.vz = vz;
         Ok(Self { inner })
     }
 
@@ -293,16 +301,17 @@ impl PyBody {
         self.inner.mass
     }
 
-    /// Position as a 2-tuple $(x, y)$.
+    /// Position as a 3-tuple $(x, y, z)$. For bodies confined to the
+    /// `xy`-plane the third component is zero by default.
     #[getter]
-    fn position(&self) -> (f64, f64) {
-        (self.inner.x, self.inner.y)
+    fn position(&self) -> (f64, f64, f64) {
+        (self.inner.x, self.inner.y, self.inner.z)
     }
 
-    /// Velocity as a 2-tuple $(v_x, v_y)$.
+    /// Velocity as a 3-tuple $(v_x, v_y, v_z)$.
     #[getter]
-    fn velocity(&self) -> (f64, f64) {
-        (self.inner.vx, self.inner.vy)
+    fn velocity(&self) -> (f64, f64, f64) {
+        (self.inner.vx, self.inner.vy, self.inner.vz)
     }
 
     /// $x$-component of position. Convenience for plotting.
@@ -317,6 +326,12 @@ impl PyBody {
         self.inner.y
     }
 
+    /// $z$-component of position. Convenience for plotting.
+    #[getter]
+    fn z(&self) -> f64 {
+        self.inner.z
+    }
+
     /// $x$-component of velocity. Convenience for plotting.
     #[getter]
     fn vx(&self) -> f64 {
@@ -327,6 +342,12 @@ impl PyBody {
     #[getter]
     fn vy(&self) -> f64 {
         self.inner.vy
+    }
+
+    /// $z$-component of velocity. Convenience for plotting.
+    #[getter]
+    fn vz(&self) -> f64 {
+        self.inner.vz
     }
 
     /// Plummer softening length $\epsilon$. Pairwise softening is
@@ -369,13 +390,15 @@ impl PyBody {
 
     fn __repr__(&self) -> String {
         format!(
-            "Body(material={:?}, mass={}, position=({}, {}), velocity=({}, {}), softening={})",
+            "Body(material={:?}, mass={}, position=({}, {}, {}), velocity=({}, {}, {}), softening={})",
             material_slug(self.inner.material),
             self.inner.mass,
             self.inner.x,
             self.inner.y,
+            self.inner.z,
             self.inner.vx,
             self.inner.vy,
+            self.inner.vz,
             self.inner.softening,
         )
     }

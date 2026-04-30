@@ -21,6 +21,7 @@
 //! serialisation, and `Metrics`.  It is **not** used for dispatch.
 
 use crate::domain::body::Body;
+use crate::math::Vec3;
 use crate::physics::integrator::force_model::ForceModel;
 use crate::physics::integrator::perturbation::PerturbationForce;
 
@@ -342,7 +343,7 @@ pub trait Integrator: Send {
         bodies: &mut [Body],
         ctx: &mut IntegratorContext<'_>,
         dt_hint: f64,
-        acc: &mut Vec<(f64, f64)>,
+        acc: &mut Vec<Vec3>,
     ) -> StepResult;
 
     /// Which algorithm this integrator represents.
