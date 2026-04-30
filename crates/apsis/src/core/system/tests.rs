@@ -270,6 +270,63 @@ mod wh_guard {
         );
     }
 
+    /// Regression: when WH is the active integrator, the dense-output
+    /// snapshot the renderer reads must not exist with internally
+    /// inconsistent array lengths. WH evaluates forces only on
+    /// `bodies[1..]`, leaving `scratch_acc` sized `N − 1`; the Order-2
+    /// fallback path in `System::step` previously combined that with
+    /// body-aligned `x0` / `v0` and produced a snapshot whose `a0`
+    /// disagreed with `x0` by one entry. The renderer guard checked
+    /// only `n_bodies()` (which reads `x0.len()`) and let the
+    /// inconsistent snapshot through, so `interpolate(i, h)` panicked
+    /// at `i = N − 1` indexing `a0[N − 1]`.
+    ///
+    /// Two independent guarantees pin the fix:
+    ///   1. Producer side — `System::step` does not synthesise an
+    ///      Order-2 snapshot when `scratch_acc.len() != bodies.len()`.
+    ///   2. Snapshot invariant — any snapshot that does exist passes
+    ///      `is_shape_consistent()`.
+    #[test]
+    fn wh_step_emits_no_inconsistent_dense_snapshot() {
+        let bodies = vec![
+            Body::star(1000.0).at(0.0, 0.0).with_velocity(0.0, 0.0),
+            Body::rocky(1.0).at(10.0, 0.0).with_velocity(0.0, 10.0),
+            Body::rocky(1e-3).at(15.0, 0.0).with_velocity(0.0, 8.0),
+        ];
+        let mut sys = System::new(bodies, UnitSystem::canonical())
+            .with_theta(0.5)
+            .with_dt(0.01)
+            .with_max_depth(10);
+        sys.set_integrator(IntegratorKind::WisdomHolman);
+        assert!(sys.is_wh_suitable(), "fixture should select the WH path, not the fallback");
+
+        // Two steps: the first populates scratch_acc, the second is
+        // the first that actually exercises the Order-2 dense-snapshot
+        // synthesis path (which was the bug site).
+        sys.step();
+        sys.step();
+
+        if let Some(snap) = &sys.last_dense_snapshot {
+            assert!(
+                snap.is_shape_consistent(),
+                "WH step published a DenseSnapshot with mismatched array lengths: \
+                 x0={} v0={} a0={} b={} — the renderer would panic indexing past the \
+                 shortest array",
+                snap.x0.len(),
+                snap.v0.len(),
+                snap.a0.len(),
+                snap.b.len(),
+            );
+            assert_eq!(
+                snap.n_bodies(),
+                sys.bodies().len(),
+                "snapshot body count {} disagrees with system body count {}",
+                snap.n_bodies(),
+                sys.bodies().len(),
+            );
+        }
+    }
+
     #[test]
     fn non_hierarchical_does_not_panic_and_stays_finite() {
         let bodies = vec![

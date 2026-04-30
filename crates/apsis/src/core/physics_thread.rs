@@ -200,8 +200,27 @@ impl PhysicsHandle {
     /// Call this once per render frame, after [`sync`](Self::sync), while the
     /// simulation is running (skip when paused to freeze the display).
     pub fn advance_render_time(&mut self, wall_delta: f64, sim_rate_target: f64) {
+        // Three independent guards — drop a frame on any failure rather
+        // than risk a panic mid-render:
+        //   * `dt > 0`  : a zero-dt snapshot would divide by zero in `h`.
+        //   * `n_bodies() == bodies.len()` : the snapshot was taken at a
+        //     different body count and `i` would index past `x0`.
+        //   * `is_shape_consistent()` : `interpolate(i, h)` indexes
+        //     `x0`, `v0`, `a0`, and `b` at the same `i`, so a snapshot
+        //     whose internal arrays disagree on length panics partway
+        //     through. Pre-3D this could not happen; the WH Order-2
+        //     fallback exposed it because WH leaves `scratch_acc` sized
+        //     `bodies.len() - 1`, producing a snapshot with `x0.len()
+        //     == N` but `a0.len() == N − 1`. The producer-side gate in
+        //     `System::step` now refuses to build that snapshot, so this
+        //     guard is defence in depth against future regressions of
+        //     the same shape.
         let snap = match &self.step_snapshot {
-            Some(s) if s.dt > 0.0 && s.n_bodies() == self.bodies.len() => s,
+            Some(s)
+                if s.dt > 0.0 && s.n_bodies() == self.bodies.len() && s.is_shape_consistent() =>
+            {
+                s
+            },
             _ => return,
         };
 
