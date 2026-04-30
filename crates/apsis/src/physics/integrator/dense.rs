@@ -87,6 +87,24 @@ impl DenseSnapshot {
     pub fn n_bodies(&self) -> usize {
         self.x0.len()
     }
+
+    /// Whether `x0`, `v0`, `a0`, and (when populated) `b` all carry the
+    /// same body count.
+    ///
+    /// `interpolate(i, h)` indexes every internal vector at the same `i`,
+    /// so a snapshot whose internal arrays disagree on length will panic
+    /// when the consumer's loop runs past the shortest. Producers that
+    /// build a snapshot from heterogeneous sources (for example, the
+    /// Order-2 fallback in `System::step`, which captures `x0` / `v0`
+    /// from `bodies` but `a0` from `scratch_acc`) must verify shape
+    /// consistency at construction time, and consumers that hold a
+    /// `DenseSnapshot` across mutation of `bodies` should re-check
+    /// before each render.
+    #[inline]
+    pub fn is_shape_consistent(&self) -> bool {
+        let n = self.x0.len();
+        self.v0.len() == n && self.a0.len() == n && (self.b.is_empty() || self.b.len() == n)
+    }
 }
 
 // ── Interpolation kernels ─────────────────────────────────────────────────────
