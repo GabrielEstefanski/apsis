@@ -15,6 +15,7 @@
 use std::f64::consts::PI;
 
 use crate::domain::body::Body;
+use crate::math::Vec3;
 use crate::physics::integrator::PerturbationForce;
 use crate::physics::radiation::force::{pr_drag_acceleration, radiation_acceleration};
 use crate::physics::radiation::params::RadiationParams;
@@ -93,8 +94,10 @@ impl RadiationField {
             let source = RadiationSource {
                 x: src_body.x,
                 y: src_body.y,
+                z: src_body.z,
                 vx: src_body.vx,
                 vy: src_body.vy,
+                vz: src_body.vz,
                 luminosity,
                 c,
             };
@@ -116,7 +119,7 @@ impl RadiationField {
 
 impl PerturbationForce for RadiationField {
     /// Accumulates radiation accelerations for the full body slice (`offset = 0`).
-    fn accumulate(&self, bodies: &[Body], scratch_acc: &mut [(f64, f64)]) {
+    fn accumulate(&self, bodies: &[Body], scratch_acc: &mut [Vec3]) {
         self.accumulate_offset(bodies, scratch_acc, 0);
     }
 
@@ -126,24 +129,23 @@ impl PerturbationForce for RadiationField {
     /// Used by [`System::apply_perturbations_planets`] during the
     /// Wisdom–Holman sub-step, where `scratch_acc` covers only `bodies[1..]`
     /// and the global index of each planet is `local_index + 1`.
-    fn accumulate_offset(&self, bodies: &[Body], scratch_acc: &mut [(f64, f64)], offset: usize) {
+    fn accumulate_offset(&self, bodies: &[Body], scratch_acc: &mut [Vec3], offset: usize) {
         for (local_i, (body, acc)) in bodies.iter().zip(scratch_acc.iter_mut()).enumerate() {
             let global_i = local_i + offset;
             let Some(params) = self.body_params.get(global_i).and_then(|p| p.as_ref()) else {
                 continue;
             };
 
-            let pos = [body.x, body.y];
-            let vel = [body.vx, body.vy];
+            let pos = Vec3::new(body.x, body.y, body.z);
+            let vel = Vec3::new(body.vx, body.vy, body.vz);
 
-            let [ax, ay] = if self.include_pr_drag {
+            let a = if self.include_pr_drag {
                 pr_drag_acceleration(pos, vel, params, &self.source)
             } else {
                 radiation_acceleration(pos, params, &self.source)
             };
 
-            acc.0 += ax;
-            acc.1 += ay;
+            *acc += a;
         }
     }
 }

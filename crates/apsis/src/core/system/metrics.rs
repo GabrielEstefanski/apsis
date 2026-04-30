@@ -2,6 +2,7 @@
 
 use crate::core::metrics::Metrics;
 use crate::core::system::System;
+use crate::math::Vec3;
 use crate::physics::energy::{angular_momentum_z, center_of_mass_state, total_energy};
 
 impl System {
@@ -12,7 +13,7 @@ impl System {
         let total = total_energy(kinetic, potential);
 
         let lz = angular_momentum_z(&self.bodies);
-        let (com_x, com_y, com_vx, com_vy) = center_of_mass_state(&self.bodies);
+        let (com_pos, com_vel) = center_of_mass_state(&self.bodies);
 
         Metrics {
             kinetic,
@@ -24,10 +25,12 @@ impl System {
             rel_angular_momentum_error: self.rel_angular_momentum_error,
             abs_angular_momentum_error: self.abs_angular_momentum_error,
 
-            com_x,
-            com_y,
-            com_vx,
-            com_vy,
+            com_x: com_pos.x,
+            com_y: com_pos.y,
+            com_z: com_pos.z,
+            com_vx: com_vel.x,
+            com_vy: com_vel.y,
+            com_vz: com_vel.z,
 
             t: self.t,
             steps: self.steps,
@@ -55,7 +58,7 @@ impl System {
     }
 
     /// Accelerations computed during the last integration step.
-    pub fn last_accelerations(&self) -> &[(f64, f64)] {
+    pub fn last_accelerations(&self) -> &[Vec3] {
         &self.scratch_acc
     }
 
@@ -119,8 +122,18 @@ impl System {
         self.rel_angular_momentum_error
     }
 
-    /// Centre-of-mass state `(x, y, vx, vy)` at the current body state.
+    /// Planar projection of the centre-of-mass state: `(x, y, vx, vy)`.
+    ///
+    /// The `xy`-projection of [`center_of_mass_3d`](Self::center_of_mass_3d).
+    /// Useful for 2D plots and overlay code; callers operating in
+    /// three dimensions read the full state through `_3d` directly.
     pub fn center_of_mass(&self) -> (f64, f64, f64, f64) {
+        let (pos, vel) = center_of_mass_state(&self.bodies);
+        (pos.x, pos.y, vel.x, vel.y)
+    }
+
+    /// Centre-of-mass position and velocity in the inertial frame.
+    pub fn center_of_mass_3d(&self) -> (Vec3, Vec3) {
         center_of_mass_state(&self.bodies)
     }
 

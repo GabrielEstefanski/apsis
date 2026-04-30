@@ -31,6 +31,7 @@
 use std::sync::Arc;
 
 use crate::domain::body::Body;
+use crate::math::Vec3;
 use rayon::prelude::*;
 
 use super::kernel::{G, Kernel, PlummerKernel, pair_eps2};
@@ -133,14 +134,20 @@ impl BarnesHutEngine {
 
     /// Compute gravitational accelerations and return total potential energy.
     ///
-    /// Fills `acc[i] = (aₓ, aᵧ)` for each body.
+    /// Fills `acc[i] = (aₓ, aᵧ, a_z)` for each body.
     /// Returns `PE = Σᵢ<ⱼ −G mᵢ mⱼ / r_ij` (softened).
     ///
     /// - N ≤ `exact_threshold`: uses exact O(N²) pairwise sum.
     /// - N > `exact_threshold`: uses parallel BH traversal.
-    pub fn evaluate(&self, bodies: &[Body], theta: f64, acc: &mut [(f64, f64)]) -> f64 {
+    ///
+    /// The kernel arithmetic is fully 3D (`r² = Δx² + Δy² + Δz²`); the
+    /// Barnes–Hut spatial index is still a quadtree (xy-only partition).
+    /// For systems with `z = 0` on every body the quadtree partition is
+    /// the correct 3D partition restricted to the orbital plane; non-zero
+    /// `z` requires an octree, which is staged separately.
+    pub fn evaluate(&self, bodies: &[Body], theta: f64, acc: &mut [Vec3]) -> f64 {
         let n = bodies.len();
-        acc.fill((0.0, 0.0));
+        acc.fill(Vec3::ZERO);
 
         if n == 0 {
             return 0.0;
@@ -154,7 +161,7 @@ impl BarnesHutEngine {
 
         let nodes = self.tree.nodes();
 
-        let results: Vec<(f64, f64, f64)> = (0..n)
+        let results: Vec<(Vec3, f64)> = (0..n)
             .into_par_iter()
             .map(|i| {
                 let mut stack = Vec::with_capacity(128);
@@ -163,8 +170,8 @@ impl BarnesHutEngine {
             .collect();
 
         let mut potential = 0.0_f64;
-        for (i, (ax, ay, phi)) in results.into_iter().enumerate() {
-            acc[i] = (ax, ay);
+        for (i, (a, phi)) in results.into_iter().enumerate() {
+            acc[i] = a;
             // phi is the specific potential at body i; multiply by mass for energy
             potential += bodies[i].mass * phi;
         }
@@ -320,7 +327,7 @@ impl BarnesHutEngine {
 /// evaluation, using pairwise softening ε²_ij = (ε²_i + ε²_j)/2.
 ///
 /// Returns the total gravitational potential energy PE = Σᵢ<ⱼ mᵢ Φᵢⱼ.
-fn exact_eval(bodies: &[Body], kernel: &dyn Kernel, acc: &mut [(f64, f64)]) -> f64 {
+fn exact_eval(bodies: &[Body], kernel: &dyn Kernel, acc: &mut [Vec3]) -> f64 {
     let n = bodies.len();
     let mut potential = 0.0_f64;
 
@@ -328,19 +335,28 @@ fn exact_eval(bodies: &[Body], kernel: &dyn Kernel, acc: &mut [(f64, f64)]) -> f
         for j in (i + 1)..n {
             let dx = bodies[j].x - bodies[i].x;
             let dy = bodies[j].y - bodies[i].y;
+            let dz = bodies[j].z - bodies[i].z;
             let eps2 = pair_eps2(bodies[i].softening, bodies[j].softening);
-            let r_sq = dx * dx + dy * dy;
+            let r_sq = dx * dx + dy * dy + dz * dz;
 
             // Shared geometric factor: G · f(r², ε²) = G / (r² + ε²)^(3/2)
             let fac = G * kernel.acceleration_factor(r_sq, eps2);
 
             // Newton's 3rd law: F_ij = −F_ji
-            // acc_i += m_j · (dx, dy) · fac
-            // acc_j += m_i · (−dx, −dy) · fac
-            acc[i].0 += bodies[j].mass * dx * fac;
-            acc[i].1 += bodies[j].mass * dy * fac;
-            acc[j].0 -= bodies[i].mass * dx * fac;
-            acc[j].1 -= bodies[i].mass * dy * fac;
+            // acc_i += m_j · (dx, dy, dz) · fac
+            // acc_j += m_i · (−dx, −dy, −dz) · fac
+            //
+            // The component-by-component `m · d · fac` chain is
+            // load-bearing: re-associating into a shared
+            // `m_fac = mass * fac` factor shifts ULPs and is observable
+            // on the Mercury 1PN gate, which sits at the f64 noise
+            // floor.
+            acc[i].x += bodies[j].mass * dx * fac;
+            acc[i].y += bodies[j].mass * dy * fac;
+            acc[i].z += bodies[j].mass * dz * fac;
+            acc[j].x -= bodies[i].mass * dx * fac;
+            acc[j].y -= bodies[i].mass * dy * fac;
+            acc[j].z -= bodies[i].mass * dz * fac;
 
             // Pair potential energy: E_ij = m_i · Φ_ij,  Φ_ij = −G · m_j · K
             let phi_ij = -G * bodies[j].mass * kernel.potential(r_sq, eps2);
@@ -353,12 +369,15 @@ fn exact_eval(bodies: &[Body], kernel: &dyn Kernel, acc: &mut [(f64, f64)]) -> f
 
 /// Barnes-Hut force evaluation for a single body — O(log N) per body.
 ///
-/// Returns `(aₓ, aᵧ, φ)` where `φ` is the specific gravitational potential
-/// (potential per unit mass) at the body's position.  Multiply by `body.mass`
-/// to get the contribution to total PE.
+/// Returns `(a, φ)` where `a` is the acceleration vector and `φ` is the
+/// specific gravitational potential (potential per unit mass) at the body's
+/// position.  Multiply by `body.mass` to get the contribution to total PE.
 ///
 /// Node interactions use the target body's own ε² (the tree stores only
-/// aggregated mass/COM, not per-body softening in internal nodes).
+/// aggregated mass/COM, not per-body softening in internal nodes). The
+/// quadtree exposes only `(com_x, com_y)` — the BH branch therefore treats
+/// every node's `z` as zero. This matches the tree's xy-partition exactly
+/// when all bodies satisfy `z = 0`; non-zero `z` inputs require an octree.
 fn bh_eval_body(
     nodes: &[Node],
     body_idx: usize,
@@ -367,9 +386,8 @@ fn bh_eval_body(
     theta: f64,
     kernel: &dyn Kernel,
     stack: &mut Vec<u32>,
-) -> (f64, f64, f64) {
-    let mut ax = 0.0_f64;
-    let mut ay = 0.0_f64;
+) -> (Vec3, f64) {
+    let mut a = Vec3::ZERO;
     let mut phi = 0.0_f64;
 
     stack.clear();
@@ -393,28 +411,34 @@ fn bh_eval_body(
                 let other = bodies[bi];
                 let dx = other.x - body.x;
                 let dy = other.y - body.y;
+                let dz = other.z - body.z;
                 let eps2 = pair_eps2(body.softening, other.softening);
-                let r_sq = dx * dx + dy * dy;
+                let r_sq = dx * dx + dy * dy + dz * dz;
 
                 let fac = G * other.mass * kernel.acceleration_factor(r_sq, eps2);
-                ax += dx * fac;
-                ay += dy * fac;
+                a.x += dx * fac;
+                a.y += dy * fac;
+                a.z += dz * fac;
                 phi += -G * other.mass * kernel.potential(r_sq, eps2);
             }
             continue;
         }
 
-        // BH criterion: accept this node as a pseudo-body when s/d < θ
+        // BH criterion: accept this node as a pseudo-body when s/d < θ.
+        // Tree nodes carry only (com_x, com_y); the z-component of the
+        // node-to-body separation is implicitly the body's own z.
         let dx = node.com_x - body.x;
         let dy = node.com_y - body.y;
+        let dz = -body.z;
         let eps2 = body.softening * body.softening;
-        let d = (dx * dx + dy * dy + eps2).sqrt();
+        let d = (dx * dx + dy * dy + dz * dz + eps2).sqrt();
 
         if node.size() / d < theta {
-            let r_sq = dx * dx + dy * dy;
+            let r_sq = dx * dx + dy * dy + dz * dz;
             let fac = G * node.mass * kernel.acceleration_factor(r_sq, eps2);
-            ax += dx * fac;
-            ay += dy * fac;
+            a.x += dx * fac;
+            a.y += dy * fac;
+            a.z += dz * fac;
             phi += -G * node.mass * kernel.potential(r_sq, eps2);
         } else {
             for &c in &node.children {
@@ -425,7 +449,7 @@ fn bh_eval_body(
         }
     }
 
-    (ax, ay, phi)
+    (a, phi)
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────── //
@@ -437,10 +461,10 @@ mod tests {
 
     use approx::assert_relative_eq;
 
-    fn eval(bodies: &[Body]) -> (Vec<(f64, f64)>, f64) {
+    fn eval(bodies: &[Body]) -> (Vec<Vec3>, f64) {
         let mut engine = BarnesHutEngine::new(16);
         engine.build(bodies);
-        let mut acc = vec![(0.0, 0.0); bodies.len()];
+        let mut acc = vec![Vec3::ZERO; bodies.len()];
         let potential = engine.evaluate(bodies, 0.5, &mut acc);
         (acc, potential)
     }
@@ -457,11 +481,13 @@ mod tests {
 
         let (acc, _) = eval(&bodies);
 
-        let fx: f64 = acc.iter().zip(&bodies).map(|(a, b)| b.mass * a.0).sum();
-        let fy: f64 = acc.iter().zip(&bodies).map(|(a, b)| b.mass * a.1).sum();
+        let fx: f64 = acc.iter().zip(&bodies).map(|(a, b)| b.mass * a.x).sum();
+        let fy: f64 = acc.iter().zip(&bodies).map(|(a, b)| b.mass * a.y).sum();
+        let fz: f64 = acc.iter().zip(&bodies).map(|(a, b)| b.mass * a.z).sum();
 
         assert_relative_eq!(fx, 0.0, epsilon = 1e-12);
         assert_relative_eq!(fy, 0.0, epsilon = 1e-12);
+        assert_relative_eq!(fz, 0.0, epsilon = 1e-12);
     }
 
     // ── Force direction ───────────────────────────────────────────── //
@@ -472,8 +498,8 @@ mod tests {
 
         let (acc, _) = eval(&bodies);
 
-        assert!(acc[0].0 > 0.0);
-        assert!(acc[1].0 < 0.0);
+        assert!(acc[0].x > 0.0);
+        assert!(acc[1].x < 0.0);
     }
 
     // ── Superposition ───────────────────────────────────────────── //
@@ -484,7 +510,7 @@ mod tests {
 
         let (acc, _) = eval(&bodies);
 
-        assert_relative_eq!(acc[1].0, 0.0, epsilon = 1e-12);
+        assert_relative_eq!(acc[1].x, 0.0, epsilon = 1e-12);
     }
 
     // ── Potential sign ───────────────────────────────────────────── //
@@ -518,7 +544,7 @@ mod tests {
         engine_exact.set_exact_threshold(usize::MAX);
         engine_exact.build(&bodies);
 
-        let mut acc_exact = vec![(0.0, 0.0); bodies.len()];
+        let mut acc_exact = vec![Vec3::ZERO; bodies.len()];
         engine_exact.evaluate(&bodies, 0.5, &mut acc_exact);
 
         // BH
@@ -526,15 +552,15 @@ mod tests {
         engine_bh.set_exact_threshold(1);
         engine_bh.build(&bodies);
 
-        let mut acc_bh = vec![(0.0, 0.0); bodies.len()];
+        let mut acc_bh = vec![Vec3::ZERO; bodies.len()];
         engine_bh.evaluate(&bodies, 0.5, &mut acc_bh);
 
         for i in 0..bodies.len() {
             let ex = acc_exact[i];
             let bh = acc_bh[i];
 
-            assert!(rel_err(bh.0, ex.0) < 1e-2);
-            assert!(rel_err(bh.1, ex.1) < 1e-2);
+            assert!(rel_err(bh.x, ex.x) < 1e-2);
+            assert!(rel_err(bh.y, ex.y) < 1e-2);
         }
     }
 }

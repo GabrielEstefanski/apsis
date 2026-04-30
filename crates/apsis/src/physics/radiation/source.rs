@@ -8,12 +8,14 @@ pub struct RadiationSource {
     /// Position in the inertial frame.
     pub x: f64,
     pub y: f64,
+    pub z: f64,
     /// Velocity in the inertial frame.
     ///
     /// Required for Poynting–Robertson drag: the aberrated flux direction
     /// depends on the relative velocity between source and particle.
     pub vx: f64,
     pub vy: f64,
+    pub vz: f64,
     /// Bolometric luminosity in internal units (energy · time⁻¹).
     pub luminosity: f64,
     /// Speed of light in internal units.
