@@ -125,13 +125,34 @@
 //!
 //! ### Failure model — what the system promises when a configuration is invalid
 //!
-//! Filled by the third commit in this series. Stub here for shape:
+//! 8. **Exactly one warning per violated invariant per registration.**
+//!    A perturbation declaring a single requirement against a kernel
+//!    that violates exactly that requirement produces exactly one
+//!    structured diagnostic, with `violated_invariant` carrying the
+//!    name of the violated invariant. Neither suppressed (silent
+//!    failure) nor multiplied beyond the count of distinct violations.
+//!    - test: [`tests::failure_exactness_violation_emits_exactly_one_warning`]
+//!    - test: [`tests::failure_continuity_violation_emits_exactly_one_warning`]
 //!
-//! 8. Exactly-one warning per violated invariant.
-//! 9. Repeated registration of the same violation does not duplicate
-//!    warnings.
-//! 10. Silent acceptance is structurally impossible — emission goes
-//!     through the structured log bus regardless of subscriber state.
+//! 9. **Repeated registration produces a faithful audit log.**
+//!    Registering the same violating perturbation N times produces
+//!    exactly N events (one per registration), each carrying the same
+//!    `violated_invariant` tag. The events are not silently coalesced
+//!    inside the simulator — every registration is its own logged
+//!    decision and remains visible to log consumers. Visual coalescing
+//!    of repeat events into "× N" badges is a consumer concern (the
+//!    [`Event::coalesce_key`](crate::core::log::Event::coalesce_key)
+//!    field exists for that purpose) and is outside the contract.
+//!    - test: [`tests::failure_repeated_registration_does_not_collapse_audit_trail`]
+//!
+//! 10. **Silent acceptance is structurally impossible.** Emission goes
+//!     through the structured log bus regardless of subscriber state:
+//!     a registration with no subscriber attached completes normally,
+//!     does not panic, returns a registered perturbation, and a
+//!     subsequent subscriber-attached registration still observes the
+//!     warning. The bus is always live; the contract does not depend
+//!     on a subscriber being present at any specific moment.
+//!     - test: [`tests::failure_silent_acceptance_is_impossible`]
 //!
 //! ## What this contract does NOT guarantee
 //!
@@ -623,44 +644,16 @@ mod tests {
     /// Continuity diagnostic — neither suppressed by the presence of
     /// the other.
     ///
-    /// The bus is process-global; concurrent unit tests share it. The
-    /// filter below keys on the `violated_invariant` field — set only
-    /// by `System::emit_kernel_requirement_violation`, no other code
-    /// path in the crate — so traffic from unrelated tests is excluded
-    /// without a per-test marker.
+    /// Bus-isolation against concurrent contract tests is provided by
+    /// [`capture_violation_invariants`]; see its rationale above.
     #[test]
     fn composition_kernel_requirements_take_union() {
-        let captured: Arc<Mutex<Vec<Event>>> = Arc::new(Mutex::new(Vec::new()));
-        let sink = captured.clone();
-        let id = subscribe(move |event: &Event| {
-            if event.level != Level::Warn {
-                return;
-            }
-            if event.fields.iter().any(|(k, _)| *k == "violated_invariant") {
-                sink.lock().unwrap().push(event.clone());
-            }
+        let invariants = capture_violation_invariants(|| {
+            let kernel = Arc::new(TruncatedPlummerKernel::new(1.0));
+            let mut sys = fixture_system().with_kernel(kernel);
+            sys.add_perturbation(Box::new(DeclaresExactnessRequirement));
+            sys.add_perturbation(Box::new(DeclaresContinuityRequirement));
         });
-
-        let kernel = Arc::new(TruncatedPlummerKernel::new(1.0));
-        let mut sys = fixture_system().with_kernel(kernel);
-        sys.add_perturbation(Box::new(DeclaresExactnessRequirement));
-        sys.add_perturbation(Box::new(DeclaresContinuityRequirement));
-
-        let events = captured.lock().unwrap().clone();
-        unsubscribe(id);
-
-        let invariants: Vec<String> = events
-            .iter()
-            .filter_map(|ev| {
-                ev.fields.iter().find_map(|(k, v)| {
-                    if *k == "violated_invariant" {
-                        Some(v.trim_matches('"').to_string())
-                    } else {
-                        None
-                    }
-                })
-            })
-            .collect();
 
         let exactness_count = invariants.iter().filter(|s| *s == "Exactness").count();
         let continuity_count = invariants.iter().filter(|s| *s == "Continuity").count();
@@ -681,6 +674,248 @@ mod tests {
             "expected exactly two invariant-violation diagnostics in total \
              (one per registered perturbation), got {}: {invariants:?}",
             invariants.len(),
+        );
+    }
+
+    // ── Failure model ─────────────────────────────────────────────────────────
+    //
+    // The log bus is a process-global singleton shared by every unit
+    // test in this binary, and `cargo test` runs tests in parallel by
+    // default. A `violated_invariant` filter alone is not enough: any
+    // two contract tests that both register violating perturbations
+    // can cross-contaminate one another's captures because their
+    // events all match the field-key filter.
+    //
+    // `BUS_TEST_LOCK` below serialises the subscribe/work/unsubscribe
+    // window across the five bus-sensitive contract tests
+    // (`composition_kernel_requirements_take_union` and the four
+    // `failure_*` tests). Within the lock, only one test publishes
+    // kernel-requirement violations at a time, so the captured set is
+    // cleanly attributable. Other unit tests continue to run in
+    // parallel; the lock only narrows concurrency among the handful of
+    // bus-sensitive ones.
+
+    static BUS_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    /// Run `body` under [`BUS_TEST_LOCK`], subscribed to the log bus,
+    /// and return the `violated_invariant` tags of every Warn event
+    /// observed during the closure's execution. Tags are de-quoted
+    /// (`"Exactness"` → `Exactness`); their relative order matches
+    /// publish order on the bus.
+    ///
+    /// Holding the lock across subscribe + body + unsubscribe ensures
+    /// the captured set contains only events `body` itself triggered,
+    /// even when other bus-sensitive tests in this binary run in
+    /// parallel. A poisoned lock is recovered (the previous holder
+    /// failed, but the data the lock guards is just a `()` marker).
+    fn capture_violation_invariants(body: impl FnOnce()) -> Vec<String> {
+        let _guard = BUS_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+
+        let captured: Arc<Mutex<Vec<Event>>> = Arc::new(Mutex::new(Vec::new()));
+        let sink = captured.clone();
+        let id = subscribe(move |event: &Event| {
+            if event.level != Level::Warn {
+                return;
+            }
+            if event.fields.iter().any(|(k, _)| *k == "violated_invariant") {
+                sink.lock().unwrap().push(event.clone());
+            }
+        });
+
+        body();
+
+        let events = captured.lock().unwrap().clone();
+        unsubscribe(id);
+
+        events
+            .iter()
+            .filter_map(|ev| {
+                ev.fields.iter().find_map(|(k, v)| {
+                    if *k == "violated_invariant" {
+                        Some(v.trim_matches('"').to_string())
+                    } else {
+                        None
+                    }
+                })
+            })
+            .collect()
+    }
+
+    /// **Invariant 8 (Exactness).** A perturbation declaring a single
+    /// `required_exactness = Exact` requirement, registered against the
+    /// default Plummer kernel (which reports `Softened` whenever any
+    /// body has nonzero softening), produces exactly one warning whose
+    /// `violated_invariant` tag identifies the offending invariant.
+    /// No silent acceptance, no spurious second warning for an
+    /// invariant the perturbation did not constrain.
+    ///
+    /// The bodies use their default material softening — i.e. the
+    /// configuration that any new user gets without thinking about
+    /// kernel preconditions, which is exactly the case the contract
+    /// must catch.
+    #[test]
+    fn failure_exactness_violation_emits_exactly_one_warning() {
+        let invariants = capture_violation_invariants(|| {
+            let primary = Body::star(1.0).at(0.0, 0.0).with_velocity(0.0, 0.0);
+            let satellite = Body::rocky(1e-6).at(1.0, 0.0).with_velocity(0.0, 1.0);
+            let mut sys = System::new(vec![primary, satellite], UnitSystem::canonical())
+                .with_integrator(IntegratorKind::Ias15)
+                .with_dt(1e-3);
+            sys.add_perturbation(Box::new(DeclaresExactnessRequirement));
+        });
+
+        assert_eq!(
+            invariants,
+            vec!["Exactness"],
+            "expected exactly one Exactness diagnostic and no others; got {invariants:?}",
+        );
+    }
+
+    /// **Invariant 8 (Continuity).** A perturbation declaring only
+    /// `min_continuity = Smooth`, registered against
+    /// `TruncatedPlummerKernel` (which reports `Continuity::C0`),
+    /// produces exactly one warning tagged `Continuity` and no
+    /// `Exactness` warning — the perturbation did not declare an
+    /// exactness requirement, so the kernel's `Modified` exactness is
+    /// not a contract violation.
+    #[test]
+    fn failure_continuity_violation_emits_exactly_one_warning() {
+        let invariants = capture_violation_invariants(|| {
+            let kernel = Arc::new(TruncatedPlummerKernel::new(1.0));
+            let mut sys = fixture_system().with_kernel(kernel);
+            sys.add_perturbation(Box::new(DeclaresContinuityRequirement));
+        });
+
+        assert_eq!(
+            invariants,
+            vec!["Continuity"],
+            "expected exactly one Continuity diagnostic and no others; got {invariants:?}",
+        );
+    }
+
+    /// **Invariant 9.** Repeated registration of the same violating
+    /// perturbation produces one event per registration — N
+    /// registrations → N events, each carrying the same
+    /// `violated_invariant` tag. The simulator does not silently
+    /// coalesce repeat violations into a single event: each
+    /// registration is its own logged decision.
+    ///
+    /// The contract is the **audit-log fidelity**, not the visual
+    /// presentation. A UI consumer that wants to fold repeats into
+    /// "× N" badges does so via
+    /// [`Event::coalesce_key`](crate::core::log::Event::coalesce_key);
+    /// the simulator's responsibility ends at faithfully publishing
+    /// every registration event.
+    #[test]
+    fn failure_repeated_registration_does_not_collapse_audit_trail() {
+        const N_REGISTRATIONS: usize = 3;
+
+        let invariants = capture_violation_invariants(|| {
+            let kernel = Arc::new(TruncatedPlummerKernel::new(1.0));
+            let mut sys = fixture_system().with_kernel(kernel);
+            for _ in 0..N_REGISTRATIONS {
+                sys.add_perturbation(Box::new(DeclaresContinuityRequirement));
+            }
+        });
+
+        assert_eq!(
+            invariants.len(),
+            N_REGISTRATIONS,
+            "expected one diagnostic per registration ({N_REGISTRATIONS} total) — \
+             the simulator must not silently coalesce repeat violations; got \
+             {invariants:?}",
+        );
+        assert!(
+            invariants.iter().all(|s| s == "Continuity"),
+            "every diagnostic should carry the Continuity tag (the only invariant \
+             this perturbation declared); got {invariants:?}",
+        );
+    }
+
+    /// **Invariant 10.** Emission is unconditional on subscriber state.
+    /// A registration with no subscriber attached must:
+    ///
+    /// 1. Complete normally — no panic from a missing subscriber.
+    /// 2. Actually register the perturbation — `perturbation_count()`
+    ///    reflects the call.
+    /// 3. Leave the bus live for future subscribers — a subsequent
+    ///    registration after a subscriber attaches still produces the
+    ///    expected warning.
+    ///
+    /// The contract is that the simulator does not silently refuse a
+    /// violating registration nor swallow the warning when no consumer
+    /// is listening. Treating "no subscriber" as a special case would
+    /// give a class of bugs where the simulator behaves differently
+    /// in tests (which subscribe) versus production (which may not),
+    /// so the bus must always be live.
+    ///
+    /// Note: this test holds [`BUS_TEST_LOCK`] for the full duration —
+    /// not just inside [`capture_violation_invariants`] — because phase
+    /// (1) emits a `violated_invariant` event without subscribing to it,
+    /// and that emit must be inside the bus-test critical section to
+    /// avoid leaking into a sibling test's capture window. Subscribe
+    /// management is therefore inlined rather than delegated to the
+    /// helper, which would attempt a second lock acquisition.
+    #[test]
+    fn failure_silent_acceptance_is_impossible() {
+        let _guard = BUS_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+
+        let kernel = Arc::new(TruncatedPlummerKernel::new(1.0));
+        let mut sys = fixture_system().with_kernel(kernel);
+
+        // (1) and (2): registration with no subscriber attached must
+        // not panic and must actually register.
+        let pre_count = sys.perturbation_count();
+        sys.add_perturbation(Box::new(DeclaresContinuityRequirement));
+        assert_eq!(
+            sys.perturbation_count(),
+            pre_count + 1,
+            "registration with no subscriber should still register the \
+             perturbation; the simulator must not silently refuse violating \
+             configurations",
+        );
+
+        // (3): a subsequent subscriber-attached registration still
+        // produces the warning. The bus is live independent of the
+        // history of subscribers. Manual subscribe + unsubscribe here
+        // (rather than calling `capture_violation_invariants`) because
+        // we already hold `BUS_TEST_LOCK` and the helper would deadlock
+        // attempting to re-acquire it.
+        let captured: Arc<Mutex<Vec<Event>>> = Arc::new(Mutex::new(Vec::new()));
+        let sink = captured.clone();
+        let id = subscribe(move |event: &Event| {
+            if event.level != Level::Warn {
+                return;
+            }
+            if event.fields.iter().any(|(k, _)| *k == "violated_invariant") {
+                sink.lock().unwrap().push(event.clone());
+            }
+        });
+
+        sys.add_perturbation(Box::new(DeclaresContinuityRequirement));
+
+        let events = captured.lock().unwrap().clone();
+        unsubscribe(id);
+
+        let invariants: Vec<String> = events
+            .iter()
+            .filter_map(|ev| {
+                ev.fields.iter().find_map(|(k, v)| {
+                    if *k == "violated_invariant" {
+                        Some(v.trim_matches('"').to_string())
+                    } else {
+                        None
+                    }
+                })
+            })
+            .collect();
+
+        assert_eq!(
+            invariants,
+            vec!["Continuity"],
+            "the bus must remain live across subscribe/unsubscribe cycles; a \
+             post-subscription registration is still expected to emit its \
+             warning, got {invariants:?}",
         );
     }
 }
