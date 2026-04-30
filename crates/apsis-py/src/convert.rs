@@ -2,13 +2,13 @@
 //!
 //! This module owns the small set of utilities every binding wrapper
 //! reaches for: error construction with researcher-friendly messages,
-//! 2-vector parsing for position/velocity kwargs, and the canonical
+//! 3-vector parsing for position/velocity kwargs, and the canonical
 //! string-to-enum normalisation policy applied uniformly across
 //! [`crate::body`], [`crate::system`], and elsewhere.
 //!
 //! Centralising these here is what keeps the per-wrapper modules thin:
 //! a `#[pymethods]` body that already delegates to a single [`apsis`]
-//! call only needs `convert::xy_pair(...)?` and `convert::value_error(...)`
+//! call only needs `convert::xyz_triple(...)?` and `convert::value_error(...)`
 //! at the boundary, never its own ad-hoc parsing or formatting.
 
 use pyo3::exceptions::PyValueError;
@@ -28,32 +28,30 @@ pub(crate) fn value_error(context: &str, detail: impl AsRef<str>) -> PyErr {
     PyValueError::new_err(format!("{context}: {}", detail.as_ref()))
 }
 
-/// Extract a `(f64, f64)` from a Python object, accepting any 2-element
-/// sequence. Tuples, lists, and any iterable that yields exactly two
-/// floats all flow through; anything else raises `ValueError` at the
-/// boundary with a clear message.
+/// Extract a 3-component vector from a Python object, accepting either
+/// a 2-element sequence `(x, y)` — treated as planar input with
+/// implicit `z = 0` — or a 3-element sequence `(x, y, z)`.
 ///
-/// Used for `position` and `velocity` kwargs across the binding. Keeping
-/// the parser in one place ensures both `Body` and `System` reject the
-/// same set of malformed inputs the same way — there is no per-wrapper
-/// drift in what "a 2-vector" means.
-///
-/// # Why a single function, not a typed wrapper struct
-///
-/// `(f64, f64)` is the canonical 2-vector representation used by
-/// `apsis::domain::body::Body` itself; anything fancier here would
-/// either re-encode the same data or invent a Python-only type. The
-/// façade-only invariant (see `lib.rs`) forbids the latter.
-pub(crate) fn xy_pair(field: &str, obj: &Bound<'_, PyAny>) -> PyResult<(f64, f64)> {
-    obj.extract::<(f64, f64)>().map_err(|_| {
-        value_error(
-            field,
-            format!(
-                "expected a 2-element sequence (x, y) of floats, got {}",
-                obj.get_type().name().map(|s| s.to_string()).unwrap_or_else(|_| "<?>".into()),
-            ),
-        )
-    })
+/// Used for `position` and `velocity` kwargs across the binding.
+/// Keeping the parser in one place ensures both `Body` and `System`
+/// reject the same set of malformed inputs the same way; there is no
+/// per-wrapper drift in what "a position vector" means. Planar Python
+/// code (`position=(0.5, 0.0)`) keeps working without change;
+/// out-of-plane scenarios opt in by passing the third component.
+pub(crate) fn xyz_triple(field: &str, obj: &Bound<'_, PyAny>) -> PyResult<(f64, f64, f64)> {
+    if let Ok(triple) = obj.extract::<(f64, f64, f64)>() {
+        return Ok(triple);
+    }
+    if let Ok((x, y)) = obj.extract::<(f64, f64)>() {
+        return Ok((x, y, 0.0));
+    }
+    Err(value_error(
+        field,
+        format!(
+            "expected a 2- or 3-element sequence of floats, got {}",
+            obj.get_type().name().map(|s| s.to_string()).unwrap_or_else(|_| "<?>".into()),
+        ),
+    ))
 }
 
 /// Normalise a Python string to the lowercase canonical slug expected

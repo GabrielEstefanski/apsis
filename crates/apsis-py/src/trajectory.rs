@@ -15,11 +15,13 @@ use pyo3::prelude::*;
 ///
 /// All arrays are NumPy `ndarray`s materialised once at construction
 /// time. The 1-D arrays (`t`, `energy`) have shape `(n_samples,)`;
-/// the 2-D arrays (`x`, `y`, `vx`, `vy`) have shape `(n_samples,
-/// n_bodies)` with the body index on the second axis. A researcher
-/// plotting body $k$'s trajectory does
-/// `plt.plot(traj.x[:, k], traj.y[:, k])`; plotting the energy
-/// drift is `plt.plot(traj.t, traj.energy)`.
+/// the 2-D arrays (`x`, `y`, `z`, `vx`, `vy`, `vz`) have shape
+/// `(n_samples, n_bodies)` with the body index on the second axis.
+/// A researcher plotting body $k$'s trajectory does
+/// `plt.plot(traj.x[:, k], traj.y[:, k])`; plotting the energy drift
+/// is `plt.plot(traj.t, traj.energy)`. Bodies confined to the
+/// `xy`-plane have `traj.z` and `traj.vz` populated with zeros — the
+/// arrays are always present and always have the documented shape.
 ///
 /// `Trajectory` is immutable once constructed — there is no mutator
 /// method on the Python side, and the underlying arrays are stored
@@ -29,8 +31,10 @@ pub(crate) struct PyTrajectory {
     t: Py<PyArray1<f64>>,
     x: Py<PyArray2<f64>>,
     y: Py<PyArray2<f64>>,
+    z: Py<PyArray2<f64>>,
     vx: Py<PyArray2<f64>>,
     vy: Py<PyArray2<f64>>,
+    vz: Py<PyArray2<f64>>,
     energy: Py<PyArray1<f64>>,
     dt: Py<PyArray1<f64>>,
     energy_drift: Py<PyArray1<f64>>,
@@ -43,8 +47,10 @@ pub(crate) struct TrajectoryBuffers {
     pub t: Vec<f64>,
     pub x: Vec<f64>,
     pub y: Vec<f64>,
+    pub z: Vec<f64>,
     pub vx: Vec<f64>,
     pub vy: Vec<f64>,
+    pub vz: Vec<f64>,
     pub energy: Vec<f64>,
     pub dt: Vec<f64>,
     pub energy_drift: Vec<f64>,
@@ -76,8 +82,10 @@ impl PyTrajectory {
             t: b.t.into_pyarray(py).unbind(),
             x: to_2d("x", b.x)?,
             y: to_2d("y", b.y)?,
+            z: to_2d("z", b.z)?,
             vx: to_2d("vx", b.vx)?,
             vy: to_2d("vy", b.vy)?,
+            vz: to_2d("vz", b.vz)?,
             energy: b.energy.into_pyarray(py).unbind(),
             dt: b.dt.into_pyarray(py).unbind(),
             energy_drift: b.energy_drift.into_pyarray(py).unbind(),
@@ -125,6 +133,13 @@ impl PyTrajectory {
         self.y.bind(py).clone()
     }
 
+    /// Body $z$-coordinates. Shape `(n_samples, n_bodies)`. Zero for
+    /// orbits confined to the `xy`-plane.
+    #[getter]
+    fn z<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray2<f64>> {
+        self.z.bind(py).clone()
+    }
+
     /// Body $x$-velocities. Shape `(n_samples, n_bodies)`.
     #[getter]
     fn vx<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray2<f64>> {
@@ -135,6 +150,13 @@ impl PyTrajectory {
     #[getter]
     fn vy<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray2<f64>> {
         self.vy.bind(py).clone()
+    }
+
+    /// Body $z$-velocities. Shape `(n_samples, n_bodies)`. Zero for
+    /// orbits confined to the `xy`-plane.
+    #[getter]
+    fn vz<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray2<f64>> {
+        self.vz.bind(py).clone()
     }
 
     /// Total mechanical energy at each sample. Shape `(n_samples,)`.
