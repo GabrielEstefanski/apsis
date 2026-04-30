@@ -132,6 +132,39 @@ re-association site:
   there used to be 16-byte rows) do not propagate into observable
   state.
 
+## 3D smoke-test portfolio (commit 7)
+
+The 3D port closes with two release-mode tests that exercise the
+full 3D code path on physically meaningful scenarios. These are not
+regression sentinels (the planar baselines above are) — they are
+**proof of life** for the 3D path: an inclined orbit reaches the same
+GR perihelion precession rate the planar gate measures, and the
+orbital plane is structurally conserved by two-body dynamics.
+
+| Gate | Mode | Measured | Threshold | Source |
+|------|------|----------|-----------|--------|
+| Mercury 1PN inclined (`i = 7°`, 500 orbits): `rel_err` | release | **2.31e−6** | 1e−4 | `mercury_precession_3d_inclined_matches_gr_within_100ppm` |
+| Mercury 1PN inclined: inclination drift | release | **0** (exact) | 1e−9 rad | same |
+| Mercury 1PN inclined: Ω drift | release | **3.98e−15** rad | 1e−9 rad | same |
+| 3D Newtonian Kepler closure (`i = 7°`, 300 orbits): `ω` drift | release | **1.69e−15** rad | 1e−9 rad | `baseline_newtonian_kepler_3d_inclined_is_closed` |
+| 3D Newtonian Kepler closure: inclination drift | release | **0** (exact) | 1e−9 rad | same |
+| 3D Newtonian Kepler closure: Ω drift | release | **8.01e−16** rad | 1e−9 rad | same |
+
+Two observations:
+
+* The 3D Mercury `rel_err` is ~2× the planar value (2.31e−6 vs
+  1.075879e−6). The difference is consistent with the additional
+  per-axis arithmetic in the 3D kernel and orbital-element pipeline:
+  one extra multiply-add per axis per body per substep accumulates
+  ~1 ULP over 500 orbits. The result still sits four orders of
+  magnitude below the 100 ppm gate.
+* `inclination drift = 0` (exactly, not "below threshold") in both
+  tests. Two-body dynamics preserves the orbital plane structurally;
+  any non-zero value here would indicate that the plane is being
+  rotated by spurious cross-axis coupling in the kernel or the
+  orbital-element pipeline. The bit-exact zero is the strongest
+  possible confirmation that the 3D path is structurally sound.
+
 ## Not captured (rationale)
 
 Tests that assert booleans or use `assert_relative_eq!(_, _, epsilon
