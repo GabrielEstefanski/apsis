@@ -142,16 +142,19 @@ impl System {
     /// Two regimes, selected by whether the system has positive softening on
     /// every body:
     ///
-    /// - **Softened (η = 0.05):** Power et al. (2003) acceleration criterion
-    ///   `η · √(ε_min / a_max)` combined with Aarseth's jerk criterion
-    ///   `η · √(a_max / |jerk|)`. Uses the smallest softening length as the
-    ///   resolution scale; `√(ε / a)` has the dimensions of time and is
-    ///   bounded above by the time the body needs to traverse one softening
-    ///   length under acceleration `a_max`.
+    /// - **Softened (η = 0.05):** Power-style acceleration criterion
+    ///   `η · √(ε_min / a_max)` (formula structure from Power et al. 2003;
+    ///   the η value is an apsis-side convention within the 0.01–0.1 range
+    ///   typical in literature) combined with Aarseth's jerk criterion
+    ///   `η · √(a_max / |jerk|)` (Aarseth 2003 §2). Uses the smallest
+    ///   softening length as the resolution scale; `√(ε / a)` has the
+    ///   dimensions of time and is bounded above by the time the body
+    ///   needs to traverse one softening length under acceleration
+    ///   `a_max`.
     ///
-    /// - **Unsoftened fallback (η = 0.01):** the Power et al. formula
-    ///   degenerates at `ε = 0` (`dt = η · √(0 / a) = 0`). The fallback uses
-    ///   the shortest pairwise Kepler period (Hut 1981; Aarseth 2003 §2):
+    /// - **Unsoftened fallback (η = 0.01):** the Power-style formula
+    ///   degenerates at `ε = 0` (`dt = η · √(0 / a) = 0`). The fallback
+    ///   uses the shortest pairwise Kepler period (Aarseth 2003 §2):
     ///   `T_ij = 2π · √(r_ij³ / μ_ij)` with `μ_ij = G · (m_i + m_j)`, and
     ///   returns `η · min_pairs(T_ij)`. This is closed-form, scale-aware,
     ///   and naturally tightens during close encounters (`T_ij → 0` as
@@ -170,8 +173,9 @@ impl System {
 
         let eps_min = self.bodies.iter().map(|b| b.softening).fold(f64::MAX, f64::min);
 
-        // Softened path: Power et al. (2003) + Aarseth jerk. Requires
-        // `ε > 0` as a length scale; degenerate at `ε = 0`.
+        // Softened path: Power-style acceleration criterion + Aarseth (2003 §2)
+        // jerk criterion. Requires `ε > 0` as a length scale; degenerate at
+        // `ε = 0`.
         if eps_min > 0.0 && eps_min < f64::MAX {
             const ETA: f64 = 0.05;
 
@@ -316,7 +320,7 @@ mod tests {
 
     /// Mixed softened + unsoftened: any unsoftened body forces `eps_min = 0`,
     /// routing through the pair-Kepler fallback. A softened companion does
-    /// not switch the branch back to the Power et al. path; the conservative
+    /// not switch the branch back to the Power-style path; the conservative
     /// choice (use the stiffer criterion) wins.
     #[test]
     fn mixed_softening_falls_back_to_pair_kepler() {
@@ -341,7 +345,7 @@ mod tests {
     }
 
     /// Regression on the softened path: when every body has positive softening,
-    /// the Power et al. + Aarseth criterion runs unchanged. Verifies the new
+    /// the Power-style acceleration + Aarseth jerk criterion runs unchanged. Verifies the new
     /// branch did not break the existing behaviour.
     #[test]
     fn softened_path_returns_finite_positive_dt() {
