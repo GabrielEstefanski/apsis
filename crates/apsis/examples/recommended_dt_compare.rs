@@ -17,7 +17,9 @@
 //!
 //! - VV  (gated):  `|ΔE/E_0| ≤ 1e-3`
 //! - Y4  (gated):  `|ΔE/E_0| ≤ 1e-6`
-//! - VV+Y4 (gated): `|ΔLz/Lz_0| ≤ 1e-10`  (or absolute `1e-10` when |Lz_0| < 1e-12)
+//! - VV+Y4 (gated): `|ΔLz| ≤ max(1e-10 · |Lz_0|, 1e-10)` — `isclose`-style
+//!   two-sided bound: relative tolerance for non-trivial `|Lz_0|`, absolute
+//!   floor at the round-off level for small or zero `|Lz_0|`.
 //! - WH (informational): no a-priori bound on either metric
 //!
 //! ## Exit codes
@@ -37,9 +39,12 @@ use std::process::ExitCode;
 
 const TOL_REL_E_VV: f64 = 1.0e-3;
 const TOL_REL_E_Y4: f64 = 1.0e-6;
+
+// `isclose`-style bound for Lz: `|ΔLz| ≤ max(rel · |Lz_0|, abs)`.
+// The absolute floor handles scenarios where `|Lz_0|` is small or zero
+// (a pure-relative bound would translate to a sub-round-off target).
 const TOL_REL_LZ: f64 = 1.0e-10;
 const TOL_ABS_LZ: f64 = 1.0e-10;
-const LZ_REL_THRESHOLD: f64 = 1.0e-12;
 
 // ── Records ─────────────────────────────────────────────────────────────── //
 
@@ -59,8 +64,10 @@ struct CellResult {
     lz0: f64,
     dt_recommended: f64,
     peak_rel_de: f64,
-    peak_lz_drift: f64,
-    lz_uses_absolute: bool,
+    /// Peak `|ΔLz|` in absolute units; the bound is computed via `isclose`
+    /// formulation `max(TOL_REL_LZ · |Lz0|, TOL_ABS_LZ)` and stored in
+    /// `lz_gate_tolerance` so the report shows the gate that was applied.
+    peak_abs_lz_drift: f64,
     gated: bool,
     e_gate_passed: Option<bool>,
     e_gate_tolerance: Option<f64>,
@@ -179,31 +186,18 @@ fn analyse(samples: &BTreeMap<(String, String), Vec<Sample>>) -> Vec<CellResult>
             rows.iter().map(|r| (r.e - e0).abs()).fold(0.0_f64, f64::max)
         };
 
-        // Peak Lz drift — relative when |Lz_0| ≥ threshold, else absolute.
-        let lz_uses_absolute = lz0.abs() < LZ_REL_THRESHOLD;
-        let peak_lz_drift = if lz_uses_absolute {
-            rows.iter().map(|r| (r.lz - lz0).abs()).fold(0.0_f64, f64::max)
-        } else {
-            rows.iter().map(|r| ((r.lz - lz0) / lz0).abs()).fold(0.0_f64, f64::max)
-        };
+        let peak_abs_lz_drift = rows.iter().map(|r| (r.lz - lz0).abs()).fold(0.0_f64, f64::max);
+        let lz_bound_effective = (TOL_REL_LZ * lz0.abs()).max(TOL_ABS_LZ);
 
         // Apply gates per integrator.
         let (gated, e_tol, lz_tol) = match integrator.as_str() {
-            "vv" => (
-                true,
-                Some(TOL_REL_E_VV),
-                Some(if lz_uses_absolute { TOL_ABS_LZ } else { TOL_REL_LZ }),
-            ),
-            "y4" => (
-                true,
-                Some(TOL_REL_E_Y4),
-                Some(if lz_uses_absolute { TOL_ABS_LZ } else { TOL_REL_LZ }),
-            ),
+            "vv" => (true, Some(TOL_REL_E_VV), Some(lz_bound_effective)),
+            "y4" => (true, Some(TOL_REL_E_Y4), Some(lz_bound_effective)),
             "wh" => (false, None, None),
             other => panic!("unknown integrator label: {other}"),
         };
         let e_gate_passed = e_tol.map(|tol| peak_rel_de <= tol);
-        let lz_gate_passed = lz_tol.map(|tol| peak_lz_drift <= tol);
+        let lz_gate_passed = lz_tol.map(|tol| peak_abs_lz_drift <= tol);
 
         out.push(CellResult {
             scenario: scenario.clone(),
@@ -213,8 +207,7 @@ fn analyse(samples: &BTreeMap<(String, String), Vec<Sample>>) -> Vec<CellResult>
             lz0,
             dt_recommended: dt_rec,
             peak_rel_de,
-            peak_lz_drift,
-            lz_uses_absolute,
+            peak_abs_lz_drift,
             gated,
             e_gate_passed,
             e_gate_tolerance: e_tol,
@@ -232,10 +225,10 @@ fn print_report(cells: &[CellResult]) {
     println!("Validation — recommended_dt heuristic — comparison report");
     println!();
     println!(
-        "  {:<26} {:<3} {:>13} {:>11} {:>12} {:<7}",
-        "scenario", "int", "dt_rec", "|ΔE/E_0|", "|ΔLz|", "verdict"
+        "  {:<26} {:<3} {:>13} {:>11} {:>12} {:>12} {:<7}",
+        "scenario", "int", "dt_rec", "|ΔE/E_0|", "|ΔLz|", "Lz_bound", "verdict"
     );
-    println!("  {:-<26} {:-<3} {:->13} {:->11} {:->12} {:-<7}", "", "", "", "", "", "");
+    println!("  {:-<26} {:-<3} {:->13} {:->11} {:->12} {:->12} {:-<7}", "", "", "", "", "", "", "");
     for c in cells {
         let verdict = if !c.gated {
             "info".to_string()
@@ -255,15 +248,18 @@ fn print_report(cells: &[CellResult]) {
                 format!("FAIL[{}]", parts.join(","))
             }
         };
-        let lz_label = if c.lz_uses_absolute { "abs" } else { "rel" };
+        let lz_bound_str = match c.lz_gate_tolerance {
+            Some(t) => format!("{t:.3e}"),
+            None => "—".to_string(),
+        };
         println!(
-            "  {:<26} {:<3} {:>13.3e} {:>11.3e} {:>9.3e}{}  {}",
+            "  {:<26} {:<3} {:>13.3e} {:>11.3e} {:>12.3e} {:>12} {}",
             c.scenario,
             c.integrator,
             c.dt_recommended,
             c.peak_rel_de,
-            c.peak_lz_drift,
-            lz_label,
+            c.peak_abs_lz_drift,
+            lz_bound_str,
             verdict,
         );
     }
@@ -297,8 +293,7 @@ fn write_json(f: &mut File, cells: &[CellResult]) -> std::io::Result<()> {
         writeln!(f, "      \"lz0\": {:.18e},", c.lz0)?;
         writeln!(f, "      \"dt_recommended\": {:.18e},", c.dt_recommended)?;
         writeln!(f, "      \"peak_rel_de\": {:.18e},", c.peak_rel_de)?;
-        writeln!(f, "      \"peak_lz_drift\": {:.18e},", c.peak_lz_drift)?;
-        writeln!(f, "      \"lz_uses_absolute\": {},", c.lz_uses_absolute)?;
+        writeln!(f, "      \"peak_abs_lz_drift\": {:.18e},", c.peak_abs_lz_drift)?;
         writeln!(f, "      \"gated\": {},", c.gated)?;
         write_optional_bool(f, "e_gate_passed", c.e_gate_passed)?;
         write_optional_f64(f, "e_gate_tolerance", c.e_gate_tolerance)?;
