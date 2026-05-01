@@ -22,6 +22,13 @@
 //!   floor at the round-off level for small or zero `|Lz_0|`.
 //! - WH (informational): no a-priori bound on either metric
 //!
+//! ## Utilization
+//!
+//! Each gated cell additionally emits `peak / bound` for both metrics.
+//! `0` is the round-off floor, `1` is at the gate edge, `>1` is FAIL.
+//! Surfaces "passes but tight" cells that would be invisible in a binary
+//! pass/fail report.
+//!
 //! ## Exit codes
 //!
 //! - `0` — all gated cells within tolerance.
@@ -64,15 +71,14 @@ struct CellResult {
     lz0: f64,
     dt_recommended: f64,
     peak_rel_de: f64,
-    /// Peak `|ΔLz|` in absolute units; the bound is computed via `isclose`
-    /// formulation `max(TOL_REL_LZ · |Lz0|, TOL_ABS_LZ)` and stored in
-    /// `lz_gate_tolerance` so the report shows the gate that was applied.
     peak_abs_lz_drift: f64,
     gated: bool,
     e_gate_passed: Option<bool>,
     e_gate_tolerance: Option<f64>,
+    e_gate_utilization: Option<f64>,
     lz_gate_passed: Option<bool>,
     lz_gate_tolerance: Option<f64>,
+    lz_gate_utilization: Option<f64>,
 }
 
 // ── Main ────────────────────────────────────────────────────────────────── //
@@ -198,6 +204,8 @@ fn analyse(samples: &BTreeMap<(String, String), Vec<Sample>>) -> Vec<CellResult>
         };
         let e_gate_passed = e_tol.map(|tol| peak_rel_de <= tol);
         let lz_gate_passed = lz_tol.map(|tol| peak_abs_lz_drift <= tol);
+        let e_gate_utilization = e_tol.map(|tol| peak_rel_de / tol);
+        let lz_gate_utilization = lz_tol.map(|tol| peak_abs_lz_drift / tol);
 
         out.push(CellResult {
             scenario: scenario.clone(),
@@ -211,8 +219,10 @@ fn analyse(samples: &BTreeMap<(String, String), Vec<Sample>>) -> Vec<CellResult>
             gated,
             e_gate_passed,
             e_gate_tolerance: e_tol,
+            e_gate_utilization,
             lz_gate_passed,
             lz_gate_tolerance: lz_tol,
+            lz_gate_utilization,
         });
     }
     out
@@ -225,10 +235,13 @@ fn print_report(cells: &[CellResult]) {
     println!("Validation — recommended_dt heuristic — comparison report");
     println!();
     println!(
-        "  {:<26} {:<3} {:>13} {:>11} {:>12} {:>12} {:<7}",
-        "scenario", "int", "dt_rec", "|ΔE/E_0|", "|ΔLz|", "Lz_bound", "verdict"
+        "  {:<26} {:<3} {:>13} {:>11} {:>8} {:>12} {:>8} {:<7}",
+        "scenario", "int", "dt_rec", "|ΔE/E_0|", "E_util", "|ΔLz|", "Lz_util", "verdict"
     );
-    println!("  {:-<26} {:-<3} {:->13} {:->11} {:->12} {:->12} {:-<7}", "", "", "", "", "", "", "");
+    println!(
+        "  {:-<26} {:-<3} {:->13} {:->11} {:->8} {:->12} {:->8} {:-<7}",
+        "", "", "", "", "", "", "", ""
+    );
     for c in cells {
         let verdict = if !c.gated {
             "info".to_string()
@@ -248,18 +261,23 @@ fn print_report(cells: &[CellResult]) {
                 format!("FAIL[{}]", parts.join(","))
             }
         };
-        let lz_bound_str = match c.lz_gate_tolerance {
-            Some(t) => format!("{t:.3e}"),
+        let e_util_str = match c.e_gate_utilization {
+            Some(u) => format!("{u:.2e}"),
+            None => "—".to_string(),
+        };
+        let lz_util_str = match c.lz_gate_utilization {
+            Some(u) => format!("{u:.2e}"),
             None => "—".to_string(),
         };
         println!(
-            "  {:<26} {:<3} {:>13.3e} {:>11.3e} {:>12.3e} {:>12} {}",
+            "  {:<26} {:<3} {:>13.3e} {:>11.3e} {:>8} {:>12.3e} {:>8} {}",
             c.scenario,
             c.integrator,
             c.dt_recommended,
             c.peak_rel_de,
+            e_util_str,
             c.peak_abs_lz_drift,
-            lz_bound_str,
+            lz_util_str,
             verdict,
         );
     }
@@ -273,6 +291,42 @@ fn print_report(cells: &[CellResult]) {
         .count();
     let info = cells.iter().filter(|c| !c.gated).count();
     println!("  gated cells: {passed_gated}/{total_gated} pass    informational cells: {info}");
+
+    print_tightest(cells);
+}
+
+// Tightest gated cells by max(E_util, Lz_util). Surfaces "passes but at the
+// edge" — the regression canary a binary pass/fail report would hide.
+fn print_tightest(cells: &[CellResult]) {
+    let mut ranked: Vec<(&CellResult, &'static str, f64)> = Vec::new();
+    for c in cells.iter().filter(|c| c.gated) {
+        if let Some(u) = c.e_gate_utilization {
+            ranked.push((c, "E", u));
+        }
+        if let Some(u) = c.lz_gate_utilization {
+            ranked.push((c, "Lz", u));
+        }
+    }
+    ranked.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
+
+    println!();
+    println!("  Tightest gated cells (top 5 by peak/bound ratio):");
+    for (c, metric, util) in ranked.iter().take(5) {
+        println!(
+            "    {:<26} {:<3} {:<2}  util={:.3e}  ({})",
+            c.scenario,
+            c.integrator,
+            metric,
+            util,
+            if *util > 1.0 {
+                "FAIL"
+            } else if *util > 0.1 {
+                "tight"
+            } else {
+                "loose"
+            },
+        );
+    }
 }
 
 // ── JSON emit (manual; no serde dependency) ────────────────────────────── //
@@ -297,8 +351,10 @@ fn write_json(f: &mut File, cells: &[CellResult]) -> std::io::Result<()> {
         writeln!(f, "      \"gated\": {},", c.gated)?;
         write_optional_bool(f, "e_gate_passed", c.e_gate_passed)?;
         write_optional_f64(f, "e_gate_tolerance", c.e_gate_tolerance)?;
+        write_optional_f64(f, "e_gate_utilization", c.e_gate_utilization)?;
         write_optional_bool(f, "lz_gate_passed", c.lz_gate_passed)?;
-        write_optional_f64_last(f, "lz_gate_tolerance", c.lz_gate_tolerance)?;
+        write_optional_f64(f, "lz_gate_tolerance", c.lz_gate_tolerance)?;
+        write_optional_f64_last(f, "lz_gate_utilization", c.lz_gate_utilization)?;
         let trailing = if idx + 1 < cells.len() { "," } else { "" };
         writeln!(f, "    }}{}", trailing)?;
     }

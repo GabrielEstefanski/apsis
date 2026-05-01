@@ -211,6 +211,20 @@ Peak $|\Delta E / E_0|$ for WH per scenario, alongside absolute $|\Delta L_z|$ d
 
 WH energy spans 14 orders of magnitude across the grid. Best: `pluto_charon` $2.21 \times 10^{-14}$ (essentially f64 floor — $dt_\text{recommended} = 4.93 \times 10^{-3}$ happens to be near-resonant for the binary's orbital period). Worst: `hd_80606_b_system` $1.43 \times 10^{0}$ (energy fully lost — the same catastrophic failure mode documented for TRAPPIST-1 + WH in issue #16, here triggered by a non-resonant `recommended_dt` on a high-eccentricity system whose dynamics WH cannot integrate stably without algorithmic redesign). The 14-decade span confirms the protocol's choice not to gate WH: there is no single bound that meaningfully discriminates "WH is healthy" from "WH is broken" for arbitrary `recommended_dt` outputs.
 
+### Bound utilization — regression canary
+
+Binary pass/fail hides structure. The comparator additionally emits per-cell utilization $u = \text{peak} / \text{bound}$ for every gated metric: $u = 0$ at the round-off floor, $u = 1$ at the gate edge, $u > 1$ FAIL. Sorted descending, the five tightest gated cells across the grid are:
+
+| Rank | Scenario | Integrator | Metric | $u$ | Status |
+| ---: | --- | --- | --- | ---: | --- |
+| 1 | `hd_80606_b_system` | VV | E | 6.68e-1 | tight |
+| 2 | `three_body_figure_eight` | VV | E | 2.35e-2 | loose |
+| 3 | `hd_80606_b_system` | Y4 | E | 1.32e-2 | loose |
+| 4 | `binary` | VV | E | 9.30e-3 | loose |
+| 5 | `binary` | Y4 | E | 6.75e-3 | loose |
+
+Only one cell sits within a decade of the bound: `hd_80606_b_system` VV at $u = 0.668$ (energy drift $6.68 \times 10^{-4}$ vs the $10^{-3}$ VV bound). The mechanism is documented in §Interpretation as the high-eccentricity close-encounter regime stretching VV's smooth-flow assumption — a known interpretive case, not a regression — but the utilization metric makes it explicit: a future change that pushes this cell past $u = 1$ would surface in the canary block before the binary verdict flips. All Lz cells sit at $u \leq 5 \times 10^{-4}$, ~3 decades inside the floor, dominated by f64 round-off.
+
 Raw outputs: `validation/recommended-dt/out/runs.csv` (3939 rows), `out/comparison.json`.
 
 ---
@@ -262,6 +276,8 @@ Under the revised bound, the `solar_system` Y4 cell passes at $1.98 \times 10^{-
 | Raw outputs | `validation/recommended-dt/out/runs.csv`, `validation/recommended-dt/out/comparison.json` |
 
 **Commit pinning protocol:** the canonical hash committed to this notebook on the run date includes both Cargo examples, this notebook itself, and any scenario-list adjustments. Reproducible from a clean checkout of that commit with no Python venv.
+
+**JSON schema follow-up (deferred).** `comparison.json` is currently consumed only locally and is gitignored alongside the CSV. If a downstream consumer is added — paper-figure script, CI gate, cross-run regression diff — an explicit `"schema_version": <n>` field should be introduced at that time, with the field renames in this notebook's revision (`peak_lz_drift` → `peak_abs_lz_drift`, removal of `lz_uses_absolute`, addition of `e_gate_utilization`/`lz_gate_utilization`) anchoring `v2`. Until a downstream consumer exists, formal versioning is YAGNI and not introduced.
 
 ---
 
