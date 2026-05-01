@@ -1,0 +1,169 @@
+# Validation — `recommended_dt` heuristic for fixed-step integrators
+
+**Date:** 2026-05-01
+**Subject:** Confirm that `System::recommended_dt()` produces a timestep value that, when fed to the fixed-step integrators (Velocity Verlet, Yoshida-4), yields energy and angular-momentum conservation within bounds derivable from the heuristic's literature derivation.
+**Baseline commit:** *(to be pinned at run time)*
+**Tooling:** apsis only — no foreign-implementation comparison. The harness is a Cargo example writing CSV plus a Rust comparator; no Python dependency.
+**Status:** *Protocol declared a priori; no run executed at the time of writing. Results section to be populated once the harness is invoked on the pinned commit.*
+
+---
+
+## Abstract
+
+This experiment validates the `recommended_dt` heuristic — a runtime function on `System` that returns a physics-justified timestep based on the current body state. The heuristic combines two regimes (Power-style acceleration criterion `dt = η · √(ε/a)` after Power et al. 2003 for the formula structure, plus Aarseth's jerk criterion `dt = η · √(a/|jerk|)` (Aarseth 2003 §2), both for softened systems; the closest-pair Kepler period (Aarseth 2003 §2) for unsoftened systems) selected by the body softening profile. The validation gates each fixed-step integrator's peak energy drift against a bound derived from the heuristic's underlying scaling argument: for symplectic methods at step size $\eta \cdot T_\text{natural}$ in smooth flow, peak $|\Delta E / E_0| \sim (dt/T_\text{natural})^k$ where $k$ is the integrator order.
+
+Velocity Verlet ($k = 2$) and Yoshida-4 ($k = 4$) are gated; Wisdom–Holman is reported as informational because its sympletic structure depends on dt commensurability with orbital period (Wisdom & Holman 1991), a constraint the heuristic does not encode. Angular momentum is gated as a structural invariant — preserved by Newton's 3rd law in the force evaluation regardless of integrator order.
+
+The experiment closes the third Phase 6A item of the v0.1 validation portfolio (alongside the Kepler/figure-8/Pythagorean parity sequence).
+
+---
+
+## Motivation
+
+`recommended_dt` is the apsis answer to the user-facing question "what timestep should I use?". It is surfaced through `Metrics::recommended_dt`, available in the GUI inspector and in scripted Python access. A user reading this value and feeding it back to `with_dt(...)` reasonably expects bounded conservation in the resulting integration — but no test in the repository today asserts this. The heuristic is correctly implemented at the formula level (PR #20 plus the original Power+Aarseth path); whether the formulas it uses produce *operationally safe* dt for the integrator zoo is a distinct claim that needs evidence.
+
+This experiment supplies that evidence within the regime each formula's literature derivation supports. Out-of-regime scenarios (chaotic close-encounter, period-resonant) are reported with informational framing — the heuristic isn't claimed to be safe there, and the data clarifies how far from the bound the operational behaviour actually drifts.
+
+---
+
+## Protocol *(declared a priori, before any code runs)*
+
+### Hypothesis
+
+For each scenario in §Methodology and each fixed-step integrator (VV, Y4, WH), set `dt = recommended_dt` evaluated after one warm-up step, then integrate for 100 substeps and measure peak conserved-quantity drift. The bounds below are bounded *a priori* at the values stated, derived from the symplectic-order scaling and the heuristic's η values.
+
+#### Tier 1 — Energy conservation *(gated)*
+
+- **Velocity Verlet:** $\max |\Delta E / E_0| \leq 1.0 \times 10^{-3}$. The Power-style acceleration criterion `dt = η · √(ε/a)` (originating in Power et al. 2003 for cosmological N-body; the η value is an apsis-side convention within the 0.01–0.1 range typical in literature) keeps VV energy conservation in the $10^{-3}$–$10^{-4}$ range for smooth-flow regimes; the bound is calibrated to the upper end of that observed range as a literature-anchored a-priori threshold. The number reflects what the heuristic was designed to deliver, not a theoretical worst-case scaling. Tight enough that scenarios where the smooth-flow assumption breaks (close encounters, chaos) may legitimately exceed it — that is itself a reportable finding, not a protocol failure.
+
+- **Yoshida-4:** $\max |\Delta E / E_0| \leq 1.0 \times 10^{-6}$. Y4's symplectic 4th-order error scales as $(dt / T_\text{natural})^4$ in smooth flow. In practice the heuristic chooses $dt = \eta \cdot \sqrt{\varepsilon / a_\text{max}}$ — not $\eta \cdot T_\text{natural}$ — and the resulting $dt / T_\text{natural}$ is typically far below $\eta$ for Kepler-like configurations (e.g., $dt / T \sim 8 \times 10^{-4}$ for a softened binary at $r = 1$, $\varepsilon = 0.01$, $\mu = 1$, giving theoretical peak $|\Delta E / E| \sim 4 \times 10^{-13}$). The bound at $1 \times 10^{-6}$ is an operational gate roughly one decade above typical Y4 conservation in this regime — selected to detect deviations of operational concern (a 4-order improvement over the VV bound, reflecting Y4's higher integrator order), not as a theoretical-worst-case ceiling.
+
+#### Tier 2 — Structural invariant *(gated)*
+
+- **Angular momentum:** $\max |\Delta L_z / L_z(0)| \leq 1.0 \times 10^{-10}$ (or absolute $\leq 1.0 \times 10^{-10}$ when $L_z(0) = 0$ by IC construction) for **VV and Y4** per scenario. The absolute bound is set by the round-off floor of the velocity update accumulated over the run: per-step round-off in $L_z$ is bounded above by $N \cdot \mathrm{ULP} \cdot |v|_\text{typical}$; over 100 steps with $N \le 10$ bodies and $|v| \sim O(1)$ in canonical units, the floor sits near $2 \times 10^{-13}$. The bound at $10^{-10}$ leaves $\sim 500\times$ margin to the realistic round-off floor — failures here would indicate a bookkeeping bug in the integrator's force evaluation or velocity update, not arithmetic noise. For VV and Y4, Newton's 3rd law in the force evaluation preserves total angular momentum at evaluation roundoff regardless of integrator order; this gate is therefore a structural sanity check independent of the heuristic. **WH is excluded from this gate** — its algorithmic structure (analytic Kepler drift plus a central-body update outside the symplectic split, see Issue #16) does not preserve $L_z$ as a structural invariant, so $L_z$ drift on WH legitimately reflects WH's known algorithmic state rather than a property of the heuristic. WH's $L_z$ is reported informationally alongside its $\Delta E / E$ in Tier 3.
+
+#### Tier 3 — Wisdom–Holman *(informational, NOT gated)*
+
+- **Wisdom–Holman:** $\max |\Delta E / E_0|$ and $\max |\Delta L_z / L_z(0)|$ reported per scenario. **No a-priori bound declared** for either metric. Two concurrent reasons:
+  - WH's symplectic structure requires dt commensurate with shortest orbital period (Wisdom & Holman 1991); `recommended_dt` does not compute orbital period and may produce a non-resonant value.
+  - WH's algorithmic structure has documented bugs (Issue #16) that violate $L_z$ preservation outside the round-off floor.
+
+  WH numbers characterise where the heuristic's output happens to fall for an integrator the heuristic was not designed for, alongside a reference of how much the WH bugs themselves contribute. Large drift on either metric ≠ heuristic defect, only out-of-domain application.
+
+### Methodology
+
+#### Scenarios
+
+13 templates from `apsis/src/templates/presets/`, chosen for variety in mass ratio, separation, eccentricity, and N. Each yields `Some(_)` from `recommended_dt` after one warm-up step.
+
+| Template | N | Regime | Softening profile |
+| --- | --: | --- | --- |
+| `binary` | 2 | Equal-mass Kepler | softened (default material) |
+| `solar_system` | 9 | Realistic multi-body | softened |
+| `kepler_36` | 3 | Compact resonant | softened |
+| `pluto_charon` | 2 | Binary close-orbit | softened |
+| `alpha_centauri_ab` | 2 | Wide binary | softened |
+| `hot_jupiter` | 2 | Close-in star+planet | softened |
+| `sun_earth_moon` | 3 | Hierarchical | softened |
+| `sun_earth_lagrange` | 3 | Lagrange L4/L5 | softened |
+| `jupiter_trojan` | 3 | Three-body asymmetric | softened |
+| `hd_80606_b_system` | 2 | High-eccentricity | softened |
+| `trappist_one` | 8 | Compact resonant chain | softened |
+| `three_body_pythagorean` | 3 | Chaotic close-encounter | unsoftened |
+| `three_body_figure_eight` | 3 | Periodic 3-body | unsoftened |
+
+The last two exercise the unsoftened-fallback path introduced in commit `70a6e76` (PR #20). The first eleven exercise the softened Power+Aarseth path.
+
+#### Per-scenario protocol
+
+`recommended_dt` depends only on body state (positions, velocities, softening, masses) — not on the integrator selected. The protocol therefore computes it **once per scenario** with a fixed canonical warm-up integrator (Velocity Verlet), and reuses the same `dt` value across the three scored integrators of the cell. This avoids the spurious "small variance across integrators" that would result from re-evaluating per cell with different warm-up integrator state.
+
+**Per-scenario warm-up (executed once):**
+
+1. Build the system from the template at the canonical seed.
+2. Set Velocity Verlet integrator and `with_dt(template.suggested_dt)` (warm-up dt — irrelevant for the test, just needs to populate diagnostics; falls back to $10^{-3}$ if the template's `suggested_dt` is `None`).
+3. `sys.step()` once to populate `last_diag` (a_max, jerk).
+4. Read `dt_recommended = sys.recommended_dt()`. Skip the entire scenario if this is `None` (e.g., a single-body template, or a degenerate IC where `a_max ≤ 1e-30`).
+
+**Per-cell scored run (executed three times per scenario, one per integrator):**
+
+1. Build a fresh `System` from the same template — not a reset of the warm-up system, but a separate construction so any internal integrator state from the warm-up does not leak into the scored run.
+2. Set the cell's integrator (VV / Y4 / WH) and `with_dt(dt_recommended)`.
+3. Capture $E_0$ and $L_z(0)$ from the fresh body state via `total_energy(sys.bodies())` and `angular_momentum_z(sys.bodies())` — `sys.energy()` returns $0$ before the first force evaluation because `last_kinetic` / `last_potential` are still at their default; computing from body state directly bypasses that warm-up requirement.
+4. Integrate for 100 substeps. After each `sys.step()`, record $E(t)$ and $L_z(t)$ from the same body-state formulas.
+5. Compute $\max_t |\Delta E / E_0|$ and $\max_t |\Delta L_z / L_z(0)|$ (or absolute when $|L_z(0)| < 10^{-12}$).
+
+Record `dt_recommended` itself once per scenario for audit. By construction this value is identical across the three integrator cells in a scenario — any divergence would indicate state leakage in the warm-up step or a non-deterministic side-effect in `recommended_dt`.
+
+#### Why 100 substeps
+
+A short horizon focuses the test on the per-step truncation behaviour of the heuristic-chosen dt, isolating it from long-horizon secular drift that other validation experiments (Kepler 100T, figure-8 10T) already characterise. The 100-substep horizon is enough to surface peak-amplitude oscillation in symplectic conservation curves without entering the regime where round-off accumulation dominates the truncation signal.
+
+#### Metric formulas
+
+- **Energy:** `total_energy(bodies) = Σᵢ ½mᵢvᵢ² − Σᵢ<ⱼ G mᵢ mⱼ / |𝐫ᵢ − 𝐫ⱼ|`. Same formula as the parity comparator; verified by the existing test suite.
+- **Angular momentum:** `Lz(bodies) = Σᵢ mᵢ (xᵢ vyᵢ − yᵢ vxᵢ)`. Computed at every step from current state.
+- **Drift:** $\max_{t} |Q(t) - Q(0)| / |Q(0)|$ for relative; $\max_{t} |Q(t) - Q(0)|$ for absolute.
+
+### Why this metric set, not (e.g.) per-step truncation error
+
+The integrator's internal truncation-error estimator (used by IAS15's controller) is not exposed by VV/Y4/WH. Energy and angular-momentum drift are the externally-observable proxies that any user can check. They directly answer the question *"if I trust recommended_dt, what conservation quality do I get?"* — the operational claim the heuristic makes implicitly.
+
+### Out of scope (declared a priori)
+
+- **IAS15.** IAS15's adaptive controller chooses its own dt; passing `recommended_dt` to IAS15 is meaningless because it overrides via the controller. Adaptive integrators are a separate validation axis.
+- **Long-horizon characterisation.** Already covered by the parity portfolio (Kepler 100T, figure-8 10T, Pythagorean 70 t.u.). This experiment focuses on per-step heuristic correctness.
+- **η-sensitivity sweep.** The η values (0.05 softened, 0.01 unsoftened) are declared a priori within the conventional ranges adopted in literature (formulas after Power et al. 2003 and Aarseth 2003 §2 respectively; specific values are the apsis defaults). A sweep would characterise the cost-precision frontier as a separate Phase 6A experiment.
+- **WH gating.** Reported only.
+- **Recommendation strength claim.** The experiment validates that recommended_dt produces *bounded* conservation, not that it produces *optimal* dt for any specific scenario. Optimality requires a sweep, declared above as out of scope.
+
+---
+
+## Results
+
+*To be populated post-run. Format: per-scenario, per-integrator table reporting `dt_recommended`, peak $|\Delta E / E_0|$, peak $|\Delta L_z / L_z(0)|$ (or absolute), and verdict against the Tier 1 + Tier 2 gates. WH column shown for scope characterisation. Final paragraph reads the four bands together (softened vs unsoftened path; smooth vs chaotic regime; gated vs informational).*
+
+---
+
+## Threats to validity
+
+1. **Warm-up state isolation from scored run.** Computing `recommended_dt` requires one `sys.step()` to populate `last_diag` (a_max, jerk). That step mutates the system state — positions, velocities, integrator scratch buffers. The scored run uses a freshly built `System` from the same template, so the only data flow from warm-up to scored run is the scalar `dt_recommended` value; the post-warm-up body state never propagates into the conservation measurement. Mitigation is by construction in the harness — the per-cell scored run rebuilds rather than reuses, and any deviation from this is a harness bug not an experimental ambiguity.
+
+2. **Determinism of `dt_recommended`.** The warm-up is run with VV at the template's `suggested_dt`; both inputs are deterministic given the template and platform. `recommended_dt` is a closed-form function of the post-warm-up body state plus integrator diagnostics (a_max, jerk). Same template + same platform → same `dt_recommended` across runs. Cross-platform variance in `dt_recommended` would propagate as a per-scenario shift in observed drift — flagged here so reproducibility readers can separate platform variance from heuristic behaviour.
+
+3. **Template `suggested_dt` choice for the warm-up.** Different templates ship different `suggested_dt` values, which produce slightly different post-warm-up states and therefore slightly different `dt_recommended` per scenario. This is by design: the heuristic's output legitimately depends on the system state the integrator hands it. Sensitivity to the warm-up `dt` value itself, within reasonable bounds, is an η-related concern reserved for the cost-precision sweep declared in §Out of scope.
+
+4. **Platform-dependent floating-point.** Per-step round-off varies with FP semantics (CPU, libm, FMA decisions); the bounds declared are derived from order-of-magnitude scaling and from literature observations, both with $\geq 1$ decade of margin to absorb cross-platform variance.
+
+5. **Out-of-regime scenarios may legitimately fail.** Pythagorean (chaotic close-encounter) and resonant configurations may exceed VV/Y4 bounds because the smooth-flow conservation property the Power-style acceleration criterion is derived for does not hold there. These failures are interpretive, not diagnostic of a heuristic defect — the §Results discussion will explicitly mark which failures are regime-mismatch vs which would indicate a real implementation issue.
+
+---
+
+## Reproducibility
+
+| Field | Value |
+| --- | --- |
+| apsis canonical commit | *(to be pinned at run time)* |
+| Rust toolchain | apsis Cargo profile `release`; default FP semantics |
+| Operating system | Microsoft Windows 11 Pro for Workstations, x64 |
+| Harness | `crates/apsis/examples/recommended_dt_validation.rs` (run + emit CSV); `crates/apsis/examples/recommended_dt_compare.rs` (read CSV + JSON report) — pure Rust, no Python dependency |
+| Raw outputs | `validation/recommended-dt/out/runs.csv`, `validation/recommended-dt/out/comparison.json` |
+
+**Commit pinning protocol:** the canonical hash committed to this notebook on the run date includes both Cargo examples, this notebook itself, and any scenario-list adjustments. Reproducible from a clean checkout of that commit with no Python venv.
+
+---
+
+## Appendix — Format consistency with the parity portfolio
+
+This notebook deliberately mirrors the methodological framing of the parity series (`2026-04-25-rebound-parity-kepler.md`, `2026-04-26-rebound-parity-figure8.md`, `2026-04-30-rebound-parity-pythagorean.md`) where applicable, specialised for an internal self-calibration test:
+
+| Section | Parity series | This notebook |
+| --- | --- | --- |
+| Comparison axis | apsis vs REBOUND, same scenario | apsis heuristic vs apsis fixed-step integrators, multiple scenarios |
+| Tier hierarchy | three tiers (hard / sanity / informational) | three tiers (energy gated / structural gated / WH informational) |
+| Comparator language | Python (REBOUND-bound) | Rust native (no foreign impl) |
+| Verdict criterion | Tier 1 + Tier 2 gated, Tier 3 reported | Tier 1 + Tier 2 gated, Tier 3 reported |
+| Phase-drift handling | informational, never gated | not relevant — single-implementation test |
+| Out-of-regime handling | flagged in Threats / Out of scope | scenarios partitioned: smooth (gated) vs chaotic (informational framing in §Results) |
+
+The shared framework is "physical/structural invariants gate; out-of-derivation regime informs". The specialisation here is dropping the cross-implementation axis and adding the heuristic-output audit (recording `dt_recommended` per cell to expose how the formula behaves across scenarios).
