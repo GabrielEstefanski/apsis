@@ -4,7 +4,7 @@
 **Subject:** Confirm that `System::recommended_dt()` produces a timestep value that, when fed to the fixed-step integrators (Velocity Verlet, Yoshida-4), yields energy and angular-momentum conservation within bounds derivable from the heuristic's literature derivation.
 **Baseline commit:** `35bd881` ("feat(parity): recommended_dt validation harness — Rust runner + comparator").
 **Tooling:** apsis only — no foreign-implementation comparison. The harness is a Cargo example writing CSV plus a Rust comparator; no Python dependency.
-**Status:** *Run executed 2026-05-01 against `35bd881`; comparator and protocol re-confirmed at the post-fixup head. **26 of 26 gated cells pass** across the 13-scenario × {VV, Y4} grid — Tier 1 energy and Tier 2 angular momentum both within bound. WH is reported informationally per protocol (13 cells, $|\Delta E / E_0|$ spanning $10^{-14}$ to $10^{0}$, confirming the protocol's choice not to gate WH). The Tier 2 bound was revised mid-experiment from a single-relative form to the standard `isclose`-style $\max(\text{rel} \cdot |L_z(0)|,\, \text{abs})$ formulation; the revision is documented in §Interpretation along with the diagnostic that motivated it.*
+**Status:** *The protocol ran in two phases. **Phase A** (commit `0d71547`) used the original Tier 2 bound `|ΔLz/Lz_0| ≤ 1e-10` and surfaced one cell — `solar_system` Y4 — where the bound demanded sub-round-off precision (the failure was a gate formulation flaw, not an integrator defect; the integrator was already at the f64 round-off floor). The Phase A artefact is preserved in commit history as a methodological diagnostic. **Phase B** (commit `b30d278`) revised the Tier 2 bound to standard `isclose`-style two-sided form $|\Delta L_z| \leq \max(10^{-10} \cdot |L_z(0)|,\, 10^{-10})$. Both phases reproduce from their respective commits with no integrator changes between them. **Phase B verdict: 26 of 26 gated cells pass** across the 13-scenario × {VV, Y4} grid — Tier 1 energy and Tier 2 angular momentum both within bound. WH is reported informationally per protocol (13 cells, $|\Delta E / E_0|$ spanning $10^{-14}$ to $10^{0}$, confirming the protocol's choice not to gate WH).*
 
 ---
 
@@ -121,7 +121,20 @@ The integrator's internal truncation-error estimator (used by IAS15's controller
 
 ## Results
 
-Run executed 2026-05-01 against `35bd881`. 39 cells: 13 scenarios × {VV, Y4, WH}. 26 gated, 13 informational. Verdict: **26/26 gated cells pass.**
+Run executed 2026-05-01 against `35bd881`. 39 cells: 13 scenarios × {VV, Y4, WH}. 26 gated, 13 informational. Verdict: **26/26 gated cells pass** under Phase B bounds.
+
+### Expected drift envelope (a priori)
+
+Before reporting observed values, the per-metric envelope each cell is expected to fall in, derived from the integrator order and the f64 round-off floor — independent of the run:
+
+| Metric | Integrator | Expected envelope (smooth flow) | Mechanism |
+| --- | --- | --- | --- |
+| $\|\Delta E / E_0\|$ | VV | $10^{-3}$ to $10^{-4}$ | Symplectic 2nd-order at $dt = \eta \sqrt{\varepsilon / a_\text{max}}$ (Power et al. 2003 regime) |
+| $\|\Delta E / E_0\|$ | Y4 | $10^{-13}$ to $10^{-9}$ | Symplectic 4th-order; in the heuristic regime $dt / T_\text{natural} \ll \eta$ so error is often round-off limited |
+| $\|\Delta L_z\|$ | VV, Y4 | $10^{-15}$ to $10^{-13}$ | f64 round-off floor: $N \cdot \mathrm{ULP} \cdot \|v\| \cdot N_\text{steps} \approx 2 \times 10^{-13}$ for $N \le 10$, $\|v\| \sim O(1)$ |
+| $\|\Delta E / E_0\|$ | WH | unbounded a priori | Period-resonance-dependent; not in derivation regime of `recommended_dt` |
+
+The Phase B bound $|\Delta L_z| \leq \max(10^{-10} \cdot |L_z(0)|,\, 10^{-10})$ leaves $\sim 500\times$ margin on the round-off envelope; the Phase A bound $|\Delta L_z / L_z(0)| \leq 10^{-10}$ collapsed below the envelope when $|L_z(0)| < 10^{-3}$, which was the diagnostic that triggered the Phase B revision. Observed values in §Tier 1 / §Tier 2 below fall within or below these envelopes for every gated cell.
 
 ### Per-scenario `dt_recommended`
 
@@ -211,9 +224,22 @@ Peak $|\Delta E / E_0|$ for WH per scenario, alongside absolute $|\Delta L_z|$ d
 
 WH energy spans 14 orders of magnitude across the grid. Best: `pluto_charon` $2.21 \times 10^{-14}$ (essentially f64 floor — $dt_\text{recommended} = 4.93 \times 10^{-3}$ happens to be near-resonant for the binary's orbital period). Worst: `hd_80606_b_system` $1.43 \times 10^{0}$ (energy fully lost — the same catastrophic failure mode documented for TRAPPIST-1 + WH in issue #16, here triggered by a non-resonant `recommended_dt` on a high-eccentricity system whose dynamics WH cannot integrate stably without algorithmic redesign). The 14-decade span confirms the protocol's choice not to gate WH: there is no single bound that meaningfully discriminates "WH is healthy" from "WH is broken" for arbitrary `recommended_dt` outputs.
 
+#### WH bug map (Issue #16)
+
+The WH implementation in this baseline carries four documented algorithmic defects. The two extreme observed cases here match the failure mode each bug predicts:
+
+| # | Bug | Predicted effect | Observed in |
+| ---: | --- | --- | --- |
+| 1 | Non-canonical centre-of-mass frame | Spurious linear momentum drift; small dt leaks energy | `trappist_one` resonant chain ($8.69 \times 10^{-2}$) |
+| 2 | Central-body update outside symplectic split | Energy non-conserved at periapsis; catastrophic at high eccentricity | `hd_80606_b_system` ($1.43 \times 10^{0}$, full energy loss) |
+| 3 | Asymmetric translation in Kepler step | Lz drift at periapsis on close pairs | `solar_system` Lz $3.57 \times 10^{-11}$, `kepler_36` Lz $1.72 \times 10^{-10}$ |
+| 4 | 2D-only computation | Z-component invariants undefined; structurally limits 3D extension | structural — invariants are valid only in the orbital plane for 2D templates |
+
+Bug list canonicalised in Issue #16; refactor tracked as TD-008. WH is reported here as informational only; using these numbers as integrator quality signal would conflate `recommended_dt` with WH bugs.
+
 ### Bound utilization — regression canary
 
-Binary pass/fail hides structure. The comparator additionally emits per-cell utilization $u = \text{peak} / \text{bound}$ for every gated metric: $u = 0$ at the round-off floor, $u = 1$ at the gate edge, $u > 1$ FAIL. Sorted descending, the five tightest gated cells across the grid are:
+Binary pass/fail hides structure. The comparator additionally emits per-cell utilization $u = \text{peak} / \text{bound}$ for every gated metric: $u = 0$ at the round-off floor, $u = 1$ at the gate edge, $u > 1$ FAIL. The alert threshold for "tight" is $u > 0.1$ (within one decade of the bound), declared a priori in the comparator constants — chosen so that any cell whose drift accumulates an order of magnitude before failing is flagged before the binary verdict flips. Sorted descending, the five tightest gated cells across the grid are:
 
 | Rank | Scenario | Integrator | Metric | $u$ | Status |
 | ---: | --- | --- | --- | ---: | --- |
@@ -270,8 +296,12 @@ Under the revised bound, the `solar_system` Y4 cell passes at $1.98 \times 10^{-
 | Field | Value |
 | --- | --- |
 | apsis canonical commit | *(to be pinned at run time)* |
-| Rust toolchain | apsis Cargo profile `release`; default FP semantics |
+| Rust toolchain | `rustc 1.94.1` stable, Cargo profile `release` (LLVM optimisation level 3, no LTO override) |
+| FP build flags | default rustc — no `-Cffast-math`, no explicit `-Ctarget-feature=+fma`; LLVM may auto-emit FMA on AVX2-capable hardware. No reordering directives in apsis force evaluation. |
+| Determinism | Per-template state is fully deterministic — `TemplateKind::build(seed)` is closed-form (no RNG), `recommended_dt` is closed-form on body state, integrator steps are deterministic given the same FP semantics. Same commit + same target triple + same CPU FMA decision → bitwise-identical CSV. |
 | Operating system | Microsoft Windows 11 Pro for Workstations, x64 |
+| CPU FP context | x86_64 with AVX2; LLVM may select FMA for some `mul-add` pairs in the integrator inner loop. |
+| Cross-platform variance | Expected per-step `\|ΔLz\|` differences $\le 10^{-15}$ from FMA / FP-instruction reordering; over 100 steps this stays $\ll 10^{-13}$, leaving $\ge 3$ decades of headroom on the Tier 2 bound. Tier 1 bounds carry $\ge 3$ decades of headroom as well, dominated by integrator-order behaviour rather than per-step FP noise. |
 | Harness | `crates/apsis/examples/recommended_dt_validation.rs` (run + emit CSV); `crates/apsis/examples/recommended_dt_compare.rs` (read CSV + JSON report) — pure Rust, no Python dependency |
 | Raw outputs | `validation/recommended-dt/out/runs.csv`, `validation/recommended-dt/out/comparison.json` |
 
