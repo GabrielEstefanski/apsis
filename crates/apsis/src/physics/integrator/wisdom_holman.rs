@@ -146,13 +146,16 @@ impl Integrator for WisdomHolman {
         let _ = Self::wh_kick(bodies, ctx, 0.5 * dt, acc, mu);
 
         // ── Exact Keplerian drift ────────────────────────────────────────
-        for i in 1..bodies.len() {
-            let b = &bodies[i];
-            let (nx, ny, nvx, nvy) = kepler_step(b.x, b.y, b.vx, b.vy, dt, mu);
-            bodies[i].x = nx;
-            bodies[i].y = ny;
-            bodies[i].vx = nvx;
-            bodies[i].vy = nvy;
+        for b in bodies[1..].iter_mut() {
+            let r0 = Vec3::new(b.x, b.y, b.z);
+            let v0 = Vec3::new(b.vx, b.vy, b.vz);
+            let (r1, v1) = kepler_step(r0, v0, dt, mu);
+            b.x = r1.x;
+            b.y = r1.y;
+            b.z = r1.z;
+            b.vx = v1.x;
+            b.vy = v1.y;
+            b.vz = v1.z;
         }
 
         // ── Second half-kick ─────────────────────────────────────────────
