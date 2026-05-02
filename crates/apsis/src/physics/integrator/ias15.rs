@@ -1392,6 +1392,7 @@ impl Integrator for Ias15 {
             used_fallback: false,
             step_snapshot: Some(final_snapshot),
             degraded,
+            hierarchy_signal: None,
         }
     }
 

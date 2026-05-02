@@ -52,7 +52,7 @@ use crate::physics::integrator::helpers::{
 };
 use crate::physics::integrator::kepler::kepler_step;
 use crate::physics::integrator::traits::{
-    Integrator, IntegratorContext, IntegratorKind, StepResult,
+    HierarchySignal, Integrator, IntegratorContext, IntegratorKind, StepResult,
 };
 
 /// Minimum ratio `M_central / Σ m_i (i > 0)` for which the WH split derivation
@@ -106,6 +106,7 @@ impl Integrator for WisdomHolman {
                 used_fallback: false,
                 step_snapshot: None,
                 degraded: false,
+                hierarchy_signal: Some(HierarchySignal::Violated),
             };
         }
 
@@ -227,12 +228,21 @@ impl Integrator for WisdomHolman {
             b.vz += v_com.z;
         }
 
+        // Classify the system's current mass distribution against the WH
+        // dominance criterion and surface it through `hierarchy_signal`.
+        // Observability only — the integrator has already run; downstream
+        // consumers (Metrics, UI, logging) read the signal to detect when
+        // the system has left the validated regime.
+        let masses: Vec<f64> = bodies.iter().map(|b| b.mass).collect();
+        let signal = HierarchySignal::classify(&masses);
+
         StepResult {
             consumed_dt: dt,
             potential_energy: pe,
             used_fallback: false,
             step_snapshot: None,
             degraded: false,
+            hierarchy_signal: Some(signal),
         }
     }
 

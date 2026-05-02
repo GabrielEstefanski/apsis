@@ -236,6 +236,86 @@ pub struct StepResult {
     /// quality can use this to surface a warning or log a degraded-step
     /// event.
     pub degraded: bool,
+
+    /// Mass-distribution-based hierarchy regime classification, populated
+    /// only by integrators whose derivation depends on a hierarchical mass
+    /// distribution. `None` when the concept does not apply (VV, Y4, IAS15
+    /// have no hierarchy assumption); `Some(_)` for Wisdom-Holman with
+    /// values graded according to the WH derivation's small-parameter
+    /// regime. Observability only — no integrator branches on the value.
+    pub hierarchy_signal: Option<HierarchySignal>,
+}
+
+// ── HierarchySignal ───────────────────────────────────────────────────────────
+
+/// Classification of a system's mass distribution against the dominance
+/// criterion underlying the Wisdom-Holman perturbation expansion.
+///
+/// The variants grade where the system sits relative to the WH derivation's
+/// small-parameter regime. Two ratios drive the classification:
+///
+/// 1. The central body must be the most massive (no other body more massive
+///    than `bodies[0]`).
+/// 2. The central-to-rest mass ratio `m_0 / Σ_{i≥1} m_i` must clear a
+///    dominance threshold for the perturbation series to converge in the
+///    asymptotic sense WH 1991 §III assumes.
+///
+/// The signal is observability-only. The integrator does not change
+/// behaviour based on it; the value is surfaced through [`StepResult`] so
+/// callers (UI, logging, validation) can detect when the system has left
+/// the validated regime.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HierarchySignal {
+    /// Central body is dominant; the WH derivation operates inside its
+    /// validated regime. `m_0 ≥ max(m_i)` and `m_0 / Σ m_i ≥ 10`.
+    Hierarchical,
+    /// Central body is the most massive but its dominance over the rest of
+    /// the system is approaching the threshold. The perturbation expansion
+    /// is at the edge of its small-parameter regime; observed energy drift
+    /// may exceed the WH 1991 published floor without indicating a defect.
+    /// `m_0 ≥ max(m_i)` and `5 ≤ m_0 / Σ m_i < 10`.
+    Borderline,
+    /// Central body fails the dominance criterion. The WH derivation does
+    /// not apply; observed conservation should not be expected to match the
+    /// validated regime. `m_0 < max(m_i)` or `m_0 / Σ m_i < 5`.
+    Violated,
+}
+
+impl HierarchySignal {
+    /// Classify a mass distribution by the Wisdom-Holman dominance criterion.
+    ///
+    /// Returns [`HierarchySignal::Violated`] for trivially degenerate inputs
+    /// (fewer than two bodies, all zero mass).
+    pub fn classify(masses: &[f64]) -> Self {
+        if masses.len() < 2 {
+            return Self::Violated;
+        }
+        let m0 = masses[0];
+        let m_rest: f64 = masses[1..].iter().sum();
+        let max_other = masses[1..].iter().copied().fold(0.0_f64, f64::max);
+
+        if m0 < max_other || m_rest <= 0.0 {
+            return Self::Violated;
+        }
+
+        let ratio = m0 / m_rest;
+        if ratio >= 10.0 {
+            Self::Hierarchical
+        } else if ratio >= 5.0 {
+            Self::Borderline
+        } else {
+            Self::Violated
+        }
+    }
+
+    /// Short human-readable label, suitable for diagnostic output and UI.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Hierarchical => "hierarchical",
+            Self::Borderline => "borderline",
+            Self::Violated => "violated",
+        }
+    }
 }
 
 // ── ExecutionProfile ──────────────────────────────────────────────────────────
@@ -568,4 +648,67 @@ pub struct AdaptiveStats {
     /// is the cheapest "is something off?" signal the orchestrator can
     /// surface without enabling the `ias15-diag` feature.
     pub shrink_grow_cycles: u64,
+}
+
+#[cfg(test)]
+mod hierarchy_signal_tests {
+    use super::HierarchySignal;
+
+    #[test]
+    fn solar_mercury_is_hierarchical() {
+        let masses = [1.0, 1.66e-7];
+        assert_eq!(HierarchySignal::classify(&masses), HierarchySignal::Hierarchical);
+    }
+
+    #[test]
+    fn dominance_ratio_at_threshold_is_hierarchical() {
+        // m_0 / Σ m_i = 1 / 0.1 = 10 — exactly at the threshold, accepted.
+        let masses = [1.0, 0.1];
+        assert_eq!(HierarchySignal::classify(&masses), HierarchySignal::Hierarchical);
+    }
+
+    #[test]
+    fn dominance_ratio_in_borderline_band_is_borderline() {
+        // m_0 / Σ m_i = 1 / 0.15 ≈ 6.67 — in [5, 10) band, borderline.
+        let masses = [1.0, 0.15];
+        assert_eq!(HierarchySignal::classify(&masses), HierarchySignal::Borderline);
+    }
+
+    #[test]
+    fn dominance_ratio_below_5x_is_violated() {
+        // m_0 / Σ m_i = 1 / 0.25 = 4 — below 5, perturbation expansion fails.
+        let masses = [1.0, 0.25];
+        assert_eq!(HierarchySignal::classify(&masses), HierarchySignal::Violated);
+    }
+
+    #[test]
+    fn equal_mass_binary_is_violated() {
+        let masses = [1.0, 1.0];
+        assert_eq!(HierarchySignal::classify(&masses), HierarchySignal::Violated);
+    }
+
+    #[test]
+    fn another_body_more_massive_than_central_is_violated() {
+        let masses = [1.0, 10.0, 1.0e-6];
+        assert_eq!(HierarchySignal::classify(&masses), HierarchySignal::Violated);
+    }
+
+    #[test]
+    fn single_body_is_violated() {
+        let masses = [1.0];
+        assert_eq!(HierarchySignal::classify(&masses), HierarchySignal::Violated);
+    }
+
+    #[test]
+    fn empty_mass_distribution_is_violated() {
+        let masses: [f64; 0] = [];
+        assert_eq!(HierarchySignal::classify(&masses), HierarchySignal::Violated);
+    }
+
+    #[test]
+    fn all_planet_masses_zero_is_violated() {
+        // Edge case: avoid division by zero or false-positive Hierarchical.
+        let masses = [1.0, 0.0, 0.0];
+        assert_eq!(HierarchySignal::classify(&masses), HierarchySignal::Violated);
+    }
 }
