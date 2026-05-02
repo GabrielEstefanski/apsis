@@ -15,18 +15,23 @@ simulator is infrastructure for composing those artifacts.
 
 The core integrator is IAS15 (Rein & Spiegel, 2015), audited against
 the algorithmic specification §2–3 and validated against REBOUND's
-IAS15 on Kepler ($e = 0.5$, 100 orbits) and the Chenciner–Montgomery
-figure-8 (10 periods); all gated invariant metrics agree at **1 ULP**
-of f64 machine epsilon. The first downstream artifact,
+IAS15 across four parity scenarios — periodic 2-body (Kepler $e = 0.5$,
+100 orbits), periodic 3-body (Chenciner–Montgomery figure-8, 10 periods),
+chaotic 3-body (Pythagorean, 70 canonical t.u.), and sign-flipped
+2-body at long horizon (Kepler retrograde, $10^4$ orbits) — with all
+gated invariant metrics agreeing at **1 ULP** of f64 machine epsilon
+in regime. The first downstream artifact,
 [`apsis-1pn`](crates/apsis-1pn/), reproduces Mercury's perihelion
 precession to **~1 ppm** of the GR prediction over 500 orbits on
 developer hardware — at the f64 noise floor of the test-particle
 1PN approximation — gated in CI at 100 ppm to absorb cross-platform
 LLVM / libm variance.
 
-> **Status.** Pre-release (`v0.1.0` alpha). The integrator and contract
-> machinery are 2D; the 3D port is the next breaking-change milestone
-> (v0.2). Public API stabilised but not yet tagged; citation DOI pending
+> **Status.** Pre-release (`v0.1.0` alpha). 3D-aware physics core
+> (Vec3, inclined orbits, 3D observables). The Wisdom-Holman
+> integrator carries documented algorithmic defects (TD-008) and is
+> not treated as a quality signal in the validation portfolio.
+> Public API stabilised but not yet tagged; citation DOI pending
 > first Zenodo release.
 
 ---
@@ -82,11 +87,18 @@ The APSIS core guarantees, independently of any registered perturbation:
   mutate the base force evaluation.
 
 These are the invariants `KernelRequirements` declarations are
-matched against (§ Statement of need); they hold across every
-integrator (Velocity Verlet, Yoshida-4, Wisdom-Holman, IAS15) for
-the entire lifetime of a `System`. Phase 1 of the v0.2 milestone
-turns these guarantees into typed contracts with CI tests asserting
-each one directly.
+matched against (§ Statement of need); they hold across Velocity
+Verlet, Yoshida-4, and IAS15 for the entire lifetime of a `System`.
+The Wisdom-Holman implementation present in the workspace carries
+four documented algorithmic defects (TD-008) and is not treated as
+a quality signal in validation runs.
+
+The guarantees are formalised as executable specification in
+[`apsis::contract`](crates/apsis/src/contract.rs) — twelve CI tests
+covering kernel invariants, composition rules, and the failure
+model, co-located with the prose statement of each guarantee. See
+the §Design and validation section of [`paper.md`](paper.md) for
+the formal treatment.
 
 ## Quickstart
 
@@ -101,8 +113,9 @@ the `apsis` runtime and `apsis-1pn`, a force crate implementing the
 1PN relativistic correction — the effect responsible for Mercury's
 perihelion precession.
 
-`pip install apsis apsis-1pn` will work from v0.2.0. Today, build
-from source via [`maturin`](https://github.com/PyO3/maturin):
+`pip install apsis apsis-1pn` will work after the first PyPI
+release. Today, build from source via
+[`maturin`](https://github.com/PyO3/maturin):
 
 ```bash
 git clone https://github.com/gabrielbragaestefanski/apsis && cd apsis
@@ -283,9 +296,10 @@ version, and compose it. APSIS trades ecosystem maturity for
 composability and publication clarity; the choice between the two is
 a property of the research question, not of the codebase.
 
-Out of scope at v0.1: 3D integration (planned v0.2), symplectic
-compositions beyond Yoshida-4, MERCURIUS-style close-encounter switching,
-stellar evolution, hydrodynamics, collisionless large-N.
+Out of current scope: symplectic compositions beyond Yoshida-4,
+MERCURIUS-style close-encounter switching, stellar evolution,
+hydrodynamics, collisionless large-N. Validated regime is currently
+$N \le 10^3$.
 
 ## Validation
 
@@ -311,20 +325,46 @@ What is verified in CI:
   the floor up to ~30 ppm on alternate runners — see
   `docs/experiments/2026-04-28-ias15-velocity-prediction-bug.md`.
 - **Cross-implementation parity portfolio**: against REBOUND's IAS15
-  on two canonical scenarios, with all gated invariant metrics
-  (energy, angular momentum, orbital elements where defined, linear
-  momentum and centre-of-mass for the figure-8) agreeing at 1 ULP.
-  Each scenario carries an *a priori* protocol notebook
-  (initial conditions, integrator settings, and tolerances declared
-  before the run) and a self-contained Python harness:
-  - **Kepler ($e = 0.5$, 100 orbits):** seven gated metrics at 1–3 ULP;
-    informational $\lvert\Delta r\rvert$ at $2.18 \times 10^{-12}$.
+  on four canonical scenarios spanning periodic 2-body, periodic
+  3-body, chaotic 3-body, and sign-flipped 2-body regimes. All gated
+  invariant metrics (energy, angular momentum, orbital elements where
+  defined, linear momentum and centre-of-mass for the three-body
+  scenarios) agree at 1 ULP in regime. Each scenario carries an
+  *a priori* protocol notebook (initial conditions, integrator
+  settings, and tolerances declared before the run) and a
+  self-contained Python harness:
+  - **Kepler-prograde ($e = 0.5$, 100 orbits):** seven gated metrics
+    at 1–3 ULP; informational $\lvert\Delta r\rvert$ at
+    $1.57 \times 10^{-9}$ (peak orbit 81).
     Notebook: [`docs/experiments/2026-04-25-rebound-parity-kepler.md`](docs/experiments/2026-04-25-rebound-parity-kepler.md).
-  - **Figure-8 (Chenciner–Montgomery, 10 periods):** twelve gated metrics
-    organised in three evidentiary tiers (hard physical invariants,
-    construction-level sanity, geometric coherence) at 1 ULP;
-    informational $\lvert\Delta r\rvert$ at $9.44 \times 10^{-13}$.
+  - **Figure-8 (Chenciner–Montgomery, 10 periods gated + 50 periods
+    informational):** twelve gated metrics organised in three
+    evidentiary tiers (hard physical invariants, construction-level
+    sanity, geometric coherence) at 1 ULP.
     Notebook: [`docs/experiments/2026-04-26-rebound-parity-figure8.md`](docs/experiments/2026-04-26-rebound-parity-figure8.md).
+  - **Pythagorean (Burrau 1913, 70 canonical t.u.):** structural
+    invariants ($\mathbf{L}$, $\mathbf{P}$, $\mathbf{r}_\text{COM}$)
+    at f64 round-off floor on both sides; energy bound exceeded
+    symmetrically by both implementations in the chaotic
+    close-encounter regime — a documented regime mismatch with the
+    smooth-flow bound's derivation, not a parity defect. 98 % event
+    alignment (44/45 close-encounter peaks matched within
+    $3 \times 10^{-2}$ t.u.).
+    Notebook: [`docs/experiments/2026-04-30-rebound-parity-pythagorean.md`](docs/experiments/2026-04-30-rebound-parity-pythagorean.md).
+  - **Kepler-retrograde ($L_z < 0$; long-horizon $10^4$ orbits +
+    100-orbit checkpoint):** ten gated metrics × two horizons; all
+    twenty pass at 1–10 ULP. Closes the sign-convention coverage
+    gap and the long-horizon stability gate identified during the
+    GR-readiness review. Brouwer-law growth confirmed
+    ($\sim 8\times$ across $100\times$ horizon, slightly below
+    $\sqrt{N}$, consistent with IAS15's near-symplectic structure).
+    Notebook: [`docs/experiments/2026-05-01-rebound-parity-retrograde.md`](docs/experiments/2026-05-01-rebound-parity-retrograde.md).
+- **Heuristic validation portfolio**: 13 scenarios × 3 fixed-step
+  integrators × 100 substeps; 26 / 26 gated cells pass under the
+  isclose-style two-sided Tier 2 bound. Per-cell utilization
+  ($u = \text{peak}/\text{bound}$) emitted for regression-canary
+  detection.
+  Notebook: [`docs/experiments/2026-05-01-recommended-dt-validation.md`](docs/experiments/2026-05-01-recommended-dt-validation.md).
 - **Workspace isolation**: `cargo build -p apsis` resolves no
   UI dependency.
 
@@ -348,19 +388,38 @@ trail directly:
   Yoshida-4 rather than IAS15 for render-loop contexts.
 - [`docs/experiments/`](docs/experiments/) — lab-notebook entries for
   reproducible experiments run during development. Each entry pairs an
-  *a priori* protocol with the executed run and a post-mortem analysis;
-  the directory currently records:
-  - the IAS15 phase-profile breakdown,
-  - a null result on the Picard noise floor,
+  *a priori* protocol with the executed run and a post-mortem analysis.
+  The directory currently records, in chronological order:
+  - the IAS15 phase-profile breakdown
+    ([`2026-04-22-ias15-phase-profile.md`](docs/experiments/2026-04-22-ias15-phase-profile.md));
+  - a null result on the Picard noise floor
+    ([`2026-04-22-picard-noise-floor.md`](docs/experiments/2026-04-22-picard-noise-floor.md));
   - the operational-domain benchmark suite that motivated the
-    versioned baseline harness,
-  - the Kepler and figure-8 cross-implementation parity protocols
-    (the notebooks the validation portfolio is anchored to), and
+    versioned baseline harness
+    ([`2026-04-24-operational-domain-benchmarks.md`](docs/experiments/2026-04-24-operational-domain-benchmarks.md));
+  - the four cross-implementation parity protocols against REBOUND's
+    IAS15 — Kepler-prograde, figure-8, Pythagorean, and Kepler-retrograde
+    with $10^4$-orbit long-horizon — anchoring the validation portfolio
+    ([`kepler`](docs/experiments/2026-04-25-rebound-parity-kepler.md),
+    [`figure8`](docs/experiments/2026-04-26-rebound-parity-figure8.md),
+    [`pythagorean`](docs/experiments/2026-04-30-rebound-parity-pythagorean.md),
+    [`retrograde`](docs/experiments/2026-05-01-rebound-parity-retrograde.md));
   - the IAS15 controller architecture audit
-    ([`2026-04-26-ias15-warmstart-bug.md`](docs/experiments/2026-04-26-ias15-warmstart-bug.md)),
-    which documents the three controller divergences from
-    Rein & Spiegel (2015) that the figure-8 parity scenario
-    surfaced and the line-by-line resolution.
+    ([`2026-04-26-ias15-warmstart-bug.md`](docs/experiments/2026-04-26-ias15-warmstart-bug.md))
+    documenting three controller divergences from Rein & Spiegel
+    (2015) and their line-by-line resolution;
+  - the IAS15 velocity-prediction bug discovery and fix
+    ([`2026-04-28-ias15-velocity-prediction-bug.md`](docs/experiments/2026-04-28-ias15-velocity-prediction-bug.md)),
+    which moved Mercury's residual error from 4.4 ppm systematic
+    bias to ~1 ppm stochastic round-off;
+  - the 3D-port physics regression baseline and the
+    Material-as-physics-component design decision
+    ([`2026-04-29-3d-port-baseline.md`](docs/experiments/2026-04-29-3d-port-baseline.md),
+    [`2026-04-29-material-as-physics-component.md`](docs/experiments/2026-04-29-material-as-physics-component.md));
+  - the `recommended_dt` heuristic validation across thirteen
+    scenarios with explicit Phase A → Phase B bound-formulation
+    correction
+    ([`2026-05-01-recommended-dt-validation.md`](docs/experiments/2026-05-01-recommended-dt-validation.md)).
 - [`validation/`](validation/) — runnable cross-implementation harnesses
   one directory per reference tool (currently REBOUND), each with its
   own Python `run.py` orchestrator and a comparator that emits a
