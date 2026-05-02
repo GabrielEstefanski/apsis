@@ -12,7 +12,7 @@ authors:
 affiliations:
  - name: Independent researcher
    index: 1
-date: 24 April 2026
+date: 2 May 2026
 bibliography: paper.bib
 ---
 
@@ -50,11 +50,14 @@ contract violated, the same machinery measures a precession three
 orders of magnitude larger and of the wrong sign — caught by the
 registration warning, never as a numerical artifact.
 
-The solver provides Velocity Verlet, Yoshida fourth-order,
-Wisdom–Holman mixed-variable, and IAS15 [@ReinSpiegel2015]
-alongside stable public traits for user-registered force models
-and perturbations. Scope is narrow by intent: 2D, $N \le 10^3$.
-Large-N collisionless dynamics, stellar evolution, and hybrid
+The solver provides Velocity Verlet, Yoshida fourth-order, and
+IAS15 [@ReinSpiegel2015] alongside stable public traits for
+user-registered force models and perturbations. A Wisdom–Holman
+mixed-variable integrator is also present; it carries documented
+algorithmic defects (tracked as TD-008) and is not treated as a
+quality signal in the validation portfolio. Scope is narrow by
+intent: $N \le 10^3$ in the current validated regime. Large-N
+collisionless dynamics, stellar evolution, and hybrid
 close-encounter regimes — the domains of REBOUND [@ReinLiu2012],
 MERCURIUS [@ReinTamayoHernandezPapaloizou2019], and NBODY6/7
 [@Aarseth2003] — remain outside this library's claims. `apsis`
@@ -115,8 +118,9 @@ The contribution is to the *methodology* of extending an N-body
 simulator rather than to the inventory of simulators. A research
 group already running REBOUND, MERCURIUS, or an equivalent
 production code is not served by replacing it with `apsis`. The
-narrow scope (2D, $N \le 10^3$) is a deliberate trade: ship a
-verification infrastructure with a complete physical demonstration,
+narrow scope ($N \le 10^3$ in the validated regime) is a deliberate
+trade: ship a verification infrastructure with a complete physical
+demonstration,
 rather than a wider simulation platform with verification deferred
 to later work. These two properties — type-expressed preconditions
 and out-of-tree verified federated extensions — are not, to the
@@ -221,9 +225,9 @@ same class of observable.
 Both counter-tests are asserted as continuous-integration gates — 1 %
 relative-error tolerance on the GR agreement, exact bijection between
 crossing and spike events with $10 \cdot dt$ temporal matching on the
-continuity measurement, and non-negotiable warning-emission on both
+continuity measurement, and warning emission required on both
 registrations. The full suite completes in under twenty seconds on
-commodity hardware.
+a 2024-class x64 workstation.
 
 **Executable contract surface.** The kernel-precondition mechanism
 demonstrated above is one of three guarantee classes the library
@@ -305,7 +309,7 @@ the claim the mechanism supports.
 # Availability and reproducibility
 
 `apsis` is available under the Apache License 2.0 at
-<https://github.com/gabrielbragaestefanski/apsis>. The Mercury
+<https://github.com/GabrielEstefanski/apsis>. The Mercury
 validation described above reproduces on a clean checkout with a
 single command,
 
