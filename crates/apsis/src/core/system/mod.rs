@@ -43,12 +43,14 @@ use crate::core::adaptive::{DtAdaptationConfig, DtController, DtMode, ThetaContr
 use crate::core::diagnostics::{DiagnosticsComputer, SimulationDiagnostics};
 use crate::core::hooks::HookRegistry;
 use crate::domain::body::Body;
+use crate::math::Vec3;
 use crate::physics::integrator::{
     ForceModel, GravityForceModel, Integrator, IntegratorKind, PerturbationForce, make_integrator,
 };
 use crate::physics::orbital::OrbitalElements;
 use crate::templates::instantiate::instantiate;
 use crate::templates::kind::TemplateKind;
+use crate::units::UnitSystem;
 
 // ── Default parameters (used by System::new) ──────────────────────────────────
 
@@ -90,7 +92,7 @@ pub struct System {
     pub(crate) force_model: Box<dyn ForceModel>,
 
     /// Scratch buffer for accelerations — reused every step.
-    pub(crate) scratch_acc: Vec<(f64, f64)>,
+    pub(crate) scratch_acc: Vec<Vec3>,
 
     /// Active integration algorithm (trait object).
     pub(crate) integrator: Box<dyn Integrator>,
@@ -142,7 +144,12 @@ pub struct System {
     /// Whether the adaptive θ controller is active.
     pub(crate) adaptive_theta: bool,
 
-    /// Gravitational scaling factor (G multiplier).
+    /// Active unit system. Frozen post-construction; see [`crate::units`].
+    pub(crate) units: UnitSystem,
+
+    /// Effective `G` in canonical units. Seeded from `units.g()` at
+    /// construction; the GUI's "G slider" can rescale it independently
+    /// via [`set_g_factor`](Self::set_g_factor).
     pub(crate) g_factor: f64,
 
     /// Initial angular momentum (z-component) — conservation baseline.
@@ -200,10 +207,19 @@ pub struct System {
 }
 
 impl System {
-    /// Create a simulation from a body list, using default parameters.
+    /// Create a simulation from a body list and an explicit unit system.
     ///
-    /// Defaults are chosen to match REBOUND-equivalent expectations for
-    /// small-N research scripts:
+    /// The `units` argument is **mandatory and immutable**. Every body
+    /// coordinate, velocity, mass, and `dt` passed in (now or later)
+    /// is interpreted in the canonical units of this [`UnitSystem`];
+    /// passing a value in the wrong unit is a silent physical error,
+    /// not a runtime error. The unit system cannot be changed after
+    /// construction — the only way to "change units" is to rebuild
+    /// the `System`.
+    ///
+    /// Defaults for everything else (integrator, `dt`, θ, softening
+    /// scale, max quadtree depth) match the conventions of small-N
+    /// research scripts:
     ///
     /// | Parameter              | Default                     |
     /// |------------------------|-----------------------------|
@@ -214,36 +230,42 @@ impl System {
     /// | Softening scale        | `1.0`                        |
     ///
     /// Override any of these with the fluent [`with_*`](Self::with_dt)
-    /// builder methods. A typical research script reads:
+    /// builder methods.
     ///
     /// ```ignore
     /// use apsis::core::system::System;
     /// use apsis::domain::body::Body;
     /// use apsis::physics::integrator::IntegratorKind;
+    /// use apsis::units::UnitSystem;
     ///
     /// let sun = Body::star(1.0);
     /// let earth = Body::rocky(3e-6).at(1.0, 0.0).with_velocity(0.0, 1.0);
     ///
-    /// let mut sys = System::new(vec![sun, earth])
+    /// let mut sys = System::new(vec![sun, earth], UnitSystem::canonical())
     ///     .with_integrator(IntegratorKind::Ias15)
     ///     .with_dt(1e-4);
     ///
     /// sys.integrate_for(100.0);
     /// println!("dE/E = {:.3e}", sys.energy_delta());
     /// ```
-    pub fn new(bodies: Vec<Body>) -> Self {
+    pub fn new(bodies: Vec<Body>, units: UnitSystem) -> Self {
         Self::with_force_model_inner(
             bodies,
             Box::new(GravityForceModel::new(DEFAULT_THETA, DEFAULT_MAX_DEPTH)),
             DEFAULT_DT,
+            units,
         )
     }
 
     /// Construct with a pluggable force model (direct O(N²), GPU kernel,
     /// post-Newtonian, …). Escape hatch for advanced users; most callers
     /// prefer [`new`](Self::new) followed by builder methods.
-    pub fn with_force_model(bodies: Vec<Body>, force_model: Box<dyn ForceModel>) -> Self {
-        Self::with_force_model_inner(bodies, force_model, DEFAULT_DT)
+    pub fn with_force_model(
+        bodies: Vec<Body>,
+        force_model: Box<dyn ForceModel>,
+        units: UnitSystem,
+    ) -> Self {
+        Self::with_force_model_inner(bodies, force_model, DEFAULT_DT, units)
     }
 
     /// Construct a system from a built-in preset.
@@ -275,10 +297,11 @@ impl System {
     pub fn from_template(kind: TemplateKind) -> Self {
         let template = kind.build(0);
         let named = instantiate(&template);
-        let mut sys = Self::new(Vec::new());
+        // Presets are calibrated for G = 1 (Hénon).
+        let mut sys = Self::new(Vec::new(), UnitSystem::canonical());
         sys.add_named_bodies(named);
-        // add_named_bodies cleared template_source; re-set it so a
-        // subsequent .with_seed(...) can rebuild the body list.
+        // Restore the template handle that add_named_bodies cleared, so
+        // a follow-up .with_seed(...) can rebuild from the same preset.
         sys.template_source = Some(kind);
         sys
     }
@@ -287,6 +310,7 @@ impl System {
         bodies: Vec<Body>,
         force_model: Box<dyn ForceModel>,
         dt: f64,
+        units: UnitSystem,
     ) -> Self {
         let total_mass = bodies.iter().map(|b| b.mass).sum();
         let names = {
@@ -343,7 +367,8 @@ impl System {
             }),
             theta_ctrl: ThetaController::new(1e-3, 0.05, 1.5).with_initial_theta(theta),
             adaptive_theta: false,
-            g_factor: 1.0,
+            g_factor: units.g(),
+            units,
             initial_angular_momentum: None,
             rel_angular_momentum_error: 0.0,
             abs_angular_momentum_error: 0.0,
@@ -361,17 +386,8 @@ impl System {
     }
 
     // ── Fluent construction builder ───────────────────────────────────────────
-    //
-    // Each method consumes and returns `Self`, so the full configuration
-    // reads top-to-bottom at construction time:
-    //
-    //     let sys = System::new(bodies)
-    //         .with_integrator(IntegratorKind::Ias15)
-    //         .with_dt(1e-4)
-    //         .with_theta(0.6);
-    //
-    // Runtime mutation uses the `set_*` counterparts in
-    // [`crate::core::system::config`].
+    // Consume-and-return-Self chain. Runtime mutation lives in the `set_*`
+    // counterparts in [`crate::core::system::config`].
 
     /// Fixed timestep for the integrator.
     #[inline]

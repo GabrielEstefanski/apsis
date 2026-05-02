@@ -5,8 +5,9 @@
 # Available presets: Star, Brown Dwarf, Gas Giant, Rocky Planet,
 #   Binary Stars, Star + Comp., Solar System, TRAPPIST-1, Kepler-36,
 #   Alpha Centauri AB, HD 80606 System, Sun–Earth L4/L5, Sun–Earth L1/L2/L3,
-#   Jupiter Trojans, Hierarchical,
-#   3-Body Chaotic Ejection, 3-Body Figure Eight, 3-Body Lagrange Triangle
+#   Jupiter Trojans, Sun–Earth–Moon, Pluto–Charon, Hot Jupiter,
+#   3-Body Chaotic Ejection, 3-Body Figure Eight, 3-Body Lagrange Equilateral,
+#   3-Body Euler Collinear, 3-Body Pythagorean
 preset = "Solar System"
 
 # Integration algorithm: velocity_verlet | yoshida4 | wisdom_holman

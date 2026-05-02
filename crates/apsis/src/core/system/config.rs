@@ -71,8 +71,18 @@ impl System {
         self.total_mass
     }
 
+    // ── Unit system ────────────────────────────────────────────────────────────
+
+    /// The system's unit system, frozen at construction. Returns a borrow
+    /// so the absence of `&mut UnitSystem` is visible at the type level.
+    pub fn units(&self) -> &crate::units::UnitSystem {
+        &self.units
+    }
+
     // ── Gravitational scaling ──────────────────────────────────────────────────
 
+    /// Override the runtime `G` multiplier (GUI slider). The unit system stays
+    /// frozen; this scales `g_factor` on top of `units().g()`.
     pub fn set_g_factor(&mut self, g: f64) {
         self.g_factor = g.max(0.0);
     }

@@ -27,6 +27,10 @@ pub enum UndoRecord {
     /// A body at `idx` was edited (position, velocity, mass, …).
     /// Undo: restore old values.
     EditedBody { idx: usize, old_body: Body, old_name: String },
+    /// Whole body list was replaced (e.g. clicking a template). Stores the
+    /// pre-replacement snapshot so undo can restore it.
+    /// Undo: reload the snapshot via `load_named_bodies`.
+    ReplacedBodies { previous: Vec<apsis::domain::body::NamedBody> },
 }
 
 /// Maximum number of undo records kept in memory.
@@ -176,6 +180,14 @@ pub struct SimulationApp {
     /// Frame-coherent gravitational hierarchy used by the orbit overlay
     /// filter pipeline. Not persisted — rebuilt from live state each tick.
     pub(super) orbit_hierarchy: apsis::physics::orbit_hierarchy::OrbitHierarchy,
+    /// EMA filter on osculating elements of overlay-drawn orbits. Removes
+    /// the high-frequency jitter induced by indirect N-body perturbations
+    /// without falsifying secular dynamics. State-only; no physics impact.
+    pub(super) orbit_smoother: crate::render::orbit_smoother::OrbitSmoother,
+    /// Simulation time at the previous render frame; used to compute
+    /// dt_sim for [`orbit_smoother`]. NaN sentinel = first frame; the
+    /// smoother snaps to current invariants in that case.
+    pub(super) orbit_smoother_last_t: f64,
     /// Bodies whose orbits are drawn unconditionally (bypass level, top-N
     /// and degeneracy filters). Pins are stored by body index; the canvas
     /// prunes out-of-range entries each frame so collision-merges don't
@@ -414,6 +426,8 @@ impl SimulationApp {
             orbit_top_n: 24,
             orbit_hide_degenerate: true,
             orbit_hierarchy: apsis::physics::orbit_hierarchy::OrbitHierarchy::new(),
+            orbit_smoother: crate::render::orbit_smoother::OrbitSmoother::new(),
+            orbit_smoother_last_t: f64::NAN,
             pinned_orbits: HashSet::new(),
             show_grid: true,
             show_vectors: false,
@@ -887,6 +901,14 @@ impl SimulationApp {
                     if self.selected_body == Some(idx) {
                         self.selection_form = Some(SelectionForm::from_body(&old_body, &old_name));
                     }
+                },
+                UndoRecord::ReplacedBodies { previous } => {
+                    self.system.load_named_bodies(previous);
+                    self.pinned_orbits.clear();
+                    self.selected_body = None;
+                    self.selection_form = None;
+                    self.pending_fit = true;
+                    self.reset_drift_peaks();
                 },
             }
         }

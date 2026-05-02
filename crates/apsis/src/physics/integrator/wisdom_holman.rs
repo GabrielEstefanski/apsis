@@ -20,6 +20,7 @@
 //! - Wisdom & Holman (1991). *Astron. J.* 102, 1528–1538.
 
 use crate::domain::body::Body;
+use crate::math::Vec3;
 use crate::physics::integrator::helpers::{
     apply_perturbations_planets, evaluate, scale_acc_and_pe,
 };
@@ -73,7 +74,7 @@ impl WisdomHolman {
         bodies: &mut [Body],
         ctx: &mut IntegratorContext<'_>,
         dt: f64,
-        acc: &mut Vec<(f64, f64)>,
+        acc: &mut Vec<Vec3>,
         mu: f64,
     ) -> f64 {
         let total_m0 = bodies[0].mass;
@@ -83,15 +84,14 @@ impl WisdomHolman {
 
         // Indirect term: a_indirect = −(Σ mⱼ aⱼ) / M₀
         // Computed from raw (pre-scaled) accelerations.
-        let (ax_bary_raw, ay_bary_raw) = acc
-            .iter()
-            .zip(bodies[1..].iter())
-            .fold((0.0_f64, 0.0_f64), |(ax, ay), (&(axi, ayi), b)| {
-                (ax + b.mass * axi, ay + b.mass * ayi)
+        let (ax_bary_raw, ay_bary_raw, az_bary_raw) =
+            acc.iter().zip(bodies[1..].iter()).fold((0.0_f64, 0.0_f64, 0.0_f64), |a, (ai, b)| {
+                (a.0 + b.mass * ai.x, a.1 + b.mass * ai.y, a.2 + b.mass * ai.z)
             });
 
         let indirect_x_raw = -ax_bary_raw / total_m0;
         let indirect_y_raw = -ay_bary_raw / total_m0;
+        let indirect_z_raw = -az_bary_raw / total_m0;
 
         // Scale gravitational accelerations and compute central potential.
         let pe_inter = scale_acc_and_pe(acc, ctx.g_factor, raw_pe);
@@ -104,9 +104,11 @@ impl WisdomHolman {
         // Apply kick with scaled indirect term.
         let indirect_x = indirect_x_raw * ctx.g_factor;
         let indirect_y = indirect_y_raw * ctx.g_factor;
-        for (i, &(ax, ay)) in acc.iter().enumerate() {
-            bodies[i + 1].vx += (ax + indirect_x) * dt;
-            bodies[i + 1].vy += (ay + indirect_y) * dt;
+        let indirect_z = indirect_z_raw * ctx.g_factor;
+        for (i, ai) in acc.iter().enumerate() {
+            bodies[i + 1].vx += (ai.x + indirect_x) * dt;
+            bodies[i + 1].vy += (ai.y + indirect_y) * dt;
+            bodies[i + 1].vz += (ai.z + indirect_z) * dt;
         }
 
         potential
@@ -119,7 +121,7 @@ impl Integrator for WisdomHolman {
         bodies: &mut [Body],
         ctx: &mut IntegratorContext<'_>,
         dt: f64,
-        acc: &mut Vec<(f64, f64)>,
+        acc: &mut Vec<Vec3>,
     ) -> StepResult {
         // Fallback to Yoshida4 if the system is not hierarchical.
         if !Self::is_suitable_for(bodies) {

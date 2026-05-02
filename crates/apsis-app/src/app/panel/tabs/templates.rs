@@ -1,6 +1,8 @@
 use crate::app::icons;
 use crate::app::theme::{BORDER, PANEL_BG, SURFACE_CARD, TEXT_DIM, TEXT_PRI, TEXT_SEC, section};
 use crate::app::ui::{SimulationApp, UndoRecord};
+use apsis::core::physics_thread::PhysicsHandle;
+use apsis::domain::body::NamedBody;
 use apsis::templates::{TEMPLATES, TemplateCategory, instantiate_at};
 use eframe::egui::text::{LayoutJob, TextFormat};
 use eframe::egui::{self, Align, Color32, FontId, Frame, Margin, RichText, Stroke};
@@ -217,13 +219,17 @@ impl SimulationApp {
             let entry = &TEMPLATES[idx];
             let preview = entry.build(self.system.seed());
             let bodies = instantiate_at(&preview, 0.0, 0.0);
-            self.push_undo(UndoRecord::AddedBodies(bodies.len()));
-            self.system.add_named_bodies(bodies);
+
+            let previous = snapshot_named_bodies(&self.system);
+            self.push_undo(UndoRecord::ReplacedBodies { previous });
+
+            self.system.load_named_bodies(bodies);
+            self.pinned_orbits.clear();
+            self.selected_body = None;
+            self.selection_form = None;
             self.pending_fit = true;
             self.reset_drift_peaks();
-            if self.sim_name.is_empty() {
-                self.sim_name = entry.name.to_owned();
-            }
+            self.sim_name = entry.name.to_owned();
         }
 
         if let Some(idx) = dragged {
@@ -232,6 +238,16 @@ impl SimulationApp {
             self.template_drag = Some(Box::new(move || kind.build(seed)));
         }
     }
+}
+
+/// Capture the current body list as `NamedBody`s for undo.
+fn snapshot_named_bodies(system: &PhysicsHandle) -> Vec<NamedBody> {
+    system
+        .bodies()
+        .iter()
+        .zip(system.names().iter())
+        .map(|(body, name)| NamedBody { body: *body, name: Some(name.clone()) })
+        .collect()
 }
 
 // ── Card widgets ─────────────────────────────────────────────────────────────

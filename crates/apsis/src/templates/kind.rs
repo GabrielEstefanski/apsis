@@ -18,7 +18,7 @@
 
 use crate::templates::Template;
 use crate::templates::category::TemplateCategory;
-use crate::templates::presets::{hierachical::simple_three_body, *};
+use crate::templates::presets::*;
 
 /// Built-in scenario presets.
 ///
@@ -46,12 +46,16 @@ pub enum TemplateKind {
     SunEarthLagrange,
     SunEarthUnstableLagrange,
     JupiterTrojans,
-    Hierarchical,
+    SunEarthMoon,
+    PlutoCharon,
+    HotJupiter,
 
     // ── Three-body problems ──────────────────────────────────────────────────
     ThreeBodyChaoticEjection,
     ThreeBodyFigureEight,
-    ThreeBodyLagrangeTriangle,
+    ThreeBodyLagrangeEquilateral,
+    ThreeBodyEulerCollinear,
+    ThreeBodyPythagorean,
 }
 
 /// Error returned by [`TemplateKind::from_name`] /
@@ -94,10 +98,14 @@ impl TemplateKind {
             TemplateKind::SunEarthLagrange,
             TemplateKind::SunEarthUnstableLagrange,
             TemplateKind::JupiterTrojans,
-            TemplateKind::Hierarchical,
+            TemplateKind::SunEarthMoon,
+            TemplateKind::PlutoCharon,
+            TemplateKind::HotJupiter,
             TemplateKind::ThreeBodyChaoticEjection,
             TemplateKind::ThreeBodyFigureEight,
-            TemplateKind::ThreeBodyLagrangeTriangle,
+            TemplateKind::ThreeBodyLagrangeEquilateral,
+            TemplateKind::ThreeBodyEulerCollinear,
+            TemplateKind::ThreeBodyPythagorean,
         ]
     }
 
@@ -120,10 +128,14 @@ impl TemplateKind {
             TemplateKind::SunEarthLagrange => "Sun–Earth L4/L5",
             TemplateKind::SunEarthUnstableLagrange => "Sun–Earth L1/L2/L3",
             TemplateKind::JupiterTrojans => "Jupiter Trojans",
-            TemplateKind::Hierarchical => "Hierarchical",
+            TemplateKind::SunEarthMoon => "Sun–Earth–Moon",
+            TemplateKind::PlutoCharon => "Pluto–Charon",
+            TemplateKind::HotJupiter => "Hot Jupiter",
             TemplateKind::ThreeBodyChaoticEjection => "3-Body Chaotic Ejection",
             TemplateKind::ThreeBodyFigureEight => "3-Body Figure Eight",
-            TemplateKind::ThreeBodyLagrangeTriangle => "3-Body Lagrange Triangle",
+            TemplateKind::ThreeBodyLagrangeEquilateral => "3-Body Lagrange Equilateral",
+            TemplateKind::ThreeBodyEulerCollinear => "3-Body Euler Collinear",
+            TemplateKind::ThreeBodyPythagorean => "3-Body Pythagorean",
         }
     }
 
@@ -147,11 +159,15 @@ impl TemplateKind {
             | TemplateKind::SunEarthLagrange
             | TemplateKind::SunEarthUnstableLagrange
             | TemplateKind::JupiterTrojans
-            | TemplateKind::Hierarchical => Systems,
+            | TemplateKind::SunEarthMoon
+            | TemplateKind::PlutoCharon
+            | TemplateKind::HotJupiter => Systems,
 
             TemplateKind::ThreeBodyChaoticEjection
             | TemplateKind::ThreeBodyFigureEight
-            | TemplateKind::ThreeBodyLagrangeTriangle => ThreeBodyProblems,
+            | TemplateKind::ThreeBodyLagrangeEquilateral
+            | TemplateKind::ThreeBodyEulerCollinear
+            | TemplateKind::ThreeBodyPythagorean => ThreeBodyProblems,
         }
     }
 
@@ -174,10 +190,14 @@ impl TemplateKind {
             TemplateKind::SunEarthLagrange => sun_earth_lagrange(seed),
             TemplateKind::SunEarthUnstableLagrange => sun_earth_unstable_lagrange(seed),
             TemplateKind::JupiterTrojans => jupiter_trojans(seed),
-            TemplateKind::Hierarchical => simple_three_body(seed),
+            TemplateKind::SunEarthMoon => sun_earth_moon(seed),
+            TemplateKind::PlutoCharon => pluto_charon(seed),
+            TemplateKind::HotJupiter => hot_jupiter(seed),
             TemplateKind::ThreeBodyChaoticEjection => three_body_chaotic_ejection(seed),
             TemplateKind::ThreeBodyFigureEight => three_body_figure_eight(seed),
-            TemplateKind::ThreeBodyLagrangeTriangle => three_body_lagrange_triangle(seed),
+            TemplateKind::ThreeBodyLagrangeEquilateral => three_body_lagrange_equilateral(seed),
+            TemplateKind::ThreeBodyEulerCollinear => three_body_euler_collinear(seed),
+            TemplateKind::ThreeBodyPythagorean => three_body_pythagorean(seed),
         }
     }
 

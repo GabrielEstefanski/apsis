@@ -4,15 +4,16 @@
 //! specific integrator or force model.
 
 use crate::domain::body::Body;
+use crate::math::Vec3;
 use crate::physics::integrator::force_model::ForceModel;
 use crate::physics::integrator::perturbation::PerturbationForce;
 
 /// Ensure `acc` has the correct length, then evaluate forces via the model.
 ///
 /// Returns the raw (unscaled) potential energy.
-pub fn evaluate(bodies: &[Body], force: &mut dyn ForceModel, acc: &mut Vec<(f64, f64)>) -> f64 {
+pub fn evaluate(bodies: &[Body], force: &mut dyn ForceModel, acc: &mut Vec<Vec3>) -> f64 {
     if acc.len() != bodies.len() {
-        acc.resize(bodies.len(), (0.0, 0.0));
+        acc.resize(bodies.len(), Vec3::ZERO);
     }
     force.compute(bodies, acc)
 }
@@ -20,11 +21,10 @@ pub fn evaluate(bodies: &[Body], force: &mut dyn ForceModel, acc: &mut Vec<(f64,
 /// Multiply every acceleration in `acc` by `g_factor` and return the scaled PE.
 ///
 /// No-op (branchless fast path) when `g_factor == 1.0`.
-pub fn scale_acc_and_pe(acc: &mut [(f64, f64)], g_factor: f64, raw_pe: f64) -> f64 {
+pub fn scale_acc_and_pe(acc: &mut [Vec3], g_factor: f64, raw_pe: f64) -> f64 {
     if (g_factor - 1.0).abs() > 1e-15 {
         for a in acc.iter_mut() {
-            a.0 *= g_factor;
-            a.1 *= g_factor;
+            *a *= g_factor;
         }
     }
     raw_pe * g_factor
@@ -36,7 +36,7 @@ pub fn scale_acc_and_pe(acc: &mut [(f64, f64)], g_factor: f64, raw_pe: f64) -> f
 /// [`scale_acc_and_pe`].
 pub fn apply_perturbations(
     bodies: &[Body],
-    acc: &mut [(f64, f64)],
+    acc: &mut [Vec3],
     perturbations: &[Box<dyn PerturbationForce>],
 ) {
     for p in perturbations {
@@ -51,7 +51,7 @@ pub fn apply_perturbations(
 /// and the correct `offset` to each perturbation.
 pub fn apply_perturbations_planets(
     bodies_planets: &[Body],
-    acc: &mut [(f64, f64)],
+    acc: &mut [Vec3],
     perturbations: &[Box<dyn PerturbationForce>],
 ) {
     for p in perturbations {

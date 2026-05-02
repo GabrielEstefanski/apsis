@@ -119,19 +119,35 @@ impl System {
     /// Replaces the entire set of bodies in the simulation.
     ///
     /// All previous state is cleared, the trail buffer is reset, and the
-    /// system is normalised to its COM rest frame.
+    /// system is normalised to its COM rest frame. Body names are auto-derived
+    /// from material; for explicit names use [`load_named_bodies`](Self::load_named_bodies).
     pub fn load_bodies(&mut self, bodies: Vec<Body>) {
+        self.load_named_bodies(
+            bodies.into_iter().map(|body| NamedBody { body, name: None }).collect(),
+        );
+    }
+
+    /// Replaces the entire set of bodies in the simulation, preserving any
+    /// explicit names attached to each body.
+    ///
+    /// Same state-reset semantics as [`load_bodies`](Self::load_bodies):
+    /// previous bodies, scratch buffers, energy baselines, and integrator
+    /// controllers are cleared, and the new system is normalised to its COM
+    /// rest frame.
+    pub fn load_named_bodies(&mut self, named_bodies: Vec<NamedBody>) {
         self.bodies.clear();
         self.scratch_acc.clear();
         self.names.clear();
         self.total_mass = 0.0;
 
-        for mut b in bodies {
-            b.sync_physical_properties();
-            b.update_luminosity(mass_to_solar(), radius_to_solar(), l_sun());
-            self.total_mass += b.mass;
-            self.names.push(auto_name(b.material, &self.names));
-            self.bodies.push(b);
+        for mut named in named_bodies {
+            let mut body = named.body;
+            body.sync_physical_properties();
+            body.update_luminosity(mass_to_solar(), radius_to_solar(), l_sun());
+            self.total_mass += body.mass;
+            let name = resolved_name(named.name.take(), body.material, &self.names);
+            self.names.push(name);
+            self.bodies.push(body);
         }
 
         self.initial_energy = None;
@@ -152,6 +168,7 @@ impl System {
         let (r_min, softening_max) = compute_closeness(&self.bodies);
         self.r_min = r_min;
         self.softening_max = softening_max;
+        self.template_source = None;
     }
 
     /// Removes the centre-of-mass velocity so the system is in its rest frame.
@@ -160,9 +177,16 @@ impl System {
     }
 
     /// Recenters the system so that the centre of mass is at the origin.
+    ///
+    /// The translation is routed through the active integrator's
+    /// [`recenter_bodies`](crate::physics::integrator::Integrator::recenter_bodies)
+    /// hook so any per-body compensation buffers (notably IAS15's `csx`)
+    /// stay consistent with the post-shift positions. The fixed-step
+    /// integrators have no such buffers and inherit the trait default
+    /// (bare subtraction).
     pub fn recenter_com(&mut self) {
         if let Some((dx, dy)) = calibration::com_offset(&self.bodies, self.total_mass) {
-            calibration::apply_body_shift(&mut self.bodies, dx, dy);
+            self.integrator.recenter_bodies(&mut self.bodies, dx, dy);
             // Notify the render-side TrailRecorder of the shift so it can
             // keep stored trail positions aligned with the new body coordinates.
             self.pending_com_shift.0 += -dx as f32;

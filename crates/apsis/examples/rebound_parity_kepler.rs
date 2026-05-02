@@ -34,6 +34,7 @@ use std::path::PathBuf;
 use apsis::core::system::System;
 use apsis::domain::body::Body;
 use apsis::physics::integrator::IntegratorKind;
+use apsis::units::UnitSystem;
 
 // ── Protocol constants (mirrored in the notebook) ───────────────────────── //
 
@@ -94,8 +95,9 @@ fn main() {
     let period = 2.0 * std::f64::consts::PI;
     let dt0 = period * DT_FRACTION_OF_PERIOD;
 
-    let mut sys =
-        System::new(vec![primary, secondary]).with_integrator(IntegratorKind::Ias15).with_dt(dt0);
+    let mut sys = System::new(vec![primary, secondary], UnitSystem::canonical())
+        .with_integrator(IntegratorKind::Ias15)
+        .with_dt(dt0);
 
     // ── CSV output ──────────────────────────────────────────────────────── //
     //

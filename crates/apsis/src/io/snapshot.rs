@@ -53,10 +53,13 @@
 //! | 4   | Added `seed` field and trail section |
 //! | 5   | `integrator` byte extended: `2 = WisdomHolman` |
 //! | 6   | Removed `omega_z` and `moment_inertia` from per-body record |
+//! | 7   | Added `z` and `vz` to per-body record (3D port) |
 //!
 //! Older files (ver < 5) round-trip cleanly; the `WisdomHolman` variant
 //! simply cannot be expressed in them and defaults to `VelocityVerlet` on
-//! load.
+//! load. v6 and earlier files default `z = 0`, `vz = 0` on load — the
+//! 3D port introduces those components but a planar-only file remains
+//! mathematically equivalent under the v7 reader.
 
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
@@ -69,7 +72,7 @@ use crate::physics::integrator::IntegratorKind;
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 pub const MAGIC: [u8; 4] = *b"GRAV";
-pub const SCHEMA_VERSION: u16 = 6;
+pub const SCHEMA_VERSION: u16 = 7;
 
 // ── Snapshot ──────────────────────────────────────────────────────────────────
 
@@ -119,8 +122,10 @@ pub struct SimSnapshot {
 pub struct BodyRecord {
     pub x: f64,
     pub y: f64,
+    pub z: f64,
     pub vx: f64,
     pub vy: f64,
+    pub vz: f64,
     pub mass: f64,
     pub density: f64,
     pub softening: f64,
@@ -135,8 +140,10 @@ impl BodyRecord {
         Self {
             x: b.x,
             y: b.y,
+            z: b.z,
             vx: b.vx,
             vy: b.vy,
+            vz: b.vz,
             mass: b.mass,
             density: b.density,
             softening: b.softening,
@@ -148,8 +155,9 @@ impl BodyRecord {
 
     /// Reconstruct a [`Body`] from this record.
     pub fn into_body(self) -> Body {
-        let mut b =
-            Body::of(self.mass, self.material).at(self.x, self.y).with_velocity(self.vx, self.vy);
+        let mut b = Body::of(self.mass, self.material)
+            .at_3d(self.x, self.y, self.z)
+            .with_velocity_3d(self.vx, self.vy, self.vz);
         b.density = self.density;
         b.softening = self.softening;
         b.physical_radius = self.physical_radius;
@@ -405,13 +413,15 @@ impl SimSnapshot {
         // v4: reproducibility seed
         wu64(&mut w, self.seed)?;
 
-        // Body records
+        // Body records (v7: x, y, z, vx, vy, vz, mass, ...)
         wu32(&mut w, self.bodies.len() as u32)?;
         for b in &self.bodies {
             wf64(&mut w, b.x)?;
             wf64(&mut w, b.y)?;
+            wf64(&mut w, b.z)?;
             wf64(&mut w, b.vx)?;
             wf64(&mut w, b.vy)?;
+            wf64(&mut w, b.vz)?;
             wf64(&mut w, b.mass)?;
             wf64(&mut w, b.density)?;
             wf64(&mut w, b.softening)?;
@@ -496,8 +506,12 @@ impl SimSnapshot {
         for _ in 0..n_bodies {
             let x = rf64(&mut r)?;
             let y = rf64(&mut r)?;
+            // v7 introduces `z` between `y` and `vx`. Older versions
+            // were planar; default `z = 0`.
+            let z = if ver >= 7 { rf64(&mut r)? } else { 0.0 };
             let vx = rf64(&mut r)?;
             let vy = rf64(&mut r)?;
+            let vz = if ver >= 7 { rf64(&mut r)? } else { 0.0 };
             let mass = rf64(&mut r)?;
             let density = rf64(&mut r)?;
             let softening = rf64(&mut r)?;
@@ -516,8 +530,10 @@ impl SimSnapshot {
             bodies.push(BodyRecord {
                 x,
                 y,
+                z,
                 vx,
                 vy,
+                vz,
                 mass,
                 density,
                 softening,

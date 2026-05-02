@@ -28,8 +28,11 @@
 //! The `app/render → core` read direction is enforced by the workspace
 //! split: nothing in this crate may import from the app crate.
 
+pub mod contract;
 pub mod core;
 pub mod domain;
 pub mod io;
+pub mod math;
 pub mod physics;
 pub mod templates;
+pub mod units;

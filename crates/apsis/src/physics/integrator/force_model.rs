@@ -11,6 +11,7 @@
 use std::sync::Arc;
 
 use crate::domain::body::Body;
+use crate::math::Vec3;
 use crate::physics::gravity::{BarnesHutEngine, Kernel, PlummerKernel};
 
 // ── Trait ─────────────────────────────────────────────────────────────────────
@@ -31,7 +32,7 @@ pub trait ForceModel: Send {
     /// `acc` is guaranteed to have length ≥ `bodies.len()`.
     /// Returns the raw gravitational potential energy (before any g_factor
     /// scaling).
-    fn compute(&mut self, bodies: &[Body], acc: &mut [(f64, f64)]) -> f64;
+    fn compute(&mut self, bodies: &[Body], acc: &mut [Vec3]) -> f64;
 
     /// Barnes-Hut opening angle θ, if the model uses one.
     ///
@@ -142,7 +143,7 @@ impl ForceModel for GravityForceModel {
         self.engine.set_kernel(kernel);
     }
 
-    fn compute(&mut self, bodies: &[Body], acc: &mut [(f64, f64)]) -> f64 {
+    fn compute(&mut self, bodies: &[Body], acc: &mut [Vec3]) -> f64 {
         // Phase-split instrumentation for the IAS15 diagnostic harness:
         // separate the tree-build half from the traversal half of the
         // evaluate work so an optimisation that caches the tree across

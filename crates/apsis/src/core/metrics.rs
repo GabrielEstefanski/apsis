@@ -44,8 +44,10 @@ pub struct Metrics {
 
     pub com_x: f64,
     pub com_y: f64,
+    pub com_z: f64,
     pub com_vx: f64,
     pub com_vy: f64,
+    pub com_vz: f64,
 
     // ── Time ──────────────────────────────────────────────────────────────── //
     /// Total simulated time elapsed.

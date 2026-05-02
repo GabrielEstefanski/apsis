@@ -33,6 +33,7 @@ use crate::core::system::System;
 use crate::core::trail::{TrailSampler, TrailSamplerKind};
 use crate::domain::body::{Body, NamedBody};
 use crate::io::snapshot::SimSnapshot;
+use crate::math::Vec3;
 use crate::physics::integrator::IntegratorKind;
 use crate::physics::orbital::OrbitalElements;
 
@@ -67,7 +68,7 @@ pub struct RenderState {
     /// published so the render-side
     /// [`AccelerationMagnitudeField`](crate::domain::field::acceleration::AccelerationMagnitudeField)
     /// can paint bodies by |a| without needing to recompute forces.
-    pub accelerations: Vec<(f64, f64)>,
+    pub accelerations: Vec<Vec3>,
 
     /// Dense-output snapshot from the most recently completed sub-step.
     /// The render thread uses this to interpolate body positions at any
@@ -104,6 +105,7 @@ pub enum PhysicsCmd {
     UpdateBody(usize, Body),
     SetName(usize, String),
     LoadBodies(Vec<Body>),
+    LoadNamedBodies(Vec<NamedBody>),
     ZeroComVelocity,
     RestoreSnapshot(SimSnapshot),
     SetDtMode(DtMode),
@@ -136,7 +138,7 @@ pub struct PhysicsHandle {
     orbital_elements: Vec<Option<OrbitalElements>>,
     softening_scale: f64,
     sim_rate: f64,
-    accelerations: Vec<(f64, f64)>,
+    accelerations: Vec<Vec3>,
     /// Pending COM shift published by the physics thread this frame.
     /// Consumed by TrailRecorder on the UI thread.
     pending_com_shift: (f32, f32),
@@ -198,8 +200,17 @@ impl PhysicsHandle {
     /// Call this once per render frame, after [`sync`](Self::sync), while the
     /// simulation is running (skip when paused to freeze the display).
     pub fn advance_render_time(&mut self, wall_delta: f64, sim_rate_target: f64) {
+        // Drop the frame rather than risk a panic. Three independent guards:
+        // `dt > 0` (avoid divide-by-zero in `h`); `n_bodies()` matches body
+        // count (avoid index past `x0`); shape-consistent snapshot (avoid
+        // index past a shorter internal array; defence in depth against the
+        // WH-class producer bug fixed in PR #14).
         let snap = match &self.step_snapshot {
-            Some(s) if s.dt > 0.0 && s.n_bodies() == self.bodies.len() => s,
+            Some(s)
+                if s.dt > 0.0 && s.n_bodies() == self.bodies.len() && s.is_shape_consistent() =>
+            {
+                s
+            },
             _ => return,
         };
 
@@ -213,9 +224,10 @@ impl PhysicsHandle {
         // Clone snap to release the borrow before mutating bodies.
         let snap = snap.clone();
         for (i, body) in self.bodies.iter_mut().enumerate() {
-            let (x, y) = snap.interpolate(i, h);
-            body.x = x;
-            body.y = y;
+            let p = snap.interpolate(i, h);
+            body.x = p.x;
+            body.y = p.y;
+            body.z = p.z;
         }
     }
 
@@ -286,7 +298,7 @@ impl PhysicsHandle {
         &self.orbital_elements
     }
     /// Accelerations from the last completed physics step (one per body).
-    pub fn accelerations(&self) -> &[(f64, f64)] {
+    pub fn accelerations(&self) -> &[Vec3] {
         &self.accelerations
     }
     pub fn t(&self) -> f64 {
@@ -402,6 +414,10 @@ impl PhysicsHandle {
     pub fn load_bodies(&self, bodies: Vec<Body>) {
         self.loading.store(true, Ordering::Relaxed);
         self.send(PhysicsCmd::LoadBodies(bodies));
+    }
+    pub fn load_named_bodies(&self, bodies: Vec<NamedBody>) {
+        self.loading.store(true, Ordering::Relaxed);
+        self.send(PhysicsCmd::LoadNamedBodies(bodies));
     }
     pub fn zero_com_velocity(&self) {
         self.send(PhysicsCmd::ZeroComVelocity);
@@ -588,6 +604,7 @@ fn cmd_blocks_during_precision(cmd: &PhysicsCmd) -> bool {
         | PhysicsCmd::RemoveBody(_)
         | PhysicsCmd::UpdateBody(_, _)
         | PhysicsCmd::LoadBodies(_)
+        | PhysicsCmd::LoadNamedBodies(_)
         | PhysicsCmd::ZeroComVelocity
         | PhysicsCmd::RestoreSnapshot(_) => true,
 
@@ -687,6 +704,12 @@ fn apply_cmd(
         PhysicsCmd::LoadBodies(bodies) => {
             loading.store(true, Ordering::Relaxed);
             system.load_bodies(bodies);
+            loading.store(false, Ordering::Relaxed);
+            *needs_full_publish = true;
+        },
+        PhysicsCmd::LoadNamedBodies(bodies) => {
+            loading.store(true, Ordering::Relaxed);
+            system.load_named_bodies(bodies);
             loading.store(false, Ordering::Relaxed);
             *needs_full_publish = true;
         },
