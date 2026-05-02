@@ -113,21 +113,29 @@ impl Integrator for WisdomHolman {
         let m_total: f64 = bodies.iter().map(|b| b.mass).sum();
         let mu = ctx.g_factor * m0;
 
-        // Step-entry snapshots.
-        let r0_in = Vec3::new(bodies[0].x, bodies[0].y, bodies[0].z);
-        let v0_in = Vec3::new(bodies[0].vx, bodies[0].vy, bodies[0].vz);
+        // The Wisdom-Holman canonical formulation uses heliocentric positions
+        // and inertial momenta in the rest frame. To extend to arbitrary
+        // initial frames without altering the algorithm, this implementation
+        // performs a Galilean transformation to the centre-of-mass rest frame
+        // at step entry, runs the symplectic split there, and applies the
+        // inverse Galilean transformation at step exit. Total momentum is
+        // exactly conserved by the symplectic split, so `v_com` is unchanged
+        // through the step.
+        let p_total =
+            bodies.iter().fold(Vec3::ZERO, |s, b| s + b.mass * Vec3::new(b.vx, b.vy, b.vz));
+        let v_com = p_total / m_total;
+        for b in bodies.iter_mut() {
+            b.vx -= v_com.x;
+            b.vy -= v_com.y;
+            b.vz -= v_com.z;
+        }
 
-        // Total inertial momentum is exactly conserved through the symplectic
-        // split; capture it once at step entry to derive `v_0_out` at step
-        // exit by inversion of the planet-momentum sum.
-        let p_total = m0 * v0_in
-            + bodies[1..].iter().fold(Vec3::ZERO, |s, b| s + b.mass * Vec3::new(b.vx, b.vy, b.vz));
+        // Step-entry snapshots in the rest frame.
+        let r0_in = Vec3::new(bodies[0].x, bodies[0].y, bodies[0].z);
 
         // The barycenter-constraint reconstruction at step exit needs the
-        // step-entry value of `Σ m_i q_i_in` to derive `r_0_out` from the
-        // post-step planet positions: in the rest frame, the barycenter
-        // `Q_0 = (1/M) Σ_all m_i r_i` is invariant, which reduces to
-        // `Q_0 - r_0 = (1/M) Σ_{i≥1} m_i q_i` = constant.
+        // step-entry value of `Σ m_i q_i_in` (i ≥ 1) to derive `r_0_out` from
+        // the post-step planet positions. In the rest frame `Q_0` is invariant.
         let m_q_in: Vec3 = bodies[1..]
             .iter()
             .fold(Vec3::ZERO, |s, b| s + b.mass * (Vec3::new(b.x, b.y, b.z) - r0_in));
@@ -143,6 +151,11 @@ impl Integrator for WisdomHolman {
         let pe = wh_kick(bodies, ctx, 0.5 * dt, acc, mu);
 
         // ── Drift: H_K (analytical Kepler around fixed origin, per planet)
+        // The Hamiltonian `H_K = p_i² / 2 m_i − G m_0 m_i / |q_i|` propagates
+        // each planet around a fixed central potential of strength `mu = G m_0`
+        // (Wisdom & Holman 1991 §III). The leading O(m_i / m_0) correction
+        // relative to the true two-body problem is absorbed by the H_indirect
+        // drift below.
         for b in bodies[1..].iter_mut() {
             let q = Vec3::new(b.x, b.y, b.z);
             let v = Vec3::new(b.vx, b.vy, b.vz);
@@ -172,8 +185,8 @@ impl Integrator for WisdomHolman {
         // ── Second half-kick ──────────────────────────────────────────────
         let _ = wh_kick(bodies, ctx, 0.5 * dt, acc, mu);
 
-        // ── Reconstruct central body inertial state ───────────────────────
-        // Barycenter constraint: `Q_0` was invariant through the step, so
+        // ── Reconstruct central body inertial state in the rest frame ─────
+        // Barycenter constraint in the rest frame: `Q_0` is invariant, so
         //   r_0_out = r_0_in + (m_q_in − m_q_out) / M
         // where m_q_out is `Σ m_i q_i_post` evaluated on the post-step
         // heliocentric positions.
@@ -181,24 +194,38 @@ impl Integrator for WisdomHolman {
             bodies[1..].iter().fold(Vec3::ZERO, |s, b| s + b.mass * Vec3::new(b.x, b.y, b.z));
         let r0_out = r0_in + (m_q_in - m_q_out) / m_total;
 
-        // ── Translate planets back to inertial coordinates ─────────────────
+        // ── Translate planets back to rest-frame inertial coordinates ────
         for b in bodies[1..].iter_mut() {
             b.x += r0_out.x;
             b.y += r0_out.y;
             b.z += r0_out.z;
         }
 
-        // Total-momentum conservation: v_0_out = (P_total − Σ m_i v_i_out) / m_0.
+        // Rest-frame total-momentum conservation: `Σ_all m_i v_i = 0`, so
+        //   v_0_out = −(1/m_0) Σ_{i≥1} m_i v_i_out.
         let p_planets_out: Vec3 =
             bodies[1..].iter().fold(Vec3::ZERO, |s, b| s + b.mass * Vec3::new(b.vx, b.vy, b.vz));
-        let v0_out = (p_total - p_planets_out) / m0;
+        let v0_out_rest = -p_planets_out / m0;
 
         bodies[0].x = r0_out.x;
         bodies[0].y = r0_out.y;
         bodies[0].z = r0_out.z;
-        bodies[0].vx = v0_out.x;
-        bodies[0].vy = v0_out.y;
-        bodies[0].vz = v0_out.z;
+        bodies[0].vx = v0_out_rest.x;
+        bodies[0].vy = v0_out_rest.y;
+        bodies[0].vz = v0_out_rest.z;
+
+        // ── Inverse Galilean transformation back to the original frame ────
+        // Advance all bodies by `v_com · dt` (centre-of-mass position drift
+        // over the step) and restore each body's `v_com` velocity component.
+        let dr_com = v_com * dt;
+        for b in bodies.iter_mut() {
+            b.x += dr_com.x;
+            b.y += dr_com.y;
+            b.z += dr_com.z;
+            b.vx += v_com.x;
+            b.vy += v_com.y;
+            b.vz += v_com.z;
+        }
 
         StepResult {
             consumed_dt: dt,
