@@ -14,7 +14,7 @@ This experiment extends the Kepler parity result (notebook `2026-04-25-rebound-p
 
 Where Kepler-prograde validates that apsis IAS15 reproduces the canonical Kepler magnitude invariants at machine precision against REBOUND, the retrograde experiment closes the **sign-convention gap**: any latent bug in cross-product order, in eccentricity-vector orientation, in `atan2` quadrant handling, or in an internal controller assumption that $L_z > 0$ would manifest here as either a Tier 1 magnitude failure (orientation-reversed quantity disagreeing with itself between sides) or a Tier 2 sign-consistency violation (sign flip during the run, or sign mismatch between sides). Such bugs would pass Kepler-prograde silently — the reason this experiment exists.
 
-This is the fourth and final entry of the parity validation portfolio: Kepler-prograde / figure-8 / Pythagorean / Kepler-retrograde, spanning periodic 2-body, periodic 3-body, chaotic 3-body, and sign-flipped 2-body regimes against REBOUND IAS15.
+This is the fourth and final entry of the parity validation portfolio: Kepler-prograde / figure-8 / Pythagorean / Kepler-retrograde, spanning periodic 2-body, periodic 3-body, chaotic 3-body, and sign-flipped 2-body regimes against REBOUND IAS15. It additionally extends the portfolio's horizon coverage from the previous maximum of 100 orbits (Kepler-prograde) to $10^4$ orbits — closing the long-horizon stability gate identified during the GR-readiness review as a precondition for the federation thesis's 1PN-class perturbation extensions.
 
 ---
 
@@ -50,7 +50,7 @@ For the retrograde Kepler two-body system at $e = 0.5$ integrated under IAS15 in
 
 #### Tier 1 — Magnitude invariants *(gated)*
 
-These are the constants of motion of pure Kepler dynamics; both per-side conservation and cross-implementation agreement are gated. **Tolerances are identical to Kepler-prograde.** The numerical floor is sign-agnostic — relaxing here would imply distrust of the symmetry of the physics and method, which is unjustified.
+These are the constants of motion of pure Kepler dynamics; both per-side conservation and cross-implementation agreement are gated. **Tolerances are identical to Kepler-prograde and identical at both horizons.** The numerical floor is sign-agnostic — relaxing here would imply distrust of the symmetry of the physics and method, which is unjustified. The bounds are also horizon-agnostic at the scales tested (see §Run parameters for the Brouwer-law envelope vs bound margin at each horizon); if observation saturates the bound at the long horizon, that observation is the finding, not a calibration failure.
 
 The tier deliberately tests only the **magnitudes** of orientation-bearing quantities ($|h|$); the sign of $h$ is gated separately in Tier 2 so the diagnostic distinguishes a magnitude-drift bug from an orientation-flip bug. A bug that preserves $|h|$ but inverts $\mathrm{sign}(h)$ intermittently would pass Tier 1 silently; gating sign separately catches it.
 
@@ -78,13 +78,32 @@ Let $h_0 := h(t = 0)$ be the initial specific angular momentum. For the retrogra
 | 2 | rebound sign consistency | Same on the REBOUND side | All samples satisfy both |
 | 3 | cross-impl sign agreement | $\mathrm{sign}(h_\text{apsis}(t_k)) = \mathrm{sign}(h_\text{rebound}(t_k))$ at every sample $t_k$ | All samples agree |
 
-The near-zero floor is set at $\varepsilon_\text{floor} = 1 \times 10^{-10}$. For the IC declared in §Methodology, $|h_0| = \sqrt{\mu \, a \, (1 - e^2)} = \sqrt{1 \cdot 1 \cdot 0.75} \approx 0.866$ in canonical units, so $\varepsilon_\text{floor}$ sits about 10 decades below $|h_0|$. This places it well above any plausible f64 round-off accumulation over 100 orbits ($\sim 10^{-12}$ absolute ceiling for IAS15-class methods on Kepler smooth flow) while still firing on any pathological collapse toward zero. It is a defensive guard, not a routine threshold.
+The near-zero floor is set at $\varepsilon_\text{floor} = 1 \times 10^{-10}$. For the IC declared in §Methodology, $|h_0| = \sqrt{\mu \, a \, (1 - e^2)} = \sqrt{1 \cdot 1 \cdot 0.75} \approx 0.866$ in canonical units. The calibration is quantified, not chosen by intuition:
+
+- **Theoretical drift envelope.** Per-step f64 round-off in $h$ is bounded above by $\mathrm{ULP} \cdot |r| \cdot |v| \approx 2.22 \times 10^{-16} \cdot O(1) \cdot O(1)$ in canonical units. Brouwer's law gives the cumulative envelope after $N$ substeps as $\sigma_h \approx \mathrm{ULP} \cdot \sqrt{N}$ (random-walk regime); for the long-horizon gate at $10^4$ orbits with $\sim 10^5$ substeps, $\sigma_h \approx 7 \times 10^{-14}$.
+- **Distance from envelope to floor.** $\varepsilon_\text{floor} = 10^{-10}$ sits $\sim 1.4 \times 10^3$ above the theoretical envelope. For $\varepsilon_\text{floor}$ to fail without a genuine bug, accumulated round-off would need to exceed its theoretical envelope by ~3 orders of magnitude, which IAS15 in Kepler smooth flow is not observed to do (Rein & Spiegel 2015 §4 reports drifts at $\sim 10^{-15}$ over $10^9$ steps — well below Brouwer's prediction, due to the algorithm's near-symplecticity).
+- **Distance from floor to $|h_0|$.** $\varepsilon_\text{floor}$ is $\sim 10^{10}$ below $|h_0|$, so a routine pass observation never triggers near-floor concern. It only fires on pathology — specifically, on $|h|$ collapsing within ~10 orders of magnitude of zero, which would be unambiguously a bug, not arithmetic noise.
+
+It is a defensive guard with quantified margin, not a routine threshold.
 
 Tier 2 has no continuous numerical bound — these are exact sign checks. If the integrator is correct, every sample passes by construction; if any bug class enumerated in §Motivation is present, it manifests as a binary failure at the first affected sample.
 
 #### Tier 3 — Geometric coherence *(informational, NOT gated)*
 
-- **Per-body position drift** — $\max_t |\mathbf{r}_{1,\text{apsis}}(t) - \mathbf{r}_{1,\text{rebound}}(t)|$ over all sample times. Reported as context. The expected magnitude is the same as Kepler-prograde ($\sim 10^{-9}$ peak around orbit 81; see prograde §Pilot Interpretation). No tolerance is declared because phase drift is not a cross-implementation invariant under adaptive controllers — gating on it would conflate physical disagreement with controller-level ULP divergence, an error the prograde notebook diagnosed and corrected.
+- **Per-body position drift** — $\max_t |\mathbf{r}_{1,\text{apsis}}(t) - \mathbf{r}_{1,\text{rebound}}(t)|$ over all sample times. Reported as context. At the 100-orbit checkpoint, the expected magnitude is the same as Kepler-prograde ($\sim 10^{-9}$ peak; see prograde §Pilot Interpretation). At the $10^4$-orbit gate, $|\Delta r|$ is expected to saturate at $O(1)$ (bodies on the same Kepler ellipse but at scrambled orbital phase, the asymptotic ceiling for any cross-implementation comparison of adaptive high-order integrators). No tolerance is declared at either horizon because phase drift is not a cross-implementation invariant under adaptive controllers — gating on it would conflate physical disagreement with controller-level ULP divergence, an error the prograde notebook diagnosed and corrected.
+
+#### Decision rules
+
+The protocol is actionable, not just descriptive. Each outcome combination has a defined diagnostic and follow-up action declared a priori, so post-run analysis is not retro-fitted to whichever interpretation the data invites:
+
+| Outcome | Diagnostic | Action |
+| --- | --- | --- |
+| Tier 1 + Tier 2 both pass at both horizons | Integrator + sign convention OK across the regime relevant to GR perihelion timescales | Ship — closes parity portfolio for v0.1; long-horizon evidence supports federation thesis |
+| Tier 1 fail, Tier 2 pass | Magnitude-drift bug — energy or radial bookkeeping; sign convention not at fault | Halt. Localise to inner force / integration loop. Re-run prograde at the same horizon; if prograde also fails, the bug is regime- or horizon-driven, not retrograde-specific |
+| Tier 1 pass, Tier 2 fail | Sign-convention bug — falls into one of the 5 categories enumerated in §Motivation | Halt. Inspect cross-product order, eccentricity-vector composition, `atan2` argument ordering, controller sign assumptions, and underflow/overflow paths. The first failing sample localises the time of bug expression |
+| Tier 1 + Tier 2 both fail | Deep defect (likely IC handling or state representation) | Halt. Verify IC bit-identicality at $t = 0$; verify COM-shift preserves $h$ sign exactly. If both pass at $t=0$ but the run diverges, the bug is in the integrator's inner state, not the IC layer |
+| Tier 1 + Tier 2 pass, Tier 3 unexpected | Phase drift larger or smaller than prograde precedent | Investigate but do not reprove. Re-run at denser sampling. Compare $|\Delta r|$ shape with prograde — if shape differs systematically (e.g., monotone vs oscillatory), the controller is responding differently to the sign-flipped IC, which itself is a finding |
+| Brouwer-law saturation at $10^4$ horizon | $\lvert\Delta E\rvert$ or $\lvert\Delta h\rvert$ approaches $10^{-13}$ from below at the long-horizon gate | Document honestly as Brouwer-law approach to bound; do **not** widen bound retroactively. If it exceeds, treat as Phase A → Phase B revision per the discipline established in PR #22 (recommended_dt validation) |
 
 ### Methodology
 
@@ -123,9 +142,20 @@ Identical to Kepler-prograde. The orbital period $T = 2\pi \sqrt{a^3 / \mu} = 2\
 
 #### Run parameters and sampling
 
-- **Total integration:** 100 orbital periods ($T = 2\pi$ in canonical units). Same horizon as Kepler-prograde.
-- **Output cadence:** 1 sample per orbital period plus initial state — 101 samples per body per side. Schema mirrors `validation/rebound-parity/kepler/` byte-for-byte to preserve cross-experiment comparability of the parity portfolio.
+The experiment runs at **two horizons** in a single integration, with both horizons gated.
+
+- **Long horizon (primary gate):** $10^4$ orbital periods ($T = 2\pi$ in canonical units), i.e., $t_\text{final} = 2\pi \times 10^4 \approx 6.28 \times 10^4$ canonical t.u. This corresponds to ~24 centuries of Mercury's orbit at canonical scaling — the regime relevant to the GR perihelion-precession claim that the v0.1 federation thesis aims to support. Demonstrating IAS15 stability at this horizon closes the long-horizon gate identified during the GR-readiness assessment as a precondition for plugging 1PN-class perturbations.
+- **Short horizon (checkpoint):** 100 orbital periods, with metrics evaluated separately on the $[0, 100]$ subset of the same run. This preserves direct comparability with Kepler-prograde (`2026-04-25`, identical horizon) — at the matched horizon, the magnitude invariants on retrograde must agree with prograde to f64 precision; any deviation is a sign-convention finding, not a regime difference.
+- **Output cadence:** 1 sample per orbital period plus initial state — 10001 samples per body per side over the full $10^4$-orbit horizon. Schema mirrors `validation/rebound-parity/kepler/` byte-for-byte to preserve cross-experiment comparability of the parity portfolio. CSV size: ~1 MB per side (manageable; not gitignored under the convention from the Kepler/figure-8/Pythagorean precedents).
 - **Output format:** wide CSV with `sample`, `t`, full per-body state $(x, y, v_x, v_y)$ for both bodies, and total energy $E$.
+
+**Why the bounds do not change with horizon.** IAS15's energy-conservation property in smooth Kepler flow has been characterised at $10^9$ steps showing drift $\sim 10^{-15}$ (Rein & Spiegel 2015 §4) — well below the Brouwer-law random-walk envelope $\sigma_E \approx \mathrm{ULP} \cdot \sqrt{N_\text{steps}}$ that bounds non-symplectic methods. For our long horizon at $\sim 10^5$ substeps, the Brouwer envelope is $\sigma_E \approx 7 \times 10^{-14}$ and IAS15 typically achieves much better. The $10^{-13}$ bound therefore retains $\geq$ 1.4× margin to the theoretical envelope and $\geq$ 100× margin to the published IAS15 behaviour, at both horizons. **No bound widening is needed for the long horizon; if observation exceeds the bound, that is the finding, not a calibration failure.**
+
+| Horizon | $N_\text{steps}$ (estimated) | Brouwer envelope $\sigma_E$ | $10^{-13}$ bound margin (theory) |
+| --- | ---: | ---: | ---: |
+| 100 orbits (checkpoint) | $\sim 10^4$ | $2.2 \times 10^{-14}$ | $\sim 5\times$ |
+| $10^4$ orbits (gate) | $\sim 10^5$ | $7.0 \times 10^{-14}$ | $\sim 1.4\times$ |
+| $10^5$ orbits (out of scope here) | $\sim 10^6$ | $2.2 \times 10^{-13}$ | $\sim 1\times$ — would saturate |
 
 #### Metric formulas
 
@@ -195,6 +225,10 @@ Reporting them as separate gates makes the diagnostic unambiguous: a Tier-1-only
 
 7. **Out-of-regime scenarios may legitimately fail.** Same caveat as Kepler-prograde: the smooth-flow assumption underlying the bound derivation holds for $e = 0.5$ Kepler. At higher eccentricity or in close-encounter regimes the bound's derivation does not apply (cf. Pythagorean `2026-04-30` §Energy drift). $e = 0.5$ is comfortably within the regime; this caveat is for context, not for hedging this experiment's claim.
 
+8. **Brouwer-law saturation at the long horizon.** The $10^{-13}$ energy and angular-momentum bounds retain $\sim 1.4\times$ theoretical margin against the Brouwer-law envelope at $\sim 10^5$ substeps (see §Run parameters table). IAS15's near-symplectic structure typically suppresses the random-walk envelope by 1–2 orders of magnitude in published smooth-flow studies (Rein & Spiegel 2015 §4), so the practical margin is expected to be $> 100\times$. If observed drift instead approaches the bound, that is genuine Brouwer-law accumulation and the §Decision rules row labelled "Brouwer-law saturation" applies — the bound is not retroactively widened. A finding here would constrain the choice of horizon for future v0.2 long-horizon experiments rather than invalidate this one.
+
+9. **Long-horizon Tier-3 saturation at $|\Delta r| = O(1)$.** At $10^4$ orbits, controller-level ULP divergence accumulated through Lyapunov-free Kepler dynamics still produces phase drift large enough that $|\Delta r|$ between sides is expected to saturate at $O(1)$ — bodies on the same Kepler ellipse but at scrambled orbital phase. This is **not a parity defect** (the same diagnosis applies as in Kepler-prograde §Pilot Interpretation), and Tier 3 is informational by construction. The expected saturation is documented here so a reader does not mis-read $|\Delta r| \sim 1$ as a regression vs the prograde 100-orbit result.
+
 ---
 
 ## Reproducibility
@@ -224,8 +258,9 @@ This notebook deliberately mirrors the section structure and methodological fram
 | Regime | periodic 2-body, $L_z > 0$ | periodic 3-body, $L_z = 0$ | chaotic 3-body, $L_z = 0$ | periodic 2-body, $L_z < 0$ |
 | Tier 1 | orbital elements + energy | $E$, $\mathbf{L}$, $\mathbf{P}$, $\mathbf{r}_\text{COM}$ | $E$, $\mathbf{L}$, $\mathbf{P}$, $\mathbf{r}_\text{COM}$ | orbital elements + energy (mag only on $h$) |
 | Tier 2 | (none — magnitude tier covers it) | (none — same) | (none — same) | **sign($h$) consistency, binary** |
-| Tier 3 | informational $|\Delta r|$ | informational $|\Delta r|$ | informational $|\Delta r|$, expected $O(1)$ | informational $|\Delta r|$ |
+| Tier 3 | informational $\lvert\Delta r\rvert$ | informational $\lvert\Delta r\rvert$ | informational $\lvert\Delta r\rvert$, expected $O(1)$ | informational $\lvert\Delta r\rvert$, expected $O(1)$ at long horizon |
 | Sign-convention coverage | $L_z > 0$ only | $L_z = 0$ | $L_z = 0$ | $L_z < 0$ — closes the gap |
-| Horizon | $100\,T$ | $10\,T$ + $50\,T$ | $70$ canonical t.u. | $100\,T$ |
+| Horizon | $100\,T$ | $10\,T$ + $50\,T$ | $70$ canonical t.u. | $10^4\,T$ (gate) + $100\,T$ (checkpoint) |
+| Decision rules | implicit | implicit | implicit | **explicit** (this notebook §Decision rules) |
 
 The shared framework remains "physical invariants gate; geometric coherence informs". The retrograde specialisation is the explicit Tier 2 sign-consistency gate, which other parity notebooks do not need (their $L_z$ either is positive by construction or is exactly zero by symmetry, neither of which admits the orientation-flip bug class). The Tier 1 magnitude-only treatment of $h$ in this notebook is the dual of that addition: it isolates magnitude-drift from orientation-flip into separate diagnostic channels.
