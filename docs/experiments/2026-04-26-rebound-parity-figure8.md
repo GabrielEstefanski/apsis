@@ -122,7 +122,7 @@ For the figure-8, gating on per-body $|\Delta r|$ would conflate this controller
 
 - **Period closure of the trajectory.** A well-formed figure-8 implementation closes the orbit at $t = T$; the per-side $\max |\Delta r|$ between $\mathbf{r}(T)$ and $\mathbf{r}(0)$ is a meaningful diagnostic of integrator quality but is not a cross-implementation parity criterion (it tests each implementation against itself, not against the other). Both apsis and REBOUND have their own internal closure benchmarks; this experiment does not duplicate them.
 - **Symbolic symmetry checks.** The figure-8 satisfies cyclic permutation by $T/3$, body-pair reflection through the origin, and time-reversal symmetry. Verifying these is a separate methodological exercise; this experiment treats them as IC-level facts and does not gate on numerical residuals of the symmetry operations.
-- **Sensitivity to IAS15 `epsilon`.** The default tolerance on both sides is used. A sweep over `epsilon` would characterise the cost-precision frontier and is reserved for the Phase 6A characterisation experiment.
+- **Sensitivity to IAS15 `epsilon`.** The default tolerance on both sides is used. A sweep over `epsilon` would characterise the cost-precision frontier and is reserved for a separate cost-precision characterisation experiment.
 
 ---
 
