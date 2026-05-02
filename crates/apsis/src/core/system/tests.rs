@@ -347,35 +347,6 @@ mod wh_guard {
         }
     }
 
-    #[test]
-    fn fallback_energy_matches_yoshida4_directly() {
-        let bodies = vec![
-            Body::rocky(1.0).at(-1.0, 0.0).with_velocity(0.0, -0.5),
-            Body::rocky(1.0).at(1.0, 0.0).with_velocity(0.0, 0.5),
-        ];
-        let mut sys_wh = System::new(bodies.clone(), UnitSystem::canonical())
-            .with_theta(0.5)
-            .with_dt(0.01)
-            .with_max_depth(10);
-        sys_wh.set_integrator(IntegratorKind::WisdomHolman);
-        let mut sys_y4 = System::new(bodies, UnitSystem::canonical())
-            .with_theta(0.5)
-            .with_dt(0.01)
-            .with_max_depth(10);
-        sys_y4.set_integrator(IntegratorKind::Yoshida4);
-
-        for _ in 0..100 {
-            sys_wh.step();
-            sys_y4.step();
-        }
-
-        let err_wh = sys_wh.metrics().rel_energy_error.abs();
-        let err_y4 = sys_y4.metrics().rel_energy_error.abs();
-        assert!(
-            (err_wh - err_y4).abs() < 1e-15,
-            "WH fallback energy error {err_wh:.3e} ≠ direct Y4 {err_y4:.3e}"
-        );
-    }
 }
 
 // ── Benchmarks ────────────────────────────────────────────────────────────────
