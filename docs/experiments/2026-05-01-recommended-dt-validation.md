@@ -14,7 +14,7 @@ This experiment validates the `recommended_dt` heuristic — a runtime function 
 
 Velocity Verlet ($k = 2$) and Yoshida-4 ($k = 4$) are gated; Wisdom–Holman is reported as informational because its sympletic structure depends on dt commensurability with orbital period (Wisdom & Holman 1991), a constraint the heuristic does not encode. Angular momentum is gated as a structural invariant — preserved by Newton's 3rd law in the force evaluation regardless of integrator order.
 
-The experiment closes the third Phase 6A item of the v0.1 validation portfolio (alongside the Kepler/figure-8/Pythagorean parity sequence).
+The experiment closes the heuristic-validation entry of the v0.1 validation portfolio (alongside the Kepler / figure-8 / Pythagorean / retrograde parity sequence).
 
 ---
 
@@ -113,7 +113,7 @@ The integrator's internal truncation-error estimator (used by IAS15's controller
 
 - **IAS15.** IAS15's adaptive controller chooses its own dt; passing `recommended_dt` to IAS15 is meaningless because it overrides via the controller. Adaptive integrators are a separate validation axis.
 - **Long-horizon characterisation.** Already covered by the parity portfolio (Kepler 100T, figure-8 10T, Pythagorean 70 t.u.). This experiment focuses on per-step heuristic correctness.
-- **η-sensitivity sweep.** The η values (0.05 softened, 0.01 unsoftened) are declared a priori within the conventional ranges adopted in literature (formulas after Power et al. 2003 and Aarseth 2003 §2 respectively; specific values are the apsis defaults). A sweep would characterise the cost-precision frontier as a separate Phase 6A experiment.
+- **η-sensitivity sweep.** The η values (0.05 softened, 0.01 unsoftened) are declared a priori within the conventional ranges adopted in literature (formulas after Power et al. 2003 and Aarseth 2003 §2 respectively; specific values are the apsis defaults). A sweep would characterise the cost-precision frontier as a separate experiment.
 - **WH gating.** Reported only.
 - **Recommendation strength claim.** The experiment validates that recommended_dt produces *bounded* conservation, not that it produces *optimal* dt for any specific scenario. Optimality requires a sweep, declared above as out of scope.
 
@@ -273,7 +273,7 @@ Under the revised bound, the `solar_system` Y4 cell passes at $1.98 \times 10^{-
 
 **Wisdom–Holman is empirically out-of-domain, as predicted.** The 14-decade span across WH energy cells reflects the protocol's a priori claim: `recommended_dt` does not encode the orbital-period commensurability constraint WH requires, so its output for WH is essentially random across scenarios. Some scenarios happen to land near-resonant (`pluto_charon` at $2 \times 10^{-14}$ — best case); some land catastrophic (`hd_80606_b_system` at $1.43 \times 10^{0}$ — full energy loss, a flag for #16-class WH algorithmic instability; `trappist_one` at $8.69 \times 10^{-2}$ — close to that regime). This range is **not** a defect of the heuristic; it is direct evidence of why WH was excluded from gating in the §Hypothesis. The data also incidentally produces a screening criterion: `recommended_dt` is unsafe for WH on resonant-compact systems (`trappist_one`, `kepler_36`, `hot_jupiter`) and on high-eccentricity systems (`hd_80606_b_system`), and is safer on wide binaries (`alpha_centauri_ab`, `pluto_charon`) and on Lagrange configurations.
 
-**This completes Phase 6A's heuristic-validation entry.** Combined with the cost-precision Pareto sweep and the operational-domain benchmarks already underway, the v0.1 paper now has evidence that the apsis heuristic is operationally safe for VV and Y4 across its derivation regime, with a clear out-of-domain framing for WH.
+**This completes the heuristic-validation entry of the v0.1 validation portfolio.** Combined with the cost-precision Pareto sweep and the operational-domain benchmarks already underway, the v0.1 paper now has evidence that the apsis heuristic is operationally safe for VV and Y4 across its derivation regime, with a clear out-of-domain framing for WH.
 
 ---
 

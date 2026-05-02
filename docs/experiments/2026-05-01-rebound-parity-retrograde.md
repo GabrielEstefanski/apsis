@@ -190,7 +190,7 @@ Reporting them as separate gates makes the diagnostic unambiguous: a Tier-1-only
 ### Out of scope (declared a priori)
 
 - **Trajectory-level prediction.** Same as Kepler-prograde — phase-level $|\Delta r|$ is informational only, since adaptive controllers produce ULP-different `dt` sequences that accumulate as orbital phase drift.
-- **3D / inclined retrograde.** This experiment is planar 2D. Out-of-plane retrograde (orbit inclination > 90°) requires the 3D port (Phase 0 of the doc roadmap) and is reserved for v0.2.
+- **3D / inclined retrograde.** This experiment is planar 2D for direct comparability with the Kepler-prograde precedent. Out-of-plane retrograde (orbit inclination > 90°) is reserved for a future experiment.
 - **Eccentricity sweep.** Only $e = 0.5$ is tested, matching Kepler-prograde for direct comparability. Sensitivity to eccentricity is a separate study and not relevant to the sign-convention claim of this experiment.
 - **Substep-economy comparison.** Same justification as in Pythagorean (`2026-04-30`) — making cross-implementation substep-count comparison scientifically meaningful requires standardised parity telemetry that does not exist today; deferred to a parity-portfolio-wide enhancement issue.
 - **Time-reversal test.** A symmetric retrograde-vs-time-reversed-prograde comparison would be a separate axis; this experiment fixes attention on the IC sign-flip, not on integrator time-reversal symmetry.

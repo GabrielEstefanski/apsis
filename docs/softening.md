@@ -189,4 +189,4 @@ For publication-quality runs, both should be tuned:
 
 3. **Softening does not model real physics.** It is a numerical regularisation,
    not a physical collision or tidal model. Merger / fragmentation events
-   require separate treatment (planned: Phase 1 — Collisions).
+   require separate treatment, currently out of scope.

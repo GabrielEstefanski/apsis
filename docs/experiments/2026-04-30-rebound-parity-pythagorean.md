@@ -129,7 +129,7 @@ The justification for the invariant-based metric set is the same as the Kepler a
 
 - **Trajectory-level prediction.** The Pythagorean problem has no closed-form solution and is exponentially sensitive to numerical noise. This experiment makes no claim about either implementation's trajectory matching any external reference; the only claim is that both implementations preserve the same Hamiltonian to f64 precision through the chaotic regime.
 - **Substep-count comparison.** This experiment does not collect or compare substep-economy data between the two implementations. Making such a comparison scientifically meaningful would require a standardised parity-telemetry mechanism — a consistent definition of "substep" applicable across `apsis` and REBOUND, symmetric collection from both sides, deterministic surfacing through a stable interface — that does not exist today. The right place for that work is a parity-portfolio-wide enhancement issue, not a Pythagorean-specific extension.
-- **Sensitivity to IAS15 `epsilon`.** The default tolerance on both sides is used. A sweep over `epsilon` would characterise the cost-precision frontier and is reserved for the Phase 6A characterisation experiment.
+- **Sensitivity to IAS15 `epsilon`.** The default tolerance on both sides is used. A sweep over `epsilon` would characterise the cost-precision frontier and is reserved for a separate cost-precision characterisation experiment.
 - **Behaviour past ejection** beyond $t = 70$. Once the binary has formed and a body has departed, the dynamics admit a closed-form description (a Keplerian binary plus a free particle) and the integration reduces to two-body integration on the binary; further parity evidence in that regime is duplicative of the Kepler notebook.
 
 ---
