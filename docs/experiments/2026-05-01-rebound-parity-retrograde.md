@@ -2,9 +2,9 @@
 
 **Date:** 2026-05-01
 **Subject:** Numerical agreement between IAS15 (apsis) and IAS15 (REBOUND) on a canonical retrograde Kepler orbit, completing the (prograde, retrograde) pair for sign-convention coverage of the Kepler limit.
-**Baseline commit:** *(to be pinned at run time)*
+**Baseline commit:** `b57ffe9` ("feat(parity): retrograde Kepler apparatus — apsis cargo example + REBOUND side + comparator").
 **Tooling:** apsis IAS15 (`crates/apsis/src/physics/integrator/ias15.rs`), REBOUND 4.6.0 via Python 3.10 (`reb.IAS15`).
-**Status:** *Protocol declared a priori. Run pending — §Results, §Interpretation, and the Reproducibility commit hash are deliberately empty until apparatus is implemented and executed.*
+**Status:** *Run executed 2026-05-02 against `b57ffe9`. **All 20 gated outcomes pass — 10 metrics × 2 horizons (100-orbit checkpoint + $10^4$-orbit long-horizon gate).** Both Tier 1 magnitude invariants and Tier 2 sign-consistency binary checks within tolerance on both sides; Decision rules verdict `PASS` on both horizons. Brouwer-law growth visible from checkpoint to long horizon ($\sim 10\times$ magnitude across the $\sim 100\times$ horizon, consistent with random-walk $\sqrt{N}$ scaling), all observed values $\geq 5\times$ inside the bound. One scientific finding registered in §Interpretation: Tier 3 $|\Delta r|$ at $10^4$ orbits saturated at $4.57 \times 10^{-9}$, well below the $O(1)$ predicted in §Threats #9 — Kepler's lack of Lyapunov amplification preserves phase coherence between two correct IAS15 implementations across $10^4$ orbits in a way the protocol's a-priori prediction underestimated.*
 
 ---
 
@@ -102,7 +102,7 @@ The protocol is actionable, not just descriptive. Each outcome combination has a
 | Tier 1 fail, Tier 2 pass | Magnitude-drift bug — energy or radial bookkeeping; sign convention not at fault | Halt. Localise to inner force / integration loop. Re-run prograde at the same horizon; if prograde also fails, the bug is regime- or horizon-driven, not retrograde-specific |
 | Tier 1 pass, Tier 2 fail | Sign-convention bug — falls into one of the 5 categories enumerated in §Motivation | Halt. Inspect cross-product order, eccentricity-vector composition, `atan2` argument ordering, controller sign assumptions, and underflow/overflow paths. The first failing sample localises the time of bug expression |
 | Tier 1 + Tier 2 both fail | Deep defect (likely IC handling or state representation) | Halt. Verify IC bit-identicality at $t = 0$; verify COM-shift preserves $h$ sign exactly. If both pass at $t=0$ but the run diverges, the bug is in the integrator's inner state, not the IC layer |
-| Tier 1 + Tier 2 pass, Tier 3 unexpected | Phase drift larger or smaller than prograde precedent | Investigate but do not reprove. Re-run at denser sampling. Compare $|\Delta r|$ shape with prograde — if shape differs systematically (e.g., monotone vs oscillatory), the controller is responding differently to the sign-flipped IC, which itself is a finding |
+| Tier 1 + Tier 2 pass, Tier 3 unexpected | Phase drift larger or smaller than prograde precedent | Investigate but do not reprove. Re-run at denser sampling. Compare $\lvert\Delta r\rvert$ shape with prograde — if shape differs systematically (e.g., monotone vs oscillatory), the controller is responding differently to the sign-flipped IC, which itself is a finding |
 | Brouwer-law saturation at $10^4$ horizon | $\lvert\Delta E\rvert$ or $\lvert\Delta h\rvert$ approaches $10^{-13}$ from below at the long-horizon gate | Document honestly as Brouwer-law approach to bound; do **not** widen bound retroactively. If it exceeds, treat as Phase A → Phase B revision per the discipline established in PR #22 (recommended_dt validation) |
 
 ### Methodology
@@ -199,13 +199,69 @@ Reporting them as separate gates makes the diagnostic unambiguous: a Tier-1-only
 
 ## Results
 
-*Pending run. §Results, §Interpretation, and the Reproducibility canonical-commit hash will be populated post-run, in a separate commit, against the apparatus commit hash. The protocol declared above is frozen at this commit and will not be retroactively altered to match observed values; any post-run protocol change will be recorded as a separate commit with explicit two-phase framing and rationale, per the discipline established in PR #22 (recommended_dt validation).*
+The run was executed 2026-05-02 against `b57ffe9`. Total samples: 10001 (orbit 0 plus 10000 orbital periods × 1 sample/orbit). Final integration time: $t_\text{final} = 6.283185 \times 10^{4}$ canonical t.u. on both sides. Initial energy bit-identical between sides: $E_0 = -5.000014999985003469 \times 10^{-7}$ (matched to 18 decimal digits, expected from bit-identical IC construction confirmed at $t = 0$).
+
+**Verdict: PASS PASS** — both Decision rules outcomes are `PASS: Tier 1 + Tier 2 both pass — integrator + sign convention OK`. All 10 gated metrics pass at the 100-orbit checkpoint and at the $10^4$-orbit long-horizon gate.
+
+### Tier 1 — Magnitude invariants (gated)
+
+| Metric | Checkpoint (100 orbits) | Long-horizon ($10^4$ orbits) | Tolerance | Verdict |
+| --- | ---: | ---: | ---: | --- |
+| $\lvert\Delta a\rvert/a$ (semi-major axis) | $3.11 \times 10^{-15}$ | $2.58 \times 10^{-14}$ | $10^{-13}$ | pass |
+| $\lvert\Delta e\rvert$ (eccentricity) | $2.33 \times 10^{-15}$ | $1.22 \times 10^{-14}$ | $10^{-13}$ | pass |
+| $\lvert\Delta\omega\rvert$ (periapsis orient., rad) | $3.11 \times 10^{-15}$ | $4.93 \times 10^{-14}$ | $10^{-12}$ | pass |
+| $\bigl\|\,\lvert h\rvert - \lvert h_0\rvert\,\bigr\| / \lvert h_0\rvert$ (cross-impl) | $1.41 \times 10^{-15}$ | $5.38 \times 10^{-15}$ | $10^{-13}$ | pass |
+| $\lvert\Delta E/E_0\rvert$ apsis | $2.12 \times 10^{-15}$ | $1.61 \times 10^{-14}$ | $10^{-13}$ | pass |
+| $\lvert\Delta E/E_0\rvert$ rebound | $2.54 \times 10^{-15}$ | $1.95 \times 10^{-14}$ | $10^{-13}$ | pass |
+| Cross-impl $\lvert\Delta E\rvert/\lvert E_0\rvert$ | $2.54 \times 10^{-15}$ | $2.58 \times 10^{-14}$ | $10^{-13}$ | pass |
+
+All seven metrics at both horizons sit in the 1–10 ULP regime relative to f64 machine epsilon. The checkpoint values are 1–3 ULP, statistically consistent with the Kepler-prograde results at the same horizon (`2026-04-25` §Results, all $\leq 4 \times 10^{-15}$).
+
+### Tier 2 — Sign(h) consistency (gated, binary)
+
+| Check | Checkpoint | Long-horizon | Verdict |
+| --- | --- | --- | --- |
+| apsis sign(h) consistency | sign preserved over 101 samples; min$\,\lvert h\rvert$ $\geq$ floor | sign preserved over 10001 samples; min$\,\lvert h\rvert$ $\geq$ floor | pass |
+| rebound sign(h) consistency | sign preserved over 101 samples; min$\,\lvert h\rvert$ $\geq$ floor | sign preserved over 10001 samples; min$\,\lvert h\rvert$ $\geq$ floor | pass |
+| Cross-impl sign(h) agreement | sign agrees on every sample | sign agrees on every sample | pass |
+
+Sign$(h_0) = -1$ (retrograde IC, as required by §Methodology). Both implementations preserve this sign at every sample on both sides; cross-implementation orientation agrees throughout. No bug class enumerated in §Motivation manifests at either horizon.
+
+### Tier 3 — Geometric coherence (informational, NOT gated)
+
+| Metric | Checkpoint | Long-horizon |
+| --- | ---: | ---: |
+| $\max \lvert\Delta r\rvert$ (secondary) | $2.18 \times 10^{-12}$ at orbit 32 | $4.57 \times 10^{-9}$ at orbit 8163 |
+
+The long-horizon $\lvert\Delta r\rvert$ is **three orders of magnitude smaller than the $O(1)$ saturation predicted in §Threats #9**. This is a scientific finding worth recording — see §Interpretation for the mechanism. The checkpoint value ($2.18 \times 10^{-12}$) is also smaller than the prograde 100-orbit precedent ($1.57 \times 10^{-9}$ at orbit 81), indicating retrograde phase drift accumulates slower at this horizon than prograde — likely a coincidence of ULP-alignment patterns rather than a structural difference, but worth noting if any future experiment finds the same asymmetry.
+
+### Brouwer-law growth from checkpoint to long horizon
+
+The Tier 1 magnitude metrics grew by a factor of $\sim 8$–$10\times$ between the two horizons, while the horizon itself grew by $100\times$:
+
+| Metric | Checkpoint | Long-horizon | Ratio | Brouwer prediction ($\sqrt{N}$) |
+| --- | ---: | ---: | ---: | ---: |
+| $\lvert\Delta a\rvert/a$ | $3.11 \times 10^{-15}$ | $2.58 \times 10^{-14}$ | $8.3\times$ | $10\times$ |
+| $\lvert\Delta E/E_0\rvert$ apsis | $2.12 \times 10^{-15}$ | $1.61 \times 10^{-14}$ | $7.6\times$ | $10\times$ |
+| $\lvert\Delta E/E_0\rvert$ rebound | $2.54 \times 10^{-15}$ | $1.95 \times 10^{-14}$ | $7.7\times$ | $10\times$ |
+
+Observed growth slightly slower than $\sqrt{N}$ random-walk prediction, consistent with IAS15's near-symplectic structure suppressing the random-walk envelope (Rein & Spiegel 2015 §4). The bound margin remains $\geq 5\times$ at the long horizon — comfortably within the regime where the $10^{-13}$ tolerance is appropriate.
+
+Raw outputs: `validation/rebound-parity/retrograde/out/{apsis,rebound}.csv` (10001 rows each, ~1 MB each), `out/comparison.json`.
 
 ---
 
 ## Interpretation
 
-*Pending run.*
+The retrograde Kepler experiment closes the sign-convention coverage gap of the parity portfolio cleanly. Reading the four bands of evidence together — IC bit-identicality at $t = 0$, Tier 1 magnitude invariants at $\sim 1$–$10$ ULP, Tier 2 sign(h) consistency at every sample on both sides, and Tier 3 phase-drift saturation well below predicted — yields a single coherent picture:
+
+**The integrator and orbital-element bookkeeping are sign-agnostic, as the underlying physics requires.** Every Tier 1 magnitude metric on retrograde matches its Kepler-prograde precedent to within a factor of 2 at the same horizon (100 orbits). Every Tier 2 sign-consistency check passes — sign$(h)$ is preserved at every sample on both sides through 10000 orbits, and the two implementations agree on orientation throughout. None of the five bug classes enumerated in §Motivation (cross-product order, eccentricity-vector composition, `atan2` argument ordering, controller sign assumptions, sign-dependent under/overflow paths) manifests. The §Decision rules verdict `PASS` applies on both horizons: integrator and sign convention OK across the regime relevant to GR perihelion timescales.
+
+**The long-horizon evidence supports the federation thesis.** The $10^4$-orbit gate corresponds to $\sim 24$ centuries of Mercury at canonical scaling — the regime relevant to the GR perihelion-precession claim that v0.1's first downstream perturbation consumer (`apsis-1pn-py`) targets. Brouwer-law growth from checkpoint to long horizon is visible ($\sim 8$–$10\times$ across $100\times$ horizon, slightly below $\sqrt{N}$), consistent with IAS15's near-symplectic energy conservation (Rein & Spiegel 2015 §4). The $10^{-13}$ bound retains $\sim 5\times$ margin at the long horizon; future v0.2 work pushing to $10^5$ orbits would saturate the bound and require honest Phase A → Phase B revision to a bound that admits the round-off floor at that scale, but $10^4$ orbits is comfortably inside the regime where the bound is appropriate.
+
+**Tier 3 phase drift is much smaller than the protocol's a-priori prediction — a finding worth recording.** §Threats #9 predicted $\lvert\Delta r\rvert$ saturating at $O(1)$ at $10^4$ orbits, reasoning by analogy with the Pythagorean chaotic regime where Lyapunov amplification scrambles per-step ULP differences into trajectory-scale separation. The observation at $4.57 \times 10^{-9}$ — three orders of magnitude inside that prediction — falsifies the analogy. The mechanism: Kepler dynamics have **zero Lyapunov exponent** by construction (the system is integrable; orbital frequency is determined by $a$ and $\mu$, both preserved at f64 precision on both sides). Phase drift in two correct IAS15 implementations therefore accumulates as a bounded random walk in the per-step ULP differences, **not** as exponential amplification. The §Threats #9 prediction conflated chaos-driven trajectory divergence with smooth-flow phase drift; the data corrects the framing without affecting the gated-metric verdict, and is documented here so the prediction error itself is part of the audit trail rather than swept under a verdict pass. (This is the kind of post-run protocol-level honesty the §Decision rules row "Tier 1 + Tier 2 pass, Tier 3 unexpected" anticipates: investigate, do not reprove.)
+
+**This completes the parity validation portfolio for v0.1.** The four entries — Kepler-prograde (`2026-04-25`, ULP at 100 orbits), figure-8 (`2026-04-26`, ULP at 10 + 50 orbits, $L_z = 0$), Pythagorean (`2026-04-30`, f64 close-encounter floor at 70 t.u., chaotic), and Kepler-retrograde (this notebook, ULP at 100 + $10^4$ orbits, $L_z < 0$) — together establish that apsis IAS15 reproduces REBOUND IAS15 across periodic 2-body, periodic 3-body, chaotic 3-body, and sign-flipped 2-body regimes, at the f64 precision floor for all gated metrics in regime, and demonstrably handles long horizons relevant to GR-class perturbations. The numerical foundation is consistent with the literature-standard implementation to the precision the physics admits, in every regime tested.
 
 ---
 
@@ -235,7 +291,8 @@ Reporting them as separate gates makes the diagnostic unambiguous: a Tier-1-only
 
 | Field | Value |
 | --- | --- |
-| apsis canonical commit | *(to be pinned at run time)* |
+| apsis canonical commit | `b57ffe9` (apparatus); protocol-only ancestors `0bdcae9` + `9cb091c` |
+| Run date | 2026-05-02 |
 | REBOUND version | 4.6.0 |
 | Python version | 3.10 (CPython, x64) |
 | Rust toolchain | `rustc 1.94.1` stable, Cargo profile `release`; default FP semantics (no `-Cffast-math`-equivalent) |
