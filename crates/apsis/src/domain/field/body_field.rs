@@ -13,6 +13,7 @@
 //! etc. — without a combinatorial enum.
 
 use crate::domain::body::Body;
+use crate::math::Vec3;
 
 /// Runtime state a [`BodyField`] may consult while sampling.
 ///
@@ -23,7 +24,7 @@ pub struct FieldContext<'a> {
     pub bodies: &'a [Body],
     /// Gravitational accelerations in internal units from the last physics
     /// step. Empty when the physics thread hasn't yet published any.
-    pub accelerations: &'a [(f64, f64)],
+    pub accelerations: &'a [Vec3],
     /// Simulation time (internal units).
     pub t: f64,
     /// Active gravitational-constant multiplier.

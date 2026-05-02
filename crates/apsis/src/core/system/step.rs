@@ -7,6 +7,7 @@ use crate::core::hooks::{
 };
 use crate::core::system::System;
 use crate::core::system::helpers::compute_closeness;
+use crate::math::Vec3;
 use crate::physics::energy::{angular_momentum_z, kinetic_energy, total_energy};
 use crate::physics::integrator::IntegratorContext;
 use crate::physics::integrator::{DenseSnapshot, IntegratorKind};
@@ -40,19 +41,20 @@ impl System {
         let dt = self.current_dt;
         let g_factor = self.g_factor;
 
-        // Capture pre-step kinematics for Order-2 dense-output fallback.
-        // `scratch_acc` holds a(t₀) from the previous step's end-of-step force
-        // evaluation, which equals the start-of-this-step acceleration for all
-        // four integrators (VV, Y4, WH each end with a force eval; IAS15 does too).
-        // Skipped on the very first step when scratch_acc is empty.
-        let pre_x0: Vec<(f64, f64)>;
-        let pre_v0: Vec<(f64, f64)>;
-        let pre_a0: Vec<(f64, f64)>;
-        let need_order2 =
-            !self.scratch_acc.is_empty() && self.integrator.kind() != IntegratorKind::Ias15;
+        // Capture pre-step state for the Order-2 dense-output fallback (VV,
+        // Y4, WH). Skipped when `scratch_acc` is empty (first step) or when
+        // its length differs from `bodies.len()` — WH leaves it sized N−1
+        // and a misaligned snapshot panics at the renderer. See PR #14 and
+        // issue #16.
+        let pre_x0: Vec<Vec3>;
+        let pre_v0: Vec<Vec3>;
+        let pre_a0: Vec<Vec3>;
+        let need_order2 = !self.scratch_acc.is_empty()
+            && self.integrator.kind() != IntegratorKind::Ias15
+            && self.scratch_acc.len() == self.bodies.len();
         if need_order2 {
-            pre_x0 = self.bodies.iter().map(|b| (b.x, b.y)).collect();
-            pre_v0 = self.bodies.iter().map(|b| (b.vx, b.vy)).collect();
+            pre_x0 = self.bodies.iter().map(|b| Vec3::new(b.x, b.y, b.z)).collect();
+            pre_v0 = self.bodies.iter().map(|b| Vec3::new(b.vx, b.vy, b.vz)).collect();
             pre_a0 = self.scratch_acc.clone();
         } else {
             pre_x0 = Vec::new();
@@ -107,12 +109,37 @@ impl System {
         self.update_energy_tracking();
         self.update_angular_momentum_tracking();
 
-        self.current_dt = match self.dt_mode {
-            DtMode::Fixed => self.user_dt,
-            DtMode::Adaptive => {
-                let stats = AccelerationStats::new(self.last_diag.max_acc, self.last_diag.jerk);
-                self.dt_ctrl.update(self.user_dt, self.rel_energy_error, stats)
-            },
+        // `current_dt` is the value passed to the integrator on the *next*
+        // call as its `dt_hint`, and is also surfaced to the UI / headless
+        // CSV as the simulation's "current step size". Three regimes:
+        //
+        //   * Self-adaptive integrator (IAS15) — the integrator's own
+        //     controller has already chosen the next step. Reading it via
+        //     [`Integrator::proposed_next_dt`] keeps `current_dt` honest
+        //     about the cadence the simulation is actually running at,
+        //     rather than reporting `user_dt` perpetually. The hint we
+        //     pass on the next call is the same value we reported, but
+        //     by trait contract the integrator is free to refine it
+        //     against the controller's internal state.
+        //
+        //   * `DtMode::Adaptive` — the *external* `DtController` (used by
+        //     fixed-step schemes that want adaptive cadence) computes the
+        //     next step from energy error and acceleration statistics.
+        //
+        //   * `DtMode::Fixed` with a non-self-adaptive integrator — pin
+        //     `current_dt = user_dt` so the next step uses exactly the
+        //     user's chosen cadence (the symplectic schemes need this for
+        //     measure preservation).
+        self.current_dt = if self.integrator.controls_own_step_size() {
+            self.integrator.proposed_next_dt().unwrap_or(self.user_dt)
+        } else {
+            match self.dt_mode {
+                DtMode::Fixed => self.user_dt,
+                DtMode::Adaptive => {
+                    let stats = AccelerationStats::new(self.last_diag.max_acc, self.last_diag.jerk);
+                    self.dt_ctrl.update(self.user_dt, self.rel_energy_error, stats)
+                },
+            }
         };
 
         if self.adaptive_theta && !self.bodies.is_empty() {
@@ -126,7 +153,13 @@ impl System {
 
         if self.steps % 97 == 0 {
             if let Some((dx, dy)) = calibration::com_offset(&self.bodies, self.total_mass) {
-                calibration::apply_body_shift(&mut self.bodies, dx, dy);
+                // Route through the integrator's `recenter_bodies` rather
+                // than the bare `apply_body_shift`: this preserves the
+                // per-body compensation accumulators that IAS15 uses to
+                // bound round-off error to `O(ε)` over long horizons.
+                // Fixed-step integrators inherit the trait default (bare
+                // subtraction), so behaviour is unchanged for them.
+                self.integrator.recenter_bodies(&mut self.bodies, dx, dy);
                 self.pending_com_shift.0 += -dx as f32;
                 self.pending_com_shift.1 += -dy as f32;
             }
@@ -168,6 +201,25 @@ impl System {
             restore_hooks(self, hooks);
             self.apply_commands(cmds);
         }
+    }
+
+    /// Recompute the energy / angular-momentum cache from the current
+    /// body state without advancing time. One force evaluation; idempotent.
+    /// Use before reading [`energy`](Self::energy) on a freshly-constructed
+    /// system that hasn't run a step yet.
+    pub fn refresh_energy_diagnostics(&mut self) {
+        if self.bodies.is_empty() {
+            self.last_kinetic = 0.0;
+            self.last_potential = 0.0;
+            return;
+        }
+        if self.scratch_acc.len() < self.bodies.len() {
+            self.scratch_acc.resize(self.bodies.len(), Vec3::ZERO);
+        }
+        let raw_potential = self.force_model.compute(&self.bodies, &mut self.scratch_acc);
+        self.last_potential = self.g_factor * raw_potential;
+        self.update_energy_tracking();
+        self.update_angular_momentum_tracking();
     }
 
     pub(crate) fn update_energy_tracking(&mut self) {

@@ -94,12 +94,13 @@ jobs:
           fi
           echo "OK: core resolves no UI dependency"
 
-  # ── Phase-3 gate: Mercury perihelion precession vs GR ────────────────────
-  # The paper's central validation number. If this regresses below 1 %
-  # agreement with General Relativity, CI fails — the result cited in the
-  # paper is protected by a build step.
+  # ── Release-mode validation: Mercury 1PN vs GR ───────────────────────────
+  # Headline physics gate. Mercury 1PN reproduces the GR perihelion
+  # precession; this job runs the assertion in release mode at the
+  # threshold the paper claims. Future release-mode validations (drag,
+  # J2, …) attach to this job so the workflow surface stays compact.
   mercury-gate:
-    name: Phase-3 gate — Mercury perihelion (1PN vs GR)
+    name: release validation (mercury 1PN vs GR)
     runs-on: ubuntu-latest
     needs: fmt-and-clippy
     steps:
@@ -112,7 +113,7 @@ jobs:
             ~/.cargo/git
             target
           key: ${{ runner.os }}-cargo-gate-${{ hashFiles('**/Cargo.lock') }}
-      - name: cargo test --release (Mercury gate, --ignored)
+      - name: cargo test --release -p apsis-1pn -- --ignored
         env:
           RUSTFLAGS: ""
         run: cargo test --release -p apsis-1pn --tests -- --ignored

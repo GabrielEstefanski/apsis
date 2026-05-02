@@ -45,7 +45,7 @@ impl OrbitOverlayStyle {
     /// predicted track reads as an annotation — a hint about where the
     /// body is heading — rather than competing with the body itself.
     pub const fn selected_default() -> Self {
-        Self { color: [140, 210, 255, 205], width_px: 1.2 }
+        Self { color: [140, 210, 255, 230], width_px: 2.0 }
     }
 
     /// Default for the *all-bodies* overlay: same hue, fainter alpha.
@@ -55,7 +55,7 @@ impl OrbitOverlayStyle {
     /// many overlapping orbits coexist without overwhelming the scene
     /// or drowning out the brighter selected-body overlay on top.
     pub const fn background_default() -> Self {
-        Self { color: [140, 210, 255, 95], width_px: 1.0 }
+        Self { color: [140, 210, 255, 150], width_px: 1.5 }
     }
 }
 

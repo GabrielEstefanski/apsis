@@ -11,6 +11,44 @@
 use super::System;
 use crate::domain::body::Body;
 use crate::physics::integrator::IntegratorKind;
+use crate::units::UnitSystem;
+
+// ── UnitSystem snapshot invariants ────────────────────────────────────────────
+//
+// The contract is "the unit system is part of the simulation's frozen state":
+// no public path may mutate it after [`System::new`] returns. These tests
+// pin the invariant so a future refactor can't silently introduce a setter
+// or a mutating helper.
+
+#[test]
+fn units_snapshot_is_immutable_across_integration() {
+    let bodies = vec![
+        Body::star(1.0).unsoftened(),
+        Body::rocky(3e-6).at(1.0, 0.0).with_velocity(0.0, 1.0).unsoftened(),
+    ];
+    let mut sys = System::new(bodies, UnitSystem::solar())
+        .with_integrator(IntegratorKind::Ias15)
+        .with_dt(1e-3);
+    let units_at_construction = *sys.units();
+    assert_eq!(units_at_construction, UnitSystem::solar());
+
+    sys.integrate_for(1.0);
+
+    assert_eq!(*sys.units(), units_at_construction);
+    assert_eq!(*sys.units(), UnitSystem::solar());
+}
+
+#[test]
+fn system_g_factor_is_derived_from_units_at_construction() {
+    let bodies = vec![Body::star(1.0)];
+
+    let sys_solar = System::new(bodies.clone(), UnitSystem::solar());
+    let sys_canon = System::new(bodies, UnitSystem::canonical());
+
+    assert_eq!(sys_solar.g_factor(), UnitSystem::solar().g());
+    assert_eq!(sys_canon.g_factor(), 1.0);
+    assert_ne!(sys_solar.g_factor(), sys_canon.g_factor());
+}
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
@@ -19,7 +57,8 @@ fn two_body_circular_system(integrator: IntegratorKind, dt: f64) -> System {
         Body::rocky(1.0).at(-1.0, 0.0).with_velocity(0.0, -0.5),
         Body::rocky(1.0).at(1.0, 0.0).with_velocity(0.0, 0.5),
     ];
-    let mut sys = System::new(bodies).with_theta(0.5).with_dt(dt).with_max_depth(10);
+    let mut sys =
+        System::new(bodies, UnitSystem::canonical()).with_theta(0.5).with_dt(dt).with_max_depth(10);
     sys.set_integrator(integrator);
     sys
 }
@@ -29,7 +68,10 @@ fn two_body_deterministic_system() -> System {
         Body::rocky(1.0).at(-1.0, 0.0).with_velocity(0.0, -0.5),
         Body::rocky(1.0).at(1.0, 0.0).with_velocity(0.0, 0.5),
     ];
-    let mut sys = System::new(bodies).with_theta(0.5).with_dt(0.01).with_max_depth(10);
+    let mut sys = System::new(bodies, UnitSystem::canonical())
+        .with_theta(0.5)
+        .with_dt(0.01)
+        .with_max_depth(10);
     // Replay/determinism tests use a fixed-step, stateless integrator.
     // IAS15 (the project default) carries warm-start state (b, e, csb, dt_next)
     // that is intentionally not serialised in snapshots — reloading resets it
@@ -149,7 +191,10 @@ mod wh_guard {
             Body::star(1000.0).at(0.0, 0.0).with_velocity(0.0, 0.0),
             Body::rocky(1.0).at(10.0, 0.0).with_velocity(0.0, 10.0),
         ];
-        let mut sys = System::new(bodies).with_theta(0.5).with_dt(0.01).with_max_depth(10);
+        let mut sys = System::new(bodies, UnitSystem::canonical())
+            .with_theta(0.5)
+            .with_dt(0.01)
+            .with_max_depth(10);
         sys.set_integrator(IntegratorKind::WisdomHolman);
         assert!(sys.is_wh_suitable());
     }
@@ -160,7 +205,10 @@ mod wh_guard {
             Body::rocky(1.0).at(-1.0, 0.0).with_velocity(0.0, -0.5),
             Body::rocky(1.0).at(1.0, 0.0).with_velocity(0.0, 0.5),
         ];
-        let mut sys = System::new(bodies).with_theta(0.5).with_dt(0.01).with_max_depth(10);
+        let mut sys = System::new(bodies, UnitSystem::canonical())
+            .with_theta(0.5)
+            .with_dt(0.01)
+            .with_max_depth(10);
         sys.set_integrator(IntegratorKind::WisdomHolman);
         assert!(!sys.is_wh_suitable());
     }
@@ -172,7 +220,10 @@ mod wh_guard {
             Body::rocky(1.0).at(1.0, 0.0).with_velocity(0.0, 0.5),
             Body::rocky(1.0).at(0.0, 1.0).with_velocity(0.5, 0.0),
         ];
-        let mut sys = System::new(bodies).with_theta(0.5).with_dt(0.01).with_max_depth(10);
+        let mut sys = System::new(bodies, UnitSystem::canonical())
+            .with_theta(0.5)
+            .with_dt(0.01)
+            .with_max_depth(10);
         sys.set_integrator(IntegratorKind::WisdomHolman);
         assert!(!sys.is_wh_suitable());
     }
@@ -184,7 +235,11 @@ mod wh_guard {
             Body::rocky(1.0).at(10.0, 0.0).with_velocity(0.0, 1.0),
         ];
         assert!(
-            System::new(bodies).with_theta(0.5).with_dt(0.01).with_max_depth(10).is_wh_suitable()
+            System::new(bodies, UnitSystem::canonical())
+                .with_theta(0.5)
+                .with_dt(0.01)
+                .with_max_depth(10)
+                .is_wh_suitable()
         );
     }
 
@@ -195,7 +250,11 @@ mod wh_guard {
             Body::rocky(1.0).at(10.0, 0.0).with_velocity(0.0, 1.0),
         ];
         assert!(
-            !System::new(bodies).with_theta(0.5).with_dt(0.01).with_max_depth(10).is_wh_suitable()
+            !System::new(bodies, UnitSystem::canonical())
+                .with_theta(0.5)
+                .with_dt(0.01)
+                .with_max_depth(10)
+                .is_wh_suitable()
         );
     }
 
@@ -203,8 +262,69 @@ mod wh_guard {
     fn single_body_is_not_suitable() {
         let bodies = vec![Body::rocky(1.0).at(0.0, 0.0).with_velocity(0.0, 0.0)];
         assert!(
-            !System::new(bodies).with_theta(0.5).with_dt(0.01).with_max_depth(10).is_wh_suitable()
+            !System::new(bodies, UnitSystem::canonical())
+                .with_theta(0.5)
+                .with_dt(0.01)
+                .with_max_depth(10)
+                .is_wh_suitable()
         );
+    }
+
+    /// Regression: when WH is the active integrator, the dense-output
+    /// snapshot the renderer reads must not exist with internally
+    /// inconsistent array lengths. WH evaluates forces only on
+    /// `bodies[1..]`, leaving `scratch_acc` sized `N − 1`; the Order-2
+    /// fallback path in `System::step` previously combined that with
+    /// body-aligned `x0` / `v0` and produced a snapshot whose `a0`
+    /// disagreed with `x0` by one entry. The renderer guard checked
+    /// only `n_bodies()` (which reads `x0.len()`) and let the
+    /// inconsistent snapshot through, so `interpolate(i, h)` panicked
+    /// at `i = N − 1` indexing `a0[N − 1]`.
+    ///
+    /// Two independent guarantees pin the fix:
+    ///   1. Producer side — `System::step` does not synthesise an
+    ///      Order-2 snapshot when `scratch_acc.len() != bodies.len()`.
+    ///   2. Snapshot invariant — any snapshot that does exist passes
+    ///      `is_shape_consistent()`.
+    #[test]
+    fn wh_step_emits_no_inconsistent_dense_snapshot() {
+        let bodies = vec![
+            Body::star(1000.0).at(0.0, 0.0).with_velocity(0.0, 0.0),
+            Body::rocky(1.0).at(10.0, 0.0).with_velocity(0.0, 10.0),
+            Body::rocky(1e-3).at(15.0, 0.0).with_velocity(0.0, 8.0),
+        ];
+        let mut sys = System::new(bodies, UnitSystem::canonical())
+            .with_theta(0.5)
+            .with_dt(0.01)
+            .with_max_depth(10);
+        sys.set_integrator(IntegratorKind::WisdomHolman);
+        assert!(sys.is_wh_suitable(), "fixture should select the WH path, not the fallback");
+
+        // Two steps: the first populates scratch_acc, the second is
+        // the first that actually exercises the Order-2 dense-snapshot
+        // synthesis path (which was the bug site).
+        sys.step();
+        sys.step();
+
+        if let Some(snap) = &sys.last_dense_snapshot {
+            assert!(
+                snap.is_shape_consistent(),
+                "WH step published a DenseSnapshot with mismatched array lengths: \
+                 x0={} v0={} a0={} b={} — the renderer would panic indexing past the \
+                 shortest array",
+                snap.x0.len(),
+                snap.v0.len(),
+                snap.a0.len(),
+                snap.b.len(),
+            );
+            assert_eq!(
+                snap.n_bodies(),
+                sys.bodies().len(),
+                "snapshot body count {} disagrees with system body count {}",
+                snap.n_bodies(),
+                sys.bodies().len(),
+            );
+        }
     }
 
     #[test]
@@ -213,7 +333,10 @@ mod wh_guard {
             Body::rocky(1.0).at(-1.0, 0.0).with_velocity(0.0, -0.5),
             Body::rocky(1.0).at(1.0, 0.0).with_velocity(0.0, 0.5),
         ];
-        let mut sys = System::new(bodies).with_theta(0.5).with_dt(0.01).with_max_depth(10);
+        let mut sys = System::new(bodies, UnitSystem::canonical())
+            .with_theta(0.5)
+            .with_dt(0.01)
+            .with_max_depth(10);
         sys.set_integrator(IntegratorKind::WisdomHolman);
         for _ in 0..100 {
             sys.step();
@@ -230,10 +353,15 @@ mod wh_guard {
             Body::rocky(1.0).at(-1.0, 0.0).with_velocity(0.0, -0.5),
             Body::rocky(1.0).at(1.0, 0.0).with_velocity(0.0, 0.5),
         ];
-        let mut sys_wh =
-            System::new(bodies.clone()).with_theta(0.5).with_dt(0.01).with_max_depth(10);
+        let mut sys_wh = System::new(bodies.clone(), UnitSystem::canonical())
+            .with_theta(0.5)
+            .with_dt(0.01)
+            .with_max_depth(10);
         sys_wh.set_integrator(IntegratorKind::WisdomHolman);
-        let mut sys_y4 = System::new(bodies).with_theta(0.5).with_dt(0.01).with_max_depth(10);
+        let mut sys_y4 = System::new(bodies, UnitSystem::canonical())
+            .with_theta(0.5)
+            .with_dt(0.01)
+            .with_max_depth(10);
         sys_y4.set_integrator(IntegratorKind::Yoshida4);
 
         for _ in 0..100 {
@@ -298,7 +426,10 @@ mod benchmarks {
         let mut b2 = Body::rocky(1.0).at(r_peri / 2.0, 0.0).with_velocity(0.0, v_peri / 2.0);
         b2.softening = 0.0;
 
-        let mut sys = System::new(vec![b1, b2]).with_theta(0.5).with_dt(dt).with_max_depth(10);
+        let mut sys = System::new(vec![b1, b2], UnitSystem::canonical())
+            .with_theta(0.5)
+            .with_dt(dt)
+            .with_max_depth(10);
         sys.set_integrator(integrator);
         for _ in 0..n_steps {
             sys.step();
@@ -363,7 +494,10 @@ mod benchmarks {
                 b
             })
             .collect();
-        let mut sys = System::new(bodies).with_theta(0.5).with_dt(DT).with_max_depth(10);
+        let mut sys = System::new(bodies, UnitSystem::canonical())
+            .with_theta(0.5)
+            .with_dt(DT)
+            .with_max_depth(10);
         sys.set_integrator(IntegratorKind::Yoshida4);
         for _ in 0..STEPS {
             sys.step();
@@ -401,7 +535,10 @@ mod benchmarks {
                     b
                 })
                 .collect();
-            let mut sys = System::new(bodies).with_theta(0.5).with_dt(dt).with_max_depth(10);
+            let mut sys = System::new(bodies, UnitSystem::canonical())
+                .with_theta(0.5)
+                .with_dt(dt)
+                .with_max_depth(10);
             sys.set_integrator(integrator);
             for _ in 0..steps {
                 sys.step();
@@ -438,7 +575,10 @@ mod benchmarks {
         for b in &mut bodies {
             b.softening = 0.0;
         }
-        let mut sys = System::new(bodies.to_vec()).with_theta(0.5).with_dt(dt).with_max_depth(10);
+        let mut sys = System::new(bodies.to_vec(), UnitSystem::canonical())
+            .with_theta(0.5)
+            .with_dt(dt)
+            .with_max_depth(10);
         sys.set_integrator(IntegratorKind::Yoshida4);
         sys
     }
@@ -739,7 +879,10 @@ mod integrator_force_compat {
                 Body::rocky(1.0).at(theta.cos(), theta.sin()).with_velocity(0.0, 0.0)
             })
             .collect();
-        System::new(bodies).with_theta(0.5).with_dt(0.01).with_max_depth(10)
+        System::new(bodies, UnitSystem::canonical())
+            .with_theta(0.5)
+            .with_dt(0.01)
+            .with_max_depth(10)
     }
 
     #[test]
@@ -816,7 +959,10 @@ mod integrator_force_compat {
             Body::rocky(1.0).at(-1.0, 0.0).with_velocity(0.0, -0.5),
             Body::rocky(1.0).at(1.0, 0.0).with_velocity(0.0, 0.5),
         ];
-        let mut sys = System::new(bodies).with_theta(0.5).with_dt(0.01).with_max_depth(10);
+        let mut sys = System::new(bodies, UnitSystem::canonical())
+            .with_theta(0.5)
+            .with_dt(0.01)
+            .with_max_depth(10);
 
         sys.set_integrator(IntegratorKind::Ias15);
 

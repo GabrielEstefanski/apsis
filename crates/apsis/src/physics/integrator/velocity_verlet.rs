@@ -10,6 +10,7 @@
 //! - Verlet (1967). *Phys. Rev.* 159, 98.
 
 use crate::domain::body::Body;
+use crate::math::Vec3;
 use crate::physics::integrator::helpers::{apply_perturbations, evaluate, scale_acc_and_pe};
 use crate::physics::integrator::primitives::{drift, kick};
 use crate::physics::integrator::traits::{
@@ -25,7 +26,7 @@ impl Integrator for VelocityVerlet {
         bodies: &mut [Body],
         ctx: &mut IntegratorContext<'_>,
         dt: f64,
-        acc: &mut Vec<(f64, f64)>,
+        acc: &mut Vec<Vec3>,
     ) -> StepResult {
         // F(t) → scale → perturbations → kick(½dt)
         let raw_pe = evaluate(bodies, ctx.force, acc);

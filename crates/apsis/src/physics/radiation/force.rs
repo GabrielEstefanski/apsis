@@ -53,6 +53,7 @@
 
 use std::f64::consts::PI;
 
+use crate::math::Vec3;
 use crate::physics::radiation::{RadiationParams, RadiationSource};
 
 // ── Kernels ───────────────────────────────────────────────────────────────────
@@ -66,27 +67,20 @@ use crate::physics::radiation::{RadiationParams, RadiationSource};
 /// a_rad = (L · Q_pr · A) / (4π r² · c · m)  ·  r̂
 /// ```
 ///
-/// # Arguments
-///
-/// - `pos` — inertial position of the body `[x, y]`
-/// - `params` — radiation interaction parameters of the body
-/// - `source` — radiating source
-///
-/// # Returns
-///
-/// Acceleration `[ax, ay]` in internal units.
-/// Returns `[0, 0]` when the body is coincident with the source (`r² < 1e-30`).
+/// Returns `Vec3::ZERO` when the body is coincident with the source
+/// (`r² < 1e-30`).
 pub fn radiation_acceleration(
-    pos: [f64; 2],
+    pos: Vec3,
     params: &RadiationParams,
     source: &RadiationSource,
-) -> [f64; 2] {
-    let dx = pos[0] - source.x;
-    let dy = pos[1] - source.y;
-    let r2 = dx * dx + dy * dy;
+) -> Vec3 {
+    let dx = pos.x - source.x;
+    let dy = pos.y - source.y;
+    let dz = pos.z - source.z;
+    let r2 = dx * dx + dy * dy + dz * dz;
 
     if r2 < 1e-30 {
-        return [0.0, 0.0];
+        return Vec3::ZERO;
     }
 
     let r = r2.sqrt();
@@ -94,7 +88,7 @@ pub fn radiation_acceleration(
     let flux = source.luminosity / (4.0 * PI * r2);
     let a_mag = flux * params.q_pr * params.area / (params.mass * source.c);
 
-    [dx * inv_r * a_mag, dy * inv_r * a_mag]
+    Vec3::new(dx * inv_r * a_mag, dy * inv_r * a_mag, dz * inv_r * a_mag)
 }
 
 /// Computes the full Poynting–Robertson acceleration, comprising both direct
@@ -108,30 +102,23 @@ pub fn radiation_acceleration(
 ///
 /// where `v_rel = v_body − v_source` (Burns et al. 1979, eq. 5).
 ///
-/// # Arguments
-///
-/// - `pos` — inertial position of the body `[x, y]`
-/// - `vel` — inertial velocity of the body `[vx, vy]`
-/// - `params` — radiation interaction parameters of the body
-/// - `source` — radiating source; must carry velocity for aberration correction
-///
-/// # Returns
-///
-/// Acceleration `[ax, ay]`. Returns `[0, 0]` near the source.
+/// Returns `Vec3::ZERO` near the source.
 pub fn pr_drag_acceleration(
-    pos: [f64; 2],
-    vel: [f64; 2],
+    pos: Vec3,
+    vel: Vec3,
     params: &RadiationParams,
     source: &RadiationSource,
-) -> [f64; 2] {
-    let dx = pos[0] - source.x;
-    let dy = pos[1] - source.y;
-    let dvx = vel[0] - source.vx;
-    let dvy = vel[1] - source.vy;
-    let r2 = dx * dx + dy * dy;
+) -> Vec3 {
+    let dx = pos.x - source.x;
+    let dy = pos.y - source.y;
+    let dz = pos.z - source.z;
+    let dvx = vel.x - source.vx;
+    let dvy = vel.y - source.vy;
+    let dvz = vel.z - source.vz;
+    let r2 = dx * dx + dy * dy + dz * dz;
 
     if r2 < 1e-30 {
-        return [0.0, 0.0];
+        return Vec3::ZERO;
     }
 
     let r = r2.sqrt();
@@ -141,7 +128,11 @@ pub fn pr_drag_acceleration(
     let a_mag = flux * params.q_pr * params.area / (params.mass * source.c);
 
     // a_PR = a_mag · (r̂ − v_rel / c)
-    [a_mag * (dx * inv_r - dvx * inv_c), a_mag * (dy * inv_r - dvy * inv_c)]
+    Vec3::new(
+        a_mag * (dx * inv_r - dvx * inv_c),
+        a_mag * (dy * inv_r - dvy * inv_c),
+        a_mag * (dz * inv_r - dvz * inv_c),
+    )
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -152,7 +143,16 @@ mod tests {
 
     /// A minimal source at the origin with unit luminosity and c = 1.
     fn unit_source() -> RadiationSource {
-        RadiationSource { x: 0.0, y: 0.0, vx: 0.0, vy: 0.0, luminosity: 1.0, c: 1.0 }
+        RadiationSource {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+            vx: 0.0,
+            vy: 0.0,
+            vz: 0.0,
+            luminosity: 1.0,
+            c: 1.0,
+        }
     }
 
     /// Unit radiation parameters: area = 1, mass = 1, Q_pr = 1.
@@ -164,55 +164,67 @@ mod tests {
 
     #[test]
     fn rad_points_away_from_source() {
-        let a = radiation_acceleration([1.0, 0.0], &unit_params(), &unit_source());
-        assert!(a[0] > 0.0, "radial component should be positive (away from source)");
-        assert!(a[1].abs() < 1e-15, "no tangential component for body on x-axis");
+        let a = radiation_acceleration(Vec3::new(1.0, 0.0, 0.0), &unit_params(), &unit_source());
+        assert!(a.x > 0.0, "radial component should be positive (away from source)");
+        assert!(a.y.abs() < 1e-15, "no y component for body on x-axis");
+        assert!(a.z.abs() < 1e-15, "no z component for body on x-axis");
     }
 
     #[test]
     fn rad_inverse_square_falloff() {
-        let a1 = radiation_acceleration([1.0, 0.0], &unit_params(), &unit_source());
-        let a2 = radiation_acceleration([2.0, 0.0], &unit_params(), &unit_source());
-        let ratio = a1[0] / a2[0];
+        let a1 = radiation_acceleration(Vec3::new(1.0, 0.0, 0.0), &unit_params(), &unit_source());
+        let a2 = radiation_acceleration(Vec3::new(2.0, 0.0, 0.0), &unit_params(), &unit_source());
+        let ratio = a1.x / a2.x;
         assert!((ratio - 4.0).abs() < 1e-12, "expected r⁻² falloff (ratio = 4), got {ratio}");
     }
 
     #[test]
     fn rad_scales_linearly_with_luminosity() {
         let s2 = RadiationSource { luminosity: 2.0, ..unit_source() };
-        let a1 = radiation_acceleration([1.0, 0.0], &unit_params(), &unit_source());
-        let a2 = radiation_acceleration([1.0, 0.0], &unit_params(), &s2);
-        assert!((a2[0] / a1[0] - 2.0).abs() < 1e-12);
+        let a1 = radiation_acceleration(Vec3::new(1.0, 0.0, 0.0), &unit_params(), &unit_source());
+        let a2 = radiation_acceleration(Vec3::new(1.0, 0.0, 0.0), &unit_params(), &s2);
+        assert!((a2.x / a1.x - 2.0).abs() < 1e-12);
     }
 
     #[test]
     fn rad_scales_linearly_with_q_pr() {
         let p2 = RadiationParams { q_pr: 2.0, ..unit_params() };
-        let a1 = radiation_acceleration([1.0, 0.0], &unit_params(), &unit_source());
-        let a2 = radiation_acceleration([1.0, 0.0], &p2, &unit_source());
-        assert!((a2[0] / a1[0] - 2.0).abs() < 1e-12);
+        let a1 = radiation_acceleration(Vec3::new(1.0, 0.0, 0.0), &unit_params(), &unit_source());
+        let a2 = radiation_acceleration(Vec3::new(1.0, 0.0, 0.0), &p2, &unit_source());
+        assert!((a2.x / a1.x - 2.0).abs() < 1e-12);
     }
 
     #[test]
     fn rad_zero_luminosity_gives_zero() {
         let s = RadiationSource { luminosity: 0.0, ..unit_source() };
-        let a = radiation_acceleration([1.0, 0.0], &unit_params(), &s);
-        assert_eq!(a, [0.0, 0.0]);
+        let a = radiation_acceleration(Vec3::new(1.0, 0.0, 0.0), &unit_params(), &s);
+        assert_eq!(a, Vec3::ZERO);
     }
 
     #[test]
     fn rad_coincident_body_returns_zero() {
-        let a = radiation_acceleration([0.0, 0.0], &unit_params(), &unit_source());
-        assert_eq!(a, [0.0, 0.0]);
+        let a = radiation_acceleration(Vec3::ZERO, &unit_params(), &unit_source());
+        assert_eq!(a, Vec3::ZERO);
     }
 
     #[test]
     fn rad_diagonal_direction_is_normalised() {
         // Body at (1, 1): force should point along (1, 1) / √2.
-        let a = radiation_acceleration([1.0, 1.0], &unit_params(), &unit_source());
-        let mag = (a[0] * a[0] + a[1] * a[1]).sqrt();
-        assert!((a[0] / mag - std::f64::consts::FRAC_1_SQRT_2).abs() < 1e-12);
-        assert!((a[1] / mag - std::f64::consts::FRAC_1_SQRT_2).abs() < 1e-12);
+        let a = radiation_acceleration(Vec3::new(1.0, 1.0, 0.0), &unit_params(), &unit_source());
+        let mag = a.length();
+        assert!((a.x / mag - std::f64::consts::FRAC_1_SQRT_2).abs() < 1e-12);
+        assert!((a.y / mag - std::f64::consts::FRAC_1_SQRT_2).abs() < 1e-12);
+    }
+
+    #[test]
+    fn rad_3d_direction_is_normalised() {
+        // Body at (1, 1, 1): force should point along (1, 1, 1) / √3.
+        let a = radiation_acceleration(Vec3::new(1.0, 1.0, 1.0), &unit_params(), &unit_source());
+        let mag = a.length();
+        let expected = 1.0 / 3.0_f64.sqrt();
+        assert!((a.x / mag - expected).abs() < 1e-12);
+        assert!((a.y / mag - expected).abs() < 1e-12);
+        assert!((a.z / mag - expected).abs() < 1e-12);
     }
 
     // ── pr_drag_acceleration ──────────────────────────────────────────────────
@@ -220,29 +232,50 @@ mod tests {
     #[test]
     fn pr_at_rest_equals_radiation_pressure() {
         // A body at rest relative to the source experiences only direct pressure.
-        let a_rad = radiation_acceleration([1.0, 0.0], &unit_params(), &unit_source());
-        let a_pr = pr_drag_acceleration([1.0, 0.0], [0.0, 0.0], &unit_params(), &unit_source());
-        assert!((a_rad[0] - a_pr[0]).abs() < 1e-15);
-        assert!((a_rad[1] - a_pr[1]).abs() < 1e-15);
+        let a_rad =
+            radiation_acceleration(Vec3::new(1.0, 0.0, 0.0), &unit_params(), &unit_source());
+        let a_pr = pr_drag_acceleration(
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::ZERO,
+            &unit_params(),
+            &unit_source(),
+        );
+        assert!((a_rad.x - a_pr.x).abs() < 1e-15);
+        assert!((a_rad.y - a_pr.y).abs() < 1e-15);
+        assert!((a_rad.z - a_pr.z).abs() < 1e-15);
     }
 
     #[test]
     fn pr_tangential_drag_opposes_orbital_velocity() {
-        // Body at (1, 0) moving in +y (circular orbit direction).
+        // Body at (1, 0, 0) moving in +y (circular orbit direction).
         // The tangential drag component should be in −y.
-        let a = pr_drag_acceleration([1.0, 0.0], [0.0, 1.0], &unit_params(), &unit_source());
-        assert!(a[1] < 0.0, "PR drag should decelerate the tangential velocity");
+        let a = pr_drag_acceleration(
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+            &unit_params(),
+            &unit_source(),
+        );
+        assert!(a.y < 0.0, "PR drag should decelerate the tangential velocity");
     }
 
     #[test]
     fn pr_radial_infall_increases_radial_push() {
         // Body falling radially inward (vx < 0) should see a reduced net
         // outward push compared to a body at rest (aberration reduces flux).
-        let a_rest = pr_drag_acceleration([1.0, 0.0], [0.0, 0.0], &unit_params(), &unit_source());
-        let a_infall =
-            pr_drag_acceleration([1.0, 0.0], [-0.1, 0.0], &unit_params(), &unit_source());
+        let a_rest = pr_drag_acceleration(
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::ZERO,
+            &unit_params(),
+            &unit_source(),
+        );
+        let a_infall = pr_drag_acceleration(
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(-0.1, 0.0, 0.0),
+            &unit_params(),
+            &unit_source(),
+        );
         assert!(
-            a_infall[0] > a_rest[0],
+            a_infall.x > a_rest.x,
             "inward radial velocity should increase apparent flux (aberration)"
         );
     }
@@ -253,13 +286,19 @@ mod tests {
         // Therefore these two scenarios must give identical accelerations:
         //   (a) body at vel = +0.5, source at rest
         //   (b) body at rest,        source at vel = −0.5
-        // Both yield dvx = vel[0] − source.vx = 0.5 − 0 = 0 − (−0.5) = 0.5.
         let s_moving_neg = RadiationSource { vx: -0.5, ..unit_source() };
-        let a_body_moving =
-            pr_drag_acceleration([1.0, 0.0], [0.5, 0.0], &unit_params(), &unit_source());
-        let a_source_moving_neg =
-            pr_drag_acceleration([1.0, 0.0], [0.0, 0.0], &unit_params(), &s_moving_neg);
-        // Both paths compute the same dvx; the results must be bit-for-bit equal.
+        let a_body_moving = pr_drag_acceleration(
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.5, 0.0, 0.0),
+            &unit_params(),
+            &unit_source(),
+        );
+        let a_source_moving_neg = pr_drag_acceleration(
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::ZERO,
+            &unit_params(),
+            &s_moving_neg,
+        );
         assert_eq!(
             a_body_moving, a_source_moving_neg,
             "PR force must depend only on v_rel: body@+v ≡ source@−v"
@@ -269,13 +308,23 @@ mod tests {
     #[test]
     fn pr_zero_luminosity_gives_zero() {
         let s = RadiationSource { luminosity: 0.0, ..unit_source() };
-        let a = pr_drag_acceleration([1.0, 0.0], [0.5, 0.3], &unit_params(), &s);
-        assert_eq!(a, [0.0, 0.0]);
+        let a = pr_drag_acceleration(
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.5, 0.3, 0.0),
+            &unit_params(),
+            &s,
+        );
+        assert_eq!(a, Vec3::ZERO);
     }
 
     #[test]
     fn pr_coincident_body_returns_zero() {
-        let a = pr_drag_acceleration([0.0, 0.0], [1.0, 1.0], &unit_params(), &unit_source());
-        assert_eq!(a, [0.0, 0.0]);
+        let a = pr_drag_acceleration(
+            Vec3::ZERO,
+            Vec3::new(1.0, 1.0, 1.0),
+            &unit_params(),
+            &unit_source(),
+        );
+        assert_eq!(a, Vec3::ZERO);
     }
 }

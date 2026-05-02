@@ -40,9 +40,21 @@ criterion = { workspace = true }
 #
 # which prints per-phase time + call count after each scenario's validation
 # run. See docs/experiments/ for usage notes.
+#
+# ias15-diag: compiles in detailed per-step diagnostic emission for the
+# IAS15 controller — b-coefficient norms after warmstart, cross-term vs
+# diagonal contribution ratios, the dt_new/dt_old history, and the
+# stagnation/shrink-grow event log. Each event is a single tab-separated
+# line on stderr behind an env-var gate, so a feature-enabled binary
+# stays silent until `APSIS_IAS15_TRACE=1` is set. Used to investigate
+# slow-onset cumulative failures (e.g. the figure-8 cascade documented
+# in `docs/experiments/2026-04-26-ias15-warmstart-bug.md`); not for
+# production. Cheap-counter equivalents (picard_stagnations,
+# shrink_grow_cycles) are surfaced in `AdaptiveStats` unconditionally.
 
 [features]
 ias15-profile = []
+ias15-diag = []
 
 # ── Benchmarks ────────────────────────────────────────────────────────────────
 #

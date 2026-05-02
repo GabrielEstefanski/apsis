@@ -15,7 +15,11 @@ impl BodyField for VelocityMagnitudeField {
         "|v|"
     }
     fn sample(&self, i: usize, ctx: &FieldContext) -> f64 {
+        // `(x² + y² + z²)` in fixed component order. For planar input
+        // `vz = 0` the trailing term is an IEEE-754-exact zero
+        // addition, so the colour-bar normalisation observed in 2D
+        // scenes is preserved bit-for-bit by the 3D sampler.
         let b = &ctx.bodies[i];
-        (b.vx * b.vx + b.vy * b.vy).sqrt()
+        (b.vx * b.vx + b.vy * b.vy + b.vz * b.vz).sqrt()
     }
 }

@@ -33,6 +33,7 @@ use crate::core::system::System;
 use crate::io::recorder::{RecordMetadata, SimRecorder};
 use crate::io::run_config::RunConfig;
 use crate::templates::{catalog::TEMPLATES, instantiate::instantiate};
+use crate::units::UnitSystem;
 
 /// Run a headless batch simulation described by `config`.
 ///
@@ -55,7 +56,10 @@ pub fn run(config: &RunConfig) -> Result<(), Box<dyn std::error::Error>> {
     let template = entry.build(config.seed);
     let named_bodies = instantiate(&template);
 
-    let mut system = System::new(vec![])
+    // Templates carry their own UI/CSV unit metadata in `template.units`;
+    // the runtime contract is the dimensionless Hénon system, since every
+    // preset's body velocities are calibrated for `G = 1`.
+    let mut system = System::new(vec![], UnitSystem::canonical())
         .with_theta(0.6) // standard accuracy
         .with_dt(config.dt)
         .with_max_depth(32);

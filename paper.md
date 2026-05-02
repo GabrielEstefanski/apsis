@@ -1,5 +1,5 @@
 ---
-title: 'APSIS: Verified Extension Contracts for N-Body Simulation in Rust'
+title: 'APSIS: A Federated Model for Composable N-Body Force Artifacts'
 tags:
   - Rust
   - N-body
@@ -12,91 +12,119 @@ authors:
 affiliations:
  - name: Independent researcher
    index: 1
-date: 24 April 2026
+date: 2 May 2026
 bibliography: paper.bib
 ---
 
 # Summary
 
-`apsis` is a Rust library providing verified extension contracts for
-gravitational N-body simulation. Physical preconditions of perturbation
-forces — for example, whether a correction assumes an unsoftened `1/r`
-potential or a smooth Hamiltonian required by symplectic integration —
-are promoted from informal documentation to type-level declarations,
-checked at extension registration and enforced through an out-of-tree
-companion crate whose compilation runs as a continuous-integration
-gate. The mechanism is demonstrated end-to-end by `apsis-1pn`, which
-implements the first-post-Newtonian Schwarzschild correction; as
-evidence that the integrator stack resolves 1PN-scale effects at the
-accuracy the verification claim requires, the demonstration reproduces
-Mercury's perihelion precession to within $4.4 \times 10^{-6}$ of the
-general-relativistic prediction over 500 orbital periods. The same
-match mechanism catches a distinct invariant-class violation (a
-discontinuous kernel) with an independent observable (impulsive
-energy-error events in one-to-one correspondence with cutoff-radius
-crossings), demonstrating that the contract is compositional rather
-than specialised to softening.
+`apsis` is a Rust library implementing a *federated perturbation
+model* for gravitational N-body simulation: each force perturbation
+is published as an independent Cargo crate, versioned, citable, and
+composed into a simulation through the library's public extension
+API. A simulation's full physical model is captured as a
+`Cargo.lock` file — reproducible bit-for-bit at the force-composition
+level. The library is the runtime for composing force artifacts; it
+is not the artifact.
 
-The solver provides four integration schemes — second-order Velocity
-Verlet, fourth-order Yoshida composition, Wisdom–Holman mixed-variable,
-and the adaptive Gauss–Radau IAS15 scheme [@ReinSpiegel2015] — alongside
-stable public traits for user-registered force models and perturbations.
-The library's scope is narrow by intent: the solver is two-dimensional
-and targets small-to-medium body counts ($N \le 10^3$). Large-N
-collisionless dynamics, stellar evolution, and hybrid close-encounter
-regimes — the domains of REBOUND [@ReinLiu2012], MERCURIUS
-[@ReinTamayoHernandezPapaloizou2019], and NBODY6/7 [@Aarseth2003] —
-remain outside the library's claims.
+Every force crate carries a contract surface. A perturbation
+declares its physical preconditions on the gravitational kernel —
+exact `1/r` versus softened, smooth versus $C^0$ — as type-level
+`KernelRequirements`; the library matches these against the active
+kernel's properties at registration and emits a structured
+diagnostic for every violated invariant. Two formally distinct
+invariants (Exactness, Continuity), when violated, produce two
+formally distinct and quantitatively separable observables, each
+caught independently by the registration check; the contract is
+compositional, not specialised to softening.
+
+The mechanism is demonstrated end-to-end by `apsis-1pn`, an
+out-of-tree crate implementing the first-post-Newtonian
+Schwarzschild correction. With the contract enforced, `apsis-1pn`
+reproduces Mercury's perihelion precession to within
+$\sim 10^{-6}$ of the closed-form general-relativistic prediction
+over 500 orbital periods under the adaptive Gauss–Radau IAS15 scheme
+[@ReinSpiegel2015], at the f64 noise floor of the test-particle 1PN
+approximation. With the Plummer softening
+contract violated, the same machinery measures a precession three
+orders of magnitude larger and of the wrong sign — caught by the
+registration warning, never as a numerical artifact.
+
+The solver provides Velocity Verlet, Yoshida fourth-order, and
+IAS15 [@ReinSpiegel2015] alongside stable public traits for
+user-registered force models and perturbations. A Wisdom–Holman
+mixed-variable integrator is also present; it carries documented
+algorithmic defects (tracked as TD-008) and is not treated as a
+quality signal in the validation portfolio. Scope is narrow by
+intent: $N \le 10^3$ in the current validated regime. Large-N
+collisionless dynamics, stellar evolution, and hybrid
+close-encounter regimes — the domains of REBOUND [@ReinLiu2012],
+MERCURIUS [@ReinTamayoHernandezPapaloizou2019], and NBODY6/7
+[@Aarseth2003] — remain outside this library's claims. `apsis`
+does not attempt to replace mature integrators or optimize
+numerical performance; its contribution is orthogonal: defining
+how physical models are structured, published, and composed.
 
 # Statement of need
 
-Extension mechanisms are a central design feature of gravitational
-N-body codes. A base integrator is augmented with conservative
-corrections — general-relativistic precession, J2 oblateness, tidal
-dissipation — or with non-gravitational forces such as radiation
-pressure and gas drag. Each extension carries implicit preconditions
-about the base integrator: the softening model, the force-determinism
-guarantee, the units of `G`, `c`, and `M`. When those preconditions
-are violated, the integrator reports no error and continues to satisfy
+In current practice, a force perturbation in a published N-body
+simulation lives in the methods section of a paper and, sometimes,
+in a fork of an established framework. The fork is not a citable
+artifact of its own, the prose drifts as it is restated by
+subsequent work, and the next group reimplements the same effect
+from scratch. The framework — REBOUND [@ReinLiu2012], REBOUNDx
+[@Tamayo2020], MERCURIUS [@ReinTamayoHernandezPapaloizou2019],
+NBODY6/7 [@Aarseth2003] — is mature, citable, and validated, but
+it absorbs every extension into a single binary with one citation
+covering everything.
+
+Each extension carries implicit preconditions about the base
+integrator: the softening model, the force-determinism guarantee,
+the units of `G`, `c`, and `M`. When those preconditions are
+violated, the integrator reports no error and continues to satisfy
 conservation invariants to machine precision. The only signal that
 something is wrong is a quantitative comparison against an analytic
 reference — the step a researcher is most likely to skip when every
-other indicator reports health.
+other indicator reports health. A concrete instance sharpens the
+failure mode: a first-post-Newtonian correction implicitly assumes
+exact `1/r` gravity, so if the base simulation applies Plummer
+softening — common for numerical stability — the softening produces
+a numerical apsidal precession that for Sun–Mercury parameters
+exceeds the relativistic effect by three orders of magnitude with
+the wrong sign, while energy and angular-momentum conservation
+remain satisfied to machine precision.
 
-These mechanisms are well-established in the N-body literature.
-REBOUNDx [@Tamayo2020] is the canonical example, adding conservative
-and dissipative forces to the symplectic integrations that REBOUND
-[@ReinLiu2012] produces; similar extension patterns exist in MERCURIUS
-[@ReinTamayoHernandezPapaloizou2019] and NBODY6/7 [@Aarseth2003]. A
-concrete instance sharpens the failure mode: a first-post-Newtonian
-correction implicitly assumes exact `1/r` gravity, so if the base
-simulation applies Plummer softening — common for numerical stability
-— the softening produces a numerical apsidal precession that for
-Sun–Mercury parameters exceeds the relativistic effect by three orders
-of magnitude with the wrong sign, while energy and angular-momentum
-conservation remain satisfied to machine precision.
+`apsis` replaces this publication path with a *federated
+perturbation model*. A force is a Cargo crate that declares its
+physical preconditions on the gravitational kernel through the
+`KernelRequirements` type — `apsis-1pn` declares
+`exact_and_smooth()`; future crates declare a different combination
+of exactness and continuity invariants depending on the physics.
+The library matches the declared requirements against the active
+kernel at `System::add_perturbation` and emits a structured
+diagnostic for each violated invariant. Forgetting a precondition
+surfaces as a registration warning, not as a wrong number in a
+paper.
 
-`apsis` promotes this class of precondition from prose to the type
-level. Extension points declare their physical assumptions as methods
-on the `PerturbationForce` trait; registering an extension whose
-assumptions are not satisfied by the current system emits a
-structured diagnostic event with per-body statistics identifying the
-violating bodies. A second design commitment makes the extension
-surface a *buildable* contract rather than a documented one:
-extensions live in independent Cargo crates that depend only on the
-library's published interface, and their compilation runs as a
-continuous-integration gate. These two properties — type-expressed
-preconditions and out-of-tree verified extensions — are not, to the
-author's knowledge, combined in any existing N-body code.
+A simulation's physical model is therefore not embedded in code,
+but in its dependency graph: `Cargo.toml` declares the forces a
+paper uses, `Cargo.lock` pins them bit-precisely. A follow-up paper
+extending the model adds one line. This is reproducibility at the
+force-composition level, distinct from script-level reproducibility
+— the latter captures the configuration but not the physics
+implementation.
 
 The contribution is to the *methodology* of extending an N-body
 simulator rather than to the inventory of simulators. A research
-group already running REBOUND, MERCURIUS, or an equivalent production
-code is not served by replacing it with `apsis`; the claim of `apsis`
-is orthogonal to the claim those codes make. The narrow scope (2D,
-$N \le 10^3$) is a deliberate trade: ship a verification infrastructure
-with a complete physical demonstration, rather than a wider
-simulation platform with verification deferred to later work.
+group already running REBOUND, MERCURIUS, or an equivalent
+production code is not served by replacing it with `apsis`. The
+narrow scope ($N \le 10^3$ in the validated regime) is a deliberate
+trade: ship a verification infrastructure with a complete physical
+demonstration,
+rather than a wider simulation platform with verification deferred
+to later work. These two properties — type-expressed preconditions
+and out-of-tree verified federated extensions — are not, to the
+author's knowledge, combined in any existing N-body code.
 
 # Design and validation
 
@@ -159,8 +187,9 @@ orbital periods under the adaptive Gauss–Radau IAS15 scheme
 the accumulated longitude of periastron drifts by 42.983 arcseconds
 per century against the closed-form general-relativistic prediction
 $6\pi GM / (c^2 a (1 - e^2))$ = 43.000 arcseconds per century
-[@Will1993], a relative error of $4.4 \times 10^{-6}$, stable over the
-integration window and monotonic in step count. With the library's
+[@Will1993], a relative error of $\sim 10^{-6}$ saturated at the f64
+noise floor with the energy invariant flat at machine precision over
+the integration window. With the library's
 default Plummer softening left in place — Exactness violated — the
 drift is $-83\,128$ arcseconds per century: three orders of magnitude
 larger than the relativistic effect and of the wrong sign, while energy
@@ -196,9 +225,65 @@ same class of observable.
 Both counter-tests are asserted as continuous-integration gates — 1 %
 relative-error tolerance on the GR agreement, exact bijection between
 crossing and spike events with $10 \cdot dt$ temporal matching on the
-continuity measurement, and non-negotiable warning-emission on both
+continuity measurement, and warning emission required on both
 registrations. The full suite completes in under twenty seconds on
-commodity hardware.
+a 2024-class x64 workstation.
+
+**Executable contract surface.** The kernel-precondition mechanism
+demonstrated above is one of three guarantee classes the library
+publishes to a perturbation author. The full surface is formalised in
+`apsis::contract`: every guarantee is named in the module-level
+documentation, every guarantee is gated by a continuous-integration
+test whose name matches the guarantee, and every test is co-located
+with the prose. Reading the module top-to-bottom reads the contract;
+running `cargo test -p apsis --lib contract` verifies it. The library
+distinguishes itself from comparable surfaces in REBOUND/REBOUNDx
+[@ReinLiu2012; @Tamayo2020] not on test count — REBOUND has a wider
+validation portfolio measured by problem count — but on **shape**:
+that a reviewer can mechanically check the claims the contract makes.
+
+The three classes are:
+
+*Kernel invariants* — the simulation is deterministic at the system
+level (the bare integrator and any registered perturbations together);
+attaching a no-op perturbation produces a trajectory bit-equal to the
+bare-Newton run; perturbation evaluation is a pure function of
+`(bodies, scratch_acc)`. Four tests, including a negative test that
+proves the determinism check observes trajectory state rather than
+returning a fixed value.
+
+*Composition rules* — registration is commutative at the IEEE-754
+accumulator step for $N = 2$; associative within the IEEE-754 summation
+envelope for $N \ge 3$; additive (perturbations contribute by `+=`,
+never overwrite, verified by sentinel pre-population of the
+accumulator); the system's effective `KernelRequirements` is the
+set-union of the individual perturbations'. Four tests. The
+trajectory-level corollary of associativity (registering $[A, B, C]$
+versus $[C, B, A]$ produces equivalent science) is not asserted at the
+contract level — adaptive integrators amplify ULP-level acceleration
+differences through chaotic substep selection, so a trajectory-level
+gate would measure integrator behaviour rather than the composition
+operator. The associativity claim therefore lives at the per-call
+accumulator level, where the IEEE-754 statement is well-defined.
+
+*Failure model* — exactly one warning per violated invariant per
+registration; repeated registration produces a faithful audit trail
+rather than silent coalescing; emission is unconditional on subscriber
+state, so a registration with no consumer attached completes normally
+and a subsequent subscriber-attached registration still observes the
+warning. Four tests. The two demonstrated counter-tests above are
+specific instances of the first guarantee (one Exactness diagnostic on
+softening violation; one Continuity diagnostic on truncated-Plummer
+violation); the remaining tests pin the audit-trail and
+no-silent-acceptance properties that the kernel-precondition
+demonstration alone would not exhibit.
+
+Twelve tests in total at `crates/apsis/src/contract.rs`. The same
+file holds the prose statement of every guarantee, the rationale for
+the invariants the contract does *not* extend to (cross-platform
+bit-exactness, cross-thread determinism, build-flag invariance), and
+the load-bearing iteration-order property of the perturbation storage
+that a future refactor must not break.
 
 **Run configuration.** All measurements correspond to: IAS15 with
 initial timestep $10^{-4} \cdot T$ and adaptivity enabled for the
@@ -210,7 +295,10 @@ at fixed $dt = 10^{-3} \cdot T$ for the Continuity counter-test
 $R_c = 1$, $\alpha = 0.8$, 60 simulation-unit integration). Sources
 at `crates/apsis-1pn/tests/mercury_precession_gate.rs` and
 `crates/apsis-1pn/tests/kernel_continuity_counter_test.rs`; both
-reproduce on a clean checkout per the §Availability command.
+reproduce on a clean checkout per the §Availability command. The
+twelve composition-contract tests run under
+`cargo test -p apsis --lib contract` and live in
+`crates/apsis/src/contract.rs`.
 
 Two formally distinct invariants (Exactness, Continuity), when
 violated, produce two formally distinct and quantitatively separable
@@ -221,7 +309,7 @@ the claim the mechanism supports.
 # Availability and reproducibility
 
 `apsis` is available under the Apache License 2.0 at
-<https://github.com/gabrielbragaestefanski/apsis>. The Mercury
+<https://github.com/GabrielEstefanski/apsis>. The Mercury
 validation described above reproduces on a clean checkout with a
 single command,
 
