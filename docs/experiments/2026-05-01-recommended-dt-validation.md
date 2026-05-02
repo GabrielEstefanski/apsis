@@ -184,7 +184,7 @@ Y4: 13/13 pass against $10^{-6}$ bound. Worst case `hd_80606_b_system` at $1.32 
 
 Peak $|\Delta L_z|$ in absolute units, gated against the per-cell bound $\max(10^{-10} \cdot |L_z(0)|,\, 10^{-10})$:
 
-| Scenario | $L_z$-bound | VV $|\Delta L_z|$ | VV verdict | Y4 $|\Delta L_z|$ | Y4 verdict |
+| Scenario | $L_z$-bound | VV $\lvert\Delta L_z\rvert$ | VV verdict | Y4 $\lvert\Delta L_z\rvert$ | Y4 verdict |
 | --- | ---: | ---: | --- | ---: | --- |
 | `alpha_centauri_ab` | 2.92e-10 | 2.67e-15 | pass | 2.67e-15 | pass |
 | `binary` | 1.00e-10 | 5.00e-16 | pass | 6.66e-16 | pass |
@@ -206,7 +206,7 @@ VV: 13/13 pass. Y4: 13/13 pass. Every gated cell sits at the f64 round-off floor
 
 Peak $|\Delta E / E_0|$ for WH per scenario, alongside absolute $|\Delta L_z|$ drift:
 
-| Scenario | WH $|\Delta E / E_0|$ | WH $|\Delta L_z|$ |
+| Scenario | WH $\lvert\Delta E / E_0\rvert$ | WH $\lvert\Delta L_z\rvert$ |
 | --- | ---: | ---: |
 | `alpha_centauri_ab` | 1.11e-12 | 2.67e-15 |
 | `binary` | 6.75e-9 | 6.66e-16 |
