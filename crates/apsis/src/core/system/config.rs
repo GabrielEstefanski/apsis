@@ -191,6 +191,50 @@ impl System {
             );
         }
 
+        // Wisdom-Holman emits a regime diagnostic at integrator selection time,
+        // mirroring the `KernelRequirements` mismatch warnings that perturbation
+        // forces issue at registration. The warning is observability only — the
+        // integrator does not refuse to operate on a non-hierarchical system,
+        // matching the discipline that `apsis` surfaces regime mismatches and
+        // lets the caller decide.
+        if matches!(kind, IntegratorKind::WisdomHolman) {
+            let masses: Vec<f64> = self.bodies.iter().map(|b| b.mass).collect();
+            let signal = crate::physics::integrator::traits::HierarchySignal::classify(&masses);
+            match signal {
+                crate::physics::integrator::traits::HierarchySignal::Hierarchical => {
+                    // Quiet: the WH derivation operates inside its validated regime.
+                },
+                crate::physics::integrator::traits::HierarchySignal::Borderline => {
+                    let m0 = self.bodies.first().map(|b| b.mass).unwrap_or(0.0);
+                    let m_rest: f64 = self.bodies.iter().skip(1).map(|b| b.mass).sum();
+                    let ratio = if m_rest > 0.0 { m0 / m_rest } else { f64::INFINITY };
+                    crate::warn_diag!(
+                        crate::core::log::Source::System,
+                        "Wisdom-Holman selected with marginal hierarchy",
+                        regime = signal.label(),
+                        dominance_ratio = ratio,
+                        threshold = 10.0,
+                        hint = "energy drift may exceed the WH 1991 published floor; \
+                                see docs/experiments/2026-05-03-wh-refactor.md",
+                    );
+                },
+                crate::physics::integrator::traits::HierarchySignal::Violated => {
+                    let m0 = self.bodies.first().map(|b| b.mass).unwrap_or(0.0);
+                    let m_rest: f64 = self.bodies.iter().skip(1).map(|b| b.mass).sum();
+                    let ratio = if m_rest > 0.0 { m0 / m_rest } else { f64::INFINITY };
+                    crate::warn_diag!(
+                        crate::core::log::Source::System,
+                        "Wisdom-Holman selected on non-hierarchical configuration",
+                        regime = signal.label(),
+                        dominance_ratio = ratio,
+                        threshold = 10.0,
+                        hint = "WH derivation does not apply outside hierarchical regime; \
+                                consider yoshida4 or ias15 for non-hierarchical systems",
+                    );
+                },
+            }
+        }
+
         self.integrator = integrator;
     }
 
