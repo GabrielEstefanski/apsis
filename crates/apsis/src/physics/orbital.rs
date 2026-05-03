@@ -100,6 +100,19 @@ const E_CIRCULAR_EPS: f64 = 1e-6;
 /// where `h_vec.x` and `h_vec.y` are exactly zero.
 const N_DEGENERATE_EPS: f64 = 1e-12;
 
+/// CSV schema version for [`OrbitalElements::csv_header`] and
+/// [`OrbitalElements::to_csv_row`].
+///
+/// **Version 1** (legacy): `t, body_idx, primary_idx, a, e, period, h,
+/// energy, omega_deg, orbit_type` — 10 columns.
+///
+/// **Version 2** (current): adds `inclination_deg, lon_asc_node_deg,
+/// true_anomaly_deg, eccentric_anomaly_deg, mean_anomaly_deg, pericenter,
+/// apocenter` — 17 columns total. External tooling parsing the apsis
+/// CSV format must check this constant before consuming the file; v1
+/// readers will silently misalign on v2 output.
+pub const CSV_SCHEMA_VERSION: u32 = 2;
+
 // ── Orbit classification ──────────────────────────────────────────────────────
 
 /// Keplerian orbit type derived from specific orbital energy.
@@ -197,11 +210,32 @@ pub struct OrbitalElements {
     /// related to `ν` by `tan(E/2) = √((1−e)/(1+e)) tan(ν/2)`. For
     /// hyperbolic orbits, hyperbolic anomaly `H ∈ ℝ` related by
     /// `tanh(H/2) = √((e−1)/(e+1)) tan(ν/2)`. NaN for parabolic.
+    ///
+    /// The half-angle recovery is numerically robust for `e < 0.999`.
+    /// Beyond that the `(1−e).sqrt()` factor enters the round-off floor
+    /// of the source ellipse and an asymptotic branch (parabolic limit)
+    /// would be needed; no current caller exercises that regime.
     pub eccentric_anomaly: f64,
 
-    /// Mean anomaly. For elliptical: `M = E − e sin E ∈ [−π, π]`.
-    /// For hyperbolic: `M_h = e sinh H − H ∈ ℝ`. Linearly evolving in
-    /// time at rate [`Self::mean_motion`]. NaN for parabolic.
+    /// Mean anomaly.
+    ///
+    /// **Elliptical:** `M = E − e sin E`, naturally landing in
+    /// `[−π − e, π + e]`. The value is **not** wrapped to `[−π, π]` —
+    /// `M` is semantically a temporal variable (`M(t) = M₀ + n t`) and an
+    /// artificial principal-value collapse would corrupt consumers
+    /// tracking `dM/dt` across frames. Snapshot recovery from
+    /// instantaneous `(r, v)` cannot supply absolute temporal context;
+    /// the `2π` discontinuity at orbit closure must be unwrapped by the
+    /// consumer with a continuity-tracking layer if monotonicity in time
+    /// is required.
+    ///
+    /// **Hyperbolic:** `M_h = e sinh H − H ∈ ℝ`. Already unbounded.
+    ///
+    /// **Parabolic:** NaN. Detection threshold is `|energy| < 1e-12`
+    /// (see `ENERGY_THRESH` inside [`elements_from_invariants`]); orbits
+    /// inside that band are flagged but not characterised. Barker's
+    /// variable `D` (the parabolic anomaly) is reserved for the day a
+    /// caller renders parabolic flybys.
     pub mean_anomaly: f64,
 
     /// Orbit classification derived from `energy`.
@@ -244,6 +278,11 @@ impl OrbitalElements {
     }
 
     /// CSV header row matching [`Self::to_csv_row`].
+    ///
+    /// Schema is versioned — see [`CSV_SCHEMA_VERSION`]. The current
+    /// header reflects v2 (17 columns); external parsers built against
+    /// the v1 format (10 columns) will silently misalign and must check
+    /// the version constant before consuming the file.
     pub fn csv_header() -> &'static str {
         "t,body_idx,primary_idx,a,e,period,h,energy,\
          inclination_deg,lon_asc_node_deg,omega_deg,\
@@ -721,7 +760,15 @@ fn anomalies(orbit_type: OrbitType, e: f64, omega: f64, inv: &OrbitInvariants) -
             let half_nu = 0.5 * nu;
             let (s_half, c_half) = half_nu.sin_cos();
             let big_e = 2.0 * ((1.0 - e).sqrt() * s_half).atan2((1.0 + e).sqrt() * c_half);
-            let m = wrap_pi(big_e - e * big_e.sin());
+            // M = E − e sin E. Not wrapped to `[−π, π]` because M is
+            // semantically a temporal variable (`M(t) = M₀ + n t`); a
+            // principal-value collapse would corrupt consumers tracking
+            // dM/dt across frames. Snapshot recovery from instantaneous
+            // (r, v) cannot supply absolute temporal context regardless,
+            // so the value lands naturally in `[−π − e, π + e]` and the
+            // `2π` jump at orbit closure must be unwrapped by the
+            // consumer with a continuity-tracking layer.
+            let m = big_e - e * big_e.sin();
             (nu, big_e, m)
         },
         OrbitType::Hyperbolic => {
@@ -898,10 +945,13 @@ pub fn elements_anchored_to_body(
 
     // Eccentric and mean anomalies follow the same elliptical identities
     // used in [`anomalies`]; the planar anchor reuses `nu` from above.
+    // `mean_anomaly` is not wrapped — see the doc on
+    // `OrbitalElements::mean_anomaly` for why snapshot M is not collapsed
+    // to `[−π, π]`.
     let half_nu = 0.5 * nu;
     let (s_half, c_half) = half_nu.sin_cos();
     let big_e = 2.0 * ((1.0 - e).sqrt() * s_half).atan2((1.0 + e).sqrt() * c_half);
-    let mean_anomaly = wrap_pi(big_e - e * big_e.sin());
+    let mean_anomaly = big_e - e * big_e.sin();
 
     OrbitalElements {
         primary_idx,
@@ -2562,5 +2612,164 @@ mod tests {
         let kep = wrap_pi(el.eccentric_anomaly - e * el.eccentric_anomaly.sin());
         let diff = ((el.mean_anomaly - kep + PI).rem_euclid(TAU) - PI).abs();
         assert!(diff < 1e-12, "Kepler eq on inclined orbit: M={}, E−e·sinE={kep}", el.mean_anomaly);
+    }
+
+    // ── Reversibility: state → elements → state ──────────────────────────────
+    //
+    // Reconstruct (r, v) from a full Keplerian element set via the
+    // perifocal-to-world rotation `R₃(Ω) · R₁(i) · R₃(ω)`. Test helper —
+    // promote to public API in a follow-up if Playback mode or the Python
+    // binding ever needs to construct bodies from elements.
+
+    /// Build a (r_world, v_world) pair from `(a, e, i, Ω, ω, ν, μ)` via
+    /// the standard astrodynamics perifocal-to-inertial rotation. For
+    /// hyperbolic input, `a` should be negative (codebase convention) and
+    /// the same conic formulas apply with `p = a(1 − e²)` retaining its
+    /// sign so `r = p / (1 + e cos ν)` is positive on the active branch.
+    fn reconstruct_state(
+        a: f64,
+        e: f64,
+        i: f64,
+        lon_asc: f64,
+        omega: f64,
+        nu: f64,
+        mu: f64,
+    ) -> (Vec3, Vec3) {
+        let p = a * (1.0 - e * e);
+        let (s_nu, c_nu) = nu.sin_cos();
+        let r = p / (1.0 + e * c_nu);
+
+        let r_pf = Vec3::new(r * c_nu, r * s_nu, 0.0);
+        let factor = (mu / p.abs()).sqrt();
+        let v_pf = Vec3::new(-factor * s_nu, factor * (e + c_nu), 0.0);
+
+        // Composite rotation R₃(Ω) · R₁(i) · R₃(ω) — same matrix as in
+        // `OrbitalElements::sample_orbit`, full 3×3 form here.
+        let (s_o, c_o) = omega.sin_cos();
+        let (s_i, c_i) = i.sin_cos();
+        let (s_w, c_w) = lon_asc.sin_cos();
+
+        let r11 = c_w * c_o - s_w * s_o * c_i;
+        let r12 = -c_w * s_o - s_w * c_o * c_i;
+        let r21 = s_w * c_o + c_w * s_o * c_i;
+        let r22 = -s_w * s_o + c_w * c_o * c_i;
+        let r31 = s_o * s_i;
+        let r32 = c_o * s_i;
+
+        let rotate = |p: Vec3| -> Vec3 {
+            Vec3::new(r11 * p.x + r12 * p.y, r21 * p.x + r22 * p.y, r31 * p.x + r32 * p.y)
+        };
+        (rotate(r_pf), rotate(v_pf))
+    }
+
+    /// Run a state → elements → state round-trip on a chosen regime.
+    /// Asserts the recovered position and velocity match the original to
+    /// `1e-9` relative.
+    fn assert_state_roundtrip(
+        label: &str,
+        a: f64,
+        e: f64,
+        i_deg: f64,
+        lon_asc_deg: f64,
+        omega_deg: f64,
+        nu_deg: f64,
+    ) {
+        let primary_mass = 1e6;
+        let mu = G * primary_mass;
+        let i = i_deg.to_radians();
+        let lon_asc = lon_asc_deg.to_radians();
+        let omega = omega_deg.to_radians();
+        let nu = nu_deg.to_radians();
+
+        let (r0, v0) = reconstruct_state(a, e, i, lon_asc, omega, nu, mu);
+
+        let primary = body(0.0, 0.0, 0.0, 0.0, primary_mass);
+        let mut sat = body(r0.x, r0.y, v0.x, v0.y, 1e-10);
+        sat.z = r0.z;
+        sat.vz = v0.z;
+        sat.sync_physical_properties();
+
+        let bodies = vec![primary, sat];
+        let el = compute_elements(&bodies, 1, 0, G).expect("regime is computable");
+
+        let (r1, v1) = reconstruct_state(
+            el.a,
+            el.e,
+            el.inclination,
+            el.lon_ascending_node,
+            el.omega,
+            el.true_anomaly,
+            mu,
+        );
+
+        let dr = (r1 - r0).length() / r0.length().max(1e-30);
+        let dv = (v1 - v0).length() / v0.length().max(1e-30);
+        assert!(dr < 1e-9, "{label}: |Δr|/|r| = {dr:.3e} (r0={r0:?}, r1={r1:?})");
+        assert!(dv < 1e-9, "{label}: |Δv|/|v| = {dv:.3e} (v0={v0:?}, v1={v1:?})");
+    }
+
+    /// Mercury-like: low eccentricity, moderate inclination, full Ω/ω.
+    #[test]
+    fn state_roundtrip_mercury_like() {
+        assert_state_roundtrip("Mercury-like", 0.387, 0.21, 7.0, 48.331, 29.124, 174.79);
+    }
+
+    /// Eris-like: extreme inclination (44°), moderate eccentricity. The
+    /// regime where 2D-projection of the orbit collapses scientific
+    /// information.
+    #[test]
+    fn state_roundtrip_eris_like() {
+        assert_state_roundtrip("Eris-like", 68.0, 0.44, 44.04, 35.95, 151.0, 90.0);
+    }
+
+    /// Sedna-like: extreme eccentricity (0.85). Stresses the
+    /// `(1−e).sqrt()` factor inside the half-angle E recovery.
+    #[test]
+    fn state_roundtrip_sedna_like() {
+        assert_state_roundtrip("Sedna-like", 507.0, 0.85, 11.93, 144.0, 311.0, 45.0);
+    }
+
+    /// Hyperbolic flyby: `e > 1` with non-trivial inclination.
+    #[test]
+    fn state_roundtrip_hyperbolic_flyby() {
+        // a < 0 by convention for hyperbolic; ν = 0.5 rad keeps the body
+        // well inside the asymptote `ν_∞ = acos(−1/e) ≈ 2.30` for e = 1.5.
+        let nu_deg = 0.5_f64.to_degrees();
+        assert_state_roundtrip("Hyperbolic", -10.0, 1.5, 20.0, 60.0, 45.0, nu_deg);
+    }
+
+    /// Circular planar: degenerate fallback path (`e ≈ 0`, `Ω = 0`,
+    /// `ω = 0`, ν taken as argument of latitude).
+    #[test]
+    fn state_roundtrip_circular_planar() {
+        let primary_mass = 1e6;
+        let mu = G * primary_mass;
+        let a = 10.0;
+        let e = 0.0;
+        let nu = std::f64::consts::FRAC_PI_4;
+
+        let (r0, v0) = reconstruct_state(a, e, 0.0, 0.0, 0.0, nu, mu);
+        let primary = body(0.0, 0.0, 0.0, 0.0, primary_mass);
+        let mut sat = body(r0.x, r0.y, v0.x, v0.y, 1e-10);
+        sat.z = r0.z;
+        sat.vz = v0.z;
+        sat.sync_physical_properties();
+        let bodies = vec![primary, sat];
+        let el = compute_elements(&bodies, 1, 0, G).expect("circular regime is computable");
+
+        let (r1, v1) = reconstruct_state(
+            el.a,
+            el.e,
+            el.inclination,
+            el.lon_ascending_node,
+            el.omega,
+            el.true_anomaly,
+            mu,
+        );
+
+        let dr = (r1 - r0).length() / r0.length();
+        let dv = (v1 - v0).length() / v0.length();
+        assert!(dr < 1e-9, "circular: |Δr|/|r| = {dr:.3e}");
+        assert!(dv < 1e-9, "circular: |Δv|/|v| = {dv:.3e}");
     }
 }
