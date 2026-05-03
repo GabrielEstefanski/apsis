@@ -78,7 +78,13 @@ use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 /// feature the `tracing-tracy` layer is added in parallel so spans flow
 /// to the standalone Tracy viewer.
 fn init_tracing() {
-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    // Default filter: app-level info, but silence Vulkan loader chatter
+    // from third-party overlay layers (Overwolf, OBS, etc.) that emit
+    // API-version warnings against modern wgpu instances. These warnings
+    // are external to our code and surface every launch on systems with
+    // those layers installed. Override with `RUST_LOG=info` to see them.
+    let filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info,GENERAL=error"));
     let registry =
         tracing_subscriber::registry().with(filter).with(fmt::layer().with_target(false));
 
@@ -128,6 +134,7 @@ pub fn run() {
         native_options,
         Box::new(|cc| {
             let mut fonts = egui::FontDefinitions::default();
+            crate::app::design::fonts::install(&mut fonts);
             egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
             egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Fill);
             cc.egui_ctx.set_fonts(fonts);

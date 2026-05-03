@@ -86,12 +86,13 @@ fn style() -> egui::Style {
 }
 
 fn text_styles() -> std::collections::BTreeMap<TextStyle, FontId> {
-    use FontFamily::{Monospace, Proportional};
+    use FontFamily::{Monospace, Name, Proportional};
+    let medium = Name(typography::font::SANS_MEDIUM.into());
     let mut map = std::collections::BTreeMap::new();
     map.insert(TextStyle::Small, FontId::new(typography::text::XS, Proportional));
     map.insert(TextStyle::Body, FontId::new(typography::text::BASE, Proportional));
     map.insert(TextStyle::Button, FontId::new(typography::text::BASE, Proportional));
-    map.insert(TextStyle::Heading, FontId::new(typography::text::LG, Proportional));
+    map.insert(TextStyle::Heading, FontId::new(typography::text::LG, medium));
     map.insert(TextStyle::Monospace, FontId::new(typography::text::BASE, Monospace));
     map
 }
