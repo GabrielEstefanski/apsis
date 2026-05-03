@@ -4,5 +4,6 @@
 //! consume tokens; nothing else in the app references raw colours, sizes, or
 //! durations directly.
 
+pub mod fonts;
 pub mod theme;
 pub mod tokens;
