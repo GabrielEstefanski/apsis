@@ -1,6 +1,7 @@
 use crate::app::config::PhysicsConfig;
+use crate::app::design::theme as design_theme;
 use crate::app::render_hints::{BodyRenderHints, compute_render_hints};
-use crate::app::theme::{BG, apply_visuals};
+use crate::app::theme::BG;
 use crate::render::{TrailRenderer, WgpuBackend};
 use apsis::core::physics_thread::{PhysicsHandle, spawn as spawn_physics};
 use apsis::core::system::System;
@@ -544,7 +545,7 @@ impl SimulationApp {
     fn draw_frame(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
 
-        apply_visuals(&ctx);
+        design_theme::install(&ctx);
 
         // ── Sync latest physics state into local cache ────────────────────────
         self.system.sync();
