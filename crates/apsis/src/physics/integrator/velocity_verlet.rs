@@ -49,6 +49,7 @@ impl Integrator for VelocityVerlet {
             used_fallback: false,
             step_snapshot: None,
             degraded: false,
+            hierarchy_signal: None,
         }
     }
 
