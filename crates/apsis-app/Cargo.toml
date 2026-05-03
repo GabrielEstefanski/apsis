@@ -18,6 +18,13 @@ path = "src/main.rs"
 [lib]
 path = "src/lib.rs"
 
+[features]
+default = []
+# Enable Tracy profiler integration. Off by default — Tracy is opt-in
+# via `cargo run --features profiling`. Requires the standalone Tracy
+# viewer (https://github.com/wolfpld/tracy) connected over TCP.
+profiling = ["dep:tracing-tracy"]
+
 [dependencies]
 apsis = { path = "../apsis" }
 serde = { workspace = true }
@@ -32,7 +39,11 @@ wgpu = { workspace = true }
 winit = { workspace = true }
 pollster = { workspace = true }
 bytemuck = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+tracing-tracy = { workspace = true, optional = true }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }
 insta = { workspace = true }
+egui_kittest = { workspace = true }
