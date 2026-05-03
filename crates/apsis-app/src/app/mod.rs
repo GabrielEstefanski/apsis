@@ -1,5 +1,6 @@
 pub mod canvas;
 pub mod config;
+pub mod design;
 pub mod icons;
 pub mod notifications;
 pub mod panel;
