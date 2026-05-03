@@ -53,3 +53,7 @@ approx = "0.5"
 pretty_assertions = "1.4"
 insta = { version = "1.39", features = ["json"] }
 criterion = "0.8.2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+tracing-tracy = "0.11"
+egui_kittest = "0.34.1"
