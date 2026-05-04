@@ -245,6 +245,11 @@ pub struct SimulationApp {
     pub(super) spawn_cluster_vel_disp: f64,
     pub(super) spawn_cluster_material: Material,
     pub(super) selected_body: Option<usize>,
+    /// Persistent state for the new design-system Inspector — `More`
+    /// expander toggles plus the Bloomberg-flash tracker. Lives on
+    /// the app rather than inside [`InspectorData`] so the per-frame
+    /// payload stays a pure value.
+    pub(super) inspector_state: crate::app::inspector::InspectorState,
     pub(super) dragging_body: Option<usize>,
     pub(super) drag_start_world: Option<(f64, f64)>,
     pub(super) selection_form: Option<SelectionForm>,
@@ -464,6 +469,7 @@ impl SimulationApp {
             spawn_cluster_vel_disp: 0.5,
             spawn_cluster_material: Material::Rocky,
             selected_body: None,
+            inspector_state: crate::app::inspector::InspectorState::default(),
             dragging_body: None,
             drag_start_world: None,
             selection_form: None,

@@ -28,8 +28,12 @@ pub struct InspectorState {
     pub flash: FlashTracker,
 }
 
-/// Render one Inspector frame for the given data and persistent state.
-pub fn show(ui: &mut Ui, data: &InspectorData, state: &mut InspectorState) {
+/// Render one Inspector frame and return the index of the action that
+/// was clicked this frame, if any. The caller dispatches intent against
+/// its own action vocabulary; this module knows nothing about what
+/// "Focus camera" or "Delete" mean.
+pub fn show(ui: &mut Ui, data: &InspectorData, state: &mut InspectorState) -> Option<usize> {
+    let mut clicked_action: Option<usize> = None;
     ui.allocate_ui_with_layout(
         egui::vec2(ui.available_width(), ui.available_height()),
         Layout::top_down(Align::LEFT),
@@ -72,13 +76,16 @@ pub fn show(ui: &mut Ui, data: &InspectorData, state: &mut InspectorState) {
                 }
 
                 if !data.actions.is_empty() {
-                    Section::new("Actions").show(ui, |ui| action_rows(ui, &data.actions));
+                    Section::new("Actions").show(ui, |ui| {
+                        clicked_action = action_rows(ui, &data.actions);
+                    });
                 }
 
                 ui.add_space(space::S5);
             });
         },
     );
+    clicked_action
 }
 
 // ── Header ───────────────────────────────────────────────────────────────────
@@ -263,8 +270,9 @@ fn camera_rows(ui: &mut Ui, c: &CameraRelativeData, flash: &mut FlashTracker) {
 
 // ── Actions ──────────────────────────────────────────────────────────────────
 
-fn action_rows(ui: &mut Ui, actions: &[super::data::ActionData]) {
-    for a in actions {
+fn action_rows(ui: &mut Ui, actions: &[super::data::ActionData]) -> Option<usize> {
+    let mut clicked = None;
+    for (i, a) in actions.iter().enumerate() {
         let mut btn = IconButton::new(&a.label);
         if let Some(ico) = &a.icon {
             btn = btn.with_icon(ico);
@@ -275,8 +283,11 @@ fn action_rows(ui: &mut Ui, actions: &[super::data::ActionData]) {
         if a.kind == ActionKind::Destructive {
             btn = btn.danger();
         }
-        ui.add(btn);
+        if ui.add(btn).clicked() {
+            clicked = Some(i);
+        }
     }
+    clicked
 }
 
 // ── Disclosure ───────────────────────────────────────────────────────────────
