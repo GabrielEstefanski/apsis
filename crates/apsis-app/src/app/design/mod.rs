@@ -5,5 +5,6 @@
 //! durations directly.
 
 pub mod fonts;
+pub mod primitives;
 pub mod theme;
 pub mod tokens;
