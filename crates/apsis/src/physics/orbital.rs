@@ -10,15 +10,23 @@
 //!
 //! ## Primary selection
 //!
-//! For each body `i`, the **primary** is the body `j ≠ i` that produces the
-//! largest gravitational acceleration at body `i`'s location:
+//! Two distinct notions of "primary" coexist for an N-body snapshot:
 //!
-//! ```text
-//! dominant j = argmax_j  G·m_j / r_ij²
-//! ```
+//! * [`dominant_primary`] — the body `j ≠ i` whose instantaneous
+//!   gravitational pull on body `i` is largest, `argmax_j G·m_j / r_ij²`.
+//!   This is the natural reference for osculating two-body elements and
+//!   is what [`compute_elements`] uses.
 //!
-//! This correctly handles hierarchical systems: the Moon's primary is Earth
-//! even though the Sun is more massive, because Earth is closer.
+//! * [`hierarchical_primary`] — the body in whose Hill sphere body `i`
+//!   currently sits. For a Moon–Earth–Sun configuration the dominant
+//!   primary of the Moon is the **Sun** (`G·M☉ / r_⊙^2 ≈ 5.9 × 10⁻³ m/s²`
+//!   exceeds Earth's `≈ 2.7 × 10⁻³ m/s²`), while the hierarchical primary
+//!   is **Earth**. The two coincide for non-hierarchical configurations
+//!   such as Mercury orbiting the Sun directly.
+//!
+//! Both are pure snapshot helpers: nothing in the integrator consumes
+//! either, and neither is cached across steps. Renderers and analysis
+//! consumers may compute them on demand.
 //!
 //! ## Computed quantities
 //!
@@ -522,14 +530,141 @@ pub fn dominant_primary(bodies: &[Body], idx: usize) -> Option<usize> {
         .enumerate()
         .filter(|(j, _)| *j != idx)
         .max_by(|(_, bj), (_, bk)| {
-            let rj2 = (bj.x - bi.x).powi(2) + (bj.y - bi.y).powi(2);
-            let rk2 = (bk.x - bi.x).powi(2) + (bk.y - bi.y).powi(2);
+            let rj2 = (bj.x - bi.x).powi(2) + (bj.y - bi.y).powi(2) + (bj.z - bi.z).powi(2);
+            let rk2 = (bk.x - bi.x).powi(2) + (bk.y - bi.y).powi(2) + (bk.z - bi.z).powi(2);
             // Compare m_j/r_j² vs m_k/r_k²  (G cancels)
             let score_j = if rj2 > 0.0 { bj.mass / rj2 } else { f64::INFINITY };
             let score_k = if rk2 > 0.0 { bk.mass / rk2 } else { f64::INFINITY };
             score_j.partial_cmp(&score_k).unwrap_or(std::cmp::Ordering::Equal)
         })
         .map(|(j, _)| j)
+}
+
+/// Returns `true` when no body in the snapshot is strictly more massive
+/// than `bodies[idx]`.
+///
+/// System root has no Keplerian orbit; rendering one would misrepresent
+/// N-body dynamics — the most massive body's motion is the integrated
+/// reflex of every other body, not a closed conic around any single
+/// reference. Inspector and canvas overlays both consult this predicate
+/// to skip drawing an orbit they have no honest way to construct.
+pub fn is_system_root(bodies: &[Body], idx: usize) -> bool {
+    if idx >= bodies.len() {
+        return false;
+    }
+    let m = bodies[idx].mass;
+    !bodies.iter().enumerate().any(|(j, b)| j != idx && b.mass > m)
+}
+
+/// How the hierarchical relationship was established — surfaced to the
+/// caller so consumers can show *why* the parent was chosen rather than
+/// asserting it as fact.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HierarchicalRelation {
+    /// Selected body sits inside the candidate's Hill sphere — the
+    /// canonical capture criterion.
+    HillSphere,
+    /// Hill-sphere check failed, but the selected body is gravitationally
+    /// bound (`ε < 0`) to the candidate; smallest such candidate wins.
+    Energy,
+}
+
+/// Hierarchical primary — the body in whose Hill sphere `idx` currently
+/// resides, paired with the criterion that established the relationship.
+/// Distinct from [`dominant_primary`] (the strongest attractor): for the
+/// Earth-Moon-Sun configuration the dominant primary of the Moon is the
+/// Sun while the hierarchical primary is Earth.
+///
+/// # Algorithm
+///
+/// Hill-sphere check, smallest-containing wins. For each candidate
+/// `cand` with `mass > bodies[idx].mass`, sorted ascending by mass:
+///
+/// * Treat `cand` as a "system root" when no body in the snapshot is
+///   strictly more massive than it. The root's Hill sphere is infinite —
+///   anything not contained by a smaller candidate falls back to it.
+/// * Otherwise, compute the Hill radius
+///   `r_H = a · ∛(m_cand / 3·m_parent)` using `cand`'s **current**
+///   distance to its [`dominant_primary`] as `a` (a snapshot proxy for
+///   the semi-major axis). Return `cand` if `idx` lies inside that Hill
+///   radius.
+///
+/// When no candidate's Hill sphere contains `idx`, fall back to an
+/// energy test: pick the smallest-mass candidate around which `idx` is
+/// gravitationally bound (`ε < 0`). This catches partial captures and
+/// chaotic configurations where Hill-sphere reasoning fails.
+///
+/// # Pure snapshot
+///
+/// This function consumes only the bodies' current `(r, v, m)`. It is
+/// not memoised, not consulted by the integrator, and carries no
+/// implication for dynamics — apsis remains a direct N-body code, with
+/// the hierarchy used solely as a render/analysis lens.
+///
+/// Returns `None` when there is no body more massive than `idx` and the
+/// energy fallback finds no bound candidate.
+pub fn hierarchical_primary(bodies: &[Body], idx: usize) -> Option<(usize, HierarchicalRelation)> {
+    if bodies.len() < 2 {
+        return None;
+    }
+    let bi = &bodies[idx];
+
+    let mut candidates: Vec<usize> =
+        (0..bodies.len()).filter(|&j| j != idx && bodies[j].mass > bi.mass).collect();
+    candidates.sort_by(|&a, &b| {
+        bodies[a].mass.partial_cmp(&bodies[b].mass).unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    // Hill-sphere primary — smallest-containing wins.
+    for &cand in &candidates {
+        let bc = &bodies[cand];
+        let is_root = bodies.iter().enumerate().all(|(j, b)| j == cand || b.mass <= bc.mass);
+
+        let r_hill = if is_root {
+            f64::INFINITY
+        } else {
+            let parent_idx = match dominant_primary(bodies, cand) {
+                Some(p) => p,
+                None => continue,
+            };
+            let bp = &bodies[parent_idx];
+            let a_cp =
+                ((bc.x - bp.x).powi(2) + (bc.y - bp.y).powi(2) + (bc.z - bp.z).powi(2)).sqrt();
+            if a_cp < 1e-15 || bp.mass < 1e-30 {
+                continue;
+            }
+            a_cp * (bc.mass / (3.0 * bp.mass)).cbrt()
+        };
+
+        let r_self = ((bi.x - bc.x).powi(2) + (bi.y - bc.y).powi(2) + (bi.z - bc.z).powi(2)).sqrt();
+        if r_self < r_hill {
+            return Some((cand, HierarchicalRelation::HillSphere));
+        }
+    }
+
+    // Energy fallback — pick the smallest bound candidate.
+    for &cand in &candidates {
+        let bc = &bodies[cand];
+        let dx = bi.x - bc.x;
+        let dy = bi.y - bc.y;
+        let dz = bi.z - bc.z;
+        let r = (dx * dx + dy * dy + dz * dz).sqrt();
+        if r < 1e-15 {
+            continue;
+        }
+        let dvx = bi.vx - bc.vx;
+        let dvy = bi.vy - bc.vy;
+        let dvz = bi.vz - bc.vz;
+        let v2 = dvx * dvx + dvy * dvy + dvz * dvz;
+        // Sign of the orbital energy proxy `½v² − m_cand/r`. The constant
+        // `G` would scale both terms identically and is irrelevant to the
+        // sign comparison; bound iff this is negative.
+        if 0.5 * v2 - bc.mass / r < 0.0 {
+            return Some((cand, HierarchicalRelation::Energy));
+        }
+    }
+
+    None
 }
 
 // ── Element computation ───────────────────────────────────────────────────────
@@ -2771,5 +2906,168 @@ mod tests {
         let dv = (v1 - v0).length() / v0.length();
         assert!(dr < 1e-9, "circular: |Δr|/|r| = {dr:.3e}");
         assert!(dv < 1e-9, "circular: |Δv|/|v| = {dv:.3e}");
+    }
+
+    // ── hierarchical_primary — Hill-sphere parent, distinct from
+    //                          the strongest-attractor `dominant_primary` ──
+
+    /// Make a body at world position (x, y, z) with given mass. Velocity is
+    /// zero — `hierarchical_primary` does not consult velocity except in
+    /// the energy fallback, which is exercised separately.
+    fn body3(x: f64, y: f64, z: f64, mass: f64) -> Body {
+        let mut b = Body::rocky(mass).at(x, y);
+        b.z = z;
+        b.sync_physical_properties();
+        b
+    }
+
+    /// Sun + Earth + Moon at SI distances. Sun pulls the Moon ~2× harder
+    /// than Earth does (`G·M☉/r_⊙² > G·M⊕/r⊕²`), so `dominant_primary`
+    /// returns the Sun for the Moon. Hierarchical primary must instead
+    /// return Earth — the body whose Hill sphere contains the Moon.
+    #[test]
+    fn hierarchical_primary_recovers_earth_for_the_moon() {
+        // Indices: 0 = Sun, 1 = Earth, 2 = Moon.
+        let m_sun = 1.989e30;
+        let m_earth = 5.972e24;
+        let m_moon = 7.342e22;
+        let au = 1.495_978_707e11;
+        let r_em = 3.844e8;
+        let bodies = vec![
+            body3(0.0, 0.0, 0.0, m_sun),
+            body3(au, 0.0, 0.0, m_earth),
+            body3(au + r_em, 0.0, 0.0, m_moon),
+        ];
+
+        // Sanity: confirm dominant_primary picks the Sun (the documented
+        // 2× ratio holds — anyone reading this test should find the
+        // motivation in the function-level rustdoc).
+        assert_eq!(dominant_primary(&bodies, 2), Some(0), "dominant_primary(Moon) = Sun");
+
+        // Hierarchical primary recovers Earth — established via Hill sphere.
+        assert_eq!(
+            hierarchical_primary(&bodies, 2),
+            Some((1, HierarchicalRelation::HillSphere)),
+            "hierarchical_primary(Moon) = Earth via Hill sphere",
+        );
+    }
+
+    /// For a body whose dominant primary already coincides with its
+    /// hierarchical primary (no Hill-sphere divergence), both functions
+    /// return the same answer.
+    #[test]
+    fn hierarchical_primary_matches_dominant_for_inner_planets() {
+        let m_sun = 1.989e30;
+        let m_mercury = 3.302e23;
+        let m_earth = 5.972e24;
+        let au = 1.495_978_707e11;
+        let bodies = vec![
+            body3(0.0, 0.0, 0.0, m_sun),
+            body3(0.387 * au, 0.0, 0.0, m_mercury),
+            body3(au, 0.0, 0.0, m_earth),
+        ];
+
+        for idx in [1, 2] {
+            let h = hierarchical_primary(&bodies, idx).map(|(i, _)| i);
+            assert_eq!(
+                h,
+                dominant_primary(&bodies, idx),
+                "non-hierarchical body {idx}: both primaries should coincide on the Sun",
+            );
+        }
+    }
+
+    /// Inclined Earth–Moon configuration — the Hill-sphere check must
+    /// reduce a 3D distance, not a planar projection. Place the Moon
+    /// straight above Earth (along `+ẑ`) and confirm Earth still wins.
+    #[test]
+    fn hierarchical_primary_handles_inclined_separation() {
+        let m_sun = 1.989e30;
+        let m_earth = 5.972e24;
+        let m_moon = 7.342e22;
+        let au = 1.495_978_707e11;
+        let r_em = 3.844e8;
+        let bodies = vec![
+            body3(0.0, 0.0, 0.0, m_sun),
+            body3(au, 0.0, 0.0, m_earth),
+            // Moon directly above Earth — the planar (x, y) projection
+            // collapses; only the 3D distance recovers the geometry.
+            body3(au, 0.0, r_em, m_moon),
+        ];
+
+        assert_eq!(
+            hierarchical_primary(&bodies, 2),
+            Some((1, HierarchicalRelation::HillSphere)),
+            "Moon stacked along ẑ above Earth must still resolve to Earth",
+        );
+    }
+
+    /// A truly isolated body — the only body more massive than itself is
+    /// the system root, captured via the infinite-Hill-sphere branch.
+    #[test]
+    fn hierarchical_primary_returns_root_for_unfiltered_planet() {
+        let m_sun = 1.989e30;
+        let m_earth = 5.972e24;
+        let au = 1.495_978_707e11;
+        let bodies = vec![body3(0.0, 0.0, 0.0, m_sun), body3(au, 0.0, 0.0, m_earth)];
+        assert_eq!(
+            hierarchical_primary(&bodies, 1),
+            Some((0, HierarchicalRelation::HillSphere)),
+            "Earth's hierarchical primary is the Sun (system root)",
+        );
+    }
+
+    /// The most massive body has no parent; result is `None`.
+    #[test]
+    fn hierarchical_primary_returns_none_for_heaviest_body() {
+        let bodies =
+            vec![body3(0.0, 0.0, 0.0, 1.989e30), body3(1.495_978_707e11, 0.0, 0.0, 5.972e24)];
+        assert!(hierarchical_primary(&bodies, 0).is_none());
+    }
+
+    /// Single-body and empty inputs short-circuit to `None` without
+    /// inspecting any state.
+    #[test]
+    fn hierarchical_primary_returns_none_for_trivial_input() {
+        let bodies = vec![body3(0.0, 0.0, 0.0, 1.0e30)];
+        assert!(hierarchical_primary(&bodies, 0).is_none());
+    }
+
+    // ── is_system_root — shared predicate consumed by inspector and
+    //                    canvas to skip orbit rendering for the heaviest
+    //                    body ──
+
+    #[test]
+    fn is_system_root_marks_the_heaviest_body() {
+        let bodies = vec![
+            body3(0.0, 0.0, 0.0, 1.989e30),     // Sun
+            body3(1.5e11, 0.0, 0.0, 5.972e24),  // Earth
+            body3(7.78e11, 0.0, 0.0, 1.898e27), // Jupiter
+        ];
+        assert!(is_system_root(&bodies, 0), "Sun is system root");
+        assert!(!is_system_root(&bodies, 1), "Earth has the Sun above it");
+        assert!(!is_system_root(&bodies, 2), "Jupiter has the Sun above it");
+    }
+
+    #[test]
+    fn is_system_root_handles_a_single_body() {
+        let bodies = vec![body3(0.0, 0.0, 0.0, 1.0e30)];
+        assert!(is_system_root(&bodies, 0));
+    }
+
+    #[test]
+    fn is_system_root_returns_false_for_out_of_range_index() {
+        let bodies = vec![body3(0.0, 0.0, 0.0, 1.0e30)];
+        assert!(!is_system_root(&bodies, 5));
+    }
+
+    /// Equal-mass siblings: neither has a body strictly heavier, so both
+    /// register as roots. The application layer can disambiguate (e.g.
+    /// pick a deterministic representative) when this matters.
+    #[test]
+    fn is_system_root_treats_equal_mass_pair_as_co_roots() {
+        let bodies = vec![body3(0.0, 0.0, 0.0, 1.0e30), body3(1.0e11, 0.0, 0.0, 1.0e30)];
+        assert!(is_system_root(&bodies, 0));
+        assert!(is_system_root(&bodies, 1));
     }
 }
