@@ -10,7 +10,7 @@ use egui_phosphor::regular::{CARET_DOWN, CARET_RIGHT};
 
 use super::data::{
     ActionKind, CameraRelativeData, EnergyData, Identity, InspectorData, KinematicState, OrbitData,
-    PerturbationData,
+    PerturbationData, RelationsData,
 };
 use super::format::{QuantityType, format_value};
 use crate::app::design::primitives::{
@@ -53,6 +53,10 @@ pub fn show(ui: &mut Ui, data: &InspectorData, state: &mut InspectorState) -> Op
                     Section::new(&format!("Orbit  ›  {}", orbit.primary_name)).show(ui, |ui| {
                         orbit_rows(ui, orbit, &mut state.orbit_more_open, &mut state.flash);
                     });
+                }
+
+                if let Some(rel) = &data.relations {
+                    Section::new("Relations").show(ui, |ui| relations_rows(ui, rel));
                 }
 
                 if let Some(energy) = &data.energy {
@@ -199,6 +203,15 @@ fn orbit_rows(ui: &mut Ui, o: &OrbitData, more_open: &mut bool, flash: &mut Flas
         let (val, unit) = format_value(o.apocenter_m, QuantityType::DistanceScalar);
         ui.add(FieldRow::new("Apocenter (Q)", &val, unit));
     }
+}
+
+// ── Relations ────────────────────────────────────────────────────────────────
+
+fn relations_rows(ui: &mut Ui, rel: &RelationsData) {
+    ui.add(FieldRow::new("Primary", &rel.primary_name, ""));
+    ui.add(FieldRow::new("Relation", rel.kind.label(), ""));
+    ui.add(FieldRow::new("Secondary", &rel.secondary_name, ""));
+    ui.add(FieldRow::new("Frame", &rel.frame_label, ""));
 }
 
 // ── Energy ───────────────────────────────────────────────────────────────────

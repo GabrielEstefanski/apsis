@@ -17,6 +17,6 @@ pub mod view;
 
 pub use data::{
     ActionData, ActionKind, CameraRelativeData, EnergyData, Header, Identity, InspectorData,
-    KinematicState, OrbitData, PerturbationData, PerturbationReadout,
+    KinematicState, OrbitData, PerturbationData, PerturbationReadout, RelationKind, RelationsData,
 };
 pub use view::{InspectorState, show};

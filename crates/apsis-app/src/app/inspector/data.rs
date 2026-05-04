@@ -19,6 +19,10 @@ pub struct InspectorData {
     pub identity: Identity,
     pub state: KinematicState,
     pub orbit: Option<OrbitData>,
+    /// Hierarchical relationship surfaced when the body's hierarchical
+    /// primary differs from the strongest attractor used in `orbit`
+    /// (Moon → Earth case). Auto-hidden otherwise.
+    pub relations: Option<RelationsData>,
     pub energy: Option<EnergyData>,
     pub perturbations: Vec<PerturbationData>,
     pub camera_relative: Option<CameraRelativeData>,
@@ -87,6 +91,44 @@ pub struct PerturbationReadout {
     pub label: String,
     pub value_str: String,
     pub unit: String,
+}
+
+/// Relation type that bound `secondary_name` to `primary_name`. Recorded
+/// here so the consumer can show the user *how* the relationship was
+/// established (Hill sphere / energy fallback) rather than asserting
+/// it as fact.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RelationKind {
+    /// Hill-sphere containment — the standard hierarchical-capture case.
+    BoundHillSphere,
+    /// Energy fallback — Hill-sphere check failed but the secondary is
+    /// gravitationally bound to the primary (`ε < 0`).
+    BoundEnergy,
+}
+
+impl RelationKind {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::BoundHillSphere => "Bound (Hill sphere)",
+            Self::BoundEnergy => "Bound (energy)",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct RelationsData {
+    /// Hierarchical primary's name (e.g. "Earth" for the Moon).
+    pub primary_name: String,
+    /// The selected body's role in this relationship — the secondary in
+    /// the binary `(primary, secondary)`. Same as the inspector header
+    /// title; surfaced explicitly so the relationship reads symmetrically.
+    pub secondary_name: String,
+    pub kind: RelationKind,
+    /// Natural reference frame label, e.g. `"Barycentric (Earth–Moon)"`.
+    /// Computational quantities elsewhere in the inspector are not
+    /// rotated into this frame; the label documents what frame would be
+    /// natural for further analysis.
+    pub frame_label: String,
 }
 
 #[derive(Debug, Clone)]

@@ -7,9 +7,10 @@
 
 use crate::app::inspector::{
     self, ActionData, ActionKind, EnergyData, Header, Identity, InspectorData, KinematicState,
-    OrbitData,
+    OrbitData, RelationKind, RelationsData,
 };
 use crate::app::ui::{SimulationApp, UndoRecord};
+use apsis::physics::orbital::{self as physics_orbital, HierarchicalRelation, is_system_root};
 use eframe::egui::{self, Color32};
 
 const ACTION_FOCUS: usize = 0;
@@ -41,7 +42,11 @@ impl SimulationApp {
         let bodies = self.system.bodies();
         let body = bodies[idx];
         let elements = self.system.orbital_elements();
-        let elem = elements.get(idx).and_then(|e| *e);
+        // System root has no Keplerian orbit; rendering one would
+        // misrepresent N-body dynamics. Suppress both ORBIT and RELATIONS
+        // sections — there is no meaningful primary to report.
+        let elem =
+            if is_system_root(bodies, idx) { None } else { elements.get(idx).and_then(|e| *e) };
 
         let raw_name = self.system.name(idx);
         let display_name =
@@ -75,10 +80,14 @@ impl SimulationApp {
         });
 
         let energy = build_energy(bodies, idx, elem, self.system.g_factor());
+        let relations = build_relations(bodies, idx, elem, &display_name, |i| {
+            let n = self.system.name(i);
+            if n.is_empty() { format!("body #{i}") } else { n.to_owned() }
+        });
 
         InspectorData {
             header: Header {
-                name: display_name,
+                name: display_name.clone(),
                 breadcrumb,
                 swatch: Color32::from_rgb(cr, cg, cb),
             },
@@ -88,16 +97,11 @@ impl SimulationApp {
                 velocity_m_s: [body.vx, body.vy, body.vz],
             },
             orbit,
+            relations,
             energy: Some(energy),
-            // Perturbation enumeration by name is not yet exposed by
-            // `System`; the `PerturbationForce` trait carries no human
-            // identifier. Section auto-hides while `perturbations` is
-            // empty.
+            // `PerturbationForce` exposes no name accessor yet; section auto-hides.
             perturbations: Vec::new(),
-            // Camera-relative readouts assume a 3D camera with a known
-            // world-space position. The current 2D-pan camera does not
-            // expose one cleanly; the section auto-hides until the 3D
-            // canvas + floating-origin work lands.
+            // Needs 3D camera world-pose; section auto-hides until the canvas lands.
             camera_relative: None,
             actions: vec![
                 ActionData {
@@ -179,4 +183,36 @@ fn build_energy(
 
     let specific = orbit.map(|el| el.energy).unwrap_or(f64::NAN);
     EnergyData { kinetic_j: kinetic, potential_j: potential, specific_j: specific }
+}
+
+/// Compute the hierarchical relationship for the selected body. Returns
+/// `Some(RelationsData)` only when the hierarchical primary differs from
+/// the strongest attractor used by `orbit` — the section auto-hides
+/// otherwise so the inspector stays compact for non-hierarchical cases.
+///
+/// `name_of` resolves a body index to a human-readable name, falling back
+/// to `body #N` when the simulation didn't supply one.
+fn build_relations(
+    bodies: &[apsis::domain::body::Body],
+    idx: usize,
+    orbit: Option<apsis::physics::orbital::OrbitalElements>,
+    secondary_name: &str,
+    name_of: impl Fn(usize) -> String,
+) -> Option<RelationsData> {
+    let (primary_idx, kind) = physics_orbital::hierarchical_primary(bodies, idx)?;
+    let strongest_idx = orbit.map(|el| el.primary_idx);
+    if strongest_idx == Some(primary_idx) {
+        return None;
+    }
+    let primary_name = name_of(primary_idx);
+    let frame_label = format!("Barycentric ({primary_name}–{secondary_name})");
+    Some(RelationsData {
+        primary_name,
+        secondary_name: secondary_name.to_owned(),
+        kind: match kind {
+            HierarchicalRelation::HillSphere => RelationKind::BoundHillSphere,
+            HierarchicalRelation::Energy => RelationKind::BoundEnergy,
+        },
+        frame_label,
+    })
 }
