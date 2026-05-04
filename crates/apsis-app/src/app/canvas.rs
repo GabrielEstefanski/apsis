@@ -3,7 +3,7 @@ use crate::app::ui::{SelectionForm, SemanticScaleMode, SimulationApp, UndoRecord
 use crate::render::CallbackFn;
 use crate::render::lighting::{LightSpec, SceneLighting};
 use crate::render::orbit_overlay::{OrbitOverlayStyle, draw_orbit_apsides, draw_orbit_polyline};
-use apsis::physics::orbital::{compute_elements, dominant_primary};
+use apsis::physics::orbital::{compute_elements, dominant_primary, is_system_root};
 use apsis::templates::instantiate_at;
 use eframe::egui::{self, Color32, FontId, Pos2, Stroke};
 use eframe::egui_wgpu;
@@ -393,6 +393,11 @@ impl SimulationApp {
                         if self.pinned_orbits.contains(&i) {
                             continue;
                         }
+                        // System root has no Keplerian orbit; rendering
+                        // one would misrepresent N-body dynamics.
+                        if is_system_root(bodies, i) {
+                            continue;
+                        }
                         let Some(level) = self.orbit_hierarchy.level(i) else {
                             continue;
                         };
@@ -460,6 +465,9 @@ impl SimulationApp {
                         if Some(i) == self.selected_body {
                             continue;
                         }
+                        if is_system_root(bodies, i) {
+                            continue;
+                        }
                         let primary =
                             self.orbit_hierarchy.primary(i).or_else(|| dominant_primary(bodies, i));
                         let Some(primary_idx) = primary else {
@@ -485,7 +493,7 @@ impl SimulationApp {
                 }
 
                 if let Some(idx) = self.selected_body {
-                    if idx < bodies.len() {
+                    if idx < bodies.len() && !is_system_root(bodies, idx) {
                         let primary = self
                             .orbit_hierarchy
                             .primary(idx)
