@@ -225,7 +225,7 @@ impl SimulationApp {
 
             self.system.load_named_bodies(bodies);
             self.pinned_orbits.clear();
-            self.selected_body = None;
+            self.selection = crate::app::ui::BodySelection::default();
             self.selection_form = None;
             self.pending_fit = true;
             self.reset_drift_peaks();

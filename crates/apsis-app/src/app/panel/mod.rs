@@ -36,8 +36,9 @@ mod tool_rail;
 mod toolbar;
 
 use crate::app::theme::{BORDER, PANEL_BG};
-use crate::app::ui::SimulationApp;
+use crate::app::ui::{BodySelection, SimulationApp};
 use eframe::egui::{self, Stroke};
+use std::collections::BTreeSet;
 
 const CONTEXTUAL_MIN: f32 = 240.0;
 const CONTEXTUAL_DEFAULT: f32 = 300.0;
@@ -78,21 +79,46 @@ impl SimulationApp {
 
     // ── Inspector (right, auto-show when a body is selected) ───────────────
     pub(super) fn draw_inspector(&mut self, ctx: &egui::Context) {
-        let idx = match self.selected_body {
-            Some(i) => i,
-            None => {
-                self.system.set_orbital_elements_needed(false);
-                return;
-            },
-        };
-        self.system.set_orbital_elements_needed(true);
-
-        if idx >= self.system.bodies().len() {
-            self.selected_body = None;
-            self.follow_selected_body = false;
-            self.selection_form = None;
+        if matches!(self.selection, BodySelection::None) {
+            self.system.set_orbital_elements_needed(false);
             return;
         }
+
+        // Stale-index guard: prune selected indices that have gone out of range.
+        let n_bodies = self.system.bodies().len();
+        let stale = match &self.selection {
+            BodySelection::Single(i) if *i >= n_bodies => Some(BodySelection::default()),
+            BodySelection::Multi(set) => {
+                let valid: BTreeSet<usize> =
+                    set.iter().copied().filter(|&i| i < n_bodies).collect();
+                (valid.len() < set.len()).then(|| match valid.len() {
+                    0 => BodySelection::default(),
+                    1 => BodySelection::Single(*valid.iter().next().unwrap()),
+                    _ => BodySelection::Multi(valid),
+                })
+            },
+            _ => None,
+        };
+        if let Some(sel) = stale {
+            if matches!(sel, BodySelection::None) {
+                self.follow_selected_body = false;
+                self.selection_form = None;
+                self.system.set_orbital_elements_needed(false);
+            }
+            self.selection = sel;
+            if matches!(self.selection, BodySelection::None) {
+                return;
+            }
+        }
+
+        // Extract dispatch info before the closure to avoid borrow conflicts.
+        let single_idx = self.selection.single();
+        let multi_set: Option<BTreeSet<usize>> = match &self.selection {
+            BodySelection::Multi(s) => Some(s.clone()),
+            _ => None,
+        };
+
+        self.system.set_orbital_elements_needed(single_idx.is_some());
 
         egui::Panel::right("inspector")
             .frame(
@@ -108,7 +134,11 @@ impl SimulationApp {
             .show(ctx, |ui| {
                 egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
                     ui.set_width(ui.available_width());
-                    self.inspector_content(ui, idx);
+                    if let Some(idx) = single_idx {
+                        self.inspector_content(ui, idx);
+                    } else if let Some(ref indices) = multi_set {
+                        self.aggregate_content(ui, indices);
+                    }
                 });
             });
     }
