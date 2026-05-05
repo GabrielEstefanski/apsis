@@ -1,6 +1,7 @@
 pub mod canvas;
 pub mod config;
 pub mod design;
+pub mod diagnostics;
 pub mod icons;
 pub mod inspector;
 pub mod notifications;
