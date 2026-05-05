@@ -6,18 +6,122 @@
 //! shape. The view itself is domain-agnostic by contract.
 
 use crate::app::inspector::{
-    self, ActionData, ActionKind, EnergyData, Header, Identity, InspectorData, KinematicState,
-    OrbitData, RelationKind, RelationsData,
+    self, ActionData, ActionKind, AggregateData, EnergyData, Header, Identity, InspectorData,
+    KinematicState, OrbitData, RelationKind, RelationsData,
 };
-use crate::app::ui::{SimulationApp, UndoRecord};
+use crate::app::ui::{BodySelection, SimulationApp, UndoRecord};
 use apsis::physics::orbital::{self as physics_orbital, HierarchicalRelation, is_system_root};
 use eframe::egui::{self, Color32};
+use std::collections::BTreeSet;
 
 const ACTION_FOCUS: usize = 0;
 const ACTION_HIDE_TRAIL: usize = 1;
 const ACTION_DELETE: usize = 2;
 
+const ACTION_AGG_DELETE: usize = 0;
+const ACTION_AGG_DESELECT: usize = 1;
+
 impl SimulationApp {
+    pub(super) fn aggregate_content(&mut self, ui: &mut egui::Ui, indices: &BTreeSet<usize>) {
+        if self.is_editing_locked() {
+            ui.disable();
+        }
+
+        let data = self.build_aggregate_data(indices);
+        let clicked = inspector::show_aggregate(ui, &data);
+
+        match clicked {
+            Some(ACTION_AGG_DELETE) => self.delete_selected_bodies(indices.clone()),
+            Some(ACTION_AGG_DESELECT) => {
+                self.selection = BodySelection::default();
+                self.selection_form = None;
+            },
+            _ => {},
+        }
+    }
+
+    fn build_aggregate_data(&self, indices: &BTreeSet<usize>) -> AggregateData {
+        let bodies = self.system.bodies();
+
+        let mut total_mass = 0.0_f64;
+        let mut com = [0.0_f64; 3];
+        let mut v_com = [0.0_f64; 3];
+
+        for &i in indices {
+            let b = bodies[i];
+            total_mass += b.mass;
+            com[0] += b.mass * b.x;
+            com[1] += b.mass * b.y;
+            com[2] += b.mass * b.z;
+            v_com[0] += b.mass * b.vx;
+            v_com[1] += b.mass * b.vy;
+            v_com[2] += b.mass * b.vz;
+        }
+
+        if total_mass > 0.0 {
+            com[0] /= total_mass;
+            com[1] /= total_mass;
+            com[2] /= total_mass;
+            v_com[0] /= total_mass;
+            v_com[1] /= total_mass;
+            v_com[2] /= total_mass;
+        }
+
+        // bounding_radius = max(|r_i − COM|)
+        let bounding_radius = indices
+            .iter()
+            .map(|&i| {
+                let b = bodies[i];
+                let dx = b.x - com[0];
+                let dy = b.y - com[1];
+                let dz = b.z - com[2];
+                (dx * dx + dy * dy + dz * dz).sqrt()
+            })
+            .fold(0.0_f64, f64::max);
+
+        AggregateData {
+            count: indices.len(),
+            total_mass_kg: total_mass,
+            com_m: com,
+            v_com_m_s: v_com,
+            bounding_radius_m: bounding_radius,
+            actions: vec![
+                ActionData {
+                    label: "Delete selected".to_owned(),
+                    icon: None,
+                    shortcut: Some("Del".to_owned()),
+                    kind: ActionKind::Destructive,
+                },
+                ActionData {
+                    label: "Deselect all".to_owned(),
+                    icon: None,
+                    shortcut: Some("Esc".to_owned()),
+                    kind: ActionKind::Neutral,
+                },
+            ],
+        }
+    }
+
+    /// Delete all bodies in `indices` in descending index order so that
+    /// swap-remove semantics don't invalidate the remaining indices.
+    fn delete_selected_bodies(&mut self, indices: BTreeSet<usize>) {
+        // BTreeSet iterates ascending; reverse gives descending.
+        let sorted: Vec<usize> = indices.into_iter().rev().collect();
+        for idx in sorted {
+            if idx < self.system.bodies().len() {
+                let body = self.system.bodies()[idx];
+                let name = self.system.name(idx).to_owned();
+                let old_last = self.system.bodies().len().saturating_sub(1);
+                self.push_undo(UndoRecord::RemovedBody { body, name });
+                self.system.remove_body(idx);
+                self.pins_after_swap_remove(idx, old_last);
+            }
+        }
+        self.selection = BodySelection::default();
+        self.follow_selected_body = false;
+        self.selection_form = None;
+    }
+
     pub(super) fn inspector_content(&mut self, ui: &mut egui::Ui, idx: usize) {
         if self.is_editing_locked() {
             ui.disable();
@@ -106,10 +210,11 @@ impl SimulationApp {
             actions: vec![
                 ActionData {
                     label: if self.follow_selected_body {
-                        "Unfollow camera".to_owned()
+                        "Unfollow camera"
                     } else {
-                        "Focus camera".to_owned()
-                    },
+                        "Focus camera"
+                    }
+                    .to_owned(),
                     icon: None,
                     shortcut: Some("F".to_owned()),
                     kind: ActionKind::Neutral,
@@ -147,7 +252,7 @@ impl SimulationApp {
         self.push_undo(UndoRecord::RemovedBody { body, name });
         self.system.remove_body(idx);
         self.pins_after_swap_remove(idx, old_last);
-        self.selected_body = None;
+        self.selection = BodySelection::default();
         self.follow_selected_body = false;
         self.selection_form = None;
     }
@@ -215,4 +320,131 @@ fn build_relations(
         },
         frame_label,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use apsis::domain::body::Body;
+
+    fn make_body(x: f64, y: f64, vx: f64, vy: f64, mass: f64) -> Body {
+        let mut b = Body::rocky(mass).at(x, y).with_velocity(vx, vy);
+        b.z = 0.0;
+        b.vz = 0.0;
+        b
+    }
+
+    fn aggregate(bodies: &[Body], indices: &[usize]) -> AggregateData {
+        let mut total_mass = 0.0_f64;
+        let mut com = [0.0_f64; 3];
+        let mut v_com = [0.0_f64; 3];
+
+        for &i in indices {
+            let b = bodies[i];
+            total_mass += b.mass;
+            com[0] += b.mass * b.x;
+            com[1] += b.mass * b.y;
+            com[2] += b.mass * b.z;
+            v_com[0] += b.mass * b.vx;
+            v_com[1] += b.mass * b.vy;
+            v_com[2] += b.mass * b.vz;
+        }
+
+        if total_mass > 0.0 {
+            com[0] /= total_mass;
+            com[1] /= total_mass;
+            com[2] /= total_mass;
+            v_com[0] /= total_mass;
+            v_com[1] /= total_mass;
+            v_com[2] /= total_mass;
+        }
+
+        let bounding_radius = indices
+            .iter()
+            .map(|&i| {
+                let b = bodies[i];
+                let dx = b.x - com[0];
+                let dy = b.y - com[1];
+                let dz = b.z - com[2];
+                (dx * dx + dy * dy + dz * dz).sqrt()
+            })
+            .fold(0.0_f64, f64::max);
+
+        AggregateData {
+            count: indices.len(),
+            total_mass_kg: total_mass,
+            com_m: com,
+            v_com_m_s: v_com,
+            bounding_radius_m: bounding_radius,
+            actions: vec![],
+        }
+    }
+
+    #[test]
+    fn aggregate_com_equal_masses() {
+        let bodies = vec![make_body(-1.0, 0.0, 0.0, 0.0, 1.0), make_body(1.0, 0.0, 0.0, 0.0, 1.0)];
+        let d = aggregate(&bodies, &[0, 1]);
+        assert!((d.com_m[0]).abs() < 1e-12, "COM x should be 0 for symmetric pair");
+        assert!((d.bounding_radius_m - 1.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn aggregate_com_unequal_masses() {
+        // Body A: mass 1 at x=0; Body B: mass 3 at x=4 → COM = 3.0
+        let bodies = vec![make_body(0.0, 0.0, 0.0, 0.0, 1.0), make_body(4.0, 0.0, 0.0, 0.0, 3.0)];
+        let d = aggregate(&bodies, &[0, 1]);
+        assert!((d.com_m[0] - 3.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn aggregate_translational_invariance() {
+        let shift = 1e11_f64;
+        let bodies_a = vec![make_body(1.0, 2.0, 0.0, 0.0, 5.0), make_body(3.0, 4.0, 0.0, 0.0, 5.0)];
+        let bodies_b = vec![
+            make_body(1.0 + shift, 2.0 + shift, 0.0, 0.0, 5.0),
+            make_body(3.0 + shift, 4.0 + shift, 0.0, 0.0, 5.0),
+        ];
+        let da = aggregate(&bodies_a, &[0, 1]);
+        let db = aggregate(&bodies_b, &[0, 1]);
+        // Bounding radius is translation-invariant.
+        assert!((da.bounding_radius_m - db.bounding_radius_m).abs() < 1e-6);
+        // COM shifts by exactly `shift`.
+        assert!((db.com_m[0] - da.com_m[0] - shift).abs() < 1e-6);
+    }
+
+    #[test]
+    fn aggregate_zero_mass_no_panic() {
+        // All-zero mass bodies — total_mass = 0; guard prevents division; COM stays 0.
+        let bodies = vec![make_body(1.0, 0.0, 0.0, 0.0, 0.0), make_body(-1.0, 0.0, 0.0, 0.0, 0.0)];
+        let d = aggregate(&bodies, &[0, 1]);
+        assert_eq!(d.total_mass_kg, 0.0);
+        assert!(d.com_m[0].is_finite());
+    }
+
+    #[test]
+    fn body_selection_toggle_invariant() {
+        // None → Single → Multi → Single → None
+        let sel = BodySelection::default();
+        let sel = sel.toggle(0);
+        assert!(matches!(sel, BodySelection::Single(0)));
+
+        let sel = sel.toggle(1);
+        assert!(matches!(sel, BodySelection::Multi(_)));
+        if let BodySelection::Multi(ref s) = sel {
+            assert_eq!(s.len(), 2);
+        }
+
+        let sel = sel.toggle(1);
+        assert!(matches!(sel, BodySelection::Single(0)));
+
+        let sel = sel.toggle(0);
+        assert!(matches!(sel, BodySelection::None));
+    }
+
+    #[test]
+    fn body_selection_multi_never_has_one_element() {
+        // Toggling the second body back out must collapse to Single, not Multi({0}).
+        let sel = BodySelection::None.toggle(5).toggle(7).toggle(7);
+        assert!(matches!(sel, BodySelection::Single(5)));
+    }
 }

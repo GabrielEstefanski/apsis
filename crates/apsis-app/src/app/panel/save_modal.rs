@@ -146,7 +146,7 @@ impl SimulationApp {
                             // Restore seed (0 = old save without seed → generate fresh)
                             self.sim_seed = if snap.seed != 0 { snap.seed } else { apsis::io::snapshot::SimSnapshot::new_seed() };
                             self.paused = true;
-                            self.selected_body = None;
+                            self.selection = crate::app::ui::BodySelection::default();
                             self.follow_selected_body = false;
                             self.selection_form = None;
                             self.pending_load = None;

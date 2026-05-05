@@ -9,8 +9,8 @@ use eframe::egui::{self, Align, FontFamily, FontId, Layout, RichText, Sense, Ui}
 use egui_phosphor::regular::{CARET_DOWN, CARET_RIGHT};
 
 use super::data::{
-    ActionKind, CameraRelativeData, EnergyData, Identity, InspectorData, KinematicState, OrbitData,
-    PerturbationData, RelationsData,
+    ActionKind, AggregateData, CameraRelativeData, EnergyData, Identity, InspectorData,
+    KinematicState, OrbitData, PerturbationData, RelationsData,
 };
 use super::format::{QuantityType, format_value};
 use crate::app::design::primitives::{
@@ -90,6 +90,75 @@ pub fn show(ui: &mut Ui, data: &InspectorData, state: &mut InspectorState) -> Op
         },
     );
     clicked_action
+}
+
+/// Render the aggregate (multi-select) inspector frame and return the clicked
+/// action index, if any. The caller dispatches actions by index.
+pub fn show_aggregate(ui: &mut Ui, data: &AggregateData) -> Option<usize> {
+    let mut clicked: Option<usize> = None;
+    ui.allocate_ui_with_layout(
+        egui::vec2(ui.available_width(), ui.available_height()),
+        Layout::top_down(Align::LEFT),
+        |ui| {
+            egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+                ui.add_space(space::S5);
+                show_aggregate_header(ui, data.count);
+                ui.add_space(space::S4);
+                hairline(ui, space::S4);
+
+                Section::new("Selection").show(ui, |ui| aggregate_rows(ui, data));
+
+                if !data.actions.is_empty() {
+                    Section::new("Actions").show(ui, |ui| {
+                        clicked = action_rows(ui, &data.actions);
+                    });
+                }
+
+                ui.add_space(space::S5);
+            });
+        },
+    );
+    clicked
+}
+
+fn show_aggregate_header(ui: &mut Ui, count: usize) {
+    let medium = FontFamily::Name(typography::font::SANS_MEDIUM.into());
+    ui.horizontal(|ui| {
+        ui.add_space(space::S4);
+        ui.label(
+            RichText::new(format!("{count} bodies"))
+                .font(FontId::new(typography::text::LG, medium))
+                .color(color::fg::PRIMARY),
+        );
+    });
+    ui.horizontal(|ui| {
+        ui.add_space(space::S4);
+        ui.label(
+            RichText::new("selection")
+                .font(FontId::new(typography::text::XS, FontFamily::Proportional))
+                .color(color::fg::TERTIARY),
+        );
+    });
+}
+
+fn aggregate_rows(ui: &mut Ui, data: &AggregateData) {
+    let (s, u) = format_value(data.total_mass_kg, QuantityType::Mass);
+    ui.add(FieldRow::new("Total mass", &s, u));
+
+    Subgroup::new("COM position").show(ui, |ui| {
+        for (axis, value) in ["x", "y", "z"].iter().zip(data.com_m.iter()) {
+            let (val, unit) = format_value(*value, QuantityType::DistanceVector);
+            ui.add(FieldRow::new(axis, &val, unit).indented(1));
+        }
+    });
+
+    let v_speed =
+        (data.v_com_m_s[0].powi(2) + data.v_com_m_s[1].powi(2) + data.v_com_m_s[2].powi(2)).sqrt();
+    let (val, unit) = format_value(v_speed, QuantityType::VelocityVector);
+    ui.add(FieldRow::new("|v_COM|", &val, unit));
+
+    let (val, unit) = format_value(data.bounding_radius_m, QuantityType::DistanceVector);
+    ui.add(FieldRow::new("Bounding radius", &val, unit));
 }
 
 // ── Header ───────────────────────────────────────────────────────────────────
