@@ -69,12 +69,38 @@ use crate::app::ui::SimulationApp;
 use apsis::core::system::System;
 use apsis::io;
 use apsis::units::UnitSystem;
+use tracing_subscriber::{EnvFilter, fmt, prelude::*};
+
+/// Initialise the global tracing subscriber.
+///
+/// `fmt` layer emits structured logs to stderr; severity is controlled by
+/// the `RUST_LOG` env var (defaults to `info`). Under the `profiling`
+/// feature the `tracing-tracy` layer is added in parallel so spans flow
+/// to the standalone Tracy viewer.
+fn init_tracing() {
+    // Default filter: app-level info, but silence Vulkan loader chatter
+    // from third-party overlay layers (Overwolf, OBS, etc.) that emit
+    // API-version warnings against modern wgpu instances. These warnings
+    // are external to our code and surface every launch on systems with
+    // those layers installed. Override with `RUST_LOG=info` to see them.
+    let filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info,GENERAL=error"));
+    let registry =
+        tracing_subscriber::registry().with(filter).with(fmt::layer().with_target(false));
+
+    #[cfg(feature = "profiling")]
+    let registry = registry.with(tracing_tracy::TracyLayer::default());
+
+    registry.init();
+}
 
 /// Entry point shared by the `apsis` binary.
 ///
 /// Dispatches to headless batch mode when `--config <path>` is present;
 /// otherwise launches the interactive eframe/egui GUI.
 pub fn run() {
+    init_tracing();
+
     // ── Headless batch mode: apsis --config run.toml ─────────────────
     let args: Vec<String> = std::env::args().collect();
     if let Some(pos) = args.iter().position(|a| a == "--config") {
@@ -108,6 +134,7 @@ pub fn run() {
         native_options,
         Box::new(|cc| {
             let mut fonts = egui::FontDefinitions::default();
+            crate::app::design::fonts::install(&mut fonts);
             egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
             egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Fill);
             cc.egui_ctx.set_fonts(fonts);

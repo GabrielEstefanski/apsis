@@ -64,6 +64,7 @@ impl Integrator for Yoshida4 {
             used_fallback: false,
             step_snapshot: None,
             degraded: false,
+            hierarchy_signal: None,
         }
     }
 

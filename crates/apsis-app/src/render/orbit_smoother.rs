@@ -110,6 +110,14 @@ struct SmoothState {
     h_vec: apsis::math::Vec3,
     /// Smoothed eccentricity (Laplace–Runge–Lenz) vector (3D).
     e_vec: apsis::math::Vec3,
+    /// Latest body-relative position. Not smoothed — captures the most
+    /// recent observation so the [`elements_anchored_to_body`] fallback
+    /// to [`elements_from_invariants`] still recovers anomalies on the
+    /// rare unbound / near-circular paths.
+    r_rel: apsis::math::Vec3,
+    /// Latest body-relative velocity. Not smoothed; same rationale as
+    /// `r_rel`.
+    v_rel: apsis::math::Vec3,
 }
 
 impl SmoothState {
@@ -121,11 +129,19 @@ impl SmoothState {
             energy: inv.energy,
             h_vec: inv.h_vec,
             e_vec: inv.e_vec,
+            r_rel: inv.r_rel,
+            v_rel: inv.v_rel,
         }
     }
 
     fn invariants(&self) -> OrbitInvariants {
-        OrbitInvariants { energy: self.energy, h_vec: self.h_vec, e_vec: self.e_vec }
+        OrbitInvariants {
+            energy: self.energy,
+            h_vec: self.h_vec,
+            e_vec: self.e_vec,
+            r_rel: self.r_rel,
+            v_rel: self.v_rel,
+        }
     }
 }
 
@@ -251,6 +267,11 @@ impl OrbitSmoother {
                     lerp(st.e_vec.y, inv.e_vec.y, alpha),
                     lerp(st.e_vec.z, inv.e_vec.z, alpha),
                 );
+                // r/v are snapshots, not EMA-smoothed: they change every
+                // frame and the smoother only consumes them in fallback
+                // paths that need a current observation.
+                st.r_rel = inv.r_rel;
+                st.v_rel = inv.v_rel;
                 st.last_t_sim = t_sim;
                 st.invariants()
             },

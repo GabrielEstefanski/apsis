@@ -218,14 +218,14 @@ impl SimulationApp {
         let mut clicked_idx: Option<usize> = None;
 
         for (idx, name, mass, rank) in &display {
-            let is_selected = self.selected_body == Some(*idx);
+            let is_selected = self.selection.contains(*idx);
             if body_row(ui, *rank, name, *mass, is_selected).clicked() {
                 clicked_idx = Some(*idx);
             }
         }
 
         if let Some(idx) = clicked_idx {
-            self.selected_body = Some(idx);
+            self.selection = crate::app::ui::BodySelection::select_single(idx);
             if let Some(b) = self.system.bodies().get(idx) {
                 self.selection_form = Some(SelectionForm::from_body(b, self.system.name(idx)));
             }

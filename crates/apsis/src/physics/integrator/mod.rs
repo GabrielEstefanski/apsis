@@ -59,7 +59,7 @@ pub use force_model::{ForceModel, GravityForceModel};
 pub use helpers::{apply_perturbations, evaluate, scale_acc_and_pe};
 pub use ias15::Ias15;
 pub use kepler::kepler_step;
-pub use perturbation::PerturbationForce;
+pub use perturbation::{PerturbationDescriptor, PerturbationForce};
 pub use primitives::{drift, kick};
 pub use traits::{AdaptiveStats, Integrator, IntegratorContext, IntegratorKind, StepResult};
 pub use velocity_verlet::VelocityVerlet;

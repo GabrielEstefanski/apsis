@@ -1,9 +1,9 @@
 use crate::app::render_params::{RenderParams, compute_render_radius};
-use crate::app::ui::{SelectionForm, SemanticScaleMode, SimulationApp, UndoRecord};
+use crate::app::ui::{BodySelection, SelectionForm, SemanticScaleMode, SimulationApp, UndoRecord};
 use crate::render::CallbackFn;
 use crate::render::lighting::{LightSpec, SceneLighting};
 use crate::render::orbit_overlay::{OrbitOverlayStyle, draw_orbit_apsides, draw_orbit_polyline};
-use apsis::physics::orbital::{compute_elements, dominant_primary};
+use apsis::physics::orbital::{compute_elements, dominant_primary, is_system_root};
 use apsis::templates::instantiate_at;
 use eframe::egui::{self, Color32, FontId, Pos2, Stroke};
 use eframe::egui_wgpu;
@@ -159,7 +159,7 @@ impl SimulationApp {
         // centre. Uses frame-rate-independent exponential smoothing and snaps
         // to the target when the body outran the lerp in a single frame.
         if self.follow_selected_body {
-            if let Some(idx) = self.selected_body {
+            if let Some(idx) = self.selection.single() {
                 if let Some(body) = self.system.bodies().get(idx) {
                     let target =
                         egui::vec2(-body.x as f32 * self.scale, -body.y as f32 * self.scale);
@@ -174,7 +174,7 @@ impl SimulationApp {
                     ctx.request_repaint();
                 } else {
                     self.follow_selected_body = false;
-                    self.selected_body = None;
+                    self.selection = BodySelection::default();
                     self.selection_form = None;
                 }
             } else {
@@ -387,10 +387,15 @@ impl SimulationApp {
                         Vec::with_capacity(bodies.len().min(self.orbit_top_n * 2));
 
                     for i in 0..bodies.len() {
-                        if Some(i) == self.selected_body {
+                        if self.selection.contains(i) {
                             continue;
                         }
                         if self.pinned_orbits.contains(&i) {
+                            continue;
+                        }
+                        // System root has no Keplerian orbit; rendering
+                        // one would misrepresent N-body dynamics.
+                        if is_system_root(bodies, i) {
                             continue;
                         }
                         let Some(level) = self.orbit_hierarchy.level(i) else {
@@ -457,7 +462,10 @@ impl SimulationApp {
                     let fg_style = OrbitOverlayStyle::selected_default();
                     let pins: Vec<usize> = self.pinned_orbits.iter().copied().collect();
                     for i in pins {
-                        if Some(i) == self.selected_body {
+                        if self.selection.contains(i) {
+                            continue;
+                        }
+                        if is_system_root(bodies, i) {
                             continue;
                         }
                         let primary =
@@ -484,8 +492,8 @@ impl SimulationApp {
                     }
                 }
 
-                if let Some(idx) = self.selected_body {
-                    if idx < bodies.len() {
+                if let Some(idx) = self.selection.single() {
+                    if idx < bodies.len() && !is_system_root(bodies, idx) {
                         let primary = self
                             .orbit_hierarchy
                             .primary(idx)
@@ -649,38 +657,66 @@ impl SimulationApp {
 
             ctx.request_repaint();
         } else {
-            // ── Normal click: select + pan to center ──────────────────────────
+            // ── Normal / Shift click: select body or toggle multi-select ──────
             self.place_drag_start = None;
             if response.clicked() {
                 if let Some(cursor) = ctx.input(|i| i.pointer.interact_pos()) {
+                    let shift = ctx.input(|i| i.modifiers.shift);
                     match self.find_body_at(cursor, center_after_pan, render_params) {
                         Some(idx) => {
-                            let body = self.system.bodies()[idx];
-                            self.selected_body = Some(idx);
-                            self.follow_selected_body = true;
-                            let name = self.system.name(idx).to_owned();
-                            self.selection_form = Some(SelectionForm::from_body(&body, &name));
+                            if shift {
+                                // Shift+click: toggle body into/out of the selection.
+                                let prev = std::mem::take(&mut self.selection);
+                                self.selection = prev.toggle(idx);
+                                match &self.selection {
+                                    BodySelection::Multi(_) => {
+                                        // Multi-select: disable follow and clear the edit form.
+                                        self.follow_selected_body = false;
+                                        self.selection_form = None;
+                                    },
+                                    BodySelection::Single(i) => {
+                                        // Toggled back to a single body — restore normal state.
+                                        let i = *i;
+                                        let body = self.system.bodies()[i];
+                                        let name = self.system.name(i).to_owned();
+                                        self.follow_selected_body = true;
+                                        self.selection_form =
+                                            Some(SelectionForm::from_body(&body, &name));
+                                    },
+                                    BodySelection::None => {
+                                        self.follow_selected_body = false;
+                                        self.selection_form = None;
+                                    },
+                                }
+                            } else {
+                                // Plain click: select single body and pan to it.
+                                let body = self.system.bodies()[idx];
+                                self.selection = BodySelection::select_single(idx);
+                                self.follow_selected_body = true;
+                                let name = self.system.name(idx).to_owned();
+                                self.selection_form = Some(SelectionForm::from_body(&body, &name));
 
-                            self.pan_vel = egui::Vec2::ZERO;
-                            self.zoom_vel = 0.0;
+                                self.pan_vel = egui::Vec2::ZERO;
+                                self.zoom_vel = 0.0;
 
-                            let screen_r =
-                                compute_render_radius(body.physical_radius, render_params);
-                            if screen_r < 6.0 && body.physical_radius > 1e-30 {
-                                let desired_px = 24.0_f32;
-                                let new_scale = (desired_px / body.physical_radius as f32)
-                                    .clamp(self.scale * 2.0, self.scale * 500.0)
-                                    .min(50_000.0);
-                                self.scale = new_scale;
+                                let screen_r =
+                                    compute_render_radius(body.physical_radius, render_params);
+                                if screen_r < 6.0 && body.physical_radius > 1e-30 {
+                                    let desired_px = 24.0_f32;
+                                    let new_scale = (desired_px / body.physical_radius as f32)
+                                        .clamp(self.scale * 2.0, self.scale * 500.0)
+                                        .min(50_000.0);
+                                    self.scale = new_scale;
+                                }
+
+                                self.camera_anim_target = Some(egui::vec2(
+                                    -body.x as f32 * self.scale,
+                                    -body.y as f32 * self.scale,
+                                ));
                             }
-
-                            self.camera_anim_target = Some(egui::vec2(
-                                -body.x as f32 * self.scale,
-                                -body.y as f32 * self.scale,
-                            ));
                         },
                         None => {
-                            self.selected_body = None;
+                            self.selection = BodySelection::default();
                             self.follow_selected_body = false;
                             self.selection_form = None;
                         },
@@ -723,7 +759,7 @@ impl SimulationApp {
         }
 
         // Keep animating while a body is selected (pulsing ring needs repaints)
-        if self.selected_body.is_some() {
+        if self.selection.is_some() {
             ctx.request_repaint();
         }
 
@@ -804,8 +840,11 @@ impl SimulationApp {
             let py = center.y + body.y as f32 * self.scale;
             let body_pos = egui::pos2(px, py);
 
-            let is_selected = self.selected_body == Some(i);
-            let is_hovered = self.hovered_body == Some(i) && !is_selected;
+            // Single body selected → pulsing ring; one of many selected → dim ring.
+            let is_primary = self.selection.single() == Some(i);
+            let is_in_multi =
+                matches!(&self.selection, BodySelection::Multi(_)) && self.selection.contains(i);
+            let is_hovered = self.hovered_body == Some(i) && !is_primary && !is_in_multi;
 
             // ── Hover ring ───────────────────────────────────────────────
             if is_hovered {
@@ -816,8 +855,17 @@ impl SimulationApp {
                 );
             }
 
-            // ── Selection ring (pulsing) ─────────────────────────────────
-            if is_selected {
+            // ── Multi-select ring (dim, no pulse) ────────────────────────
+            if is_in_multi {
+                painter.circle_stroke(
+                    body_pos,
+                    visual_r + RING_GAP,
+                    Stroke::new(1.0, Color32::from_rgba_premultiplied(200, 200, 255, 120)),
+                );
+            }
+
+            // ── Primary selection ring (pulsing) ─────────────────────────
+            if is_primary {
                 let r1 = visual_r + RING_GAP + pulse;
                 let r2 = r1 + 3.5;
 
@@ -848,14 +896,16 @@ impl SimulationApp {
 
             // ── Name label ───────────────────────────────────────────────
             let importance = if max_mass > 0.0 { body.mass / max_mass } else { 0.0 };
-            let show_label = visual_r >= 5.0 || importance >= importance_threshold || is_selected;
+            let is_any_selected = is_primary || is_in_multi;
+            let show_label =
+                visual_r >= 5.0 || importance >= importance_threshold || is_any_selected;
 
             if show_label {
                 // Cap offset so the label never drifts far from the body
                 let offset_y = (visual_r + 4.0).min(MAX_LABEL_OFFSET_PX);
                 let label_pos = egui::pos2(px, py + offset_y);
 
-                let color = if is_selected {
+                let color = if is_any_selected {
                     Color32::from_rgb(220, 220, 255)
                 } else {
                     Color32::from_rgba_premultiplied(175, 175, 195, 195)

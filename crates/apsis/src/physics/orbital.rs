@@ -10,15 +10,23 @@
 //!
 //! ## Primary selection
 //!
-//! For each body `i`, the **primary** is the body `j ≠ i` that produces the
-//! largest gravitational acceleration at body `i`'s location:
+//! Two distinct notions of "primary" coexist for an N-body snapshot:
 //!
-//! ```text
-//! dominant j = argmax_j  G·m_j / r_ij²
-//! ```
+//! * [`dominant_primary`] — the body `j ≠ i` whose instantaneous
+//!   gravitational pull on body `i` is largest, `argmax_j G·m_j / r_ij²`.
+//!   This is the natural reference for osculating two-body elements and
+//!   is what [`compute_elements`] uses.
 //!
-//! This correctly handles hierarchical systems: the Moon's primary is Earth
-//! even though the Sun is more massive, because Earth is closer.
+//! * [`hierarchical_primary`] — the body in whose Hill sphere body `i`
+//!   currently sits. For a Moon–Earth–Sun configuration the dominant
+//!   primary of the Moon is the **Sun** (`G·M☉ / r_⊙^2 ≈ 5.9 × 10⁻³ m/s²`
+//!   exceeds Earth's `≈ 2.7 × 10⁻³ m/s²`), while the hierarchical primary
+//!   is **Earth**. The two coincide for non-hierarchical configurations
+//!   such as Mercury orbiting the Sun directly.
+//!
+//! Both are pure snapshot helpers: nothing in the integrator consumes
+//! either, and neither is cached across steps. Renderers and analysis
+//! consumers may compute them on demand.
 //!
 //! ## Computed quantities
 //!
@@ -32,6 +40,11 @@
 //! | `i`    | inclination relative to the simulation's `ẑ` axis | always |
 //! | `Ω`    | longitude of ascending node | `\|n\| > N_DEGENERATE_EPS` |
 //! | `ω`    | argument of periapsis | `e > E_CIRCULAR_EPS` (and inclined branch when `\|n\| > N_DEGENERATE_EPS`) |
+//! | `ν`    | true anomaly | always (degenerate to argument of latitude when `e < E_CIRCULAR_EPS`) |
+//! | `E`/`H`| eccentric anomaly (`E` elliptical, hyperbolic `H` unbound) | bound or hyperbolic; NaN parabolic |
+//! | `M`    | mean anomaly (linearly time-evolving) | bound or hyperbolic; NaN parabolic |
+//! | `q`,`Q`| pericenter / apocenter distance | helper methods on [`OrbitalElements`] |
+//! | `n`    | mean motion `2π / T` | helper method on [`OrbitalElements`] |
 //!
 //! ## Frame and convention alignment
 //!
@@ -95,6 +108,19 @@ const E_CIRCULAR_EPS: f64 = 1e-6;
 /// where `h_vec.x` and `h_vec.y` are exactly zero.
 const N_DEGENERATE_EPS: f64 = 1e-12;
 
+/// CSV schema version for [`OrbitalElements::csv_header`] and
+/// [`OrbitalElements::to_csv_row`].
+///
+/// **Version 1** (legacy): `t, body_idx, primary_idx, a, e, period, h,
+/// energy, omega_deg, orbit_type` — 10 columns.
+///
+/// **Version 2** (current): adds `inclination_deg, lon_asc_node_deg,
+/// true_anomaly_deg, eccentric_anomaly_deg, mean_anomaly_deg, pericenter,
+/// apocenter` — 17 columns total. External tooling parsing the apsis
+/// CSV format must check this constant before consuming the file; v1
+/// readers will silently misalign on v2 output.
+pub const CSV_SCHEMA_VERSION: u32 = 2;
+
 // ── Orbit classification ──────────────────────────────────────────────────────
 
 /// Keplerian orbit type derived from specific orbital energy.
@@ -129,14 +155,22 @@ impl OrbitType {
 /// All quantities are in simulation units. `a`, `T`, and `ω` are only
 /// physically meaningful for bound (elliptical) orbits.
 ///
-/// # 3D readiness
+/// # Frame
 ///
-/// The struct carries `inclination` and `lon_ascending_node` even though
-/// the simulation is currently 2D. In 2D both are exactly zero and the
-/// perifocal → world rotation collapses to a single rotation by `ω`. When
-/// the engine moves to 3D, [`compute_elements`] will populate them from
-/// the angular-momentum vector and the ascending-node geometry; every
-/// consumer of [`sample_orbit`] keeps working unchanged.
+/// Elements live in the simulation's inertial Cartesian frame `{x̂, ŷ, ẑ}`.
+/// `inclination` is measured against `+ẑ`; `lon_ascending_node` against
+/// `+x̂`; both are populated from `h_vec` and the ascending-node geometry.
+/// For planar configurations (`|n| < N_DEGENERATE_EPS`) `Ω` collapses to
+/// 0 by convention and `ω` falls back to `atan2(e_vec.y, e_vec.x)`.
+///
+/// # Anomalies
+///
+/// `true_anomaly`, `eccentric_anomaly`, and `mean_anomaly` characterise
+/// the body's instantaneous phase on the orbit. They satisfy Kepler's
+/// equation `M = E − e sin E` for elliptical orbits, with the analogous
+/// hyperbolic identity `M_h = e sinh H − H` for unbound flybys. The mean
+/// anomaly is the linearly time-evolving angle `M = n (t − t_peri)` where
+/// `n` is the mean motion (see [`Self::mean_motion`]).
 #[derive(Debug, Clone, Copy)]
 pub struct OrbitalElements {
     /// Index of the dominant primary body this orbit is computed relative to.
@@ -167,11 +201,50 @@ pub struct OrbitalElements {
     /// Undefined when `e < 1e-6` (circular); returns 0.
     pub omega: f64,
 
-    /// Inclination i ∈ [0, π] (radians). Always `0` in 2D.
+    /// Inclination i ∈ [0, π] (radians).
     pub inclination: f64,
 
-    /// Longitude of the ascending node Ω ∈ [−π, π] (radians). Always `0` in 2D.
+    /// Longitude of the ascending node Ω ∈ [−π, π] (radians).
+    /// Returns 0 when the line of nodes is degenerate (`i ≈ 0` or `i ≈ π`).
     pub lon_ascending_node: f64,
+
+    /// True anomaly ν ∈ [−π, π] (radians) — body's angular position on the
+    /// orbit measured from periapsis, in the direction of motion. For
+    /// circular orbits (`e < E_CIRCULAR_EPS`), reduces to the argument of
+    /// latitude (angle from ascending node). NaN for parabolic.
+    pub true_anomaly: f64,
+
+    /// Eccentric anomaly. For elliptical orbits, `E ∈ [−π, π]` (radians)
+    /// related to `ν` by `tan(E/2) = √((1−e)/(1+e)) tan(ν/2)`. For
+    /// hyperbolic orbits, hyperbolic anomaly `H ∈ ℝ` related by
+    /// `tanh(H/2) = √((e−1)/(e+1)) tan(ν/2)`. NaN for parabolic.
+    ///
+    /// The half-angle recovery is numerically robust for `e < 0.999`.
+    /// Beyond that the `(1−e).sqrt()` factor enters the round-off floor
+    /// of the source ellipse and an asymptotic branch (parabolic limit)
+    /// would be needed; no current caller exercises that regime.
+    pub eccentric_anomaly: f64,
+
+    /// Mean anomaly.
+    ///
+    /// **Elliptical:** `M = E − e sin E`, naturally landing in
+    /// `[−π − e, π + e]`. The value is **not** wrapped to `[−π, π]` —
+    /// `M` is semantically a temporal variable (`M(t) = M₀ + n t`) and an
+    /// artificial principal-value collapse would corrupt consumers
+    /// tracking `dM/dt` across frames. Snapshot recovery from
+    /// instantaneous `(r, v)` cannot supply absolute temporal context;
+    /// the `2π` discontinuity at orbit closure must be unwrapped by the
+    /// consumer with a continuity-tracking layer if monotonicity in time
+    /// is required.
+    ///
+    /// **Hyperbolic:** `M_h = e sinh H − H ∈ ℝ`. Already unbounded.
+    ///
+    /// **Parabolic:** NaN. Detection threshold is `|energy| < 1e-12`
+    /// (see `ENERGY_THRESH` inside [`elements_from_invariants`]); orbits
+    /// inside that band are flagged but not characterised. Barker's
+    /// variable `D` (the parabolic anomaly) is reserved for the day a
+    /// caller renders parabolic flybys.
+    pub mean_anomaly: f64,
 
     /// Orbit classification derived from `energy`.
     pub orbit_type: OrbitType,
@@ -183,22 +256,70 @@ impl OrbitalElements {
         self.orbit_type.is_bound()
     }
 
+    /// Pericenter distance `q`.
+    ///
+    /// Elliptical: `q = a(1 − e)`. Hyperbolic: `q = |a|(e − 1)` (positive,
+    /// the closest-approach distance on the incoming branch). Parabolic
+    /// returns NaN — the canonical parabolic parameter is `q = h² / (2GM)`,
+    /// which this struct does not carry.
+    pub fn pericenter(self) -> f64 {
+        match self.orbit_type {
+            OrbitType::Elliptical => self.a * (1.0 - self.e),
+            OrbitType::Hyperbolic => self.a.abs() * (self.e - 1.0),
+            OrbitType::Parabolic => f64::NAN,
+        }
+    }
+
+    /// Apocenter distance `Q = a(1 + e)`. Defined only for elliptical
+    /// orbits; hyperbolic and parabolic flybys have no bounded apoapsis
+    /// and return NaN.
+    pub fn apocenter(self) -> f64 {
+        match self.orbit_type {
+            OrbitType::Elliptical => self.a * (1.0 + self.e),
+            _ => f64::NAN,
+        }
+    }
+
+    /// Mean motion `n = 2π / T`. Returns NaN for unbound orbits.
+    pub fn mean_motion(self) -> f64 {
+        if self.period.is_finite() && self.period > 0.0 { TAU / self.period } else { f64::NAN }
+    }
+
     /// CSV header row matching [`Self::to_csv_row`].
+    ///
+    /// Schema is versioned — see [`CSV_SCHEMA_VERSION`]. The current
+    /// header reflects v2 (17 columns); external parsers built against
+    /// the v1 format (10 columns) will silently misalign and must check
+    /// the version constant before consuming the file.
     pub fn csv_header() -> &'static str {
-        "t,body_idx,primary_idx,a,e,period,h,energy,omega_deg,orbit_type"
+        "t,body_idx,primary_idx,a,e,period,h,energy,\
+         inclination_deg,lon_asc_node_deg,omega_deg,\
+         true_anomaly_deg,eccentric_anomaly_deg,mean_anomaly_deg,\
+         pericenter,apocenter,orbit_type"
     }
 
     /// Serialise to a CSV data row.  `t` and `body_idx` are injected by the caller.
     pub fn to_csv_row(self, t: f64, body_idx: usize) -> String {
         format!(
-            "{t:.6e},{body_idx},{},{:.6e},{:.6e},{:.6e},{:.6e},{:.6e},{:.4},{:?}",
+            "{t:.6e},{body_idx},{},\
+             {:.6e},{:.6e},{:.6e},{:.6e},{:.6e},\
+             {:.4},{:.4},{:.4},\
+             {:.4},{:.4},{:.4},\
+             {:.6e},{:.6e},{:?}",
             self.primary_idx,
             self.a,
             self.e,
             self.period,
             self.h_vec.z,
             self.energy,
+            self.inclination.to_degrees(),
+            self.lon_ascending_node.to_degrees(),
             self.omega.to_degrees(),
+            self.true_anomaly.to_degrees(),
+            self.eccentric_anomaly.to_degrees(),
+            self.mean_anomaly.to_degrees(),
+            self.pericenter(),
+            self.apocenter(),
             self.orbit_type.label(),
         )
     }
@@ -409,14 +530,141 @@ pub fn dominant_primary(bodies: &[Body], idx: usize) -> Option<usize> {
         .enumerate()
         .filter(|(j, _)| *j != idx)
         .max_by(|(_, bj), (_, bk)| {
-            let rj2 = (bj.x - bi.x).powi(2) + (bj.y - bi.y).powi(2);
-            let rk2 = (bk.x - bi.x).powi(2) + (bk.y - bi.y).powi(2);
+            let rj2 = (bj.x - bi.x).powi(2) + (bj.y - bi.y).powi(2) + (bj.z - bi.z).powi(2);
+            let rk2 = (bk.x - bi.x).powi(2) + (bk.y - bi.y).powi(2) + (bk.z - bi.z).powi(2);
             // Compare m_j/r_j² vs m_k/r_k²  (G cancels)
             let score_j = if rj2 > 0.0 { bj.mass / rj2 } else { f64::INFINITY };
             let score_k = if rk2 > 0.0 { bk.mass / rk2 } else { f64::INFINITY };
             score_j.partial_cmp(&score_k).unwrap_or(std::cmp::Ordering::Equal)
         })
         .map(|(j, _)| j)
+}
+
+/// Returns `true` when no body in the snapshot is strictly more massive
+/// than `bodies[idx]`.
+///
+/// System root has no Keplerian orbit; rendering one would misrepresent
+/// N-body dynamics — the most massive body's motion is the integrated
+/// reflex of every other body, not a closed conic around any single
+/// reference. Inspector and canvas overlays both consult this predicate
+/// to skip drawing an orbit they have no honest way to construct.
+pub fn is_system_root(bodies: &[Body], idx: usize) -> bool {
+    if idx >= bodies.len() {
+        return false;
+    }
+    let m = bodies[idx].mass;
+    !bodies.iter().enumerate().any(|(j, b)| j != idx && b.mass > m)
+}
+
+/// How the hierarchical relationship was established — surfaced to the
+/// caller so consumers can show *why* the parent was chosen rather than
+/// asserting it as fact.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HierarchicalRelation {
+    /// Selected body sits inside the candidate's Hill sphere — the
+    /// canonical capture criterion.
+    HillSphere,
+    /// Hill-sphere check failed, but the selected body is gravitationally
+    /// bound (`ε < 0`) to the candidate; smallest such candidate wins.
+    Energy,
+}
+
+/// Hierarchical primary — the body in whose Hill sphere `idx` currently
+/// resides, paired with the criterion that established the relationship.
+/// Distinct from [`dominant_primary`] (the strongest attractor): for the
+/// Earth-Moon-Sun configuration the dominant primary of the Moon is the
+/// Sun while the hierarchical primary is Earth.
+///
+/// # Algorithm
+///
+/// Hill-sphere check, smallest-containing wins. For each candidate
+/// `cand` with `mass > bodies[idx].mass`, sorted ascending by mass:
+///
+/// * Treat `cand` as a "system root" when no body in the snapshot is
+///   strictly more massive than it. The root's Hill sphere is infinite —
+///   anything not contained by a smaller candidate falls back to it.
+/// * Otherwise, compute the Hill radius
+///   `r_H = a · ∛(m_cand / 3·m_parent)` using `cand`'s **current**
+///   distance to its [`dominant_primary`] as `a` (a snapshot proxy for
+///   the semi-major axis). Return `cand` if `idx` lies inside that Hill
+///   radius.
+///
+/// When no candidate's Hill sphere contains `idx`, fall back to an
+/// energy test: pick the smallest-mass candidate around which `idx` is
+/// gravitationally bound (`ε < 0`). This catches partial captures and
+/// chaotic configurations where Hill-sphere reasoning fails.
+///
+/// # Pure snapshot
+///
+/// This function consumes only the bodies' current `(r, v, m)`. It is
+/// not memoised, not consulted by the integrator, and carries no
+/// implication for dynamics — apsis remains a direct N-body code, with
+/// the hierarchy used solely as a render/analysis lens.
+///
+/// Returns `None` when there is no body more massive than `idx` and the
+/// energy fallback finds no bound candidate.
+pub fn hierarchical_primary(bodies: &[Body], idx: usize) -> Option<(usize, HierarchicalRelation)> {
+    if bodies.len() < 2 {
+        return None;
+    }
+    let bi = &bodies[idx];
+
+    let mut candidates: Vec<usize> =
+        (0..bodies.len()).filter(|&j| j != idx && bodies[j].mass > bi.mass).collect();
+    candidates.sort_by(|&a, &b| {
+        bodies[a].mass.partial_cmp(&bodies[b].mass).unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    // Hill-sphere primary — smallest-containing wins.
+    for &cand in &candidates {
+        let bc = &bodies[cand];
+        let is_root = bodies.iter().enumerate().all(|(j, b)| j == cand || b.mass <= bc.mass);
+
+        let r_hill = if is_root {
+            f64::INFINITY
+        } else {
+            let parent_idx = match dominant_primary(bodies, cand) {
+                Some(p) => p,
+                None => continue,
+            };
+            let bp = &bodies[parent_idx];
+            let a_cp =
+                ((bc.x - bp.x).powi(2) + (bc.y - bp.y).powi(2) + (bc.z - bp.z).powi(2)).sqrt();
+            if a_cp < 1e-15 || bp.mass < 1e-30 {
+                continue;
+            }
+            a_cp * (bc.mass / (3.0 * bp.mass)).cbrt()
+        };
+
+        let r_self = ((bi.x - bc.x).powi(2) + (bi.y - bc.y).powi(2) + (bi.z - bc.z).powi(2)).sqrt();
+        if r_self < r_hill {
+            return Some((cand, HierarchicalRelation::HillSphere));
+        }
+    }
+
+    // Energy fallback — pick the smallest bound candidate.
+    for &cand in &candidates {
+        let bc = &bodies[cand];
+        let dx = bi.x - bc.x;
+        let dy = bi.y - bc.y;
+        let dz = bi.z - bc.z;
+        let r = (dx * dx + dy * dy + dz * dz).sqrt();
+        if r < 1e-15 {
+            continue;
+        }
+        let dvx = bi.vx - bc.vx;
+        let dvy = bi.vy - bc.vy;
+        let dvz = bi.vz - bc.vz;
+        let v2 = dvx * dvx + dvy * dvy + dvz * dvz;
+        // Sign of the orbital energy proxy `½v² − m_cand/r`. The constant
+        // `G` would scale both terms identically and is irrelevant to the
+        // sign comparison; bound iff this is negative.
+        if 0.5 * v2 - bc.mass / r < 0.0 {
+            return Some((cand, HierarchicalRelation::Energy));
+        }
+    }
+
+    None
 }
 
 // ── Element computation ───────────────────────────────────────────────────────
@@ -443,6 +691,12 @@ pub struct OrbitInvariants {
     /// `e_vec = (v × h)/μ − r̂`. Magnitude is the orbit's eccentricity;
     /// direction points from the focus toward the periapsis.
     pub e_vec: Vec3,
+    /// Body's position relative to the primary, `r_body − r_primary`.
+    /// Required by anomaly recovery in [`elements_from_invariants`].
+    pub r_rel: Vec3,
+    /// Body's velocity relative to the primary, `v_body − v_primary`.
+    /// Required by anomaly recovery in [`elements_from_invariants`].
+    pub v_rel: Vec3,
 }
 
 /// Computes the linear primitives (ε, h_vec, e_vec) for body `idx`
@@ -503,7 +757,7 @@ pub fn compute_invariants(
         v_cross_h.z * inv_gm - r_hat.z,
     );
 
-    Some(OrbitInvariants { energy, h_vec, e_vec })
+    Some(OrbitInvariants { energy, h_vec, e_vec, r_rel: r_vec, v_rel: v_vec })
 }
 
 /// Reconstructs `OrbitalElements` from the linear primitives plus the
@@ -586,6 +840,8 @@ pub fn elements_from_invariants(
         (a, f64::INFINITY, OrbitType::Hyperbolic)
     };
 
+    let (true_anomaly, eccentric_anomaly, mean_anomaly) = anomalies(orbit_type, e, omega, inv);
+
     OrbitalElements {
         primary_idx,
         a,
@@ -596,8 +852,102 @@ pub fn elements_from_invariants(
         omega,
         inclination,
         lon_ascending_node,
+        true_anomaly,
+        eccentric_anomaly,
+        mean_anomaly,
         orbit_type,
     }
+}
+
+/// Recover the true / eccentric / mean anomalies from the orbit invariants.
+///
+/// For the elliptical and hyperbolic cases the routine returns the canonical
+/// triple `(ν, E, M)` (or `(ν, H, M_h)` for hyperbolic). Parabolic orbits
+/// return `NaN` for all three — the parabolic anomaly system is governed
+/// by Barker's equation, which is intentionally out of scope while no caller
+/// renders parabolic flybys.
+fn anomalies(orbit_type: OrbitType, e: f64, omega: f64, inv: &OrbitInvariants) -> (f64, f64, f64) {
+    let r = inv.r_rel.length();
+    if r < 1e-15 {
+        return (f64::NAN, f64::NAN, f64::NAN);
+    }
+
+    let nu = if e > E_CIRCULAR_EPS {
+        // ν from focus-conic: cos ν = (e_vec · r) / (e · r); sign from r·v
+        // (positive when receding from primary, i.e. moving from peri- to apo-centre).
+        let cos_nu = (inv.e_vec.dot(inv.r_rel) / (e * r)).clamp(-1.0, 1.0);
+        let raw = cos_nu.acos();
+        if inv.r_rel.dot(inv.v_rel) >= 0.0 { raw } else { -raw }
+    } else {
+        // Circular: ν is undefined. Convention: return the argument of
+        // latitude `u = atan2(r·m̂, r·n̂)` (with `n̂` = ascending node
+        // direction, `m̂ = ĥ × n̂`), shifted by ω. Since ω = 0 for circular
+        // orbits by convention, this returns the body's angle from the
+        // ascending node — preserving position information for visualisation.
+        let u = argument_of_latitude(inv.r_rel, inv.h_vec);
+        wrap_pi(u - omega)
+    };
+
+    match orbit_type {
+        OrbitType::Elliptical => {
+            // E from ν via half-angle identity, evaluated as `atan2` to
+            // avoid the tan(π/2) branch when ν approaches ±π.
+            let half_nu = 0.5 * nu;
+            let (s_half, c_half) = half_nu.sin_cos();
+            let big_e = 2.0 * ((1.0 - e).sqrt() * s_half).atan2((1.0 + e).sqrt() * c_half);
+            // M = E − e sin E. Not wrapped to `[−π, π]` because M is
+            // semantically a temporal variable (`M(t) = M₀ + n t`); a
+            // principal-value collapse would corrupt consumers tracking
+            // dM/dt across frames. Snapshot recovery from instantaneous
+            // (r, v) cannot supply absolute temporal context regardless,
+            // so the value lands naturally in `[−π − e, π + e]` and the
+            // `2π` jump at orbit closure must be unwrapped by the
+            // consumer with a continuity-tracking layer.
+            let m = big_e - e * big_e.sin();
+            (nu, big_e, m)
+        },
+        OrbitType::Hyperbolic => {
+            // H from ν via half-angle: tanh(H/2) = √((e−1)/(e+1)) tan(ν/2).
+            // The argument can grow beyond ±1 if ν is past the asymptote
+            // ν_∞ = ±acos(−1/e); clamp to keep atanh defined and let the
+            // saturated value mark the body sitting on the asymptote.
+            let half_nu = 0.5 * nu;
+            let arg = ((e - 1.0) / (e + 1.0)).sqrt() * half_nu.tan();
+            let half_h = arg.clamp(-1.0 + 1e-15, 1.0 - 1e-15).atanh();
+            let big_h = 2.0 * half_h;
+            let m_h = e * big_h.sinh() - big_h;
+            (nu, big_h, m_h)
+        },
+        OrbitType::Parabolic => (f64::NAN, f64::NAN, f64::NAN),
+    }
+}
+
+/// Argument of latitude — angle from the ascending node to the body's
+/// current position, measured in the orbital plane in the direction of
+/// motion. Reduces to `atan2(r.y, r.x)` for planar prograde orbits.
+fn argument_of_latitude(r_rel: Vec3, h_vec: Vec3) -> f64 {
+    let h_mag = h_vec.length();
+    if h_mag < 1e-15 {
+        return 0.0;
+    }
+    let h_hat = h_vec / h_mag;
+
+    // Node line `n = ẑ × h`. Vanishes for planar prograde or retrograde
+    // orbits — fall back to `+x̂` so a planar circular orbit reports the
+    // body's argument as `atan2(r.y, r.x)`.
+    let n_x = -h_vec.y;
+    let n_y = h_vec.x;
+    let n_mag = (n_x * n_x + n_y * n_y).sqrt();
+    let n_hat = if n_mag > N_DEGENERATE_EPS {
+        Vec3::new(n_x / n_mag, n_y / n_mag, 0.0)
+    } else {
+        Vec3::new(1.0, 0.0, 0.0)
+    };
+
+    let m_hat = h_hat.cross(n_hat);
+    let along_node = r_rel.dot(n_hat);
+    let along_perp = r_rel.dot(m_hat);
+    along_perp.atan2(along_node)
 }
 
 pub fn compute_elements(
@@ -728,6 +1078,16 @@ pub fn elements_anchored_to_body(
     let theta_body = ry.atan2(rx);
     let omega = wrap_pi(theta_body - nu);
 
+    // Eccentric and mean anomalies follow the same elliptical identities
+    // used in [`anomalies`]; the planar anchor reuses `nu` from above.
+    // `mean_anomaly` is not wrapped — see the doc on
+    // `OrbitalElements::mean_anomaly` for why snapshot M is not collapsed
+    // to `[−π, π]`.
+    let half_nu = 0.5 * nu;
+    let (s_half, c_half) = half_nu.sin_cos();
+    let big_e = 2.0 * ((1.0 - e).sqrt() * s_half).atan2((1.0 + e).sqrt() * c_half);
+    let mean_anomaly = big_e - e * big_e.sin();
+
     OrbitalElements {
         primary_idx,
         a,
@@ -738,6 +1098,9 @@ pub fn elements_anchored_to_body(
         omega,
         inclination: 0.0,
         lon_ascending_node: 0.0,
+        true_anomaly: nu,
+        eccentric_anomaly: big_e,
+        mean_anomaly,
         orbit_type: OrbitType::Elliptical,
     }
 }
@@ -817,6 +1180,20 @@ mod tests {
             a.omega,
             b.omega
         );
+        // Anomalies — only compare when both are defined and the orbit is
+        // non-circular. Circular orbits have ill-conditioned anomalies and
+        // ω jitter dominates the residual.
+        if a.e >= 1e-6 && b.e >= 1e-6 {
+            for (name, x, y) in [
+                ("ν", a.true_anomaly, b.true_anomaly),
+                ("E", a.eccentric_anomaly, b.eccentric_anomaly),
+                ("M", a.mean_anomaly, b.mean_anomaly),
+            ] {
+                if x.is_finite() && y.is_finite() {
+                    assert!(rel(x, y) < tol, "{label}: {name} {} vs {}", x, y);
+                }
+            }
+        }
         assert_eq!(a.orbit_type, b.orbit_type, "{label}: orbit_type");
     }
 
@@ -913,6 +1290,8 @@ mod tests {
             energy: inv_true.energy * 1.01,
             h_vec: inv_true.h_vec * 0.99,
             e_vec: Vec3::new(inv_true.e_vec.x * 1.01, inv_true.e_vec.y * 0.99, inv_true.e_vec.z),
+            r_rel: inv_true.r_rel,
+            v_rel: inv_true.v_rel,
         };
         let gm = G * (bodies[1].mass + bodies[0].mass);
         let el = elements_anchored_to_body(&inv_smooth, 0, gm, &bodies[1], &bodies[0]);
@@ -2144,5 +2523,551 @@ mod tests {
                 el.e,
             );
         }
+    }
+
+    // ── Anomalies — Kepler equation, half-angle identities, time linearity ──
+
+    /// Build a body at periapsis on an elliptical orbit of given `(a, e)`,
+    /// with primary at the origin and orbit in the xy-plane (prograde).
+    /// At periapsis: r = a(1−e), v ⊥ r, v = √(GM(1+e)/(a(1−e))).
+    fn ellipse_at_periapsis(a: f64, e: f64, primary_mass: f64) -> (Body, Body) {
+        let gm = G * primary_mass;
+        let r_peri = a * (1.0 - e);
+        let v_peri = (gm * (1.0 + e) / r_peri).sqrt();
+        let primary = body(0.0, 0.0, 0.0, 0.0, primary_mass);
+        let satellite = body(r_peri, 0.0, 0.0, v_peri, 1e-10);
+        (primary, satellite)
+    }
+
+    /// Body on an elliptical orbit at given true anomaly ν, with `(a, e)`
+    /// in the xy-plane. Uses focus-conic and the in-plane frame, then
+    /// rotates into the world frame via ω = 0 (no rotation needed since
+    /// periapsis is on +x̂).
+    fn ellipse_at_true_anomaly(a: f64, e: f64, nu: f64, primary_mass: f64) -> (Body, Body) {
+        let gm = G * primary_mass;
+        let p = a * (1.0 - e * e);
+        let r = p / (1.0 + e * nu.cos());
+        let (s_nu, c_nu) = nu.sin_cos();
+        let x = r * c_nu;
+        let y = r * s_nu;
+        // Velocity in perifocal frame (Murray & Dermott eq. 2.36):
+        // v_r = √(GM/p) · e sin ν,  v_θ = √(GM/p) · (1 + e cos ν)
+        let h = (gm * p).sqrt();
+        let inv_r = 1.0 / r;
+        // Cartesian velocity = v_r · r̂ + v_θ · θ̂. With r̂ = (cos ν, sin ν)
+        // and θ̂ = (-sin ν, cos ν).
+        let v_r = (gm / p).sqrt() * e * s_nu;
+        let v_theta = h * inv_r;
+        let vx = v_r * c_nu - v_theta * s_nu;
+        let vy = v_r * s_nu + v_theta * c_nu;
+        let primary = body(0.0, 0.0, 0.0, 0.0, primary_mass);
+        let satellite = body(x, y, vx, vy, 1e-10);
+        (primary, satellite)
+    }
+
+    /// Kepler's equation `M = E − e sin E` must hold to round-off for any
+    /// elliptical orbit at any phase.
+    #[test]
+    fn kepler_equation_holds_across_eccentricity_range() {
+        let nu_samples = [-2.5, -1.3, -0.5, 0.0, 0.4, 1.1, 2.2, 3.0];
+        for &e in &[0.05, 0.21, 0.45, 0.7, 0.85, 0.95] {
+            for &nu in &nu_samples {
+                let (p, s) = ellipse_at_true_anomaly(10.0, e, nu, 1e6);
+                let el = elements(p, s);
+                let big_e = el.eccentric_anomaly;
+                let m = el.mean_anomaly;
+                let lhs = m;
+                let rhs = wrap_pi(big_e - e * big_e.sin());
+                let diff = ((lhs - rhs + PI).rem_euclid(TAU) - PI).abs();
+                assert!(
+                    diff < 1e-12,
+                    "Kepler eq fails at e={e}, ν={nu}: M={m}, E−e·sinE={rhs}, diff={diff}",
+                );
+            }
+        }
+    }
+
+    /// Half-angle identity: `tan(E/2) = √((1−e)/(1+e)) · tan(ν/2)`.
+    /// Exercised across the eccentricity range covering Mercury (0.21),
+    /// Eris (0.44), and Sedna (0.85).
+    #[test]
+    fn true_to_eccentric_anomaly_half_angle_identity() {
+        let nu_samples = [-2.0, -0.7, 0.3, 1.5, 2.8];
+        for &e in &[0.05, 0.21, 0.44, 0.7, 0.85] {
+            for &nu in &nu_samples {
+                let (p, s) = ellipse_at_true_anomaly(10.0, e, nu, 1e6);
+                let el = elements(p, s);
+                let lhs = (0.5 * el.eccentric_anomaly).tan();
+                let rhs = ((1.0 - e) / (1.0 + e)).sqrt() * (0.5 * el.true_anomaly).tan();
+                let diff = (lhs - rhs).abs();
+                assert!(
+                    diff < 1e-10,
+                    "ν↔E identity fails at e={e}, ν={nu}: tan(E/2)={lhs}, √(...)·tan(ν/2)={rhs}",
+                );
+            }
+        }
+    }
+
+    /// At periapsis (ν = 0) all three anomalies must vanish.
+    #[test]
+    fn anomalies_zero_at_periapsis() {
+        for &e in &[0.05, 0.21, 0.5, 0.85] {
+            let (p, s) = ellipse_at_periapsis(10.0, e, 1e6);
+            let el = elements(p, s);
+            assert!(el.true_anomaly.abs() < 1e-12, "ν({e}) = {}", el.true_anomaly);
+            assert!(el.eccentric_anomaly.abs() < 1e-12, "E({e}) = {}", el.eccentric_anomaly);
+            assert!(el.mean_anomaly.abs() < 1e-12, "M({e}) = {}", el.mean_anomaly);
+        }
+    }
+
+    /// Mean motion `n = 2π / T = √(GM / a³)`. Pure algebra on stored fields.
+    #[test]
+    fn mean_motion_matches_kepler_third_law() {
+        for &e in &[0.0, 0.21, 0.7] {
+            let a = 10.0;
+            let m = 1e6;
+            let (p, s) =
+                if e < 1e-10 { circular_orbit(a, m) } else { ellipse_at_periapsis(a, e, m) };
+            let el = elements(p, s);
+            let expected = (G * m / (a * a * a)).sqrt();
+            let got = el.mean_motion();
+            assert!(
+                (got - expected).abs() / expected < 1e-12,
+                "n mismatch at e={e}: got {got}, expected {expected}",
+            );
+        }
+    }
+
+    /// `pericenter() = a(1−e)` and `apocenter() = a(1+e)` for elliptical orbits.
+    #[test]
+    fn pericenter_apocenter_match_ae_formulas() {
+        for &(a, e) in &[(10.0, 0.0), (10.0, 0.5), (50.0, 0.85), (1.0, 0.21)] {
+            let (p, s) = ellipse_at_periapsis(a, e, 1e6);
+            let el = elements(p, s);
+            assert!(
+                (el.pericenter() - a * (1.0 - e)).abs() < 1e-9,
+                "q mismatch at (a,e)=({a},{e}): got {} expected {}",
+                el.pericenter(),
+                a * (1.0 - e),
+            );
+            assert!(
+                (el.apocenter() - a * (1.0 + e)).abs() < 1e-9,
+                "Q mismatch at (a,e)=({a},{e}): got {} expected {}",
+                el.apocenter(),
+                a * (1.0 + e),
+            );
+        }
+    }
+
+    /// Hyperbolic identity: `M_h = e sinh H − H`, with `H` related to ν by
+    /// `tanh(H/2) = √((e−1)/(e+1)) · tan(ν/2)` for ν inside the asymptote.
+    #[test]
+    fn hyperbolic_kepler_identity_holds() {
+        // Hyperbolic flyby: e = 1.5, q = 5 (pericenter distance).
+        let e = 1.5;
+        let q = 5.0;
+        let m = 1e6;
+        let gm = G * m;
+        // At periapsis: r = q, v = √(GM(1+e)/q)
+        let v_peri = (gm * (1.0 + e) / q).sqrt();
+        let primary = body(0.0, 0.0, 0.0, 0.0, m);
+        // Place body at periapsis on +x̂, velocity in +ŷ direction.
+        let satellite = body(q, 0.0, 0.0, v_peri, 1e-10);
+        let bodies = vec![primary, satellite];
+        let el = compute_elements(&bodies, 1, 0, G).unwrap();
+        assert_eq!(el.orbit_type, OrbitType::Hyperbolic);
+        // At periapsis: ν = H = M_h = 0.
+        assert!(el.true_anomaly.abs() < 1e-12);
+        assert!(el.eccentric_anomaly.abs() < 1e-12);
+        assert!(el.mean_anomaly.abs() < 1e-12);
+
+        // Off-periapsis sample: place body at ν = 0.5 rad, verify identity.
+        let nu: f64 = 0.5;
+        let p = q * (1.0 + e); // semi-latus rectum = a(1−e²); for hyperbolic q = a(e−1) so a = q/(e−1) and p = q(e+1)/1 ... actually p = q(1+e). check.
+        // For hyperbolic: q = a(e−1) with a < 0 by convention or |a| convention.
+        // Using p = h²/GM = q(1+e), valid for any conic.
+        let r = p / (1.0 + e * nu.cos());
+        let (s_nu, c_nu) = nu.sin_cos();
+        let x = r * c_nu;
+        let y = r * s_nu;
+        let h = (gm * p).sqrt();
+        let v_r = (gm / p).sqrt() * e * s_nu;
+        let v_theta = h / r;
+        let vx = v_r * c_nu - v_theta * s_nu;
+        let vy = v_r * s_nu + v_theta * c_nu;
+        let bodies = vec![body(0.0, 0.0, 0.0, 0.0, m), body(x, y, vx, vy, 1e-10)];
+        let el = compute_elements(&bodies, 1, 0, G).unwrap();
+        assert_eq!(el.orbit_type, OrbitType::Hyperbolic);
+        let big_h = el.eccentric_anomaly;
+        let m_h = el.mean_anomaly;
+        let kepler_residual = (m_h - (e * big_h.sinh() - big_h)).abs();
+        assert!(
+            kepler_residual < 1e-10,
+            "Hyperbolic Kepler fails: M_h={m_h}, e·sinh(H)−H={}, residual={kepler_residual}",
+            e * big_h.sinh() - big_h,
+        );
+    }
+
+    /// Inclined elliptical orbit (Eris-like, i = 44°): inclination must be
+    /// recovered correctly and anomalies must satisfy Kepler's equation just
+    /// the same as in the planar case.
+    #[test]
+    fn anomalies_correct_on_inclined_orbit_eris_like() {
+        // Build a body on an ellipse in the xy-plane, then rotate the
+        // entire (r, v) by inclination i around the +x̂ axis. The
+        // ascending node sits on +x̂.
+        let a = 50.0;
+        let e = 0.44;
+        let nu = 1.2;
+        let i = 44.0_f64.to_radians();
+        let m = 1e6;
+
+        let (p_planar, s_planar) = ellipse_at_true_anomaly(a, e, nu, m);
+        // Rotate (r, v) around x̂: y' = y cos i, z' = y sin i; same for v.
+        let (s_i, c_i) = i.sin_cos();
+        let mut s = body(s_planar.x, s_planar.y * c_i, s_planar.vx, s_planar.vy * c_i, 1e-10);
+        s.z = s_planar.y * s_i;
+        s.vz = s_planar.vy * s_i;
+        s.sync_physical_properties();
+
+        let bodies = vec![p_planar, s];
+        let el = compute_elements(&bodies, 1, 0, G).unwrap();
+
+        // Inclination matches.
+        assert!(
+            (el.inclination - i).abs() < 1e-10,
+            "i: got {} expected {}",
+            el.inclination.to_degrees(),
+            i.to_degrees(),
+        );
+        // True anomaly preserved through rotation (rotation does not move
+        // the body along the orbit).
+        assert!((el.true_anomaly - nu).abs() < 1e-9, "ν: got {} expected {}", el.true_anomaly, nu,);
+        // Kepler's equation still holds.
+        let kep = wrap_pi(el.eccentric_anomaly - e * el.eccentric_anomaly.sin());
+        let diff = ((el.mean_anomaly - kep + PI).rem_euclid(TAU) - PI).abs();
+        assert!(diff < 1e-12, "Kepler eq on inclined orbit: M={}, E−e·sinE={kep}", el.mean_anomaly);
+    }
+
+    // ── Reversibility: state → elements → state ──────────────────────────────
+    //
+    // Reconstruct (r, v) from a full Keplerian element set via the
+    // perifocal-to-world rotation `R₃(Ω) · R₁(i) · R₃(ω)`. Test helper —
+    // promote to public API in a follow-up if Playback mode or the Python
+    // binding ever needs to construct bodies from elements.
+
+    /// Build a (r_world, v_world) pair from `(a, e, i, Ω, ω, ν, μ)` via
+    /// the standard astrodynamics perifocal-to-inertial rotation. For
+    /// hyperbolic input, `a` should be negative (codebase convention) and
+    /// the same conic formulas apply with `p = a(1 − e²)` retaining its
+    /// sign so `r = p / (1 + e cos ν)` is positive on the active branch.
+    fn reconstruct_state(
+        a: f64,
+        e: f64,
+        i: f64,
+        lon_asc: f64,
+        omega: f64,
+        nu: f64,
+        mu: f64,
+    ) -> (Vec3, Vec3) {
+        let p = a * (1.0 - e * e);
+        let (s_nu, c_nu) = nu.sin_cos();
+        let r = p / (1.0 + e * c_nu);
+
+        let r_pf = Vec3::new(r * c_nu, r * s_nu, 0.0);
+        let factor = (mu / p.abs()).sqrt();
+        let v_pf = Vec3::new(-factor * s_nu, factor * (e + c_nu), 0.0);
+
+        // Composite rotation R₃(Ω) · R₁(i) · R₃(ω) — same matrix as in
+        // `OrbitalElements::sample_orbit`, full 3×3 form here.
+        let (s_o, c_o) = omega.sin_cos();
+        let (s_i, c_i) = i.sin_cos();
+        let (s_w, c_w) = lon_asc.sin_cos();
+
+        let r11 = c_w * c_o - s_w * s_o * c_i;
+        let r12 = -c_w * s_o - s_w * c_o * c_i;
+        let r21 = s_w * c_o + c_w * s_o * c_i;
+        let r22 = -s_w * s_o + c_w * c_o * c_i;
+        let r31 = s_o * s_i;
+        let r32 = c_o * s_i;
+
+        let rotate = |p: Vec3| -> Vec3 {
+            Vec3::new(r11 * p.x + r12 * p.y, r21 * p.x + r22 * p.y, r31 * p.x + r32 * p.y)
+        };
+        (rotate(r_pf), rotate(v_pf))
+    }
+
+    /// Run a state → elements → state round-trip on a chosen regime.
+    /// Asserts the recovered position and velocity match the original to
+    /// `1e-9` relative.
+    fn assert_state_roundtrip(
+        label: &str,
+        a: f64,
+        e: f64,
+        i_deg: f64,
+        lon_asc_deg: f64,
+        omega_deg: f64,
+        nu_deg: f64,
+    ) {
+        let primary_mass = 1e6;
+        let mu = G * primary_mass;
+        let i = i_deg.to_radians();
+        let lon_asc = lon_asc_deg.to_radians();
+        let omega = omega_deg.to_radians();
+        let nu = nu_deg.to_radians();
+
+        let (r0, v0) = reconstruct_state(a, e, i, lon_asc, omega, nu, mu);
+
+        let primary = body(0.0, 0.0, 0.0, 0.0, primary_mass);
+        let mut sat = body(r0.x, r0.y, v0.x, v0.y, 1e-10);
+        sat.z = r0.z;
+        sat.vz = v0.z;
+        sat.sync_physical_properties();
+
+        let bodies = vec![primary, sat];
+        let el = compute_elements(&bodies, 1, 0, G).expect("regime is computable");
+
+        let (r1, v1) = reconstruct_state(
+            el.a,
+            el.e,
+            el.inclination,
+            el.lon_ascending_node,
+            el.omega,
+            el.true_anomaly,
+            mu,
+        );
+
+        let dr = (r1 - r0).length() / r0.length().max(1e-30);
+        let dv = (v1 - v0).length() / v0.length().max(1e-30);
+        assert!(dr < 1e-9, "{label}: |Δr|/|r| = {dr:.3e} (r0={r0:?}, r1={r1:?})");
+        assert!(dv < 1e-9, "{label}: |Δv|/|v| = {dv:.3e} (v0={v0:?}, v1={v1:?})");
+    }
+
+    /// Mercury-like: low eccentricity, moderate inclination, full Ω/ω.
+    #[test]
+    fn state_roundtrip_mercury_like() {
+        assert_state_roundtrip("Mercury-like", 0.387, 0.21, 7.0, 48.331, 29.124, 174.79);
+    }
+
+    /// Eris-like: extreme inclination (44°), moderate eccentricity. The
+    /// regime where 2D-projection of the orbit collapses scientific
+    /// information.
+    #[test]
+    fn state_roundtrip_eris_like() {
+        assert_state_roundtrip("Eris-like", 68.0, 0.44, 44.04, 35.95, 151.0, 90.0);
+    }
+
+    /// Sedna-like: extreme eccentricity (0.85). Stresses the
+    /// `(1−e).sqrt()` factor inside the half-angle E recovery.
+    #[test]
+    fn state_roundtrip_sedna_like() {
+        assert_state_roundtrip("Sedna-like", 507.0, 0.85, 11.93, 144.0, 311.0, 45.0);
+    }
+
+    /// Hyperbolic flyby: `e > 1` with non-trivial inclination.
+    #[test]
+    fn state_roundtrip_hyperbolic_flyby() {
+        // a < 0 by convention for hyperbolic; ν = 0.5 rad keeps the body
+        // well inside the asymptote `ν_∞ = acos(−1/e) ≈ 2.30` for e = 1.5.
+        let nu_deg = 0.5_f64.to_degrees();
+        assert_state_roundtrip("Hyperbolic", -10.0, 1.5, 20.0, 60.0, 45.0, nu_deg);
+    }
+
+    /// Circular planar: degenerate fallback path (`e ≈ 0`, `Ω = 0`,
+    /// `ω = 0`, ν taken as argument of latitude).
+    #[test]
+    fn state_roundtrip_circular_planar() {
+        let primary_mass = 1e6;
+        let mu = G * primary_mass;
+        let a = 10.0;
+        let e = 0.0;
+        let nu = std::f64::consts::FRAC_PI_4;
+
+        let (r0, v0) = reconstruct_state(a, e, 0.0, 0.0, 0.0, nu, mu);
+        let primary = body(0.0, 0.0, 0.0, 0.0, primary_mass);
+        let mut sat = body(r0.x, r0.y, v0.x, v0.y, 1e-10);
+        sat.z = r0.z;
+        sat.vz = v0.z;
+        sat.sync_physical_properties();
+        let bodies = vec![primary, sat];
+        let el = compute_elements(&bodies, 1, 0, G).expect("circular regime is computable");
+
+        let (r1, v1) = reconstruct_state(
+            el.a,
+            el.e,
+            el.inclination,
+            el.lon_ascending_node,
+            el.omega,
+            el.true_anomaly,
+            mu,
+        );
+
+        let dr = (r1 - r0).length() / r0.length();
+        let dv = (v1 - v0).length() / v0.length();
+        assert!(dr < 1e-9, "circular: |Δr|/|r| = {dr:.3e}");
+        assert!(dv < 1e-9, "circular: |Δv|/|v| = {dv:.3e}");
+    }
+
+    // ── hierarchical_primary — Hill-sphere parent, distinct from
+    //                          the strongest-attractor `dominant_primary` ──
+
+    /// Make a body at world position (x, y, z) with given mass. Velocity is
+    /// zero — `hierarchical_primary` does not consult velocity except in
+    /// the energy fallback, which is exercised separately.
+    fn body3(x: f64, y: f64, z: f64, mass: f64) -> Body {
+        let mut b = Body::rocky(mass).at(x, y);
+        b.z = z;
+        b.sync_physical_properties();
+        b
+    }
+
+    /// Sun + Earth + Moon at SI distances. Sun pulls the Moon ~2× harder
+    /// than Earth does (`G·M☉/r_⊙² > G·M⊕/r⊕²`), so `dominant_primary`
+    /// returns the Sun for the Moon. Hierarchical primary must instead
+    /// return Earth — the body whose Hill sphere contains the Moon.
+    #[test]
+    fn hierarchical_primary_recovers_earth_for_the_moon() {
+        // Indices: 0 = Sun, 1 = Earth, 2 = Moon.
+        let m_sun = 1.989e30;
+        let m_earth = 5.972e24;
+        let m_moon = 7.342e22;
+        let au = 1.495_978_707e11;
+        let r_em = 3.844e8;
+        let bodies = vec![
+            body3(0.0, 0.0, 0.0, m_sun),
+            body3(au, 0.0, 0.0, m_earth),
+            body3(au + r_em, 0.0, 0.0, m_moon),
+        ];
+
+        // Sanity: confirm dominant_primary picks the Sun (the documented
+        // 2× ratio holds — anyone reading this test should find the
+        // motivation in the function-level rustdoc).
+        assert_eq!(dominant_primary(&bodies, 2), Some(0), "dominant_primary(Moon) = Sun");
+
+        // Hierarchical primary recovers Earth — established via Hill sphere.
+        assert_eq!(
+            hierarchical_primary(&bodies, 2),
+            Some((1, HierarchicalRelation::HillSphere)),
+            "hierarchical_primary(Moon) = Earth via Hill sphere",
+        );
+    }
+
+    /// For a body whose dominant primary already coincides with its
+    /// hierarchical primary (no Hill-sphere divergence), both functions
+    /// return the same answer.
+    #[test]
+    fn hierarchical_primary_matches_dominant_for_inner_planets() {
+        let m_sun = 1.989e30;
+        let m_mercury = 3.302e23;
+        let m_earth = 5.972e24;
+        let au = 1.495_978_707e11;
+        let bodies = vec![
+            body3(0.0, 0.0, 0.0, m_sun),
+            body3(0.387 * au, 0.0, 0.0, m_mercury),
+            body3(au, 0.0, 0.0, m_earth),
+        ];
+
+        for idx in [1, 2] {
+            let h = hierarchical_primary(&bodies, idx).map(|(i, _)| i);
+            assert_eq!(
+                h,
+                dominant_primary(&bodies, idx),
+                "non-hierarchical body {idx}: both primaries should coincide on the Sun",
+            );
+        }
+    }
+
+    /// Inclined Earth–Moon configuration — the Hill-sphere check must
+    /// reduce a 3D distance, not a planar projection. Place the Moon
+    /// straight above Earth (along `+ẑ`) and confirm Earth still wins.
+    #[test]
+    fn hierarchical_primary_handles_inclined_separation() {
+        let m_sun = 1.989e30;
+        let m_earth = 5.972e24;
+        let m_moon = 7.342e22;
+        let au = 1.495_978_707e11;
+        let r_em = 3.844e8;
+        let bodies = vec![
+            body3(0.0, 0.0, 0.0, m_sun),
+            body3(au, 0.0, 0.0, m_earth),
+            // Moon directly above Earth — the planar (x, y) projection
+            // collapses; only the 3D distance recovers the geometry.
+            body3(au, 0.0, r_em, m_moon),
+        ];
+
+        assert_eq!(
+            hierarchical_primary(&bodies, 2),
+            Some((1, HierarchicalRelation::HillSphere)),
+            "Moon stacked along ẑ above Earth must still resolve to Earth",
+        );
+    }
+
+    /// A truly isolated body — the only body more massive than itself is
+    /// the system root, captured via the infinite-Hill-sphere branch.
+    #[test]
+    fn hierarchical_primary_returns_root_for_unfiltered_planet() {
+        let m_sun = 1.989e30;
+        let m_earth = 5.972e24;
+        let au = 1.495_978_707e11;
+        let bodies = vec![body3(0.0, 0.0, 0.0, m_sun), body3(au, 0.0, 0.0, m_earth)];
+        assert_eq!(
+            hierarchical_primary(&bodies, 1),
+            Some((0, HierarchicalRelation::HillSphere)),
+            "Earth's hierarchical primary is the Sun (system root)",
+        );
+    }
+
+    /// The most massive body has no parent; result is `None`.
+    #[test]
+    fn hierarchical_primary_returns_none_for_heaviest_body() {
+        let bodies =
+            vec![body3(0.0, 0.0, 0.0, 1.989e30), body3(1.495_978_707e11, 0.0, 0.0, 5.972e24)];
+        assert!(hierarchical_primary(&bodies, 0).is_none());
+    }
+
+    /// Single-body and empty inputs short-circuit to `None` without
+    /// inspecting any state.
+    #[test]
+    fn hierarchical_primary_returns_none_for_trivial_input() {
+        let bodies = vec![body3(0.0, 0.0, 0.0, 1.0e30)];
+        assert!(hierarchical_primary(&bodies, 0).is_none());
+    }
+
+    // ── is_system_root — shared predicate consumed by inspector and
+    //                    canvas to skip orbit rendering for the heaviest
+    //                    body ──
+
+    #[test]
+    fn is_system_root_marks_the_heaviest_body() {
+        let bodies = vec![
+            body3(0.0, 0.0, 0.0, 1.989e30),     // Sun
+            body3(1.5e11, 0.0, 0.0, 5.972e24),  // Earth
+            body3(7.78e11, 0.0, 0.0, 1.898e27), // Jupiter
+        ];
+        assert!(is_system_root(&bodies, 0), "Sun is system root");
+        assert!(!is_system_root(&bodies, 1), "Earth has the Sun above it");
+        assert!(!is_system_root(&bodies, 2), "Jupiter has the Sun above it");
+    }
+
+    #[test]
+    fn is_system_root_handles_a_single_body() {
+        let bodies = vec![body3(0.0, 0.0, 0.0, 1.0e30)];
+        assert!(is_system_root(&bodies, 0));
+    }
+
+    #[test]
+    fn is_system_root_returns_false_for_out_of_range_index() {
+        let bodies = vec![body3(0.0, 0.0, 0.0, 1.0e30)];
+        assert!(!is_system_root(&bodies, 5));
+    }
+
+    /// Equal-mass siblings: neither has a body strictly heavier, so both
+    /// register as roots. The application layer can disambiguate (e.g.
+    /// pick a deterministic representative) when this matters.
+    #[test]
+    fn is_system_root_treats_equal_mass_pair_as_co_roots() {
+        let bodies = vec![body3(0.0, 0.0, 0.0, 1.0e30), body3(1.0e11, 0.0, 0.0, 1.0e30)];
+        assert!(is_system_root(&bodies, 0));
+        assert!(is_system_root(&bodies, 1));
     }
 }
