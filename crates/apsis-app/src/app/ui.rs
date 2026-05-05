@@ -472,6 +472,10 @@ pub struct SimulationApp {
     /// entry holds an `enabled` flag; toggling it calls `apply_perturbations`
     /// which rebuilds and sends the active stack to the physics thread.
     pub(super) perturbation_catalog: Vec<crate::app::perturbation::PerturbationCatalogEntry>,
+
+    // ── Render-loop diagnostics ───────────────────────────────────────────────
+    pub(super) diagnostics: crate::app::diagnostics::Diagnostics,
+    pub(super) show_fps_hud: bool,
 }
 
 impl SimulationApp {
@@ -642,6 +646,9 @@ impl SimulationApp {
             color_view_range: None,
 
             perturbation_catalog: crate::app::perturbation::default_catalog(),
+
+            diagnostics: crate::app::diagnostics::Diagnostics::new(),
+            show_fps_hud: true,
         }
     }
 
@@ -677,6 +684,10 @@ impl SimulationApp {
             let wall_delta = ctx.input(|i| i.unstable_dt as f64).min(0.2);
             self.system.advance_render_time(wall_delta, rate);
         }
+
+        let animating =
+            should_advance || self.camera_anim_target.is_some() || self.dragging_body.is_some();
+        self.diagnostics.tick(animating);
 
         // ── Single-step: re-pause after one frame of physics ─────────────────
         if self.step_pending {

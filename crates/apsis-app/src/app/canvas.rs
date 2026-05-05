@@ -791,11 +791,27 @@ impl SimulationApp {
         // ── Overlay: rings + labels (on top of GPU layer) ─────────────────────
         self.draw_overlay(ui, center_after_pan, time);
 
+        // ── FPS / frame-time HUD (top-right of canvas, subtle) ────────────────
+        if self.show_fps_hud {
+            self.draw_fps_overlay(ui, rect);
+        }
+
         // ── Loading overlay ───────────────────────────────────────────────────
         if self.system.is_loading() {
             self.draw_loading_overlay(ui, rect, time);
             ctx.request_repaint();
         }
+    }
+
+    fn draw_fps_overlay(&self, ui: &egui::Ui, rect: egui::Rect) {
+        let d = &self.diagnostics;
+        if d.is_idle() || d.warming() {
+            return;
+        }
+        let text = format!("{:>4.0} FPS · {:>5.2} ms", d.fps(), d.frame_ms());
+        let pos = egui::pos2(rect.right() - 12.0, rect.top() + 10.0);
+        let color = crate::app::design::tokens::color::fg::TERTIARY;
+        ui.painter().text(pos, egui::Align2::RIGHT_TOP, text, FontId::monospace(10.0), color);
     }
 
     // ── Overlay ───────────────────────────────────────────────────────────────
