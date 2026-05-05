@@ -102,7 +102,7 @@ pub fn show_aggregate(ui: &mut Ui, data: &AggregateData) -> Option<usize> {
         |ui| {
             egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
                 ui.add_space(space::S5);
-                show_aggregate_header(ui, data.count);
+                show_aggregate_header(ui, data.count, &data.body_names);
                 ui.add_space(space::S4);
                 hairline(ui, space::S4);
 
@@ -121,12 +121,12 @@ pub fn show_aggregate(ui: &mut Ui, data: &AggregateData) -> Option<usize> {
     clicked
 }
 
-fn show_aggregate_header(ui: &mut Ui, count: usize) {
+fn show_aggregate_header(ui: &mut Ui, count: usize, body_names: &[String]) {
     let medium = FontFamily::Name(typography::font::SANS_MEDIUM.into());
     ui.horizontal(|ui| {
         ui.add_space(space::S4);
         ui.label(
-            RichText::new(format!("{count} bodies"))
+            RichText::new(format!("System · {count} bodies"))
                 .font(FontId::new(typography::text::LG, medium))
                 .color(color::fg::PRIMARY),
         );
@@ -134,11 +134,37 @@ fn show_aggregate_header(ui: &mut Ui, count: usize) {
     ui.horizontal(|ui| {
         ui.add_space(space::S4);
         ui.label(
-            RichText::new("selection")
+            RichText::new(format_body_names_breadcrumb(body_names))
                 .font(FontId::new(typography::text::XS, FontFamily::Proportional))
                 .color(color::fg::TERTIARY),
         );
     });
+}
+
+/// Comma-separated body-name list for the multi-select breadcrumb,
+/// truncated with an ellipsis when it would exceed five names or sixty
+/// characters. Both bounds are perceptual; tighten them only after a
+/// real overflow is observed.
+fn format_body_names_breadcrumb(names: &[String]) -> String {
+    const MAX_NAMES: usize = 5;
+    const MAX_CHARS: usize = 60;
+    if names.is_empty() {
+        return String::new();
+    }
+    let truncated_by_count = names.len() > MAX_NAMES;
+    let head: Vec<&str> = names.iter().take(MAX_NAMES).map(|s| s.as_str()).collect();
+    let mut joined = head.join(", ");
+    if truncated_by_count {
+        let extra = names.len() - MAX_NAMES;
+        joined.push_str(&format!(", +{extra} more"));
+    }
+    if joined.chars().count() > MAX_CHARS {
+        let mut clipped: String = joined.chars().take(MAX_CHARS - 1).collect();
+        clipped.push('…');
+        clipped
+    } else {
+        joined
+    }
 }
 
 fn aggregate_rows(ui: &mut Ui, data: &AggregateData) {

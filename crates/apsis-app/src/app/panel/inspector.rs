@@ -79,8 +79,17 @@ impl SimulationApp {
             })
             .fold(0.0_f64, f64::max);
 
+        let body_names: Vec<String> = indices
+            .iter()
+            .map(|&i| {
+                let n = self.system.name(i);
+                if n.is_empty() { format!("body #{i}") } else { n.to_owned() }
+            })
+            .collect();
+
         AggregateData {
             count: indices.len(),
+            body_names,
             total_mass_kg: total_mass,
             com_m: com,
             v_com_m_s: v_com,
@@ -380,6 +389,7 @@ mod tests {
 
         AggregateData {
             count: indices.len(),
+            body_names: indices.iter().map(|i| format!("body #{i}")).collect(),
             total_mass_kg: total_mass,
             com_m: com,
             v_com_m_s: v_com,
