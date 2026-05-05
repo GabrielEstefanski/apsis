@@ -139,6 +139,10 @@ pub struct RelationsData {
 #[derive(Debug, Clone)]
 pub struct AggregateData {
     pub count: usize,
+    /// Body names in selection order, for the breadcrumb listing under
+    /// the header. The view truncates with an ellipsis when the list
+    /// would exceed the available width.
+    pub body_names: Vec<String>,
     pub total_mass_kg: f64,
     /// Centre-of-mass position in metres.
     pub com_m: [f64; 3],
