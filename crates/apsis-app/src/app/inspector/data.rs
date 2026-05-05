@@ -131,6 +131,24 @@ pub struct RelationsData {
     pub frame_label: String,
 }
 
+/// Inspector payload for a multi-body selection.
+///
+/// Sections that are semantically undefined for groups (Orbit, Energy,
+/// Relations, Camera-relative) are intentionally absent. Only
+/// mass-aggregate quantities and COM kinematics are reported.
+#[derive(Debug, Clone)]
+pub struct AggregateData {
+    pub count: usize,
+    pub total_mass_kg: f64,
+    /// Centre-of-mass position in metres.
+    pub com_m: [f64; 3],
+    /// Centre-of-mass velocity in m/s.
+    pub v_com_m_s: [f64; 3],
+    /// `max(|r_i − COM|)` — maximum distance from COM to any selected body.
+    pub bounding_radius_m: f64,
+    pub actions: Vec<ActionData>,
+}
+
 #[derive(Debug, Clone)]
 pub struct CameraRelativeData {
     pub distance_m: f64,
