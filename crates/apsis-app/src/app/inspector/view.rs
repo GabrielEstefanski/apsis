@@ -28,12 +28,16 @@ pub struct InspectorState {
     pub flash: FlashTracker,
 }
 
-/// Render one Inspector frame and return the index of the action that
-/// was clicked this frame, if any. The caller dispatches intent against
-/// its own action vocabulary; this module knows nothing about what
-/// "Focus camera" or "Delete" mean.
-pub fn show(ui: &mut Ui, data: &InspectorData, state: &mut InspectorState) -> Option<usize> {
-    let mut clicked_action: Option<usize> = None;
+/// Render one Inspector frame and return the [`ActionData::id`] of the
+/// action clicked this frame, if any. The caller dispatches intent
+/// against its own action vocabulary — this module never inspects the
+/// id beyond cloning the value.
+pub fn show<Id: Clone>(
+    ui: &mut Ui,
+    data: &InspectorData<Id>,
+    state: &mut InspectorState,
+) -> Option<Id> {
+    let mut clicked_action: Option<Id> = None;
     ui.allocate_ui_with_layout(
         egui::vec2(ui.available_width(), ui.available_height()),
         Layout::top_down(Align::LEFT),
@@ -92,10 +96,10 @@ pub fn show(ui: &mut Ui, data: &InspectorData, state: &mut InspectorState) -> Op
     clicked_action
 }
 
-/// Render the aggregate (multi-select) inspector frame and return the clicked
-/// action index, if any. The caller dispatches actions by index.
-pub fn show_aggregate(ui: &mut Ui, data: &AggregateData) -> Option<usize> {
-    let mut clicked: Option<usize> = None;
+/// Render the aggregate (multi-select) inspector frame and return the
+/// [`ActionData::id`] of the action clicked this frame, if any.
+pub fn show_aggregate<Id: Clone>(ui: &mut Ui, data: &AggregateData<Id>) -> Option<Id> {
+    let mut clicked: Option<Id> = None;
     ui.allocate_ui_with_layout(
         egui::vec2(ui.available_width(), ui.available_height()),
         Layout::top_down(Align::LEFT),
@@ -167,7 +171,7 @@ fn format_body_names_breadcrumb(names: &[String]) -> String {
     }
 }
 
-fn aggregate_rows(ui: &mut Ui, data: &AggregateData) {
+fn aggregate_rows<Id>(ui: &mut Ui, data: &AggregateData<Id>) {
     let (s, u) = format_value(data.total_mass_kg, QuantityType::Mass);
     ui.add(FieldRow::new("Total mass", &s, u));
 
@@ -378,9 +382,9 @@ fn camera_rows(ui: &mut Ui, c: &CameraRelativeData, flash: &mut FlashTracker) {
 
 // ── Actions ──────────────────────────────────────────────────────────────────
 
-fn action_rows(ui: &mut Ui, actions: &[super::data::ActionData]) -> Option<usize> {
+fn action_rows<Id: Clone>(ui: &mut Ui, actions: &[super::data::ActionData<Id>]) -> Option<Id> {
     let mut clicked = None;
-    for (i, a) in actions.iter().enumerate() {
+    for a in actions.iter() {
         let mut btn = IconButton::new(&a.label);
         if let Some(ico) = &a.icon {
             btn = btn.with_icon(ico);
@@ -392,7 +396,7 @@ fn action_rows(ui: &mut Ui, actions: &[super::data::ActionData]) -> Option<usize
             btn = btn.danger();
         }
         if ui.add(btn).clicked() {
-            clicked = Some(i);
+            clicked = Some(a.id.clone());
         }
     }
     clicked
