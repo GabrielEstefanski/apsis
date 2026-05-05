@@ -14,12 +14,24 @@ use apsis::physics::orbital::{self as physics_orbital, HierarchicalRelation, is_
 use eframe::egui::{self, Color32};
 use std::collections::BTreeSet;
 
-const ACTION_FOCUS: usize = 0;
-const ACTION_HIDE_TRAIL: usize = 1;
-const ACTION_DELETE: usize = 2;
+/// Dispatch tokens for the single-body inspector action rows.
+///
+/// Each [`ActionData`] in the single-body view carries one of these
+/// values; the click handler matches on the variant exhaustively, so a
+/// reorder of the actions vector never silently rewires dispatch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SingleIntent {
+    FocusCamera,
+    HideTrail,
+    Delete,
+}
 
-const ACTION_AGG_DELETE: usize = 0;
-const ACTION_AGG_DESELECT: usize = 1;
+/// Dispatch tokens for the multi-select aggregate action rows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MultiIntent {
+    DeleteSelected,
+    DeselectAll,
+}
 
 impl SimulationApp {
     pub(super) fn aggregate_content(&mut self, ui: &mut egui::Ui, indices: &BTreeSet<usize>) {
@@ -31,16 +43,16 @@ impl SimulationApp {
         let clicked = inspector::show_aggregate(ui, &data);
 
         match clicked {
-            Some(ACTION_AGG_DELETE) => self.delete_selected_bodies(indices.clone()),
-            Some(ACTION_AGG_DESELECT) => {
+            Some(MultiIntent::DeleteSelected) => self.delete_selected_bodies(indices.clone()),
+            Some(MultiIntent::DeselectAll) => {
                 self.selection = BodySelection::default();
                 self.selection_form = None;
             },
-            _ => {},
+            None => {},
         }
     }
 
-    fn build_aggregate_data(&self, indices: &BTreeSet<usize>) -> AggregateData {
+    fn build_aggregate_data(&self, indices: &BTreeSet<usize>) -> AggregateData<MultiIntent> {
         let bodies = self.system.bodies();
 
         let mut total_mass = 0.0_f64;
@@ -96,12 +108,14 @@ impl SimulationApp {
             bounding_radius_m: bounding_radius,
             actions: vec![
                 ActionData {
+                    id: MultiIntent::DeleteSelected,
                     label: "Delete selected".to_owned(),
                     icon: None,
                     shortcut: Some("Del".to_owned()),
                     kind: ActionKind::Destructive,
                 },
                 ActionData {
+                    id: MultiIntent::DeselectAll,
                     label: "Deselect all".to_owned(),
                     icon: None,
                     shortcut: Some("Esc".to_owned()),
@@ -140,10 +154,10 @@ impl SimulationApp {
         let clicked = inspector::show(ui, &data, &mut self.inspector_state);
 
         match clicked {
-            Some(ACTION_FOCUS) => self.toggle_follow_selected(),
-            Some(ACTION_HIDE_TRAIL) => self.toggle_hide_trail(idx),
-            Some(ACTION_DELETE) => self.delete_selected_body(idx),
-            _ => {},
+            Some(SingleIntent::FocusCamera) => self.toggle_follow_selected(),
+            Some(SingleIntent::HideTrail) => self.toggle_hide_trail(idx),
+            Some(SingleIntent::Delete) => self.delete_selected_body(idx),
+            None => {},
         }
     }
 
@@ -151,7 +165,7 @@ impl SimulationApp {
     /// system snapshot. Pure projection — nothing here mutates state or
     /// triggers domain computation beyond what the cached snapshot already
     /// publishes.
-    fn build_inspector_data(&self, idx: usize) -> InspectorData {
+    fn build_inspector_data(&self, idx: usize) -> InspectorData<SingleIntent> {
         let bodies = self.system.bodies();
         let body = bodies[idx];
         let elements = self.system.orbital_elements();
@@ -226,6 +240,7 @@ impl SimulationApp {
             camera_relative: None,
             actions: vec![
                 ActionData {
+                    id: SingleIntent::FocusCamera,
                     label: if self.follow_selected_body {
                         "Unfollow camera"
                     } else {
@@ -237,12 +252,14 @@ impl SimulationApp {
                     kind: ActionKind::Neutral,
                 },
                 ActionData {
+                    id: SingleIntent::HideTrail,
                     label: "Hide trail".to_owned(),
                     icon: None,
                     shortcut: Some("H".to_owned()),
                     kind: ActionKind::Neutral,
                 },
                 ActionData {
+                    id: SingleIntent::Delete,
                     label: "Delete".to_owned(),
                     icon: None,
                     shortcut: Some("Del".to_owned()),
