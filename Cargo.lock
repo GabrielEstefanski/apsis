@@ -254,6 +254,7 @@ name = "apsis-app"
 version = "0.1.0"
 dependencies = [
  "apsis",
+ "apsis-1pn",
  "bytemuck",
  "eframe",
  "egui",

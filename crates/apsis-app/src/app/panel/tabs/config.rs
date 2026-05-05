@@ -1,7 +1,9 @@
 use crate::app::config::PhysicsConfig;
+use crate::app::design::tokens::color::signal::WARN;
 use crate::app::theme::secondary_btn;
 use crate::app::theme::{ACCENT, BORDER, DANGER, SUCCESS, TEXT_DIM, TEXT_PRI, TEXT_SEC};
 use crate::app::ui::SimulationApp;
+use apsis::physics::gravity::kernel::Exactness;
 use eframe::egui::{self, Align, Color32, Layout, RichText, Stroke};
 
 // ── Layout constants ──────────────────────────────────────────────────────────
@@ -259,6 +261,89 @@ impl SimulationApp {
         if changed {
             self.physics_cfg.seed = seed;
             self.system.set_seed(seed);
+        }
+
+        // ── PERTURBATIONS ─────────────────────────────────────────────────────
+
+        section(ui, "PERTURBATIONS");
+
+        let n = self.perturbation_catalog.len();
+        let mut any_changed = false;
+        for i in 0..n {
+            let enabled = self.perturbation_catalog[i].enabled;
+            let name = self.perturbation_catalog[i].descriptor.name().to_owned();
+            let desc = self.perturbation_catalog[i].descriptor.description().to_owned();
+            let mut checked = enabled;
+            let changed = ui
+                .horizontal(|ui| {
+                    let r = ui.checkbox(&mut checked, "");
+                    ui.add_space(2.0);
+                    ui.vertical(|ui| {
+                        ui.label(RichText::new(name).size(10.5).color(TEXT_PRI));
+                        ui.label(RichText::new(desc).size(9.0).color(TEXT_DIM));
+                    });
+                    r.changed()
+                })
+                .inner;
+            if changed {
+                self.perturbation_catalog[i].enabled = checked;
+                any_changed = true;
+            }
+            ui.add_space(2.0);
+        }
+        if any_changed {
+            self.apply_perturbations();
+        }
+
+        // Warn on any active perturbation whose `kernel_requirements`
+        // would not be satisfied by the current Plummer-softened kernel.
+        // The check is structural — it consumes the same `Exactness` rank
+        // the integrator uses to gate registration, so the UI mirrors the
+        // physics contract instead of inventing its own predicate.
+        let warn_softening = self.physics_cfg.softening_scale > 0.0
+            && self.perturbation_catalog.iter().any(|e| {
+                e.enabled
+                    && e.descriptor.kernel_requirements().required_exactness
+                        == Some(Exactness::Exact)
+            });
+        if warn_softening {
+            ui.add_space(2.0);
+            let warn = WARN;
+            egui::Frame::NONE
+                .fill(Color32::from_rgba_unmultiplied(warn.r(), warn.g(), warn.b(), 18))
+                .stroke(Stroke::new(0.5, warn.gamma_multiply(0.4)))
+                .corner_radius(3.0)
+                .inner_margin(egui::Margin::symmetric(6, 4))
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(
+                                "Active perturbation requires exact 1/r gravity. \
+                                 Plummer softening is on — its numerical apsidal \
+                                 precession dominates the physical signal.",
+                            )
+                            .size(9.0)
+                            .color(warn),
+                        )
+                        .wrap(),
+                    );
+                    ui.add_space(3.0);
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                RichText::new("Disable softening").size(9.5).color(warn),
+                            )
+                            .fill(Color32::TRANSPARENT)
+                            .stroke(Stroke::new(0.5, warn.gamma_multiply(0.6)))
+                            .min_size(egui::vec2(120.0, 18.0)),
+                        )
+                        .clicked()
+                    {
+                        self.physics_cfg.softening_scale = 0.0;
+                        self.system.set_softening_scale(0.0);
+                    }
+                });
         }
 
         // ── RESET ─────────────────────────────────────────────────────────────

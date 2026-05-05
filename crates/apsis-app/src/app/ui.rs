@@ -466,6 +466,12 @@ pub struct SimulationApp {
     /// Last resolved data range from the active colour view. Cached so the
     /// colour bar and numeric readouts can render without re-evaluating.
     pub(super) color_view_range: Option<(f64, f64)>,
+
+    // ── Perturbation catalog ──────────────────────────────────────────────────
+    /// User-facing list of available non-gravitational perturbations. Each
+    /// entry holds an `enabled` flag; toggling it calls `apply_perturbations`
+    /// which rebuilds and sends the active stack to the physics thread.
+    pub(super) perturbation_catalog: Vec<crate::app::perturbation::PerturbationCatalogEntry>,
 }
 
 impl SimulationApp {
@@ -484,6 +490,18 @@ impl SimulationApp {
     /// Short hint shown on hover over disabled edit controls.
     pub(super) fn editing_lock_hint(&self) -> &'static str {
         "Precision run in progress — editing is disabled until the run completes"
+    }
+
+    /// Rebuild and push the active perturbation stack to the physics thread.
+    /// Call whenever an entry in `perturbation_catalog` changes.
+    pub(super) fn apply_perturbations(&mut self) {
+        let ps: Vec<Box<dyn apsis::physics::integrator::PerturbationForce>> = self
+            .perturbation_catalog
+            .iter()
+            .filter(|e| e.enabled)
+            .map(|e| e.descriptor.build())
+            .collect();
+        self.system.set_perturbations(ps);
     }
 
     pub fn new(system: System) -> Self {
@@ -622,6 +640,8 @@ impl SimulationApp {
             normalizer_registry: crate::render::color::NormalizerRegistry::standard(),
             color_view: None,
             color_view_range: None,
+
+            perturbation_catalog: crate::app::perturbation::default_catalog(),
         }
     }
 

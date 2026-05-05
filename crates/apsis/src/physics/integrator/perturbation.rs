@@ -100,3 +100,36 @@ pub trait PerturbationForce: Send + Sync {
         self.kernel_requirements().required_exactness == Some(Exactness::Exact)
     }
 }
+
+/// Plugin metadata for a [`PerturbationForce`] — the federation seam.
+///
+/// Each downstream perturbation crate (`apsis-1pn`, hypothetical
+/// `apsis-j2`, `apsis-tidal`, ...) publishes a `Descriptor` value
+/// implementing this trait. Consumers (the interactive shell, headless
+/// runners, future Python bindings) collect descriptors into a registry
+/// without learning a single concrete perturbation type — adding a new
+/// plugin is purely a `Cargo.toml` dependency plus one descriptor entry.
+///
+/// `kernel_requirements` mirrors the requirements of the perturbation
+/// the descriptor builds. It is exposed at descriptor level so callers
+/// can audit compatibility against the active kernel **before**
+/// constructing the force; consult
+/// [`KernelRequirements::check_against`] against the system's current
+/// [`KernelProperties`](crate::physics::gravity::kernel::KernelProperties)
+/// to enumerate violations.
+pub trait PerturbationDescriptor: Send + Sync {
+    /// Short, human-readable identifier shown in UIs and diagnostics
+    /// (e.g. `"General Relativity (1PN)"`).
+    fn name(&self) -> &str;
+
+    /// One-line summary of the physical effect for end users.
+    fn description(&self) -> &str;
+
+    /// Kernel preconditions of the perturbation this descriptor builds.
+    /// Equal to the value the produced [`PerturbationForce`] reports.
+    fn kernel_requirements(&self) -> KernelRequirements;
+
+    /// Construct a fresh perturbation instance ready to attach via
+    /// [`System::add_perturbation`](crate::core::system::System::add_perturbation).
+    fn build(&self) -> Box<dyn PerturbationForce>;
+}

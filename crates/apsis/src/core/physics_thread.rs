@@ -34,7 +34,7 @@ use crate::core::trail::{TrailSampler, TrailSamplerKind};
 use crate::domain::body::{Body, NamedBody};
 use crate::io::snapshot::SimSnapshot;
 use crate::math::Vec3;
-use crate::physics::integrator::IntegratorKind;
+use crate::physics::integrator::{IntegratorKind, PerturbationForce};
 use crate::physics::orbital::OrbitalElements;
 
 // ── Render state ──────────────────────────────────────────────────────────────
@@ -113,6 +113,9 @@ pub enum PhysicsCmd {
     /// Swap the trail-sampler strategy. Anchors (if any) are discarded; the
     /// next step restores them and records an initial sample.
     SetTrailSampler(TrailSamplerKind),
+    /// Replace the full perturbation stack atomically. Clears all previously
+    /// registered forces, then registers each entry in order.
+    SetPerturbations(Vec<Box<dyn PerturbationForce>>),
     Shutdown,
 }
 
@@ -432,6 +435,10 @@ impl PhysicsHandle {
     pub fn set_trail_sampler(&self, kind: TrailSamplerKind) {
         self.send(PhysicsCmd::SetTrailSampler(kind));
     }
+    pub fn set_perturbations(&self, ps: Vec<Box<dyn PerturbationForce>>) {
+        self.send(PhysicsCmd::SetPerturbations(ps));
+    }
+
     pub fn restore_from_snapshot(&self, snap: &SimSnapshot) {
         self.loading.store(true, Ordering::Relaxed);
         self.send(PhysicsCmd::RestoreSnapshot(snap.clone()));
@@ -606,7 +613,8 @@ fn cmd_blocks_during_precision(cmd: &PhysicsCmd) -> bool {
         | PhysicsCmd::LoadBodies(_)
         | PhysicsCmd::LoadNamedBodies(_)
         | PhysicsCmd::ZeroComVelocity
-        | PhysicsCmd::RestoreSnapshot(_) => true,
+        | PhysicsCmd::RestoreSnapshot(_)
+        | PhysicsCmd::SetPerturbations(_) => true,
 
         PhysicsCmd::SetPaused(_)
         | PhysicsCmd::SetSimRateTarget(_)
@@ -727,6 +735,13 @@ fn apply_cmd(
         },
         PhysicsCmd::SetTrailSampler(kind) => {
             *trail_sampler = kind.build();
+        },
+        PhysicsCmd::SetPerturbations(ps) => {
+            system.clear_perturbations();
+            for p in ps {
+                system.add_perturbation(p);
+            }
+            *needs_full_publish = true;
         },
         PhysicsCmd::RestoreSnapshot(snap) => {
             loading.store(true, Ordering::Relaxed);
