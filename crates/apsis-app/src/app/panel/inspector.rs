@@ -7,7 +7,7 @@
 
 use crate::app::inspector::{
     self, ActionData, ActionKind, AggregateData, EnergyData, Header, Identity, InspectorData,
-    KinematicState, OrbitData, RelationKind, RelationsData,
+    KinematicState, OrbitData, PerturbationData, RelationKind, RelationsData,
 };
 use crate::app::ui::{BodySelection, SimulationApp, UndoRecord};
 use apsis::physics::orbital::{self as physics_orbital, HierarchicalRelation, is_system_root};
@@ -203,8 +203,16 @@ impl SimulationApp {
             orbit,
             relations,
             energy: Some(energy),
-            // `PerturbationForce` exposes no name accessor yet; section auto-hides.
-            perturbations: Vec::new(),
+            perturbations: self
+                .perturbation_catalog
+                .iter()
+                .filter(|e| e.enabled)
+                .map(|e| PerturbationData {
+                    name: e.descriptor.name().to_owned(),
+                    active: true,
+                    readouts: Vec::new(),
+                })
+                .collect(),
             // Needs 3D camera world-pose; section auto-hides until the canvas lands.
             camera_relative: None,
             actions: vec![

@@ -27,6 +27,7 @@ profiling = ["dep:tracing-tracy"]
 
 [dependencies]
 apsis = { path = "../apsis" }
+apsis-1pn = { path = "../apsis-1pn" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 toml = { workspace = true }
