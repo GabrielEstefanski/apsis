@@ -476,6 +476,11 @@ pub struct SimulationApp {
     // ── Render-loop diagnostics ───────────────────────────────────────────────
     pub(super) diagnostics: crate::app::diagnostics::Diagnostics,
     pub(super) show_fps_hud: bool,
+
+    // ── 3D camera ─────────────────────────────────────────────────────────────
+    pub(super) camera: crate::app::camera::OrbitCamera,
+    pub(super) camera_input_config: crate::app::camera::input::CameraInputConfig,
+    pub(super) show_camera_triad: bool,
 }
 
 impl SimulationApp {
@@ -649,6 +654,15 @@ impl SimulationApp {
 
             diagnostics: crate::app::diagnostics::Diagnostics::new(),
             show_fps_hud: true,
+
+            camera: crate::app::camera::OrbitCamera::new(crate::app::camera::CameraPose::new(
+                glam::DVec3::ZERO,
+                0.5,
+                0.3,
+                50.0,
+            )),
+            camera_input_config: crate::app::camera::input::CameraInputConfig::default(),
+            show_camera_triad: true,
         }
     }
 
@@ -688,6 +702,12 @@ impl SimulationApp {
         let animating =
             should_advance || self.camera_anim_target.is_some() || self.dragging_body.is_some();
         self.diagnostics.tick(animating);
+
+        let cam_dt = ctx.input(|i| i.stable_dt as f64).min(0.1);
+        self.camera.integrate(cam_dt);
+        if !self.camera.is_at_rest() {
+            ctx.request_repaint();
+        }
 
         // ── Single-step: re-pause after one frame of physics ─────────────────
         if self.step_pending {
