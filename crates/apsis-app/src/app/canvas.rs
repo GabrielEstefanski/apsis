@@ -40,6 +40,20 @@ const FOLLOW_SNAP_PX: f32 = 120.0;
 /// those are exactly the orbits worth looking at.
 const DEGEN_ECC_WINDOW: f64 = 0.005;
 
+// ── Camera-triad helpers ──────────────────────────────────────────────────────
+
+/// Project a camera-space direction onto unit screen coordinates.
+/// Returns `(dx, dy, depth, colour, label)` where `dy` flips because
+/// egui screen-y points down, and positive `depth` means behind the
+/// camera (right-handed view space).
+fn project(
+    cam: glam::DVec3,
+    color: eframe::egui::Color32,
+    label: &'static str,
+) -> (f32, f32, f32, eframe::egui::Color32, &'static str) {
+    (cam.x as f32, -cam.y as f32, cam.z as f32, color, label)
+}
+
 // ── Orbit overlay filter helpers ──────────────────────────────────────────────
 
 /// Maps a hierarchy level to an index into the user's per-level toggle
@@ -130,6 +144,45 @@ impl SimulationApp {
                 self.zoom_vel = 0.0;
             } else {
                 ctx.request_repaint();
+            }
+        }
+
+        // ── 3D camera gestures ────────────────────────────────────────────────
+        {
+            use crate::app::camera::input::{
+                DragInput, Modifiers as CamMods, PointerButton as CamBtn, apply_drag, apply_scroll,
+            };
+            use glam::DVec2;
+
+            let pointer_in_canvas = hover_pos.is_some_and(|p| rect.contains(p));
+            let (rmb, mmb, ptr_delta, mods) = ctx.input(|i| {
+                (
+                    i.pointer.button_down(egui::PointerButton::Secondary),
+                    i.pointer.button_down(egui::PointerButton::Middle),
+                    i.pointer.delta(),
+                    CamMods {
+                        shift: i.modifiers.shift,
+                        alt: i.modifiers.alt,
+                        ctrl: i.modifiers.ctrl,
+                    },
+                )
+            });
+
+            if pointer_in_canvas && (rmb || mmb) && ptr_delta != egui::Vec2::ZERO {
+                apply_drag(
+                    &mut self.camera,
+                    DragInput {
+                        delta_px: DVec2::new(ptr_delta.x as f64, ptr_delta.y as f64),
+                        button: if mmb { CamBtn::Middle } else { CamBtn::Secondary },
+                        modifiers: mods,
+                    },
+                    &self.camera_input_config,
+                );
+            }
+
+            if pointer_in_canvas && scroll_y.abs() > 0.0 {
+                // smooth_scroll_delta is in pixels; normalise to wheel ticks.
+                apply_scroll(&mut self.camera, scroll_y as f64 / 60.0, &self.camera_input_config);
             }
         }
 
@@ -796,6 +849,11 @@ impl SimulationApp {
             self.draw_fps_overlay(ui, rect);
         }
 
+        // ── 3D camera axis triad (bottom-left, debug) ─────────────────────────
+        if self.show_camera_triad {
+            self.draw_camera_triad(ui, rect);
+        }
+
         // ── Loading overlay ───────────────────────────────────────────────────
         if self.system.is_loading() {
             self.draw_loading_overlay(ui, rect, time);
@@ -812,6 +870,48 @@ impl SimulationApp {
         let pos = egui::pos2(rect.right() - 12.0, rect.top() + 10.0);
         let color = crate::app::design::tokens::color::fg::TERTIARY;
         ui.painter().text(pos, egui::Align2::RIGHT_TOP, text, FontId::monospace(10.0), color);
+    }
+
+    fn draw_camera_triad(&self, ui: &egui::Ui, rect: egui::Rect) {
+        use glam::DVec3;
+
+        const RADIUS_PX: f32 = 28.0;
+        const X_COL: Color32 = Color32::from_rgb(212, 102, 102);
+        const Y_COL: Color32 = Color32::from_rgb(132, 192, 132);
+        const Z_COL: Color32 = Color32::from_rgb(122, 154, 232);
+
+        let view = self.camera.current.view_matrix();
+        let center = egui::pos2(rect.left() + 44.0, rect.bottom() - 44.0);
+
+        // World axes are direction vectors, so transform_vector3 applies
+        // only the rotation part of the view matrix. Camera-space basis
+        // is right-handed: +x right, +y up, −z into the screen.
+        let mut axes: [(f32, f32, f32, Color32, &str); 3] = [
+            project(view.transform_vector3(DVec3::X), X_COL, "x"),
+            project(view.transform_vector3(DVec3::Y), Y_COL, "y"),
+            project(view.transform_vector3(DVec3::Z), Z_COL, "z"),
+        ];
+        axes.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
+
+        let painter = ui.painter();
+        let bg = crate::app::design::tokens::color::fg::TERTIARY;
+        painter.circle_stroke(center, RADIUS_PX + 2.0, Stroke::new(0.5, bg.gamma_multiply(0.4)));
+
+        for (dx, dy, depth, color, label) in axes {
+            let tip = center + egui::vec2(dx * RADIUS_PX, dy * RADIUS_PX);
+            // Axes pointing away from the camera dim — gives the ring a
+            // sense of depth without needing a real projection.
+            let alpha = if depth > 0.0 { 0.45 } else { 1.0 };
+            painter.line_segment([center, tip], Stroke::new(1.5, color.gamma_multiply(alpha)));
+            painter.text(
+                tip + egui::vec2(dx * 7.0, dy * 7.0),
+                egui::Align2::CENTER_CENTER,
+                label,
+                FontId::monospace(9.5),
+                color.gamma_multiply(alpha),
+            );
+        }
+        painter.circle_filled(center, 1.5, bg);
     }
 
     // ── Overlay ───────────────────────────────────────────────────────────────
