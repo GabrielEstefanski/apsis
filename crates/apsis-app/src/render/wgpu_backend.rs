@@ -558,8 +558,7 @@ impl WgpuBackend {
                 queue,
                 trail_buf,
                 self.trail_visibility.as_deref(),
-                center,
-                scale,
+                view_proj,
                 &self.trail_style,
             );
         }
