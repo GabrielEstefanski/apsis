@@ -745,10 +745,6 @@ impl SimulationApp {
                 backend.trail_visibility = None;
                 backend.trail_buffer = None;
             };
-            // Force trails off until they ride on the 3D camera. See the
-            // `show_grid = false` note above.
-            backend.trail_buffer = None;
-            backend.trail_visibility = None;
         }
 
         // ── Place-mode: click or drag-release to spawn a body ────────────────
