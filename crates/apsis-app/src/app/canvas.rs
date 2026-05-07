@@ -6,6 +6,7 @@ use crate::render::orbit_overlay::{
     OrbitOverlayStyle, closest_sample_index, draw_orbit_apsides, draw_orbit_polyline,
     draw_orbit_polyline_with_halo,
 };
+use crate::render::render_relative::RenderRelativeVec3;
 use apsis::physics::orbital::{compute_elements, dominant_primary, is_system_root};
 use apsis::templates::instantiate_at;
 use eframe::egui::{self, Color32, FontId, Pos2, Stroke};
@@ -444,13 +445,23 @@ impl SimulationApp {
                 .filter(|b| b.is_luminous())
                 .map(|b| b.luminosity)
                 .fold(0.0_f64, f64::max);
+            // Render-frame anchor for the frame; built once and reused
+            // for every camera-relative cast below.
+            let render_origin = self.camera.current.eye();
+
             let lights: Vec<LightSpec> = if max_lum > 0.0 {
                 bodies
                     .iter()
                     .filter(|b| b.is_luminous())
-                    .map(|b| LightSpec {
-                        world_pos: [b.x as f32, b.y as f32, b.z as f32],
-                        intensity: (b.luminosity / max_lum) as f32,
+                    .map(|b| {
+                        let rel = RenderRelativeVec3::from_world(
+                            glam::DVec3::new(b.x, b.y, b.z),
+                            render_origin,
+                        );
+                        LightSpec {
+                            pos_relative: rel.as_array(),
+                            intensity: (b.luminosity / max_lum) as f32,
+                        }
                     })
                     .collect()
             } else {
@@ -468,10 +479,15 @@ impl SimulationApp {
             // are already fully lit in reality), outer planets keep a usable
             // fraction. The RMS (vs. plain mean) weights toward outer bodies
             // deliberately — it's the outer planets that need the help.
-            let r_ref = if let Some(primary) = lights.first() {
-                let lx = primary.world_pos[0] as f64;
-                let ly = primary.world_pos[1] as f64;
-                let lz = primary.world_pos[2] as f64;
+            //
+            // Computed in absolute `f64` space against the primary
+            // luminous body — the LightSpec we built above is already
+            // in render-relative coordinates and has lost a tiny amount
+            // of precision, irrelevant here but worth taking from the
+            // raw body for clarity.
+            let primary_luminous = bodies.iter().find(|b| b.is_luminous());
+            let r_ref = if let Some(primary) = primary_luminous {
+                let (lx, ly, lz) = (primary.x, primary.y, primary.z);
                 let (sum_sq, n) = bodies.iter().filter(|b| !b.is_luminous()).fold(
                     (0.0_f64, 0usize),
                     |(acc, k), b| {
@@ -583,8 +599,12 @@ impl SimulationApp {
                         emissive_full[2] * weight_disk,
                         emissive_full[3],
                     ];
+                    let center_rel = RenderRelativeVec3::from_world(
+                        glam::DVec3::new(b.x, b.y, b.z),
+                        render_origin,
+                    );
                     backend.draw_body(
-                        world_pos,
+                        center_rel,
                         r_world,
                         albedo,
                         emissive,
