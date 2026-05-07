@@ -422,7 +422,7 @@ impl SimulationApp {
                     .iter()
                     .filter(|b| b.is_luminous())
                     .map(|b| LightSpec {
-                        world_pos: [b.x as f32, b.y as f32, 0.0],
+                        world_pos: [b.x as f32, b.y as f32, b.z as f32],
                         intensity: (b.luminosity / max_lum) as f32,
                     })
                     .collect()
@@ -444,12 +444,14 @@ impl SimulationApp {
             let r_ref = if let Some(primary) = lights.first() {
                 let lx = primary.world_pos[0] as f64;
                 let ly = primary.world_pos[1] as f64;
+                let lz = primary.world_pos[2] as f64;
                 let (sum_sq, n) = bodies.iter().filter(|b| !b.is_luminous()).fold(
                     (0.0_f64, 0usize),
                     |(acc, k), b| {
                         let dx = b.x - lx;
                         let dy = b.y - ly;
-                        (acc + dx * dx + dy * dy, k + 1)
+                        let dz = b.z - lz;
+                        (acc + dx * dx + dy * dy + dz * dz, k + 1)
                     },
                 );
                 if n > 0 { (sum_sq / n as f64).sqrt().max(1e-3) as f32 } else { 1.0 }
@@ -496,7 +498,18 @@ impl SimulationApp {
 
                 let base = [rgb[0] as f32 / 255.0, rgb[1] as f32 / 255.0, rgb[2] as f32 / 255.0];
                 let (albedo, emissive) = if b.is_luminous() {
-                    ([0.0, 0.0, 0.0, 1.0], [base[0], base[1], base[2], 1.0])
+                    // Scale emissive by luminosity so HDR has dynamic
+                    // range for the auto-exposure to work with.
+                    // Without this every star peaks at albedo cap (≤ 1)
+                    // and the tone-map cannot tell a Sun apart from a
+                    // fully-lit planet — resulting in "everything dark
+                    // except the star" after exposure compression.
+                    // Saturating sigmoid: brown dwarf ≈ 1×, Sun ≈ 7×,
+                    // O-star bounded near 10×.
+                    let lum_solar = b.luminosity as f32;
+                    let scale = 1.0 + 9.0 * (1.0 - (-lum_solar).exp());
+                    let e = [base[0] * scale, base[1] * scale, base[2] * scale, 1.0];
+                    ([0.0, 0.0, 0.0, 1.0], e)
                 } else {
                     ([base[0], base[1], base[2], 1.0], [0.0, 0.0, 0.0, 1.0])
                 };
