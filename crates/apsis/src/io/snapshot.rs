@@ -58,6 +58,7 @@
 //! | 7   | Added `z` and `vz` to per-body record (3D port) |
 //! | 8   | Replaced `material` byte with `q_pr` (8 bytes f64); `Body` no longer carries a material taxonomy field |
 //! | 9   | Trail positions widened from `[f32; 2]` to `[f32; 3]` for the 3D camera |
+//! | 10  | Per-body record carries a `BodyClass` byte appended after `q_pr` |
 //!
 //! Older files (ver < 5) round-trip cleanly; the `WisdomHolman` variant
 //! simply cannot be expressed in them and defaults to `VelocityVerlet` on
@@ -67,19 +68,22 @@
 //! reconstruct `q_pr` from the legacy material byte via a fixed lookup
 //! that mirrors the pre-refactor `Material::q_pr()` table. v8 trail
 //! sections store two floats per sample; the v9 reader materialises the
-//! third component as `z = 0`.
+//! third component as `z = 0`. v9 and earlier per-body records have no
+//! class byte; the v10 reader assigns `BodyClass::Unknown` so the body
+//! falls outside the class-based filters until the user re-tags it.
 
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::domain::body::Body;
+use crate::domain::body_preset::BodyClass;
 use crate::physics::integrator::IntegratorKind;
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 pub const MAGIC: [u8; 4] = *b"GRAV";
-pub const SCHEMA_VERSION: u16 = 9;
+pub const SCHEMA_VERSION: u16 = 10;
 
 // ── Snapshot ──────────────────────────────────────────────────────────────────
 
@@ -125,7 +129,8 @@ pub struct SimSnapshot {
 ///
 /// Mirrors [`Body`] exactly, but uses `Copy` semantics so snapshots can be
 /// cloned without heap allocation per body. As of schema v8 the record
-/// stores `q_pr` directly rather than a material taxonomy byte.
+/// stores `q_pr` directly rather than a material taxonomy byte; v10 adds
+/// a one-byte [`BodyClass`] tag.
 #[derive(Clone, Copy)]
 pub struct BodyRecord {
     pub x: f64,
@@ -142,6 +147,9 @@ pub struct BodyRecord {
     /// Radiation-pressure receiver coefficient. v8+ persists it
     /// directly; v1–7 reconstructed it from the legacy material byte.
     pub q_pr: f64,
+    /// UX taxonomy bucket. v10+ persists it directly; older versions
+    /// load as [`BodyClass::Unknown`].
+    pub class: BodyClass,
 }
 
 impl BodyRecord {
@@ -160,6 +168,7 @@ impl BodyRecord {
             physical_radius: b.physical_radius,
             color: b.color,
             q_pr: b.q_pr,
+            class: b.class,
         }
     }
 
@@ -176,6 +185,7 @@ impl BodyRecord {
         b.physical_radius = self.physical_radius;
         b.color = self.color;
         b.q_pr = self.q_pr;
+        b.class = self.class;
         b
     }
 }
@@ -417,8 +427,8 @@ impl SimSnapshot {
         // v4: reproducibility seed
         wu64(&mut w, self.seed)?;
 
-        // Body records (v8: x, y, z, vx, vy, vz, mass, density, softening,
-        //                    physical_radius, color[3], q_pr)
+        // Body records (v10: x, y, z, vx, vy, vz, mass, density, softening,
+        //                     physical_radius, color[3], q_pr, class[1])
         wu32(&mut w, self.bodies.len() as u32)?;
         for b in &self.bodies {
             wf64(&mut w, b.x)?;
@@ -433,6 +443,7 @@ impl SimSnapshot {
             wf64(&mut w, b.physical_radius)?;
             w.write_all(&b.color)?;
             wf64(&mut w, b.q_pr)?;
+            wu8(&mut w, b.class.to_u8())?;
         }
 
         // v2: per-body names
@@ -540,6 +551,17 @@ impl SimSnapshot {
             let mut color = [0u8; 3];
             r.read_exact(&mut color)?;
             let q_pr = if ver >= 8 { rf64(&mut r)? } else { q_pr };
+            // v10 appends a one-byte BodyClass after q_pr. Older
+            // versions had no class field — load as Unknown so the
+            // body sits outside the class-based filters until the
+            // user re-tags it.
+            let class = if ver >= 10 {
+                let mut class_byte = [0u8; 1];
+                r.read_exact(&mut class_byte)?;
+                BodyClass::from_u8(class_byte[0])
+            } else {
+                BodyClass::Unknown
+            };
 
             bodies.push(BodyRecord {
                 x,
@@ -554,6 +576,7 @@ impl SimSnapshot {
                 physical_radius,
                 color,
                 q_pr,
+                class,
             });
         }
 

@@ -1,4 +1,4 @@
-use crate::domain::body_preset::{self, BodyPreset};
+use crate::domain::body_preset::{self, BodyClass, BodyPreset};
 use std::f64::consts::PI;
 
 /// Base softening length for a body of mass 1.0.
@@ -77,6 +77,14 @@ pub struct Body {
     /// radiation forces. Bodies with `q_pr == 0.0` are silently
     /// skipped by the radiation pipeline.
     pub q_pr: f64,
+
+    /// UX taxonomy bucket — Star, Planet, Moon, Asteroid, Comet, or
+    /// Unknown. Set from the construction preset's
+    /// [`BodyPreset::default_class`] (overridable per body via
+    /// [`Body::with_class`]); never read by physics. The render and
+    /// inspector layers use it for category-level filters and
+    /// grouping.
+    pub class: BodyClass,
 }
 
 /// Body payload with an optional explicit display name.
@@ -120,6 +128,7 @@ impl Body {
             color: [180, 180, 180],
             luminosity: 0.0,
             q_pr: 0.0,
+            class: BodyClass::Unknown,
         }
     }
 
@@ -154,6 +163,7 @@ impl Body {
             color: preset.default_color,
             luminosity,
             q_pr: preset.default_q_pr,
+            class: preset.default_class,
         }
     }
 
@@ -292,6 +302,18 @@ impl Body {
     #[must_use]
     pub fn with_q_pr(mut self, q_pr: f64) -> Self {
         self.q_pr = q_pr;
+        self
+    }
+
+    /// Override the preset-default UX class. Use to tag a body whose
+    /// preset does not match its role: Earth's Moon is constructed
+    /// from [`body_preset::ROCKY`] (default class
+    /// [`BodyClass::Planet`]) but should render under
+    /// [`BodyClass::Moon`] for filter purposes.
+    #[inline]
+    #[must_use]
+    pub fn with_class(mut self, class: BodyClass) -> Self {
+        self.class = class;
         self
     }
 
