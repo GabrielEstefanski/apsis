@@ -12,15 +12,11 @@ pub struct CallbackFn {
     pub screen: [f32; 2],
     /// Canvas origin in logical pixels: [rect.min.x, rect.min.y].
     pub viewport_min: [f32; 2],
-    /// Absolute-frame world → clip transform. Column-major.
-    pub view_proj: [[f32; 4]; 4],
     /// Render-frame (camera-relative) → clip transform. Column-major.
-    /// Used by shaders that consume geometry already shifted by
-    /// `render_origin`; equivalent to `projection × rotation_only_view`.
+    /// `projection × rotation_only_view`. Render-side geometry is
+    /// produced in this frame from
+    /// [`crate::render::render_relative::RenderRelativeVec3`].
     pub view_proj_relative: [[f32; 4]; 4],
-    /// Eye position in absolute world coordinates. Render-frame
-    /// shaders use `(0,0,0)` instead — see [`crate::render::render_relative`].
-    pub camera_pos: [f32; 3],
 }
 
 impl CallbackTrait for CallbackFn {
@@ -52,9 +48,7 @@ impl CallbackTrait for CallbackFn {
             physical_size,
             ppp,
             self.format,
-            self.view_proj,
             self.view_proj_relative,
-            self.camera_pos,
         );
         Vec::new()
     }

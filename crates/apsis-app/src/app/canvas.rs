@@ -58,18 +58,10 @@ fn project(
 
 // ── World → screen projection ────────────────────────────────────────────────
 
-fn camera_view_proj(camera: &crate::app::camera::OrbitCamera, rect: egui::Rect) -> glam::Mat4 {
-    let aspect = (rect.width() / rect.height().max(1.0)).max(0.001);
-    let proj = glam::Mat4::perspective_infinite_reverse_rh(FOV_Y_RAD, aspect, NEAR_PLANE);
-    let view = camera.current.view_matrix().as_mat4();
-    proj * view
-}
-
 /// Render-frame projection: `projection × rotation_only_view`. Consumed
-/// by shaders whose geometry has already been shifted by the current
-/// `render_origin`, so the camera sits at `(0,0,0)` and only the view
-/// rotation matters. Same `proj` as the absolute path so the depth
-/// distribution and clip-space conventions stay identical.
+/// by shaders and CPU helpers whose geometry has already been shifted
+/// by the current `render_origin`, so the camera sits at `(0,0,0)` and
+/// only the view rotation matters.
 fn camera_view_proj_relative(
     camera: &crate::app::camera::OrbitCamera,
     rect: egui::Rect,
@@ -80,48 +72,67 @@ fn camera_view_proj_relative(
     proj * view
 }
 
-/// Inverse of [`world_to_screen`] restricted to the ecliptic
-/// (`z = 0`). Returns `None` when the camera ray doesn't hit that
-/// plane in front of the eye — looking up, grazing, or with the
-/// pivot above the horizon.
+/// Ray-cast through the camera onto the absolute-world ecliptic plane
+/// (`z = 0`). Operates entirely in the render frame (camera at the
+/// origin, plane at `z = -render_origin.z`); the absolute hit point is
+/// recovered by adding `render_origin` back at `f64` precision.
+///
+/// Returns `None` when the camera ray doesn't hit that plane in front
+/// of the eye — looking up, grazing, or with the pivot above the
+/// horizon.
 fn screen_to_world_on_z_plane(
     screen_pos: egui::Pos2,
-    view_proj: glam::Mat4,
+    view_proj_relative: glam::Mat4,
     rect: egui::Rect,
-    camera_pos: glam::Vec3,
+    render_origin: glam::DVec3,
 ) -> Option<glam::DVec3> {
-    let inv = view_proj.inverse();
+    let inv = view_proj_relative.inverse();
     let ndc_x = ((screen_pos.x - rect.min.x) / rect.width()) * 2.0 - 1.0;
     let ndc_y = -(((screen_pos.y - rect.min.y) / rect.height()) * 2.0 - 1.0);
-    // Reverse-Z infinite-far: clip z = 0 lands on the far plane,
-    // so unprojecting that gives a stable far-ray endpoint.
+    // Reverse-Z infinite-far: clip z = 0 lands on the far plane, so
+    // unprojecting that gives a stable far-ray endpoint in the render
+    // frame. Camera origin is `(0,0,0)` here, so the ray direction is
+    // just the normalised endpoint.
     let far_clip = glam::Vec4::new(ndc_x, ndc_y, 0.0, 1.0);
-    let far_world = inv * far_clip;
-    if far_world.w.abs() < 1e-12 {
+    let far_relative = inv * far_clip;
+    if far_relative.w.abs() < 1e-12 {
         return None;
     }
-    let far_pos = far_world.truncate() / far_world.w;
-    let ray_dir = (far_pos - camera_pos).normalize();
+    let far_pos = far_relative.truncate() / far_relative.w;
+    let ray_dir = far_pos.normalize();
     if ray_dir.z.abs() < 1e-6 {
         return None;
     }
-    let t = -camera_pos.z / ray_dir.z;
+    // Absolute `z = 0` plane sits at `z_relative = -render_origin.z`
+    // in the render frame.
+    let target_z_relative = -render_origin.z as f32;
+    let t = target_z_relative / ray_dir.z;
     if t <= 0.0 {
         return None;
     }
-    let hit = camera_pos + ray_dir * t;
-    Some(glam::DVec3::new(hit.x as f64, hit.y as f64, 0.0))
+    let hit_relative = ray_dir * t;
+    // Recover absolute world coordinates at `f64` precision.
+    let hit_x = render_origin.x + hit_relative.x as f64;
+    let hit_y = render_origin.y + hit_relative.y as f64;
+    Some(glam::DVec3::new(hit_x, hit_y, 0.0))
 }
 
-/// Project a world-space point onto canvas screen coordinates. Returns
-/// `None` when the point is at or behind the near plane (clip-space
-/// `w ≤ 0`) — caller should skip drawing or hit-testing such bodies.
+/// Project an absolute-world point onto canvas screen coordinates.
+/// The world position is shifted into the render frame at `f64`
+/// precision (via [`RenderRelativeVec3::from_world`]) before the `f32`
+/// cast, so the projection stays stable for bodies at AU-scale absolute
+/// positions even when the camera is close to them.
+///
+/// Returns `None` when the point is at or behind the near plane
+/// (clip-space `w ≤ 0`).
 fn world_to_screen(
-    world_pos: glam::Vec3,
-    view_proj: glam::Mat4,
+    world_pos: glam::DVec3,
+    render_origin: glam::DVec3,
+    view_proj_relative: glam::Mat4,
     rect: egui::Rect,
 ) -> Option<egui::Pos2> {
-    let clip = view_proj * world_pos.extend(1.0);
+    let rel = RenderRelativeVec3::from_world(world_pos, render_origin);
+    let clip = view_proj_relative * rel.as_vec3().extend(1.0);
     if clip.w <= 0.0 {
         return None;
     }
@@ -132,17 +143,21 @@ fn world_to_screen(
     Some(egui::pos2(sx, sy))
 }
 
-/// Pixel radius of a sphere at `center` of physical size `radius_world`
-/// as seen by a perspective camera at `camera_pos`. Matches the formula
-/// used by the body shader so hit-test and ring overlays land on the
-/// rendered silhouette.
+/// Pixel radius of a sphere with physical size `radius_world` whose
+/// centre sits at `center_relative` in the render frame. Matches the
+/// formula used by the body shader so hit-test and ring overlays land
+/// on the rendered silhouette.
+///
+/// The camera is at the render-frame origin, so `center_relative.length()`
+/// is the camera-to-body distance — small magnitude when the camera is
+/// close, with full `f32` precision because both sides of the original
+/// subtraction were taken in `f64`.
 fn projected_radius_px(
-    center: glam::Vec3,
+    center_relative: RenderRelativeVec3,
     radius_world: f32,
-    camera_pos: glam::Vec3,
     canvas_height_px: f32,
 ) -> f32 {
-    let dist = (center - camera_pos).length().max(1e-6);
+    let dist = center_relative.as_vec3().length().max(1e-6);
     let focal_y = canvas_height_px / (2.0 * (FOV_Y_RAD * 0.5).tan());
     radius_world * focal_y / dist
 }
@@ -397,12 +412,13 @@ impl SimulationApp {
         // frame and threaded through hit-test, hover, label drawing and
         // the render callback so a single source of truth governs where
         // each body lives on screen.
-        let view_proj = camera_view_proj(&self.camera, rect);
+        let view_proj_relative = camera_view_proj_relative(&self.camera, rect);
+        let render_origin = self.camera.current.eye();
 
         // ── Hover detection (before click, drives cursor + ring) ──────────────
         self.hovered_body = hover_pos
             .filter(|p| rect.contains(*p))
-            .and_then(|p| self.find_body_at(p, view_proj, rect));
+            .and_then(|p| self.find_body_at(p, view_proj_relative, rect));
 
         // Cursor: pointer over bodies, grab over empty space, grabbing while dragging
         if response.dragged() {
@@ -445,10 +461,6 @@ impl SimulationApp {
                 .filter(|b| b.is_luminous())
                 .map(|b| b.luminosity)
                 .fold(0.0_f64, f64::max);
-            // Render-frame anchor for the frame; built once and reused
-            // for every camera-relative cast below.
-            let render_origin = self.camera.current.eye();
-
             let lights: Vec<LightSpec> = if max_lum > 0.0 {
                 bodies
                     .iter()
@@ -512,10 +524,6 @@ impl SimulationApp {
                 ..Default::default()
             });
 
-            let body_camera_pos = {
-                let e = self.camera.current.eye();
-                glam::Vec3::new(e.x as f32, e.y as f32, e.z as f32)
-            };
             let body_canvas_h = rect.height().max(1.0);
             let body_focal_y = body_canvas_h / (2.0 * (FOV_Y_RAD * 0.5).tan());
             let body_mode = self.semantic_scale_mode;
@@ -550,8 +558,9 @@ impl SimulationApp {
                     Some(colors) => colors[i],
                     None => b.color,
                 };
-                let body_world = glam::Vec3::new(b.x as f32, b.y as f32, b.z as f32);
-                let body_dist = (body_world - body_camera_pos).length().max(1e-6);
+                let body_world = glam::DVec3::new(b.x, b.y, b.z);
+                let center_rel = RenderRelativeVec3::from_world(body_world, render_origin);
+                let body_dist = center_rel.as_vec3().length().max(1e-6);
                 let r_world = radius_world_3d(
                     b.physical_radius,
                     body_mode,
@@ -559,7 +568,7 @@ impl SimulationApp {
                     body_dist,
                     body_focal_y,
                 );
-                let r_px = projected_radius_px(body_world, r_world, body_camera_pos, body_canvas_h);
+                let r_px = projected_radius_px(center_rel, r_world, body_canvas_h);
 
                 let base = [rgb[0] as f32 / 255.0, rgb[1] as f32 / 255.0, rgb[2] as f32 / 255.0];
                 let luminous = b.is_luminous();
@@ -575,7 +584,6 @@ impl SimulationApp {
                 } else {
                     ([base[0], base[1], base[2], 1.0], [0.0, 0.0, 0.0, 1.0])
                 };
-                let world_pos = [b.x as f32, b.y as f32, b.z as f32];
 
                 // Cross-fade disc ↔ point applies to both branches —
                 // sub-pixel luminous bodies need the sprite path or
@@ -599,10 +607,6 @@ impl SimulationApp {
                         emissive_full[2] * weight_disk,
                         emissive_full[3],
                     ];
-                    let center_rel = RenderRelativeVec3::from_world(
-                        glam::DVec3::new(b.x, b.y, b.z),
-                        render_origin,
-                    );
                     backend.draw_body(
                         center_rel,
                         r_world,
@@ -614,12 +618,14 @@ impl SimulationApp {
                 }
 
                 if weight_point > 0.001 {
-                    if let Some(pix) = world_to_screen(body_world, view_proj, rect) {
+                    if let Some(pix) =
+                        world_to_screen(body_world, render_origin, view_proj_relative, rect)
+                    {
                         let body_pos = apsis::math::Vec3::new(b.x, b.y, b.z);
                         let observer = apsis::math::Vec3::new(
-                            body_camera_pos.x as f64,
-                            body_camera_pos.y as f64,
-                            body_camera_pos.z as f64,
+                            render_origin.x,
+                            render_origin.y,
+                            render_origin.z,
                         );
                         let mag = apsis::physics::photometry::apparent_magnitude(
                             b,
@@ -656,9 +662,15 @@ impl SimulationApp {
             {
                 let g_factor = self.system.g_factor();
                 let t_sim = self.system.t();
+                // Orbit-overlay sample projection: take each `f64` world
+                // sample, shift into the render frame at full precision,
+                // then apply the relative view-proj. Same pattern as the
+                // body draw loop so an orbit polyline lands on the
+                // pixels its body draws on.
                 let project = |p: [f64; 3]| -> ([f32; 2], f32) {
-                    let world = glam::Vec3::new(p[0] as f32, p[1] as f32, p[2] as f32);
-                    let clip = view_proj * world.extend(1.0);
+                    let world = glam::DVec3::new(p[0], p[1], p[2]);
+                    let rel = RenderRelativeVec3::from_world(world, render_origin);
+                    let clip = view_proj_relative * rel.as_vec3().extend(1.0);
                     let w = clip.w;
                     if w > 0.0 {
                         let ndc = clip.truncate() / w;
@@ -758,8 +770,10 @@ impl SimulationApp {
                         // behind-camera bodies skip the candidate
                         // pool — the orbit ranking only looks at what
                         // the user might plausibly be looking at.
-                        let world = glam::Vec3::new(b.x as f32, b.y as f32, b.z as f32);
-                        let Some(sp) = world_to_screen(world, view_proj, rect) else {
+                        let world = glam::DVec3::new(b.x, b.y, b.z);
+                        let Some(sp) =
+                            world_to_screen(world, render_origin, view_proj_relative, rect)
+                        else {
                             continue;
                         };
                         let dx = sp.x - vp_center.x;
@@ -948,7 +962,7 @@ impl SimulationApp {
             if response.drag_started() {
                 if let Some(pos) = pointer.press_origin() {
                     // Only start a place-drag if not clicking an existing body
-                    if self.find_body_at(pos, view_proj, rect).is_none() {
+                    if self.find_body_at(pos, view_proj_relative, rect).is_none() {
                         self.place_drag_start = Some(pos);
                     }
                 }
@@ -978,14 +992,22 @@ impl SimulationApp {
                         ));
                         // Velocity preview from the drag delta in
                         // world AU on the ecliptic. Both endpoints
-                        // unproject through the same view_proj, so
-                        // their difference is dimensional regardless
-                        // of camera zoom or tilt.
-                        let cam = self.camera.current.eye();
-                        let cam_pos = glam::Vec3::new(cam.x as f32, cam.y as f32, cam.z as f32);
+                        // unproject through the same camera so their
+                        // difference is dimensional regardless of
+                        // zoom or tilt.
                         let speed = match (
-                            screen_to_world_on_z_plane(start, view_proj, rect, cam_pos),
-                            screen_to_world_on_z_plane(cur, view_proj, rect, cam_pos),
+                            screen_to_world_on_z_plane(
+                                start,
+                                view_proj_relative,
+                                rect,
+                                render_origin,
+                            ),
+                            screen_to_world_on_z_plane(
+                                cur,
+                                view_proj_relative,
+                                rect,
+                                render_origin,
+                            ),
                         ) {
                             (Some(s), Some(e)) => {
                                 let d = e - s;
@@ -1009,13 +1031,14 @@ impl SimulationApp {
                 let start = self.place_drag_start.take();
                 if let Some(cursor) = ctx.input(|i| i.pointer.interact_pos()) {
                     // Don't spawn if clicking an existing body
-                    if self.find_body_at(cursor, view_proj, rect).is_none() {
+                    if self.find_body_at(cursor, view_proj_relative, rect).is_none() {
                         let spawn_pos = start.unwrap_or(cursor);
-                        let cam = self.camera.current.eye();
-                        let cam_pos = glam::Vec3::new(cam.x as f32, cam.y as f32, cam.z as f32);
-                        let Some(spawn_world) =
-                            screen_to_world_on_z_plane(spawn_pos, view_proj, rect, cam_pos)
-                        else {
+                        let Some(spawn_world) = screen_to_world_on_z_plane(
+                            spawn_pos,
+                            view_proj_relative,
+                            rect,
+                            render_origin,
+                        ) else {
                             self.place_drag_start = None;
                             return;
                         };
@@ -1025,9 +1048,20 @@ impl SimulationApp {
                         // Velocity from drag delta — same dimensional
                         // unproject as the preview above.
                         let (vx, vy) = match start
-                            .and_then(|s| screen_to_world_on_z_plane(s, view_proj, rect, cam_pos))
-                            .zip(screen_to_world_on_z_plane(cursor, view_proj, rect, cam_pos))
-                        {
+                            .and_then(|s| {
+                                screen_to_world_on_z_plane(
+                                    s,
+                                    view_proj_relative,
+                                    rect,
+                                    render_origin,
+                                )
+                            })
+                            .zip(screen_to_world_on_z_plane(
+                                cursor,
+                                view_proj_relative,
+                                rect,
+                                render_origin,
+                            )) {
                             Some((s, e)) => {
                                 let d = e - s;
                                 (d.x * 0.5, d.y * 0.5)
@@ -1063,7 +1097,7 @@ impl SimulationApp {
             if response.clicked() {
                 if let Some(cursor) = ctx.input(|i| i.pointer.interact_pos()) {
                     let shift = ctx.input(|i| i.modifiers.shift);
-                    match self.find_body_at(cursor, view_proj, rect) {
+                    match self.find_body_at(cursor, view_proj_relative, rect) {
                         Some(idx) => {
                             if shift {
                                 // Shift+click: toggle body into/out of the selection.
@@ -1143,11 +1177,12 @@ impl SimulationApp {
                         // casting through the camera onto the
                         // ecliptic. Drop is rejected when the camera
                         // can't see that plane at the cursor.
-                        let cam = self.camera.current.eye();
-                        let cam_pos = glam::Vec3::new(cam.x as f32, cam.y as f32, cam.z as f32);
-                        let Some(world) =
-                            screen_to_world_on_z_plane(screen_pos, view_proj, rect, cam_pos)
-                        else {
+                        let Some(world) = screen_to_world_on_z_plane(
+                            screen_pos,
+                            view_proj_relative,
+                            rect,
+                            render_origin,
+                        ) else {
                             return;
                         };
                         let wx = world.x;
@@ -1183,11 +1218,7 @@ impl SimulationApp {
         let queue = self.queue.as_ref().unwrap().clone();
         let format = self.format.unwrap();
 
-        let view_proj_arr = view_proj.to_cols_array_2d();
-        let view_proj_relative_arr =
-            camera_view_proj_relative(&self.camera, rect).to_cols_array_2d();
-        let eye = self.camera.current.eye();
-        let camera_pos = [eye.x as f32, eye.y as f32, eye.z as f32];
+        let view_proj_relative_arr = view_proj_relative.to_cols_array_2d();
 
         ui.painter().add(egui_wgpu::Callback::new_paint_callback(
             rect,
@@ -1198,14 +1229,12 @@ impl SimulationApp {
                 format,
                 screen: [rect.width(), rect.height()],
                 viewport_min: [rect.min.x, rect.min.y],
-                view_proj: view_proj_arr,
                 view_proj_relative: view_proj_relative_arr,
-                camera_pos,
             },
         ));
 
         // ── Overlay: rings + labels (on top of GPU layer) ─────────────────────
-        self.draw_overlay(ui, rect, view_proj, time);
+        self.draw_overlay(ui, rect, view_proj_relative, time);
 
         // ── FPS / frame-time HUD (top-right of canvas, subtle) ────────────────
         if self.show_fps_hud {
@@ -1243,7 +1272,10 @@ impl SimulationApp {
         const Y_COL: Color32 = Color32::from_rgb(132, 192, 132);
         const Z_COL: Color32 = Color32::from_rgb(122, 154, 232);
 
-        let view = self.camera.current.view_matrix();
+        // The triad only needs the camera orientation, never the eye
+        // translation, so the rotation-only view (the same one shaders
+        // consume under Floating Origin) is the right choice.
+        let view = self.camera.current.view_rotation_only();
         let center = egui::pos2(rect.left() + 44.0, rect.bottom() - 44.0);
 
         // World axes are direction vectors, so transform_vector3 applies
@@ -1279,7 +1311,13 @@ impl SimulationApp {
 
     // ── Overlay ───────────────────────────────────────────────────────────────
 
-    fn draw_overlay(&self, ui: &egui::Ui, rect: egui::Rect, view_proj: glam::Mat4, time: f32) {
+    fn draw_overlay(
+        &self,
+        ui: &egui::Ui,
+        rect: egui::Rect,
+        view_proj_relative: glam::Mat4,
+        time: f32,
+    ) {
         let bodies = self.system.bodies();
         let names = self.system.names();
 
@@ -1287,11 +1325,8 @@ impl SimulationApp {
             return;
         }
 
+        let render_origin = self.camera.current.eye();
         let max_mass = bodies.iter().map(|b| b.mass).fold(0.0_f64, f64::max);
-        let camera_pos = {
-            let e = self.camera.current.eye();
-            glam::Vec3::new(e.x as f32, e.y as f32, e.z as f32)
-        };
         let canvas_h = rect.height().max(1.0);
         let focal_y = canvas_h / (2.0 * (FOV_Y_RAD * 0.5).tan());
         let mode = self.semantic_scale_mode;
@@ -1302,15 +1337,10 @@ impl SimulationApp {
         };
 
         // Label visibility threshold scales with camera distance so a wide
-        // overview shows fewer labels than a close-up framing.
-        let cam_dist = (camera_pos
-            - glam::Vec3::new(
-                self.camera.current.pivot.x as f32,
-                self.camera.current.pivot.y as f32,
-                self.camera.current.pivot.z as f32,
-            ))
-        .length()
-        .max(1e-3);
+        // overview shows fewer labels than a close-up framing. Pivot
+        // distance comes straight from the orbit camera; the f64
+        // subtraction stays precise at AU scale.
+        let cam_dist = (render_origin - self.camera.current.pivot).length().max(1e-3) as f32;
         let importance_threshold = (2.0_f64 / cam_dist as f64).clamp(0.001, 1.0);
 
         let painter = ui.painter();
@@ -1320,13 +1350,15 @@ impl SimulationApp {
         let pulse = (time * 3.5).sin() * 1.5_f32;
 
         for (i, (body, name)) in bodies.iter().zip(names.iter()).enumerate() {
-            let world = glam::Vec3::new(body.x as f32, body.y as f32, body.z as f32);
-            let Some(body_pos) = world_to_screen(world, view_proj, rect) else {
+            let world = glam::DVec3::new(body.x, body.y, body.z);
+            let Some(body_pos) = world_to_screen(world, render_origin, view_proj_relative, rect)
+            else {
                 continue;
             };
-            let body_dist = (world - camera_pos).length().max(1e-6);
+            let center_rel = RenderRelativeVec3::from_world(world, render_origin);
+            let body_dist = center_rel.as_vec3().length().max(1e-6);
             let r_world = radius_world_3d(body.physical_radius, mode, min_px, body_dist, focal_y);
-            let visual_r = projected_radius_px(world, r_world, camera_pos, canvas_h);
+            let visual_r = projected_radius_px(center_rel, r_world, canvas_h);
             let px = body_pos.x;
             let py = body_pos.y;
 
@@ -1475,12 +1507,14 @@ impl SimulationApp {
 
     // ── Hit-test ──────────────────────────────────────────────────────────────
 
-    fn find_body_at(&self, cursor: Pos2, view_proj: glam::Mat4, rect: egui::Rect) -> Option<usize> {
+    fn find_body_at(
+        &self,
+        cursor: Pos2,
+        view_proj_relative: glam::Mat4,
+        rect: egui::Rect,
+    ) -> Option<usize> {
         let bodies = self.system.bodies();
-        let camera_pos = {
-            let e = self.camera.current.eye();
-            glam::Vec3::new(e.x as f32, e.y as f32, e.z as f32)
-        };
+        let render_origin = self.camera.current.eye();
         let canvas_h = rect.height().max(1.0);
         let focal_y = canvas_h / (2.0 * (FOV_Y_RAD * 0.5).tan());
         let mode = self.semantic_scale_mode;
@@ -1495,17 +1529,22 @@ impl SimulationApp {
         // bodies can occlude each other regardless of insertion order.
         let mut best: Option<(usize, f32)> = None;
         for (i, b) in bodies.iter().enumerate() {
-            let world = glam::Vec3::new(b.x as f32, b.y as f32, b.z as f32);
-            let Some(screen) = world_to_screen(world, view_proj, rect) else { continue };
-            let body_dist = (world - camera_pos).length().max(1e-6);
+            let world = glam::DVec3::new(b.x, b.y, b.z);
+            let Some(screen) = world_to_screen(world, render_origin, view_proj_relative, rect)
+            else {
+                continue;
+            };
+            let center_rel = RenderRelativeVec3::from_world(world, render_origin);
+            let dist_vec = center_rel.as_vec3();
+            let body_dist = dist_vec.length().max(1e-6);
             let r_world = radius_world_3d(b.physical_radius, mode, min_px, body_dist, focal_y);
-            let r = projected_radius_px(world, r_world, camera_pos, canvas_h).max(MIN_HIT_PX);
+            let r = projected_radius_px(center_rel, r_world, canvas_h).max(MIN_HIT_PX);
             let dx = cursor.x - screen.x;
             let dy = cursor.y - screen.y;
             if dx * dx + dy * dy > r * r {
                 continue;
             }
-            let cam_dist_sq = (world - camera_pos).length_squared();
+            let cam_dist_sq = dist_vec.length_squared();
             if best.is_none_or(|(_, prev_d2)| cam_dist_sq < prev_d2) {
                 best = Some((i, cam_dist_sq));
             }

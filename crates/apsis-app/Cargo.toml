@@ -49,3 +49,7 @@ tracing-tracy = { workspace = true, optional = true }
 pretty_assertions = { workspace = true }
 insta = { workspace = true }
 egui_kittest = { workspace = true }
+# Standalone WGSL parse + validate, called from per-renderer tests so
+# identifier-scope / type / field errors fail at `cargo test` instead
+# of waiting for `device.create_shader_module` at app startup.
+naga = "29"
