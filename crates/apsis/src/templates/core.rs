@@ -101,6 +101,12 @@ pub struct TemplateBody {
     /// (asteroid swarms, ad-hoc test particles) leave this `None` and
     /// inherit the preset model.
     pub density: Option<f64>,
+
+    /// Optional Bond-albedo override. Templates that quote real
+    /// bodies pass the published Bond value (Earth `0.306`, Moon
+    /// `0.110`, Vesta `0.42`, etc.); bulk-anonymous bodies leave
+    /// `None` and inherit the preset's class-typical placeholder.
+    pub albedo: Option<f64>,
 }
 
 impl TemplateBody {
@@ -117,6 +123,7 @@ impl TemplateBody {
             velocity: [0.0, 0.0, 0.0],
             class_override: None,
             density: None,
+            albedo: None,
         }
     }
 
@@ -135,6 +142,7 @@ impl TemplateBody {
             velocity,
             class_override: None,
             density: None,
+            albedo: None,
         }
     }
 }

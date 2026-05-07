@@ -59,6 +59,7 @@
 //! | 8   | Replaced `material` byte with `q_pr` (8 bytes f64); `Body` no longer carries a material taxonomy field |
 //! | 9   | Trail positions widened from `[f32; 2]` to `[f32; 3]` for the 3D camera |
 //! | 10  | Per-body record carries a `BodyClass` byte appended after `q_pr` |
+//! | 11  | Per-body record carries an `albedo` f64 appended after the class byte |
 //!
 //! Older files (ver < 5) round-trip cleanly; the `WisdomHolman` variant
 //! simply cannot be expressed in them and defaults to `VelocityVerlet` on
@@ -71,6 +72,9 @@
 //! third component as `z = 0`. v9 and earlier per-body records have no
 //! class byte; the v10 reader assigns `BodyClass::Unknown` so the body
 //! falls outside the class-based filters until the user re-tags it.
+//! v10 and earlier records have no albedo field; the v11 reader falls
+//! back to a class-typical placeholder (0.30 for Planet, 0.10 for
+//! Asteroid, 0.04 for Comet, 0.50 for Moon, 0.0 for Star/Unknown).
 
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
@@ -83,7 +87,7 @@ use crate::physics::integrator::IntegratorKind;
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 pub const MAGIC: [u8; 4] = *b"GRAV";
-pub const SCHEMA_VERSION: u16 = 10;
+pub const SCHEMA_VERSION: u16 = 11;
 
 // ── Snapshot ──────────────────────────────────────────────────────────────────
 
@@ -128,9 +132,9 @@ pub struct SimSnapshot {
 /// Per-body fields stored in a [`SimSnapshot`].
 ///
 /// Mirrors [`Body`] exactly, but uses `Copy` semantics so snapshots can be
-/// cloned without heap allocation per body. As of schema v8 the record
-/// stores `q_pr` directly rather than a material taxonomy byte; v10 adds
-/// a one-byte [`BodyClass`] tag.
+/// cloned without heap allocation per body. v8 dropped the legacy material
+/// byte in favour of `q_pr`; v10 added a one-byte [`BodyClass`] tag; v11
+/// added an `albedo` f64.
 #[derive(Clone, Copy)]
 pub struct BodyRecord {
     pub x: f64,
@@ -150,6 +154,9 @@ pub struct BodyRecord {
     /// UX taxonomy bucket. v10+ persists it directly; older versions
     /// load as [`BodyClass::Unknown`].
     pub class: BodyClass,
+    /// Bond albedo. v11+ persists it directly; older versions fall
+    /// back to a class-typical placeholder on load.
+    pub albedo: f64,
 }
 
 impl BodyRecord {
@@ -169,6 +176,7 @@ impl BodyRecord {
             color: b.color,
             q_pr: b.q_pr,
             class: b.class,
+            albedo: b.albedo,
         }
     }
 
@@ -186,6 +194,7 @@ impl BodyRecord {
         b.color = self.color;
         b.q_pr = self.q_pr;
         b.class = self.class;
+        b.albedo = self.albedo;
         b
     }
 }
@@ -366,6 +375,21 @@ fn legacy_q_pr_from_material_byte(v: u8) -> f64 {
     }
 }
 
+/// Class-typical Bond albedo placeholder for snapshots written
+/// before v11. Values mirror the `default_albedo` on the
+/// corresponding `BodyPreset`; bodies that need their published
+/// value re-tagged once the user opens the inspector.
+fn albedo_fallback_for(class: BodyClass) -> f64 {
+    match class {
+        BodyClass::Star => 0.0,
+        BodyClass::Planet => 0.30,
+        BodyClass::Moon => 0.50,
+        BodyClass::Asteroid => 0.10,
+        BodyClass::Comet => 0.04,
+        BodyClass::Unknown => 0.30,
+    }
+}
+
 // ── Snapshot I/O ──────────────────────────────────────────────────────────────
 
 fn unix_millis() -> u64 {
@@ -427,8 +451,8 @@ impl SimSnapshot {
         // v4: reproducibility seed
         wu64(&mut w, self.seed)?;
 
-        // Body records (v10: x, y, z, vx, vy, vz, mass, density, softening,
-        //                     physical_radius, color[3], q_pr, class[1])
+        // Body records (v11: x, y, z, vx, vy, vz, mass, density, softening,
+        //                     physical_radius, color[3], q_pr, class[1], albedo)
         wu32(&mut w, self.bodies.len() as u32)?;
         for b in &self.bodies {
             wf64(&mut w, b.x)?;
@@ -444,6 +468,7 @@ impl SimSnapshot {
             w.write_all(&b.color)?;
             wf64(&mut w, b.q_pr)?;
             wu8(&mut w, b.class.to_u8())?;
+            wf64(&mut w, b.albedo)?;
         }
 
         // v2: per-body names
@@ -562,6 +587,11 @@ impl SimSnapshot {
             } else {
                 BodyClass::Unknown
             };
+            // v11 appends an albedo f64 after the class byte. Older
+            // versions fall back to a class-typical placeholder so the
+            // photometry pipeline has a sane number to work with until
+            // the user retags.
+            let albedo = if ver >= 11 { rf64(&mut r)? } else { albedo_fallback_for(class) };
 
             bodies.push(BodyRecord {
                 x,
@@ -577,6 +607,7 @@ impl SimSnapshot {
                 color,
                 q_pr,
                 class,
+                albedo,
             });
         }
 

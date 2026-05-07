@@ -78,6 +78,9 @@ struct PlanetData {
     /// instantiator applies the conversion before handing the value
     /// to `Body::with_density`.
     density_kg_m3: f64,
+    /// Bond albedo (spectrum-integrated reflectivity, dimensionless).
+    /// Published NASA / JPL fact-sheet value.
+    albedo_bond: f64,
 }
 
 /// J2000 ecliptic mean orbital elements (NASA JPL `approx_pos.html`,
@@ -94,6 +97,7 @@ const PLANETS: &[PlanetData] = &[
         argp_deg: 29.130,
         preset: &body_preset::ROCKY,
         density_kg_m3: 5429.0,
+        albedo_bond: 0.088,
     },
     PlanetData {
         name: "Venus",
@@ -105,6 +109,7 @@ const PLANETS: &[PlanetData] = &[
         argp_deg: 54.852,
         preset: &body_preset::ROCKY,
         density_kg_m3: 5243.0,
+        albedo_bond: 0.760,
     },
     PlanetData {
         name: "Earth",
@@ -116,6 +121,7 @@ const PLANETS: &[PlanetData] = &[
         argp_deg: 102.938,
         preset: &body_preset::ROCKY,
         density_kg_m3: 5514.0,
+        albedo_bond: 0.306,
     },
     PlanetData {
         name: "Mars",
@@ -127,6 +133,7 @@ const PLANETS: &[PlanetData] = &[
         argp_deg: 286.502,
         preset: &body_preset::ROCKY,
         density_kg_m3: 3934.0,
+        albedo_bond: 0.250,
     },
     PlanetData {
         name: "Jupiter",
@@ -138,6 +145,7 @@ const PLANETS: &[PlanetData] = &[
         argp_deg: 274.255,
         preset: &body_preset::GAS,
         density_kg_m3: 1326.0,
+        albedo_bond: 0.503,
     },
     PlanetData {
         name: "Saturn",
@@ -152,6 +160,7 @@ const PLANETS: &[PlanetData] = &[
         // (less than water) — Voyager / Cassini gravity moments fix
         // it firmly at 687 kg/m³.
         density_kg_m3: 687.0,
+        albedo_bond: 0.342,
     },
     PlanetData {
         name: "Uranus",
@@ -163,6 +172,7 @@ const PLANETS: &[PlanetData] = &[
         argp_deg: 96.999,
         preset: &body_preset::ICE_GIANT,
         density_kg_m3: 1270.0,
+        albedo_bond: 0.300,
     },
     PlanetData {
         name: "Neptune",
@@ -174,6 +184,7 @@ const PLANETS: &[PlanetData] = &[
         argp_deg: 273.187,
         preset: &body_preset::ICE_GIANT,
         density_kg_m3: 1638.0,
+        albedo_bond: 0.290,
     },
 ];
 
@@ -192,6 +203,7 @@ const DWARFS: &[PlanetData] = &[
         argp_deg: 73.598,
         preset: &body_preset::ASTEROID,
         density_kg_m3: 2161.0,
+        albedo_bond: 0.090,
     },
     PlanetData {
         name: "Pluto",
@@ -203,6 +215,7 @@ const DWARFS: &[PlanetData] = &[
         argp_deg: 113.834,
         preset: &body_preset::ICY,
         density_kg_m3: 1854.0,
+        albedo_bond: 0.490,
     },
     PlanetData {
         name: "Haumea",
@@ -214,6 +227,7 @@ const DWARFS: &[PlanetData] = &[
         argp_deg: 240.20,
         preset: &body_preset::ICY,
         density_kg_m3: 2018.0,
+        albedo_bond: 0.510,
     },
     PlanetData {
         name: "Makemake",
@@ -225,6 +239,7 @@ const DWARFS: &[PlanetData] = &[
         argp_deg: 294.834,
         preset: &body_preset::ICY,
         density_kg_m3: 1700.0,
+        albedo_bond: 0.770,
     },
     PlanetData {
         name: "Eris",
@@ -236,6 +251,7 @@ const DWARFS: &[PlanetData] = &[
         argp_deg: 151.639,
         preset: &body_preset::ICY,
         density_kg_m3: 2430.0,
+        albedo_bond: 0.960,
     },
     PlanetData {
         // Mass uncertain (~1×10²¹ kg); JPL lists no determined value.
@@ -253,6 +269,7 @@ const DWARFS: &[PlanetData] = &[
         // No measured value; estimated from spectroscopy assuming icy
         // composition similar to Pluto / Sedna-class TNOs.
         density_kg_m3: 2000.0,
+        albedo_bond: 0.320,
     },
     PlanetData {
         name: "Quaoar",
@@ -264,6 +281,7 @@ const DWARFS: &[PlanetData] = &[
         argp_deg: 147.479,
         preset: &body_preset::ICY,
         density_kg_m3: 1700.0,
+        albedo_bond: 0.124,
     },
     PlanetData {
         name: "Orcus",
@@ -275,6 +293,7 @@ const DWARFS: &[PlanetData] = &[
         argp_deg: 72.310,
         preset: &body_preset::ICY,
         density_kg_m3: 1530.0,
+        albedo_bond: 0.230,
     },
     PlanetData {
         name: "Gonggong",
@@ -286,6 +305,7 @@ const DWARFS: &[PlanetData] = &[
         argp_deg: 207.628,
         preset: &body_preset::ICY,
         density_kg_m3: 1740.0,
+        albedo_bond: 0.140,
     },
 ];
 
@@ -315,6 +335,8 @@ struct MoonData {
     preset: &'static BodyPreset,
     /// Bulk density in kg/m³ (NASA SSD body page).
     density_kg_m3: f64,
+    /// Bond albedo (NASA SSD body page).
+    albedo_bond: f64,
 }
 
 const MOONS: &[MoonData] = &[
@@ -330,6 +352,7 @@ const MOONS: &[MoonData] = &[
         argp_deg: 318.15,
         preset: &body_preset::ROCKY,
         density_kg_m3: 3344.0,
+        albedo_bond: 0.110,
     },
     // Jupiter — Galilean moons (Jupiter equatorial frame)
     MoonData {
@@ -343,6 +366,7 @@ const MOONS: &[MoonData] = &[
         argp_deg: 84.129,
         preset: &body_preset::ROCKY,
         density_kg_m3: 3528.0,
+        albedo_bond: 0.620,
     },
     MoonData {
         name: "Europa",
@@ -355,6 +379,7 @@ const MOONS: &[MoonData] = &[
         argp_deg: 88.970,
         preset: &body_preset::ICY,
         density_kg_m3: 3013.0,
+        albedo_bond: 0.670,
     },
     MoonData {
         name: "Ganymede",
@@ -367,6 +392,7 @@ const MOONS: &[MoonData] = &[
         argp_deg: 192.417,
         preset: &body_preset::ICY,
         density_kg_m3: 1942.0,
+        albedo_bond: 0.430,
     },
     MoonData {
         name: "Callisto",
@@ -379,6 +405,7 @@ const MOONS: &[MoonData] = &[
         argp_deg: 52.643,
         preset: &body_preset::ICY,
         density_kg_m3: 1834.0,
+        albedo_bond: 0.220,
     },
     // Saturn (Saturn equatorial frame)
     MoonData {
@@ -392,6 +419,7 @@ const MOONS: &[MoonData] = &[
         argp_deg: 332.499,
         preset: &body_preset::ICY,
         density_kg_m3: 1148.0,
+        albedo_bond: 0.600,
     },
     MoonData {
         name: "Enceladus",
@@ -404,6 +432,8 @@ const MOONS: &[MoonData] = &[
         argp_deg: 0.000,
         preset: &body_preset::ICY,
         density_kg_m3: 1609.0,
+        // Geyser-fresh ice — the brightest body in the solar system.
+        albedo_bond: 0.990,
     },
     MoonData {
         name: "Dione",
@@ -416,6 +446,7 @@ const MOONS: &[MoonData] = &[
         argp_deg: 168.820,
         preset: &body_preset::ICY,
         density_kg_m3: 1478.0,
+        albedo_bond: 0.630,
     },
     MoonData {
         name: "Rhea",
@@ -428,6 +459,7 @@ const MOONS: &[MoonData] = &[
         argp_deg: 256.609,
         preset: &body_preset::ICY,
         density_kg_m3: 1236.0,
+        albedo_bond: 0.650,
     },
     MoonData {
         name: "Titan",
@@ -440,6 +472,9 @@ const MOONS: &[MoonData] = &[
         argp_deg: 78.371,
         preset: &body_preset::ICY,
         density_kg_m3: 1880.0,
+        // Hazy nitrogen atmosphere drops the Bond well below the icy
+        // surface value.
+        albedo_bond: 0.220,
     },
     MoonData {
         name: "Iapetus",
@@ -452,6 +487,9 @@ const MOONS: &[MoonData] = &[
         argp_deg: 271.606,
         preset: &body_preset::ICY,
         density_kg_m3: 1088.0,
+        // Hemispheric dichotomy (Cassini Regio is dark, trailing
+        // hemisphere bright); Bond is the disc-integrated mean.
+        albedo_bond: 0.200,
     },
     // Uranus (Uranus equatorial frame — pole tilted 97.77° from
     // ecliptic, so satellites orbit ~perpendicular to it).
@@ -466,6 +504,7 @@ const MOONS: &[MoonData] = &[
         argp_deg: 165.522,
         preset: &body_preset::ICY,
         density_kg_m3: 1711.0,
+        albedo_bond: 0.170,
     },
     // Neptune — Triton orbits retrograde (i > 90° relative to parent
     // equator), the only large moon known to do so. The result in
@@ -481,6 +520,7 @@ const MOONS: &[MoonData] = &[
         argp_deg: 234.412,
         preset: &body_preset::ICY,
         density_kg_m3: 2061.0,
+        albedo_bond: 0.760,
     },
 ];
 
@@ -544,6 +584,9 @@ pub fn solar_system(seed: u64) -> Template {
         position: Some([0.0, 0.0, 0.0]),
         velocity: [0.0, 0.0, 0.0],
         class_override: None,
+        // Sun emits — reflected contribution is negligible, so the
+        // photometry pipeline handles it via `luminosity` alone.
+        albedo: None,
     });
 
     // ── Planets and dwarfs share the same heliocentric construction ──────── //
@@ -594,6 +637,7 @@ pub fn solar_system(seed: u64) -> Template {
             velocity: vel,
             class_override: None,
             density: Some(data.density_kg_m3 * KG_M3_TO_SOLAR_AU3),
+            albedo: Some(data.albedo_bond),
         });
     };
 
@@ -659,6 +703,7 @@ pub fn solar_system(seed: u64) -> Template {
             // user can hide moons en masse without touching planets.
             class_override: Some(crate::domain::body_preset::BodyClass::Moon),
             density: Some(m.density_kg_m3 * KG_M3_TO_SOLAR_AU3),
+            albedo: Some(m.albedo_bond),
         });
     }
 
@@ -693,6 +738,7 @@ pub fn solar_system(seed: u64) -> Template {
             position: Some(pos),
             velocity: vel,
             class_override: None,
+            albedo: None,
         });
     }
 
@@ -743,6 +789,7 @@ pub fn solar_system(seed: u64) -> Template {
             position: Some(pos),
             velocity: vel,
             class_override: None,
+            albedo: None,
         });
     }
 

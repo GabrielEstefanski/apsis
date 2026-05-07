@@ -43,6 +43,7 @@ pub fn sun_earth_unstable_lagrange(_seed: u64) -> Template {
                 class_override: None,
                 preset: &body_preset::STAR,
                 density: Some(1408.0 * KG_M3_TO_SOLAR_AU3),
+                albedo: None,
             },
             // Earth
             TemplateBody {
@@ -53,6 +54,7 @@ pub fn sun_earth_unstable_lagrange(_seed: u64) -> Template {
                 class_override: None,
                 preset: &body_preset::ROCKY,
                 density: Some(5514.0 * KG_M3_TO_SOLAR_AU3),
+                albedo: None,
             },
             // L1 (unstable)
             TemplateBody {
@@ -63,6 +65,7 @@ pub fn sun_earth_unstable_lagrange(_seed: u64) -> Template {
                 class_override: None,
                 preset: &body_preset::ASTEROID,
                 density: None,
+                albedo: None,
             },
             // L2 (unstable)
             TemplateBody {
@@ -73,6 +76,7 @@ pub fn sun_earth_unstable_lagrange(_seed: u64) -> Template {
                 class_override: None,
                 preset: &body_preset::ASTEROID,
                 density: None,
+                albedo: None,
             },
             // L3 (unstable)
             TemplateBody {
@@ -83,6 +87,7 @@ pub fn sun_earth_unstable_lagrange(_seed: u64) -> Template {
                 class_override: None,
                 preset: &body_preset::ASTEROID,
                 density: None,
+                albedo: None,
             },
         ],
         display_scale: 1.0,

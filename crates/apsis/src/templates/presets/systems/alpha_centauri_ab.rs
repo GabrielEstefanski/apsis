@@ -86,6 +86,7 @@ pub fn alpha_centauri_ab(_seed: u64) -> Template {
                 class_override: None,
                 preset: &body_preset::STAR,
                 density: Some(1450.0 * KG_M3_TO_SOLAR_AU3),
+                albedo: None,
             },
             TemplateBody {
                 name: Some("Alpha Centauri B"),
@@ -95,6 +96,7 @@ pub fn alpha_centauri_ab(_seed: u64) -> Template {
                 class_override: None,
                 preset: &body_preset::STAR,
                 density: Some(1900.0 * KG_M3_TO_SOLAR_AU3),
+                albedo: None,
             },
             // Proxima — M5.5V red dwarf, ρ ≈ 56 800 kg/m³ from
             // Demory et al. (2009) interferometric radius.
@@ -106,6 +108,7 @@ pub fn alpha_centauri_ab(_seed: u64) -> Template {
                 preset: &body_preset::RED_DWARF,
                 class_override: None,
                 density: Some(56_800.0 * KG_M3_TO_SOLAR_AU3),
+                albedo: None,
             },
         ],
         display_scale: 1.0,
