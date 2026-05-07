@@ -1,5 +1,5 @@
 use crate::{
-    domain::materials::Material,
+    domain::body_preset,
     templates::{Template, TemplateBody, UnitSystem, builders::circular_orbit},
 };
 use rand::rngs::SmallRng;
@@ -14,7 +14,7 @@ pub fn trappist_1(seed: u64) -> Template {
     bodies.push(TemplateBody {
         name: Some("TRAPPIST-1"),
         mass: 0.089,
-        material: Material::Star,
+        preset: &body_preset::STAR,
         position: Some([0.0, 0.0, 0.0]),
         velocity: [0.0, 0.0, 0.0],
     });
@@ -37,7 +37,7 @@ pub fn trappist_1(seed: u64) -> Template {
         bodies.push(TemplateBody {
             name: Some(name),
             mass,
-            material: Material::Rocky,
+            preset: &body_preset::ROCKY,
             position: Some(pos),
             velocity: vel,
         });

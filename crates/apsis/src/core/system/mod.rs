@@ -315,8 +315,8 @@ impl System {
         let total_mass = bodies.iter().map(|b| b.mass).sum();
         let names = {
             let mut acc: Vec<String> = Vec::with_capacity(bodies.len());
-            for b in &bodies {
-                acc.push(helpers::auto_name(b.material, &acc));
+            for _ in &bodies {
+                acc.push(helpers::auto_name(helpers::DEFAULT_NAME_PREFIX, &acc));
             }
             acc
         };

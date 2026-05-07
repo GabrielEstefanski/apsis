@@ -36,12 +36,13 @@ impl System {
     pub fn restore_from_snapshot(&mut self, snap: &crate::io::snapshot::SimSnapshot) {
         let bodies: Vec<Body> = snap.bodies.iter().map(|r| r.into_body()).collect();
 
+        use crate::core::system::helpers::DEFAULT_NAME_PREFIX;
         self.names = if snap.names.len() == bodies.len() {
             snap.names.clone()
         } else {
             let mut acc: Vec<String> = Vec::with_capacity(bodies.len());
-            for b in &bodies {
-                acc.push(auto_name(b.material, &acc));
+            for _ in &bodies {
+                acc.push(auto_name(DEFAULT_NAME_PREFIX, &acc));
             }
             acc
         };

@@ -2,40 +2,32 @@
 
 use crate::domain::body::Body;
 
-const MASS_TO_SOLAR: f64 = 1.0;
-const RADIUS_TO_SOLAR: f64 = 1.0 / 0.00465;
-const L_SUN: f64 = 1.0;
+/// Default prefix when a body is added without an explicit name and
+/// no preset hint is available (e.g. via [`System::add_body`]). Spawn
+/// UIs and template loaders that know which preset produced the body
+/// should pass that preset's `display_name` through
+/// [`System::add_named_body`] instead.
+pub(crate) const DEFAULT_NAME_PREFIX: &str = "Body";
 
-pub(crate) fn mass_to_solar() -> f64 {
-    MASS_TO_SOLAR
-}
-pub(crate) fn radius_to_solar() -> f64 {
-    RADIUS_TO_SOLAR
-}
-pub(crate) fn l_sun() -> f64 {
-    L_SUN
-}
-
-/// Generate an auto-name for a new body given existing names.
-/// Counts existing names that start with the material prefix and appends N+1.
-pub(crate) fn auto_name(
-    material: crate::domain::materials::Material,
-    existing: &[String],
-) -> String {
-    let prefix = material.display_name();
+/// Generate an auto-name `"<prefix> N"` for a new body given the
+/// names already in use. Counts existing names that start with the
+/// requested prefix and appends `N + 1`.
+pub(crate) fn auto_name(prefix: &str, existing: &[String]) -> String {
     let count = existing.iter().filter(|n| n.starts_with(prefix)).count() + 1;
     format!("{prefix} {count}")
 }
 
+/// Resolve a final body name from an optional explicit value and a
+/// fallback prefix used when the explicit value is missing or blank.
 pub(crate) fn resolved_name(
     explicit: Option<String>,
-    material: crate::domain::materials::Material,
+    fallback_prefix: &str,
     existing: &[String],
 ) -> String {
     explicit
         .map(|name| name.trim().to_owned())
         .filter(|name| !name.is_empty())
-        .unwrap_or_else(|| auto_name(material, existing))
+        .unwrap_or_else(|| auto_name(fallback_prefix, existing))
 }
 
 /// Compute the minimum pairwise separation and maximum effective softening

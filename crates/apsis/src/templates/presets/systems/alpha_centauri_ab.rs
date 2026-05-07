@@ -10,7 +10,7 @@
 //! timescale, so this preset omits it.
 
 use crate::{
-    domain::materials::Material,
+    domain::body_preset,
     templates::{Template, TemplateBody, UnitSystem},
 };
 
@@ -40,14 +40,14 @@ pub fn alpha_centauri_ab(_seed: u64) -> Template {
                 mass: m_a,
                 position: Some([-r1, 0.0, 0.0]),
                 velocity: [0.0, -v1, 0.0],
-                material: Material::Star,
+                preset: &body_preset::STAR,
             },
             TemplateBody {
                 name: Some("Alpha Centauri B"),
                 mass: m_b,
                 position: Some([r2, 0.0, 0.0]),
                 velocity: [0.0, v2, 0.0],
-                material: Material::Star,
+                preset: &body_preset::STAR,
             },
         ],
         display_scale: 1.0,

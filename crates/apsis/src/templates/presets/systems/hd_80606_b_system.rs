@@ -1,5 +1,5 @@
 use crate::{
-    domain::materials::Material,
+    domain::body_preset,
     templates::{Template, TemplateBody, UnitSystem},
 };
 use rand::rngs::SmallRng;
@@ -18,7 +18,7 @@ pub fn hd_80606(seed: u64) -> Template {
     bodies.push(TemplateBody {
         name: Some("HD 80606"),
         mass: m_star,
-        material: Material::Star,
+        preset: &body_preset::STAR,
         position: Some([0.0, 0.0, 0.0]),
         velocity: [0.0, 0.0, 0.0],
     });
@@ -38,7 +38,7 @@ pub fn hd_80606(seed: u64) -> Template {
     bodies.push(TemplateBody {
         name: Some("HD 80606 b"),
         mass: m_planet,
-        material: Material::Gas,
+        preset: &body_preset::GAS,
         position: Some(pos),
         velocity: vel,
     });

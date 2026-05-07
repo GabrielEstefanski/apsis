@@ -18,7 +18,7 @@
 //! asymmetric masses.
 
 use crate::{
-    domain::materials::Material,
+    domain::body_preset,
     templates::{Template, TemplateBody, UnitSystem},
 };
 
@@ -38,21 +38,21 @@ pub fn three_body_euler_collinear(_seed: u64) -> Template {
                 mass: m,
                 position: Some([-d, 0.0, 0.0]),
                 velocity: [0.0, -v, 0.0],
-                material: Material::Rocky,
+                preset: &body_preset::ROCKY,
             },
             TemplateBody {
                 name: Some("Centre body"),
                 mass: m,
                 position: Some([0.0, 0.0, 0.0]),
                 velocity: [0.0, 0.0, 0.0],
-                material: Material::Rocky,
+                preset: &body_preset::ROCKY,
             },
             TemplateBody {
                 name: Some("Outer body 2"),
                 mass: m,
                 position: Some([d, 0.0, 0.0]),
                 velocity: [0.0, v, 0.0],
-                material: Material::Rocky,
+                preset: &body_preset::ROCKY,
             },
         ],
         display_scale: 1.0,

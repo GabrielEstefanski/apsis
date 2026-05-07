@@ -1,5 +1,5 @@
 use crate::{
-    domain::materials::Material,
+    domain::body_preset::{self, BodyPreset},
     templates::{Template, TemplateBody, UnitSystem, builders::circular_orbit},
 };
 use rand::rngs::SmallRng;
@@ -14,15 +14,17 @@ pub fn kepler_36(seed: u64) -> Template {
     bodies.push(TemplateBody {
         name: Some("Kepler-36"),
         mass: 1.07,
-        material: Material::Star,
+        preset: &body_preset::STAR,
         position: Some([0.0, 0.0, 0.0]),
         velocity: [0.0, 0.0, 0.0],
     });
 
-    // Planets
-    let planets = [("b", 0.115, 4.0e-6, Material::Rocky), ("c", 0.128, 2.0e-5, Material::Gas)];
+    // Planets — `&'static BodyPreset` carries the construction defaults
+    // (density, colour, q_pr) per body without polluting the runtime.
+    let planets: [(&str, f64, f64, &'static BodyPreset); 2] =
+        [("b", 0.115, 4.0e-6, &body_preset::ROCKY), ("c", 0.128, 2.0e-5, &body_preset::GAS)];
 
-    for (name, a, mass, material) in planets {
+    for (name, a, mass, preset) in planets {
         let phase = rng.random::<f64>() * std::f64::consts::TAU;
 
         let (pos, vel) = circular_orbit(1.07, a, phase);
@@ -30,7 +32,7 @@ pub fn kepler_36(seed: u64) -> Template {
         bodies.push(TemplateBody {
             name: Some(name),
             mass,
-            material,
+            preset,
             position: Some(pos),
             velocity: vel,
         });

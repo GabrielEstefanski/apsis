@@ -64,11 +64,20 @@ class IntegratorKind:
 # ── Body ──────────────────────────────────────────────────────────────────────
 
 class Body:
-    """Point-mass body with kinematics, mass, softening, and material class.
+    """Point-mass body with kinematics, mass, softening, and a binding-
+    layer material slug.
 
-    Bodies are constructed through one of the nine material factories
+    Bodies are constructed through one of the nine preset factories
     (``Body.star``, ``Body.rocky``, ...). All factories share a
     kwargs-only signature; position and velocity default to zero.
+
+    The underlying core body holds no material taxonomy field —
+    physical defaults from the preset are applied once at construction
+    and never re-read. The Python wrapper still surfaces a
+    ``body.material`` slug for ergonomic introspection on freshly-built
+    bodies; bodies retrieved via ``System.bodies`` lose that tag
+    (they report ``"body"``) because the round-trip drops the
+    binding-layer state.
 
     Builder methods (:meth:`at`, :meth:`with_velocity`,
     :meth:`with_density`, :meth:`unsoftened`) return a new ``Body`` —
@@ -201,9 +210,18 @@ class Body:
     def radius(self) -> float: ...
     @property
     def material(self) -> str:
-        """Material class slug (e.g. ``"star"``, ``"rocky"``, ``"gas_giant"``)."""
+        """Construction-time preset slug (e.g. ``"star"``, ``"rocky"``,
+        ``"gas_giant"``). Round-tripped bodies (those returned by
+        ``System.bodies``) report ``"body"`` because the slug is
+        binding-layer state and the core body holds no taxonomy
+        reference."""
     @property
     def luminosity(self) -> float: ...
+    @property
+    def q_pr(self) -> float:
+        """Radiation-pressure receiver coefficient ``Q_pr``. Positive on
+        radiation receivers (asteroids, comets, icy grains); zero on
+        emitters and large planets."""
 
     def __repr__(self) -> str: ...
 

@@ -3,27 +3,29 @@ use crate::app::theme::{
     ACCENT, ACCENT_DIM, BORDER, DANGER, SUCCESS, SURFACE_STRIP, TEXT_DIM, TEXT_PRI, TEXT_SEC,
 };
 use crate::app::ui::{BodyForm, SimulationApp, SpawnTab, UndoRecord};
-use apsis::domain::body::{Body, radius_from_density_mass};
-use apsis::domain::materials::{Material, density};
+use apsis::domain::body::{Body, NamedBody, radius_from_density_mass};
+use apsis::domain::body_preset::{self, BodyPreset};
 use apsis::physics::gravity::G;
 use eframe::egui::{self, Color32, Frame, Margin, RichText, Stroke};
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-/// Fixed-cell material picker grid. Returns `true` if the selection changed.
-fn material_grid(ui: &mut egui::Ui, selected: &mut Material) -> bool {
+/// Fixed-cell preset picker grid. Returns `true` if the selection
+/// changed. The grid is purely UX — the underlying `Body` carries no
+/// preset reference, so this control only governs the next spawn.
+fn preset_grid(ui: &mut egui::Ui, selected: &mut &'static BodyPreset) -> bool {
     let mut changed = false;
     let cols = 2;
     let spacing_x = 6.0;
     let cell_w = ((ui.available_width() - spacing_x) / cols as f32).max(96.0);
     let cell_h = 24.0;
 
-    egui::Grid::new(ui.id().with("mat_grid")).num_columns(cols).spacing([spacing_x, 4.0]).show(
+    egui::Grid::new(ui.id().with("preset_grid")).num_columns(cols).spacing([spacing_x, 4.0]).show(
         ui,
         |ui| {
-            for (i, &mat) in Material::ALL.iter().enumerate() {
-                let is_sel = *selected == mat;
-                let [r, g, b] = mat.props().base_color;
+            for (i, preset) in body_preset::ALL.iter().enumerate() {
+                let is_sel = std::ptr::eq(*selected, *preset);
+                let [r, g, b] = preset.default_color;
                 let dot_col = Color32::from_rgb(r, g, b);
                 let text_col = if is_sel { TEXT_PRI } else { TEXT_SEC };
                 let fill = if is_sel { ACCENT_DIM } else { Color32::from_rgb(20, 20, 26) };
@@ -42,7 +44,7 @@ fn material_grid(ui: &mut egui::Ui, selected: &mut Material) -> bool {
                     },
                 );
                 job.append(
-                    mat.display_name(),
+                    preset.display_name,
                     0.0,
                     egui::TextFormat {
                         font_id: egui::FontId::proportional(9.5),
@@ -62,7 +64,7 @@ fn material_grid(ui: &mut egui::Ui, selected: &mut Material) -> bool {
                 );
 
                 if btn.clicked() && !is_sel {
-                    *selected = mat;
+                    *selected = preset;
                     changed = true;
                 }
 
@@ -70,15 +72,15 @@ fn material_grid(ui: &mut egui::Ui, selected: &mut Material) -> bool {
                     ui.end_row();
                 }
             }
-            if Material::ALL.len() % cols != 0 {
+            if body_preset::ALL.len() % cols != 0 {
                 ui.end_row();
             }
         },
     );
 
     ui.add_space(5.0);
-    let mat = *selected;
-    let nominal_density = density(mat, mat.default_mass());
+    let preset = *selected;
+    let nominal_density = preset.density.density_at(preset.default_mass());
     Frame::NONE
         .fill(SURFACE_STRIP)
         .stroke(Stroke::new(0.5, BORDER))
@@ -86,9 +88,9 @@ fn material_grid(ui: &mut egui::Ui, selected: &mut Material) -> bool {
         .inner_margin(Margin::symmetric(8, 6))
         .show(ui, |ui| {
             ui.horizontal(|ui| {
-                let [r, g, b] = mat.props().base_color;
+                let [r, g, b] = preset.default_color;
                 ui.label(RichText::new("●").size(11.0).color(Color32::from_rgb(r, g, b)));
-                ui.label(RichText::new(mat.display_name()).size(10.5).color(TEXT_PRI).strong());
+                ui.label(RichText::new(preset.display_name).size(10.5).color(TEXT_PRI).strong());
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.label(
                         RichText::new(format!("ρ₀ {:.3e}", nominal_density))
@@ -143,7 +145,7 @@ impl SimulationApp {
         ui.add_space(4.0);
         ui.label(
             RichText::new(
-                "Pick a spawn mode, configure mass and material, then place on the canvas.",
+                "Pick a spawn mode, configure mass and preset, then place on the canvas.",
             )
             .size(10.5)
             .color(TEXT_SEC),
@@ -202,12 +204,12 @@ impl SimulationApp {
     // ── Single ────────────────────────────────────────────────────────────────
 
     fn panel_add_single(&mut self, ui: &mut egui::Ui) {
-        // ── MATERIAL ─────────────────────────────────────────────────────────
-        sub_section(ui, "MATERIAL");
-        let mat_changed = material_grid(ui, &mut self.place_material);
-        if mat_changed {
-            self.place_mass = self.place_material.default_mass();
-            self.place_density = density(self.place_material, self.place_mass);
+        // ── PRESET ───────────────────────────────────────────────────────────
+        sub_section(ui, "PRESET");
+        let preset_changed = preset_grid(ui, &mut self.place_preset);
+        if preset_changed {
+            self.place_mass = self.place_preset.default_mass();
+            self.place_density = self.place_preset.density.density_at(self.place_mass);
         }
 
         // ── PROPERTIES ───────────────────────────────────────────────────────
@@ -225,7 +227,7 @@ impl SimulationApp {
                 .max_decimals(6),
         );
         if self.place_mass != prev_mass {
-            self.place_density = density(self.place_material, self.place_mass);
+            self.place_density = self.place_preset.density.density_at(self.place_mass);
         }
 
         let dens_speed = (self.place_density * 0.02).max(1e-6);
@@ -359,11 +361,11 @@ impl SimulationApp {
     // ── Ring ──────────────────────────────────────────────────────────────────
 
     fn panel_add_ring(&mut self, ui: &mut egui::Ui) {
-        // ── MATERIAL ─────────────────────────────────────────────────────────
-        sub_section(ui, "MATERIAL");
-        let mat_changed = material_grid(ui, &mut self.spawn_ring_material);
-        if mat_changed {
-            self.spawn_ring_mass = self.spawn_ring_material.default_mass();
+        // ── PRESET ───────────────────────────────────────────────────────────
+        sub_section(ui, "PRESET");
+        let preset_changed = preset_grid(ui, &mut self.spawn_ring_preset);
+        if preset_changed {
+            self.spawn_ring_mass = self.spawn_ring_preset.default_mass();
         }
 
         // ── GEOMETRY ─────────────────────────────────────────────────────────
@@ -450,22 +452,26 @@ impl SimulationApp {
                 } else {
                     0.0
                 };
-                let ring_density = density(self.spawn_ring_material, self.spawn_ring_mass);
+                let preset = self.spawn_ring_preset;
+                let ring_density = preset.density.density_at(self.spawn_ring_mass);
+                let preset_name = preset.display_name.to_owned();
 
                 self.push_undo(UndoRecord::AddedBodies(n));
+                let mut named = Vec::with_capacity(n);
                 for i in 0..n {
                     let angle = (i as f64 / n as f64) * std::f64::consts::TAU;
                     let x = center.com_x + self.spawn_ring_radius * angle.cos();
                     let y = center.com_y + self.spawn_ring_radius * angle.sin();
                     let vx = -v * angle.sin();
                     let vy = v * angle.cos();
-                    let mut b = Body::of(self.spawn_ring_mass, self.spawn_ring_material)
+                    let mut b = Body::from_preset(preset, self.spawn_ring_mass)
                         .at(x, y)
                         .with_velocity(vx, vy);
                     b.density = ring_density;
                     b.sync_physical_properties();
-                    self.system.add_body(b);
+                    named.push(NamedBody { body: b, name: Some(preset_name.clone()) });
                 }
+                self.system.add_named_bodies(named);
             }
         }
     }
@@ -473,11 +479,11 @@ impl SimulationApp {
     // ── Cluster ───────────────────────────────────────────────────────────────
 
     fn panel_add_cluster(&mut self, ui: &mut egui::Ui) {
-        // ── MATERIAL ─────────────────────────────────────────────────────────
-        sub_section(ui, "MATERIAL");
-        let mat_changed = material_grid(ui, &mut self.spawn_cluster_material);
-        if mat_changed {
-            self.spawn_cluster_mass = self.spawn_cluster_material.default_mass();
+        // ── PRESET ───────────────────────────────────────────────────────────
+        sub_section(ui, "PRESET");
+        let preset_changed = preset_grid(ui, &mut self.spawn_cluster_preset);
+        if preset_changed {
+            self.spawn_cluster_mass = self.spawn_cluster_preset.default_mass();
         }
 
         // ── GEOMETRY ─────────────────────────────────────────────────────────
@@ -579,7 +585,9 @@ impl SimulationApp {
             let n = self.spawn_cluster_count as usize;
             if n > 0 {
                 let center = self.system.metrics();
-                let clust_density = density(self.spawn_cluster_material, self.spawn_cluster_mass);
+                let preset = self.spawn_cluster_preset;
+                let clust_density = preset.density.density_at(self.spawn_cluster_mass);
+                let preset_name = preset.display_name.to_owned();
 
                 self.push_undo(UndoRecord::AddedBodies(n));
                 use rand::rngs::SmallRng;
@@ -587,6 +595,7 @@ impl SimulationApp {
                 let seed = self.system.seed();
                 let mut rng: SmallRng =
                     if seed == 0 { rand::make_rng() } else { SmallRng::seed_from_u64(seed) };
+                let mut named = Vec::with_capacity(n);
                 for _ in 0..n {
                     let r = self.spawn_cluster_radius * rng.random::<f64>().sqrt();
                     let theta = rng.random::<f64>() * std::f64::consts::TAU;
@@ -594,13 +603,14 @@ impl SimulationApp {
                     let y = center.com_y + r * theta.sin();
                     let vx = (rng.random::<f64>() - 0.5) * self.spawn_cluster_vel_disp * 2.0;
                     let vy = (rng.random::<f64>() - 0.5) * self.spawn_cluster_vel_disp * 2.0;
-                    let mut b = Body::of(self.spawn_cluster_mass, self.spawn_cluster_material)
+                    let mut b = Body::from_preset(preset, self.spawn_cluster_mass)
                         .at(x, y)
                         .with_velocity(vx, vy);
                     b.density = clust_density;
                     b.sync_physical_properties();
-                    self.system.add_body(b);
+                    named.push(NamedBody { body: b, name: Some(preset_name.clone()) });
                 }
+                self.system.add_named_bodies(named);
             }
         }
     }

@@ -1,5 +1,5 @@
 use crate::{
-    domain::materials::Material,
+    domain::body_preset,
     templates::{Template, TemplateBody, UnitSystem, builders::circular_orbit},
 };
 
@@ -28,7 +28,7 @@ pub fn jupiter_trojans(seed: u64) -> Template {
             mass: m_sun,
             position: Some([0.0, 0.0, 0.0]),
             velocity: [0.0, 0.0, 0.0],
-            material: Material::Star,
+            preset: &body_preset::STAR,
         },
         // Jupiter
         TemplateBody {
@@ -36,7 +36,7 @@ pub fn jupiter_trojans(seed: u64) -> Template {
             mass: m_jupiter,
             position: Some(j_pos),
             velocity: j_vel,
-            material: Material::Gas,
+            preset: &body_preset::GAS,
         },
     ];
 
@@ -61,7 +61,7 @@ pub fn jupiter_trojans(seed: u64) -> Template {
                 mass: 1e-12,
                 position: Some(pos),
                 velocity: vel,
-                material: Material::Asteroid,
+                preset: &body_preset::ASTEROID,
             });
         }
     }
