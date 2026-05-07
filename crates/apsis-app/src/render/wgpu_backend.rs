@@ -1433,4 +1433,17 @@ mod shader_tests {
     fn primitives_shader_validates() {
         crate::render::validate_wgsl("primitives", super::PRIMITIVES_SHADER);
     }
+
+    /// mat4x4 (64) + vec2 (8) + vec2 (8) = 80 B, alignment 16 → 80
+    /// already aligned. No `vec3` field, so no alignment trap risk.
+    #[test]
+    fn camera_uniform_layout() {
+        crate::render::assert_uniform_layout::<super::CameraUniform>("CameraUniform", 80);
+    }
+
+    /// vec2 (8) + vec2 (8) = 16 B, no alignment trap.
+    #[test]
+    fn screen_uniform_layout() {
+        crate::render::assert_uniform_layout::<super::ScreenUniform>("ScreenUniform", 16);
+    }
 }
