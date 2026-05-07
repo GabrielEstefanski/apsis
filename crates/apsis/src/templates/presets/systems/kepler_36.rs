@@ -40,6 +40,7 @@ pub fn kepler_36(seed: u64) -> Template {
         density: Some(1290.0 * KG_M3_TO_SOLAR_AU3),
         position: Some([0.0, 0.0, 0.0]),
         velocity: [0.0, 0.0, 0.0],
+        class_override: None,
     });
 
     // Per-body data. Mass in M_☉ (M_⊕ × 3.003e-6); density in kg/m³.
@@ -65,6 +66,7 @@ pub fn kepler_36(seed: u64) -> Template {
             preset,
             position: Some(pos),
             velocity: vel,
+            class_override: None,
             density: Some(density_si * KG_M3_TO_SOLAR_AU3),
         });
     }

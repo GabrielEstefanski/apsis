@@ -43,6 +43,9 @@ pub fn instantiate_at(template: &Template, cx: f64, cy: f64) -> Vec<NamedBody> {
             let mut b = Body::from_preset(t.preset, t.mass)
                 .at_3d(px + dx, py + dy, pz)
                 .with_velocity_3d(vx, vy, vz);
+            if let Some(class) = t.class_override {
+                b = b.with_class(class);
+            }
 
             // Per-body density override: templates that quote real
             // bodies (Earth, Sun, Jupiter, …) supply published values

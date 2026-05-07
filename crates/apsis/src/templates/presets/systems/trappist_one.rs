@@ -33,6 +33,7 @@ pub fn trappist_1(seed: u64) -> Template {
         density: Some(51_100.0 * KG_M3_TO_SOLAR_AU3),
         position: Some([0.0, 0.0, 0.0]),
         velocity: [0.0, 0.0, 0.0],
+        class_override: None,
     });
 
     // ── Planets ──────────────────────────────────────────────────── //
@@ -64,6 +65,7 @@ pub fn trappist_1(seed: u64) -> Template {
             density: Some(density_si * KG_M3_TO_SOLAR_AU3),
             position: Some(pos),
             velocity: vel,
+            class_override: None,
         });
     }
 

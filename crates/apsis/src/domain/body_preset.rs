@@ -198,6 +198,87 @@ impl LuminosityModel {
     }
 }
 
+// ── BodyClass ─────────────────────────────────────────────────────────────────
+
+/// Visual / UX taxonomy for a [`Body`].
+///
+/// Distinct from [`BodyPreset`] — class is a coarse label the renderer
+/// and inspector use to group bodies (filter trails by category, label
+/// inspector sections), not a physics input. A single preset can be
+/// instantiated under different classes: ICY anchors Europa
+/// ([`Moon`](Self::Moon)) and Pluto ([`Asteroid`](Self::Asteroid))
+/// equally well, and Earth's Moon is a ROCKY body classed as
+/// [`Moon`](Self::Moon).
+///
+/// The class a [`BodyPreset`] suggests via its
+/// [`default_class`](BodyPreset::default_class) field is just a
+/// starting point; templates and user code can override it through
+/// [`Body::with_class`](crate::domain::body::Body::with_class).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum BodyClass {
+    /// Stellar object: main-sequence star, brown dwarf, white dwarf,
+    /// neutron star, black hole. Default for STAR / BROWN_DWARF /
+    /// WHITE_DWARF presets.
+    Star,
+    /// Major planetary body (terrestrial, gas, ice giant). Default for
+    /// ROCKY / GAS / ICE_GIANT presets.
+    Planet,
+    /// Natural satellite (icy or rocky). Templates set this on bodies
+    /// orbiting a planet regardless of the underlying preset.
+    Moon,
+    /// Minor planetary body in a heliocentric (or stellar-centric)
+    /// orbit. Default for ASTEROID; also covers KBOs and TNOs when
+    /// instantiated from ICY.
+    Asteroid,
+    /// Volatile-rich body on a typically eccentric orbit. Default for
+    /// COMET.
+    Comet,
+    /// Catch-all for hand-built bodies, test particles, and bodies
+    /// loaded from snapshots that predate class persistence.
+    Unknown,
+}
+
+impl BodyClass {
+    /// Stable label suitable for UI controls and snapshot debugging.
+    pub const fn display_name(self) -> &'static str {
+        match self {
+            Self::Star => "Star",
+            Self::Planet => "Planet",
+            Self::Moon => "Moon",
+            Self::Asteroid => "Asteroid",
+            Self::Comet => "Comet",
+            Self::Unknown => "Unknown",
+        }
+    }
+
+    /// One-byte codec for snapshot persistence. Stable across schema
+    /// versions; new variants append.
+    pub const fn to_u8(self) -> u8 {
+        match self {
+            Self::Star => 0,
+            Self::Planet => 1,
+            Self::Moon => 2,
+            Self::Asteroid => 3,
+            Self::Comet => 4,
+            Self::Unknown => 5,
+        }
+    }
+
+    /// Inverse of [`to_u8`](Self::to_u8). Unknown bytes round-trip to
+    /// [`Self::Unknown`] so a forward-incompatible save never injects
+    /// a wrong category.
+    pub const fn from_u8(v: u8) -> Self {
+        match v {
+            0 => Self::Star,
+            1 => Self::Planet,
+            2 => Self::Moon,
+            3 => Self::Asteroid,
+            4 => Self::Comet,
+            _ => Self::Unknown,
+        }
+    }
+}
+
 // ── BodyPreset ────────────────────────────────────────────────────────────────
 
 /// Construction preset: the bundle of defaults
@@ -226,6 +307,12 @@ pub struct BodyPreset {
     pub density: DensitySource,
     /// Optional luminosity model; `None` for non-luminous classes.
     pub luminosity: Option<LuminositySource>,
+    /// Default UX taxonomy applied when a [`Body`] is constructed from
+    /// this preset. Templates can override on a per-body basis when
+    /// the preset's natural class does not match the role (Earth's
+    /// Moon is a [`ROCKY`] preset classed as
+    /// [`Moon`](BodyClass::Moon)).
+    pub default_class: BodyClass,
 }
 
 impl BodyPreset {
@@ -263,14 +350,18 @@ pub const COMET: BodyPreset = BodyPreset {
     display_name: "Comet",
     default_color: [160, 190, 215],
     default_q_pr: 0.9,
+    // 67P-class anchor: ≈10¹³ kg = 5e-18 M_☉. The α = 0.01 makes the
+    // power law nearly flat across the cometary mass range, so the
+    // exact anchor mostly sets the rho_min branch.
     density: DensitySource::Model(DensityModel {
         rho_0: 500.0,
-        anchor_mass: 1e-6,
+        anchor_mass: 5e-18,
         alpha: 0.01,
         rho_min: 200.0,
         rho_max: 900.0,
     }),
     luminosity: None,
+    default_class: BodyClass::Comet,
 };
 
 /// Rubble-pile or monolithic rock (C/S/M-type asteroids).
@@ -279,14 +370,16 @@ pub const ASTEROID: BodyPreset = BodyPreset {
     display_name: "Asteroid",
     default_color: [80, 75, 68],
     default_q_pr: 1.0,
+    // Ceres-class anchor: 9.4 × 10²⁰ kg ≈ 4.7e-10 M_☉.
     density: DensitySource::Model(DensityModel {
         rho_0: 2500.0,
-        anchor_mass: 1e-4,
+        anchor_mass: 4.7e-10,
         alpha: 0.02,
         rho_min: 1200.0,
         rho_max: 5500.0,
     }),
     luminosity: None,
+    default_class: BodyClass::Asteroid,
 };
 
 /// Silicate / iron body (terrestrial planets). ρ₀ = 5514 kg/m³
@@ -296,14 +389,16 @@ pub const ROCKY: BodyPreset = BodyPreset {
     display_name: "Rocky",
     default_color: [139, 90, 43],
     default_q_pr: 0.0,
+    // Earth anchor: 1 M_⊕ = 3.0034 × 10⁻⁶ M_☉.
     density: DensitySource::Model(DensityModel {
         rho_0: 5514.0,
-        anchor_mass: 1.0,
+        anchor_mass: 3.0034e-6,
         alpha: 0.115,
         rho_min: 3000.0,
         rho_max: 13_000.0,
     }),
     luminosity: None,
+    default_class: BodyClass::Planet,
 };
 
 /// Volatile-rich body (icy moons, ocean worlds, KBOs). Calibrated to
@@ -312,14 +407,16 @@ pub const ICY: BodyPreset = BodyPreset {
     display_name: "Icy",
     default_color: [180, 220, 240],
     default_q_pr: 0.7,
+    // Ganymede anchor: 0.025 M_⊕ ≈ 7.45 × 10⁻⁸ M_☉.
     density: DensitySource::Model(DensityModel {
         rho_0: 1936.0,
-        anchor_mass: 0.025,
+        anchor_mass: 7.45e-8,
         alpha: 0.05,
         rho_min: 800.0,
         rho_max: 3500.0,
     }),
     luminosity: None,
+    default_class: BodyClass::Moon,
 };
 
 /// Ice-dominated giant with small rocky core (Uranus/Neptune).
@@ -328,14 +425,16 @@ pub const ICE_GIANT: BodyPreset = BodyPreset {
     display_name: "Ice Giant",
     default_color: [64, 164, 223],
     default_q_pr: 0.0,
+    // Neptune anchor: 17.15 M_⊕ ≈ 5.151 × 10⁻⁵ M_☉.
     density: DensitySource::Model(DensityModel {
         rho_0: 1638.0,
-        anchor_mass: 17.15,
+        anchor_mass: 5.151e-5,
         alpha: 0.12,
         rho_min: 900.0,
         rho_max: 3000.0,
     }),
     luminosity: None,
+    default_class: BodyClass::Planet,
 };
 
 /// Gas-dominated giant (Jupiter/Saturn/hot Jupiters). Calibrated to
@@ -344,14 +443,16 @@ pub const GAS: BodyPreset = BodyPreset {
     display_name: "Gas Giant",
     default_color: [210, 140, 60],
     default_q_pr: 0.0,
+    // Jupiter anchor: 317.8 M_⊕ ≈ 9.5435 × 10⁻⁴ M_☉.
     density: DensitySource::Model(DensityModel {
         rho_0: 1326.0,
-        anchor_mass: 317.8,
+        anchor_mass: 9.5435e-4,
         alpha: 0.18,
         rho_min: 200.0,
         rho_max: 8_000.0,
     }),
     luminosity: None,
+    default_class: BodyClass::Planet,
 };
 
 /// Sub-stellar object below the hydrogen-burning limit (~13–80 M_Jup).
@@ -361,14 +462,17 @@ pub const BROWN_DWARF: BodyPreset = BodyPreset {
     display_name: "Brown Dwarf",
     default_color: [160, 60, 20],
     default_q_pr: 0.0,
+    // 40 M_Jup anchor (Chabrier et al. 2009): 40 × 9.5435 × 10⁻⁴
+    // ≈ 0.0382 M_☉.
     density: DensitySource::Model(DensityModel {
         rho_0: 50_000.0,
-        anchor_mass: 13_000.0,
+        anchor_mass: 0.0382,
         alpha: 0.22,
         rho_min: 20_000.0,
         rho_max: 2.0e5,
     }),
     luminosity: Some(LuminositySource::Model(LuminosityModel::BrownDwarfBurrows)),
+    default_class: BodyClass::Star,
 };
 
 /// Main-sequence star, F/G/K spectral type (Sun-like and warmer).
@@ -383,14 +487,16 @@ pub const STAR: BodyPreset = BodyPreset {
     display_name: "Star",
     default_color: [255, 220, 100],
     default_q_pr: 0.0,
+    // Solar anchor: 1 M_☉, ρ₀ = 1408 kg/m³ (Sun's bulk density).
     density: DensitySource::Model(DensityModel {
         rho_0: 1408.0,
-        anchor_mass: 1_000_000.0,
+        anchor_mass: 1.0,
         alpha: -0.35,
         rho_min: 100.0,
         rho_max: 1.0e5,
     }),
     luminosity: Some(LuminositySource::Model(LuminosityModel::MainSequence)),
+    default_class: BodyClass::Star,
 };
 
 /// Low-mass main-sequence star, M spectral type (TRAPPIST-1,
@@ -417,6 +523,7 @@ pub const RED_DWARF: BodyPreset = BodyPreset {
         rho_max: 2.0e5,
     }),
     luminosity: Some(LuminositySource::Model(LuminosityModel::MainSequence)),
+    default_class: BodyClass::Star,
 };
 
 /// Degenerate stellar remnant supported by electron degeneracy.
@@ -426,9 +533,10 @@ pub const WHITE_DWARF: BodyPreset = BodyPreset {
     display_name: "White Dwarf",
     default_color: [200, 220, 255],
     default_q_pr: 0.0,
+    // Sirius B anchor ≈ 1.018 M_☉; treat as 1.0 M_☉ for the EOS pivot.
     density: DensitySource::Model(DensityModel {
         rho_0: 3.0e6,
-        anchor_mass: 600_000.0,
+        anchor_mass: 1.0,
         // Observational fit; Chandrasekhar α = 2 diverges outside
         // [0.4, 1.2] M_☉ so the empirical 1.2 keeps the model in a
         // physically-bounded range across the merger / accretion
@@ -438,6 +546,7 @@ pub const WHITE_DWARF: BodyPreset = BodyPreset {
         rho_max: 1.0e9,
     }),
     luminosity: Some(LuminositySource::Model(LuminosityModel::WhiteDwarfRadius)),
+    default_class: BodyClass::Star,
 };
 
 /// Catalogue of built-in presets. Used by the spawn UI to populate
@@ -506,34 +615,41 @@ mod tests {
     }
 
     // ── Density model parity with the previous Material taxonomy ─────────────
+    //
+    // Mass arguments are in M_☉ — the canonical solar_au unit. Earlier
+    // revisions of these tests passed M_⊕ because the anchor masses
+    // were specified in M_⊕; the unit-mismatch fix moved every anchor
+    // to M_☉ so the assertions had to follow.
+
+    const M_EARTH_IN_SOLAR: f64 = 3.0034e-6;
 
     #[test]
     fn rocky_earth_density_recovers_observed_value() {
-        let rho = ROCKY.density.density_at(1.0);
+        let rho = ROCKY.density.density_at(M_EARTH_IN_SOLAR);
         assert!(approx_eq(rho, 5514.0, 0.10), "Earth ρ = {rho}");
     }
 
     #[test]
     fn rocky_moon_density_recovers_observed_value() {
-        let rho = ROCKY.density.density_at(0.0123);
+        let rho = ROCKY.density.density_at(0.0123 * M_EARTH_IN_SOLAR);
         assert!(approx_eq(rho, 3346.0, 0.10), "Moon ρ = {rho}");
     }
 
     #[test]
     fn gas_jupiter_density_recovers_observed_value() {
-        let rho = GAS.density.density_at(317.8);
+        let rho = GAS.density.density_at(317.8 * M_EARTH_IN_SOLAR);
         assert!(approx_eq(rho, 1326.0, 0.10), "Jupiter ρ = {rho}");
     }
 
     #[test]
     fn star_sun_density_recovers_observed_value() {
-        let rho = STAR.density.density_at(1_000_000.0);
+        let rho = STAR.density.density_at(1.0);
         assert!(approx_eq(rho, 1408.0, 0.10), "Sun ρ = {rho}");
     }
 
     #[test]
     fn icy_pluto_density_recovers_observed_value() {
-        let rho = ICY.density.density_at(0.0022);
+        let rho = ICY.density.density_at(0.0022 * M_EARTH_IN_SOLAR);
         assert!(approx_eq(rho, 1854.0, 0.10), "Pluto ρ = {rho}");
     }
 
@@ -617,9 +733,9 @@ mod tests {
 
     #[test]
     fn default_mass_pulls_from_density_anchor() {
-        assert_eq!(ROCKY.default_mass(), 1.0);
-        assert_eq!(STAR.default_mass(), 1_000_000.0);
-        assert_eq!(GAS.default_mass(), 317.8);
+        assert_eq!(ROCKY.default_mass(), M_EARTH_IN_SOLAR);
+        assert_eq!(STAR.default_mass(), 1.0);
+        assert_eq!(GAS.default_mass(), 9.5435e-4);
     }
 
     #[test]

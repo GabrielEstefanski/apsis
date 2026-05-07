@@ -68,17 +68,16 @@ impl SimulationApp {
                     self.system.set_trail_sampler(self.trail_recorder.sampler_kind());
                 }
 
-                let mr_tip = "Minimum mass ratio (body / dominant body)\n\
-                    for a trail to be shown. Raise to hide asteroid-mass\n\
-                    objects; 0 = show all bodies.";
-                kv_drag(ui, "min mass ratio", mr_tip, |ui| {
-                    ui.add(
-                        egui::DragValue::new(&mut self.trail_min_mass_ratio)
-                            .speed(1e-8)
-                            .range(0.0_f64..=1.0)
-                            .custom_formatter(|v, _| format!("{v:.1e}"))
-                            .custom_parser(|s| s.parse::<f64>().ok()),
-                    );
+                let cls_tip = "Body classes whose trails are visible.\n\
+                    Bodies tagged Unknown ignore the filter; the per-body\n\
+                    toggle in the inspector overrides both this filter\n\
+                    and the authored-set default.";
+                kv_row(ui, "classes", cls_tip, |ui| {
+                    ui.add(egui::Checkbox::new(&mut self.trail_class_filter.star, "Star"));
+                    ui.add(egui::Checkbox::new(&mut self.trail_class_filter.planet, "Planet"));
+                    ui.add(egui::Checkbox::new(&mut self.trail_class_filter.moon, "Moon"));
+                    ui.add(egui::Checkbox::new(&mut self.trail_class_filter.asteroid, "Asteroid"));
+                    ui.add(egui::Checkbox::new(&mut self.trail_class_filter.comet, "Comet"));
                 });
             });
         }

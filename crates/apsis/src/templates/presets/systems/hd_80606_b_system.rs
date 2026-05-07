@@ -36,6 +36,7 @@ pub fn hd_80606(seed: u64) -> Template {
         density: Some(1500.0 * KG_M3_TO_SOLAR_AU3),
         position: Some([0.0, 0.0, 0.0]),
         velocity: [0.0, 0.0, 0.0],
+        class_override: None,
     });
 
     // ── Planet (placed at periapsis) ───── //
@@ -60,6 +61,7 @@ pub fn hd_80606(seed: u64) -> Template {
         density: Some(980.0 * KG_M3_TO_SOLAR_AU3),
         position: Some(pos),
         velocity: vel,
+        class_override: None,
     });
 
     Template {

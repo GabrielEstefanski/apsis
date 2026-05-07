@@ -63,7 +63,7 @@ pub struct RenderState {
     /// order they were produced. Each entry has length `bodies.len()`. The
     /// UI thread drains this vector every sync and feeds it to the
     /// [`TrailRecorder`](crate::core::trail::TrailRecorder).
-    pub trail_samples: Vec<Vec<[f32; 2]>>,
+    pub trail_samples: Vec<Vec<[f32; 3]>>,
     /// Gravitational accelerations from the last completed physics step,
     /// published so the render-side
     /// [`AccelerationMagnitudeField`](crate::domain::field::acceleration::AccelerationMagnitudeField)
@@ -147,7 +147,7 @@ pub struct PhysicsHandle {
     pending_com_shift: (f32, f32),
     /// Trail samples published by the physics thread this frame. Drained by
     /// the UI thread on [`sync`] and fed to the [`TrailRecorder`].
-    pending_trail_samples: Vec<Vec<[f32; 2]>>,
+    pending_trail_samples: Vec<Vec<[f32; 3]>>,
 
     /// Latest dense-output snapshot, used by [`advance_render_time`](Self::advance_render_time).
     step_snapshot: Option<crate::physics::integrator::DenseSnapshot>,
@@ -243,10 +243,10 @@ impl PhysicsHandle {
 
     /// Drains the trail samples accumulated since the last call.
     ///
-    /// Each returned column is a `Vec<[f32; 2]>` of length `bodies.len()`
+    /// Each returned column is a `Vec<[f32; 3]>` of length `bodies.len()`
     /// produced by the physics-thread's sampler. Consumed by
     /// [`TrailRecorder::ingest`](crate::core::trail::TrailRecorder::ingest).
-    pub fn take_trail_samples(&mut self) -> Vec<Vec<[f32; 2]>> {
+    pub fn take_trail_samples(&mut self) -> Vec<Vec<[f32; 3]>> {
         std::mem::take(&mut self.pending_trail_samples)
     }
 
@@ -565,7 +565,7 @@ fn publish_full(
     system: &mut System,
     rs: &mut RenderState,
     com_shift_acc: (f32, f32),
-    trail_samples: &mut Vec<Vec<[f32; 2]>>,
+    trail_samples: &mut Vec<Vec<[f32; 3]>>,
 ) {
     publish_positions(system, rs);
     rs.names = system.names().to_vec();
@@ -780,7 +780,7 @@ fn physics_loop(
     let mut trail_sampler: Box<dyn TrailSampler> = TrailSamplerKind::default().build();
     // Samples accumulated since the last publish_full; swapped into the
     // RenderState when that happens. Each column has length `bodies.len()`.
-    let mut trail_samples_pending: Vec<Vec<[f32; 2]>> = Vec::new();
+    let mut trail_samples_pending: Vec<Vec<[f32; 3]>> = Vec::new();
     // Safety cap: limit how many samples can accumulate between publishes
     // so a runaway frame cannot produce an unbounded backlog. Sized to
     // cover ~6 full orbits at the default arc-length density (314/orbit),
@@ -972,8 +972,11 @@ fn physics_loop(
                 if trail_samples_pending.len() < TRAIL_SAMPLES_PER_BATCH_MAX
                     && trail_sampler.should_sample(system.bodies())
                 {
-                    let col: Vec<[f32; 2]> =
-                        system.bodies().iter().map(|b| [b.x as f32, b.y as f32]).collect();
+                    let col: Vec<[f32; 3]> = system
+                        .bodies()
+                        .iter()
+                        .map(|b| [b.x as f32, b.y as f32, b.z as f32])
+                        .collect();
                     trail_samples_pending.push(col);
                 }
 
