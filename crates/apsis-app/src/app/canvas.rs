@@ -542,14 +542,11 @@ impl SimulationApp {
                 };
                 let world_pos = [b.x as f32, b.y as f32, b.z as f32];
 
-                // Luminous bodies always go through the disc path;
-                // bloom on the luminous plane handles the halo.
-                if luminous {
-                    backend.draw_body(world_pos, r_world, albedo_full, emissive_full, true);
-                    continue;
-                }
-
-                // Reflective: cross-fade disc ↔ point.
+                // Cross-fade disc ↔ point applies to both branches —
+                // sub-pixel luminous bodies need the sprite path or
+                // they vanish from the rasteriser entirely. Point
+                // sprites for reflective accumulate into HDR_R; for
+                // luminous, into HDR_L (so bloom picks them up).
                 let t = ((r_px - DISK_OFF_PX) / (DISK_FULL_PX - DISK_OFF_PX)).clamp(0.0, 1.0);
                 let weight_disk = t * t * (3.0 - 2.0 * t);
                 let weight_point = 1.0 - weight_disk;
@@ -561,7 +558,20 @@ impl SimulationApp {
                         albedo_full[2] * weight_disk,
                         albedo_full[3],
                     ];
-                    backend.draw_body(world_pos, r_world, albedo, emissive_full, false);
+                    let emissive = [
+                        emissive_full[0] * weight_disk,
+                        emissive_full[1] * weight_disk,
+                        emissive_full[2] * weight_disk,
+                        emissive_full[3],
+                    ];
+                    backend.draw_body(
+                        world_pos,
+                        r_world,
+                        albedo,
+                        emissive,
+                        luminous,
+                        b.albedo as f32,
+                    );
                 }
 
                 if weight_point > 0.001 {
@@ -583,7 +593,11 @@ impl SimulationApp {
                                 as f32
                                 * weight_point;
                         if intensity.is_finite() && intensity > 0.0 {
-                            backend.draw_point([pix.x, pix.y], intensity, base);
+                            if luminous {
+                                backend.draw_point_luminous([pix.x, pix.y], intensity, base);
+                            } else {
+                                backend.draw_point([pix.x, pix.y], intensity, base);
+                            }
                         }
                     }
                 }
