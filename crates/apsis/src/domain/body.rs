@@ -85,6 +85,21 @@ pub struct Body {
     /// inspector layers use it for category-level filters and
     /// grouping.
     pub class: BodyClass,
+
+    /// Bond albedo — fraction of incident bolometric radiation that
+    /// the body reflects, integrated over all wavelengths and phase
+    /// angles. Dimensionless, range `[0, 1]`. Read by the
+    /// [`crate::physics::photometry`] pipeline to compute the
+    /// reflected flux at the observer; ignored by force evaluators.
+    ///
+    /// Defaults are taken from [`BodyPreset::default_albedo`] (which
+    /// are class-typical placeholders, e.g. `0.10` for asteroid,
+    /// `0.30` for rocky). Templates that quote real bodies override
+    /// to the published Bond value (Earth `0.306`, Moon `0.11`,
+    /// Vesta `0.42`).
+    ///
+    /// Stars carry `0.0` — their flux is emitted, not reflected.
+    pub albedo: f64,
 }
 
 /// Body payload with an optional explicit display name.
@@ -129,6 +144,7 @@ impl Body {
             luminosity: 0.0,
             q_pr: 0.0,
             class: BodyClass::Unknown,
+            albedo: 0.30,
         }
     }
 
@@ -168,6 +184,7 @@ impl Body {
             luminosity,
             q_pr: preset.default_q_pr,
             class: preset.default_class,
+            albedo: preset.default_albedo,
         }
     }
 
@@ -318,6 +335,17 @@ impl Body {
     #[must_use]
     pub fn with_class(mut self, class: BodyClass) -> Self {
         self.class = class;
+        self
+    }
+
+    /// Override the preset-default Bond albedo. Templates of named
+    /// bodies (Earth, Sun, Moon, Mercury, …) call this with their
+    /// published value; bulk-anonymous bodies inherit the preset's
+    /// class-typical placeholder.
+    #[inline]
+    #[must_use]
+    pub fn with_albedo(mut self, albedo: f64) -> Self {
+        self.albedo = albedo.clamp(0.0, 1.0);
         self
     }
 

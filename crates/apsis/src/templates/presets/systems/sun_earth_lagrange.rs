@@ -34,6 +34,7 @@ pub fn sun_earth_lagrange(_seed: u64) -> Template {
                 class_override: None,
                 preset: &body_preset::STAR,
                 density: Some(1408.0 * KG_M3_TO_SOLAR_AU3),
+                albedo: None,
             },
             // Earth
             TemplateBody {
@@ -44,6 +45,7 @@ pub fn sun_earth_lagrange(_seed: u64) -> Template {
                 class_override: None,
                 preset: &body_preset::ROCKY,
                 density: Some(5514.0 * KG_M3_TO_SOLAR_AU3),
+                albedo: None,
             },
             // Trojan at L4
             TemplateBody {
@@ -54,6 +56,7 @@ pub fn sun_earth_lagrange(_seed: u64) -> Template {
                 class_override: None,
                 preset: &body_preset::ASTEROID,
                 density: None,
+                albedo: None,
             },
             // Trojan at L5
             TemplateBody {
@@ -64,6 +67,7 @@ pub fn sun_earth_lagrange(_seed: u64) -> Template {
                 class_override: None,
                 preset: &body_preset::ASTEROID,
                 density: None,
+                albedo: None,
             },
         ],
         display_scale: 1.0,

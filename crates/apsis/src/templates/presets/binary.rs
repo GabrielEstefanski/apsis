@@ -25,6 +25,7 @@ pub fn binary_star(_seed: u64) -> Template {
                 class_override: None,
                 preset: &body_preset::STAR,
                 density: None,
+                albedo: None,
             },
             TemplateBody {
                 name: Some("Star B"),
@@ -34,6 +35,7 @@ pub fn binary_star(_seed: u64) -> Template {
                 class_override: None,
                 preset: &body_preset::STAR,
                 density: None,
+                albedo: None,
             },
         ],
         display_scale: 1.0,
@@ -79,6 +81,7 @@ pub fn star_companion(_seed: u64) -> Template {
                 class_override: None,
                 preset: &body_preset::STAR,
                 density: None,
+                albedo: None,
             },
             TemplateBody {
                 name: Some("Companion"),
@@ -88,6 +91,7 @@ pub fn star_companion(_seed: u64) -> Template {
                 class_override: None,
                 preset: &body_preset::BROWN_DWARF,
                 density: None,
+                albedo: None,
             },
         ],
         display_scale: 1.0,
