@@ -1,8 +1,7 @@
 //! Camera tool — view framing and scale semantics.
 //!
 //! Pure presentation: camera settings never modify body state. Covers zoom,
-//! visual body-size multiplier, scale-mode semantics, and quick-view actions
-//! (fit, zero COM).
+//! scale-mode semantics, and quick-view actions (fit, zero COM).
 
 use crate::app::theme::{
     BORDER, TEXT_DIM, TEXT_PRI, TEXT_SEC, primary_btn, secondary_btn, section,
@@ -26,18 +25,6 @@ impl SimulationApp {
                     .range(0.001..=50_000.0_f32)
                     .max_decimals(3),
             );
-        });
-
-        section(ui, "BODY SIZE");
-        ui.horizontal(|ui| {
-            ui.label(RichText::new("boost").size(10.0).color(TEXT_SEC));
-            ui.add(
-                egui::DragValue::new(&mut self.body_size_boost)
-                    .speed(0.5)
-                    .range(1.0..=500.0_f32)
-                    .max_decimals(1),
-            )
-            .on_hover_text("Visual multiplier for body radii. Does not change physics.");
         });
 
         section(ui, "SCALE MODE");
