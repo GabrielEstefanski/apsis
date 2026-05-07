@@ -29,65 +29,73 @@
 //! (planet + moon) must add the parent velocity explicitly — see the solar
 //! system template for the canonical pattern.
 
-use crate::domain::materials::Material;
+use crate::domain::body_preset::BodyPreset;
 
 // ── TemplateBody ──────────────────────────────────────────────────────────────
 
 /// Descriptor for one body in a simulation template.
 ///
-/// All fields that can be derived from [`Material`] and mass are omitted here
-/// and computed at instantiation time by [`Body::of`].  Only the quantities
-/// that cannot be derived — or that the scenario author wants to override —
-/// are present.
+/// Templates pair a mass with a [`BodyPreset`] reference; everything
+/// else (density, colour, q_pr, luminosity) is derived at
+/// instantiation time from the preset. Only the quantities the
+/// scenario author wants to override (position, velocity, optional
+/// name) are stored here directly.
 ///
 /// ## What is *not* stored here
 ///
-/// | Derived quantity    | Computed by          |
-/// |---------------------|----------------------|
-/// | Bulk density        | `density(material, mass)` |
-/// | Physical radius     | `radius_from_mass_density(...)` |
-/// | Softening length    | `default_softening(mass)` |
-/// | Display colour      | `material.props().base_color` |
+/// | Derived quantity    | Computed by                            |
+/// |---------------------|----------------------------------------|
+/// | Bulk density        | `preset.density.density_at(mass)`      |
+/// | Physical radius     | `radius_from_density_mass(ρ, m)`       |
+/// | Softening length    | `default_softening(mass)`              |
+/// | Display colour      | `preset.default_color`                 |
+/// | Radiation `q_pr`    | `preset.default_q_pr`                  |
+/// | Luminosity          | `preset.luminosity.compute(...)`       |
 #[derive(Debug, Clone, Copy)]
 pub struct TemplateBody {
-    /// Optional authored display name preserved at instantiation time.
+    /// Optional authored display name preserved at instantiation
+    /// time. When `None`, the instantiator falls back to the preset's
+    /// `display_name` (e.g. `"Asteroid"`, `"Star"`).
     pub name: Option<&'static str>,
 
     /// Mass [simulation mass units, e.g. M_☉].
     pub mass: f64,
 
-    /// Material class — determines density, colour, and collision behaviour.
-    pub material: Material,
+    /// Construction preset — determines density, colour, q_pr, and
+    /// (optionally) luminosity at instantiation. Reference is held by
+    /// `&'static` so the built-in catalogue is zero-cost; user-defined
+    /// presets can be `Box::leak`'d into the same shape.
+    pub preset: &'static BodyPreset,
 
     /// Initial position `[x, y, z]` [simulation length units].
     ///
-    /// `None` defers placement to the instantiation logic (e.g. the engine
-    /// applies a centre-of-mass correction or places bodies on a grid).
-    /// 2D scenarios set `z = 0`.
+    /// `None` defers placement to the instantiation logic (e.g. the
+    /// engine applies a centre-of-mass correction or places bodies
+    /// on a grid). 2D scenarios set `z = 0`.
     pub position: Option<[f64; 3]>,
 
-    /// Initial velocity `[vx, vy, vz]` in the inertial simulation frame
-    /// [length / time]. 2D scenarios set `vz = 0`.
+    /// Initial velocity `[vx, vy, vz]` in the inertial simulation
+    /// frame [length / time]. 2D scenarios set `vz = 0`.
     pub velocity: [f64; 3],
 }
 
 impl TemplateBody {
     /// Construct a body at rest with no spin.
     ///
-    /// Convenience constructor for the common case where position and velocity
-    /// will be filled in by the scenario builder.
-    pub fn at_rest(mass: f64, material: Material) -> Self {
-        Self { name: None, mass, material, position: None, velocity: [0.0, 0.0, 0.0] }
+    /// Convenience constructor for the common case where position and
+    /// velocity will be filled in by the scenario builder.
+    pub fn at_rest(mass: f64, preset: &'static BodyPreset) -> Self {
+        Self { name: None, mass, preset, position: None, velocity: [0.0, 0.0, 0.0] }
     }
 
     /// Construct a body with explicit position and velocity, no spin.
     pub fn with_state(
         mass: f64,
-        material: Material,
+        preset: &'static BodyPreset,
         position: [f64; 3],
         velocity: [f64; 3],
     ) -> Self {
-        Self { name: None, mass, material, position: Some(position), velocity }
+        Self { name: None, mass, preset, position: Some(position), velocity }
     }
 }
 

@@ -20,7 +20,7 @@
 //! (where `m_test ≪ m_sun` satisfies Routh).
 
 use crate::{
-    domain::materials::Material,
+    domain::body_preset,
     templates::{Template, TemplateBody, UnitSystem},
 };
 
@@ -46,21 +46,21 @@ pub fn three_body_lagrange_equilateral(_seed: u64) -> Template {
                 mass: m,
                 position: Some(p1),
                 velocity: tangential(p1, v),
-                material: Material::Rocky,
+                preset: &body_preset::ROCKY,
             },
             TemplateBody {
                 name: Some("Body 2"),
                 mass: m,
                 position: Some(p2),
                 velocity: tangential(p2, v),
-                material: Material::Rocky,
+                preset: &body_preset::ROCKY,
             },
             TemplateBody {
                 name: Some("Body 3"),
                 mass: m,
                 position: Some(p3),
                 velocity: tangential(p3, v),
-                material: Material::Rocky,
+                preset: &body_preset::ROCKY,
             },
         ],
         display_scale: 1.0,

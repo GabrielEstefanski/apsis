@@ -6,7 +6,7 @@ use crate::render::{TrailRenderer, WgpuBackend};
 use apsis::core::physics_thread::{PhysicsHandle, spawn as spawn_physics};
 use apsis::core::system::System;
 use apsis::domain::body::Body;
-use apsis::domain::materials::Material;
+use apsis::domain::body_preset::{self, BodyPreset};
 use apsis::io::recorder::SimRecorder;
 use apsis::io::snapshot::{SaveEntry, SimSnapshot, list_saves};
 use apsis::physics::integrator::IntegratorKind;
@@ -314,12 +314,12 @@ pub struct SimulationApp {
     pub(super) spawn_ring_count: u32,
     pub(super) spawn_ring_mass: f64,
     pub(super) spawn_ring_vel_scale: f64,
-    pub(super) spawn_ring_material: Material,
+    pub(super) spawn_ring_preset: &'static BodyPreset,
     pub(super) spawn_cluster_radius: f64,
     pub(super) spawn_cluster_count: u32,
     pub(super) spawn_cluster_mass: f64,
     pub(super) spawn_cluster_vel_disp: f64,
-    pub(super) spawn_cluster_material: Material,
+    pub(super) spawn_cluster_preset: &'static BodyPreset,
     pub(super) selection: BodySelection,
     /// Persistent state for the new design-system Inspector — `More`
     /// expander toggles plus the Bloomberg-flash tracker. Lives on
@@ -347,7 +347,7 @@ pub struct SimulationApp {
     /// Default 1e-6 suppresses asteroid-mass bodies automatically.
     pub(super) trail_min_mass_ratio: f64,
 
-    pub(super) place_material: Material,
+    pub(super) place_preset: &'static BodyPreset,
 
     pub(super) trail: Option<TrailRenderer>,
 
@@ -564,12 +564,12 @@ impl SimulationApp {
             spawn_ring_count: 60,
             spawn_ring_mass: 0.01,
             spawn_ring_vel_scale: 1.0,
-            spawn_ring_material: Material::Rocky,
+            spawn_ring_preset: &body_preset::ROCKY,
             spawn_cluster_radius: 5.0,
             spawn_cluster_count: 30,
             spawn_cluster_mass: 1.0,
             spawn_cluster_vel_disp: 0.5,
-            spawn_cluster_material: Material::Rocky,
+            spawn_cluster_preset: &body_preset::ROCKY,
             selection: BodySelection::default(),
             inspector_state: crate::app::inspector::InspectorState::default(),
             dragging_body: None,
@@ -586,7 +586,7 @@ impl SimulationApp {
             trail_style_preset: crate::render::TrailStylePreset::UniverseSandbox,
             trail_recorder: apsis::core::trail::TrailRecorder::new(),
             trail_min_mass_ratio: 1e-7,
-            place_material: Material::Rocky,
+            place_preset: &body_preset::ROCKY,
             trail: None,
 
             zoom_vel: 0.0,

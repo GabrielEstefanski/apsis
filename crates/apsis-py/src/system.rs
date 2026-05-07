@@ -308,9 +308,15 @@ impl PySystem {
     /// the bodies themselves are immutable on the Python side. Stable
     /// across calls only if the simulation is not stepped between
     /// them.
+    ///
+    /// Round-tripped bodies report `material == "body"` because the
+    /// core `Body` carries no preset reference; the construction-time
+    /// slug is binding-layer state that does not survive the System
+    /// round-trip. Use the slug on freshly-constructed bodies (before
+    /// they enter a System) when material introspection matters.
     #[getter]
     fn bodies(&self) -> Vec<PyBody> {
-        self.inner.bodies().iter().copied().map(|b| PyBody { inner: b }).collect()
+        self.inner.bodies().iter().copied().map(|b| PyBody { inner: b, slug: "body" }).collect()
     }
 
     /// Total mechanical energy at the most recently completed step,

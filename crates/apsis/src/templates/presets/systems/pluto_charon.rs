@@ -12,7 +12,7 @@
 //! scale would be misleading.
 
 use crate::{
-    domain::materials::Material,
+    domain::body_preset,
     templates::{Template, TemplateBody, UnitSystem},
 };
 
@@ -39,14 +39,14 @@ pub fn pluto_charon(_seed: u64) -> Template {
                 mass: m_pluto,
                 position: Some([-r_pluto, 0.0, 0.0]),
                 velocity: [0.0, -v_pluto, 0.0],
-                material: Material::Icy,
+                preset: &body_preset::ICY,
             },
             TemplateBody {
                 name: Some("Charon"),
                 mass: m_charon,
                 position: Some([r_charon, 0.0, 0.0]),
                 velocity: [0.0, v_charon, 0.0],
-                material: Material::Icy,
+                preset: &body_preset::ICY,
             },
         ],
         display_scale: 1.0,

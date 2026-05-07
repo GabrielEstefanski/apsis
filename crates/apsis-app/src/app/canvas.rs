@@ -805,14 +805,18 @@ impl SimulationApp {
                             (0.0, 0.0)
                         };
 
-                        let mut body =
-                            apsis::domain::body::Body::of(self.place_mass, self.place_material)
-                                .at(wx, wy)
-                                .with_velocity(vx, vy);
-                        body.sync_physical_properties();
+                        let body = apsis::domain::body::Body::from_preset(
+                            self.place_preset,
+                            self.place_mass,
+                        )
+                        .at(wx, wy)
+                        .with_velocity(vx, vy);
 
                         self.push_undo(UndoRecord::AddedBodies(1));
-                        self.system.add_body(body);
+                        self.system.add_named_body(apsis::domain::body::NamedBody {
+                            body,
+                            name: Some(self.place_preset.display_name.to_owned()),
+                        });
                     }
                 }
             }

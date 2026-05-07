@@ -1,4 +1,4 @@
-use crate::domain::materials::{Material, density};
+use crate::domain::body_preset::{self, BodyPreset};
 use std::f64::consts::PI;
 
 /// Base softening length for a body of mass 1.0.
@@ -12,6 +12,15 @@ use std::f64::consts::PI;
 #[doc(hidden)]
 pub const EPS_BASE: f64 = 0.02;
 
+/// Point-mass body: kinematics, mass, and the small set of physical
+/// properties read by gravitational and radiation force evaluators.
+///
+/// Body owns its physical state directly. It carries no taxonomy
+/// reference — material classifications are construction-time presets
+/// (see [`crate::domain::body_preset`]), not runtime fields. The
+/// resulting struct matches the REBOUND `reb_particle` shape: every
+/// field is a quantity a force evaluator might read, and every default
+/// is sensible for a non-emitting non-receiving point mass.
 #[derive(Clone, Copy, Debug)]
 pub struct Body {
     pub x: f64,
@@ -31,38 +40,43 @@ pub struct Body {
 
     /// True physical radius derived from mass and density.
     ///
-    /// This represents the actual size of the body and is used for:
+    /// Used by:
     /// - energy calculations (e.g. disruption threshold Q*)
-    /// - physically meaningful scaling
-    ///
-    /// Unlike `radius`, this value is **never modified by calibration**.
+    /// - radiation pressure (cross section ∝ r²)
+    /// - rendering and collision geometry
     pub physical_radius: f64,
 
     /// Bulk density of the body: ρ = m / V, V = 4/3 π r³.
     ///
-    /// This is the **primary size property** of a body — the physical radius
-    /// is derived from it via `r = (3m / 4πρ)^(1/3)`.
-    ///
-    /// This value is invariant during simulation except for merge/fragmentation
-    /// events where material composition changes.
+    /// Primary size property — physical radius is recomputed from
+    /// this via [`Body::sync_physical_properties`] whenever mass or
+    /// density change.
     pub density: f64,
 
-    /// Astrophysical material class.
-    pub material: Material,
-
-    /// Display colour [R, G, B].
+    /// Display colour `[R, G, B]`. Set by the construction preset
+    /// (e.g. brown for [`body_preset::ROCKY`], blue-grey for
+    /// [`body_preset::ICY`]) and overridable per body via
+    /// [`Body::with_color`]. Never read by the physics path.
     pub color: [u8; 3],
 
     /// Bolometric luminosity in internal energy · time⁻¹ units.
     ///
-    /// This field is **not** computed automatically on construction — it starts
-    /// at `0.0` and must be populated explicitly via [`update_luminosity`]
-    /// before any radiation calculation.
-    ///
-    /// [`RadiationField::from_bodies`] reads this field directly; calling
-    /// `from_bodies` without first calling `update_luminosity` on all luminous
-    /// bodies will silently produce no radiation sources.
+    /// Set by the construction preset for luminous classes
+    /// ([`body_preset::STAR`], [`body_preset::BROWN_DWARF`],
+    /// [`body_preset::WHITE_DWARF`]); zero for everything else.
+    /// Static after construction — mutating mass or density does not
+    /// recompute luminosity automatically. Override manually with
+    /// [`Body::with_luminosity`] if a sim layer needs to refresh it.
     pub luminosity: f64,
+
+    /// Radiation-pressure receiver coefficient `Q_pr` (Burns,
+    /// Lamy & Soter 1979). Zero on stars and large planets;
+    /// positive on dust grains, asteroid surfaces, comets.
+    ///
+    /// Read by [`crate::physics::radiation`] when computing per-body
+    /// radiation forces. Bodies with `q_pr == 0.0` are silently
+    /// skipped by the radiation pipeline.
+    pub q_pr: f64,
 }
 
 /// Body payload with an optional explicit display name.
@@ -70,7 +84,7 @@ pub struct Body {
 /// Returned by [`Body::named`] and by the template catalog. Consumed by
 /// [`System::add_named_body`](crate::core::system::System::add_named_body)
 /// to preserve authored names; otherwise the system derives a stable
-/// material-based fallback.
+/// preset-based fallback.
 #[derive(Clone, Debug)]
 pub struct NamedBody {
     pub body: Body,
@@ -78,70 +92,53 @@ pub struct NamedBody {
 }
 
 impl Body {
-    // ── Material constructors ─────────────────────────────────────────────────
+    // ── Low-level constructor ────────────────────────────────────────────────
     //
-    // Each constructor creates a body at the origin, at rest, with physical
-    // properties derived from `mass` and the canonical material profile.
-    // Position and velocity are set via the fluent builder methods below.
+    // Explicit mass and density; everything else takes a sensible default
+    // (zero kinematics, mid-grey colour, no luminosity, no radiation
+    // receiver). This is the form documented in the paper.
 
-    /// Star — main-sequence luminous body. Default density, luminous material.
-    pub fn star(mass: f64) -> Self {
-        Self::from_material(mass, Material::Star)
-    }
-
-    /// Brown dwarf — sub-stellar, deuterium-burning regime.
-    pub fn brown_dwarf(mass: f64) -> Self {
-        Self::from_material(mass, Material::BrownDwarf)
-    }
-
-    /// White dwarf — compact stellar remnant.
-    pub fn white_dwarf(mass: f64) -> Self {
-        Self::from_material(mass, Material::WhiteDwarf)
-    }
-
-    /// Gas giant — Jupiter-class hydrogen/helium envelope.
-    pub fn gas_giant(mass: f64) -> Self {
-        Self::from_material(mass, Material::Gas)
-    }
-
-    /// Ice giant — Neptune-class water/methane envelope.
-    pub fn ice_giant(mass: f64) -> Self {
-        Self::from_material(mass, Material::IceGiant)
-    }
-
-    /// Rocky body — terrestrial planet or large rocky satellite.
-    pub fn rocky(mass: f64) -> Self {
-        Self::from_material(mass, Material::Rocky)
-    }
-
-    /// Icy body — water-dominated composition (outer satellites, KBOs).
-    pub fn icy(mass: f64) -> Self {
-        Self::from_material(mass, Material::Icy)
-    }
-
-    /// Asteroid — rocky minor body.
-    pub fn asteroid(mass: f64) -> Self {
-        Self::from_material(mass, Material::Asteroid)
-    }
-
-    /// Comet — volatile-rich minor body.
-    pub fn comet(mass: f64) -> Self {
-        Self::from_material(mass, Material::Comet)
-    }
-
-    /// Body with an explicit material.
-    ///
-    /// Prefer the material-named constructors ([`star`](Self::star),
-    /// [`rocky`](Self::rocky), …) for readability; this is the escape hatch
-    /// when the material is computed programmatically.
-    pub fn of(mass: f64, material: Material) -> Self {
-        Self::from_material(mass, material)
-    }
-
-    fn from_material(mass: f64, material: Material) -> Self {
-        let density = density(material, mass);
+    /// Construct a body with explicit mass and density. Physical
+    /// radius is derived as `r = (3m / 4πρ)^(1/3)`; softening uses
+    /// the project default `EPS_BASE * m^(1/3)`. Position and
+    /// velocity start at the origin with no velocity; tune via the
+    /// fluent builder methods or the preset-based factories.
+    pub fn new(mass: f64, density: f64) -> Self {
         let physical_radius = radius_from_density_mass(density, mass);
         let softening = default_softening(mass);
+        Self {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+            vx: 0.0,
+            vy: 0.0,
+            vz: 0.0,
+            mass,
+            softening,
+            physical_radius,
+            density,
+            color: [180, 180, 180],
+            luminosity: 0.0,
+            q_pr: 0.0,
+        }
+    }
+
+    /// Construct a body from a [`BodyPreset`] at the requested mass.
+    ///
+    /// Density, colour, `q_pr`, and luminosity are all taken from the
+    /// preset; physical radius and softening are derived. Mass is
+    /// assumed to be in solar units — the preset's luminosity model
+    /// runs with that assumption. For non-solar unit systems, override
+    /// the resulting body's `luminosity` field manually after
+    /// construction.
+    pub fn from_preset(preset: &BodyPreset, mass: f64) -> Self {
+        let density = preset.density.density_at(mass);
+        let physical_radius = radius_from_density_mass(density, mass);
+        let softening = default_softening(mass);
+        let luminosity = preset
+            .luminosity
+            .map(|src| src.compute(mass, physical_radius / SOLAR_RADIUS_AU))
+            .unwrap_or(0.0);
 
         Self {
             x: 0.0,
@@ -154,10 +151,61 @@ impl Body {
             softening,
             physical_radius,
             density,
-            material,
-            color: material.props().base_color,
-            luminosity: 0.0,
+            color: preset.default_color,
+            luminosity,
+            q_pr: preset.default_q_pr,
         }
+    }
+
+    // ── Preset-named constructors (high-level ergonomic factories) ──────────
+    //
+    // Each is a one-liner over `from_preset` with the corresponding built-in
+    // preset. Preserves the `Body::rocky(mass)` etc. spelling without
+    // re-exposing the preset enum on the body itself.
+
+    /// Star — main-sequence luminous body. See [`body_preset::STAR`].
+    pub fn star(mass: f64) -> Self {
+        Self::from_preset(&body_preset::STAR, mass)
+    }
+
+    /// Brown dwarf — sub-stellar deuterium burner.
+    pub fn brown_dwarf(mass: f64) -> Self {
+        Self::from_preset(&body_preset::BROWN_DWARF, mass)
+    }
+
+    /// White dwarf — degenerate stellar remnant.
+    pub fn white_dwarf(mass: f64) -> Self {
+        Self::from_preset(&body_preset::WHITE_DWARF, mass)
+    }
+
+    /// Gas giant — H/He envelope (Jupiter, Saturn, hot Jupiters).
+    pub fn gas_giant(mass: f64) -> Self {
+        Self::from_preset(&body_preset::GAS, mass)
+    }
+
+    /// Ice giant — water/methane envelope (Uranus, Neptune).
+    pub fn ice_giant(mass: f64) -> Self {
+        Self::from_preset(&body_preset::ICE_GIANT, mass)
+    }
+
+    /// Rocky body — silicate terrestrial planet or large rocky moon.
+    pub fn rocky(mass: f64) -> Self {
+        Self::from_preset(&body_preset::ROCKY, mass)
+    }
+
+    /// Icy body — water-ice dominated (icy moons, KBOs).
+    pub fn icy(mass: f64) -> Self {
+        Self::from_preset(&body_preset::ICY, mass)
+    }
+
+    /// Asteroid — rocky minor body.
+    pub fn asteroid(mass: f64) -> Self {
+        Self::from_preset(&body_preset::ASTEROID, mass)
+    }
+
+    /// Comet — volatile-rich minor body.
+    pub fn comet(mass: f64) -> Self {
+        Self::from_preset(&body_preset::COMET, mass)
     }
 
     // ── Fluent builder ────────────────────────────────────────────────────────
@@ -207,12 +255,43 @@ impl Body {
         self
     }
 
-    /// Override the material-default density. Radius is recomputed to match.
+    /// Override the preset-default density. Physical radius is
+    /// recomputed to match.
     #[inline]
     #[must_use]
     pub fn with_density(mut self, density: f64) -> Self {
         self.density = density;
         self.physical_radius = radius_from_density_mass(self.density, self.mass);
+        self
+    }
+
+    /// Override the preset-default colour. Visualisation only — never
+    /// affects the physics path.
+    #[inline]
+    #[must_use]
+    pub fn with_color(mut self, color: [u8; 3]) -> Self {
+        self.color = color;
+        self
+    }
+
+    /// Set the bolometric luminosity directly. Use after construction
+    /// when running outside the canonical solar unit system, or to
+    /// install a non-default luminosity (a tabulated pulsar curve,
+    /// for example).
+    #[inline]
+    #[must_use]
+    pub fn with_luminosity(mut self, l: f64) -> Self {
+        self.luminosity = l;
+        self
+    }
+
+    /// Override the preset-default radiation-pressure receiver
+    /// coefficient `Q_pr`. Set to `0.0` to opt the body out of the
+    /// radiation pipeline.
+    #[inline]
+    #[must_use]
+    pub fn with_q_pr(mut self, q_pr: f64) -> Self {
+        self.q_pr = q_pr;
         self
     }
 
@@ -227,7 +306,7 @@ impl Body {
     /// Zero this body's Plummer softening length, producing the exact `1/r`
     /// potential for every interaction involving it.
     ///
-    /// The simulator defaults every body to a material-scaled Plummer
+    /// The simulator defaults every body to a preset-scaled Plummer
     /// softening (`EPS_BASE · mass^(1/3)`). For a solar-mass body this
     /// gives ε ≈ 0.02 AU — about 5 % of Mercury's perihelion distance —
     /// which introduces a numerical apsidal precession that can easily
@@ -256,42 +335,14 @@ impl Body {
 
     // ── Mutators ──────────────────────────────────────────────────────────────
 
-    /// Recompute physical-only quantities from the current mass and density.
+    /// Recompute the physical radius from the current mass and density.
     ///
-    /// Must be used whenever `mass` or `density` is mutated in place
+    /// Must be called whenever `mass` or `density` is mutated in place
     /// (e.g. via direct field assignment on a `&mut Body`). It intentionally
     /// does **not** touch the calibrated contact radius, which belongs to the
     /// numerical collision model rather than the body's physical geometry.
     pub fn sync_physical_properties(&mut self) {
         self.physical_radius = radius_from_density_mass(self.density, self.mass);
-    }
-
-    /// Updates the cached [`luminosity`](Self::luminosity) field from the
-    /// current mass, radius, and supplied unit conversion factors.
-    ///
-    /// Must be called explicitly after:
-    /// - construction if radiation is enabled
-    /// - any change to `mass` or `density` (after [`sync_physical_properties`])
-    /// - any change to `material`
-    ///
-    /// `l_sun` is L☉ expressed in internal energy · time⁻¹ units.
-    pub(crate) fn update_luminosity(
-        &mut self,
-        mass_to_solar: f64,
-        radius_to_solar: f64,
-        l_sun: f64,
-    ) {
-        self.luminosity = self.luminosity_solar(mass_to_solar, radius_to_solar) * l_sun;
-    }
-
-    pub(crate) fn luminosity_solar(&self, mass_to_solar: f64, radius_to_solar: f64) -> f64 {
-        let m = self.mass * mass_to_solar;
-        match self.material {
-            Material::Star => main_sequence_luminosity_smooth(m),
-            Material::BrownDwarf => brown_dwarf_luminosity(m),
-            Material::WhiteDwarf => white_dwarf_luminosity(self.physical_radius * radius_to_solar),
-            _ => 0.0,
-        }
     }
 
     /// Returns `true` if this body emits radiation.
@@ -319,112 +370,17 @@ pub(crate) fn sphere_radius_from_volume(volume: f64) -> f64 {
     ((3.0 * volume) / (4.0 * PI)).cbrt()
 }
 
-// ── Luminosity models ─────────────────────────────────────────────────────────
-
-/// Logistic sigmoid: smooth step from 0 → 1 centred at `m0` with width `w`.
-#[inline]
-fn logistic(m: f64, m0: f64, w: f64) -> f64 {
-    1.0 / (1.0 + ((m0 - m) / w).exp())
-}
-
-/// Main-sequence mass–luminosity relation with a continuously differentiable
-/// exponent.
-///
-/// The exponent `α(M)` blends smoothly across two physical regimes:
-///
-/// | Regime       | Mass range  | α   | Dominant physics          |
-/// |--------------|-------------|-----|---------------------------|
-/// | Low-mass     | M ≲ 0.43 M☉ | 2.3 | Fully convective interior |
-/// | Solar-type   | M ≳ 0.43 M☉ | 3.5 | Radiative core            |
-///
-/// References: Salaris & Cassisi (2005) §5.3; Tout et al. (1996) *MNRAS* 281.
-fn main_sequence_luminosity_smooth(m: f64) -> f64 {
-    if m <= 0.0 {
-        return 0.0;
-    }
-
-    let alpha = 2.3 + (3.5 - 2.3) * logistic(m, 0.43, 0.15);
-
-    m.powf(alpha)
-}
-
-/// Deuterium-burning luminosity for sub-stellar objects.
-///
-/// Reference: Burrows et al. (1997) *ApJ* 491, 856.
-fn brown_dwarf_luminosity(m: f64) -> f64 {
-    if m <= 0.013 {
-        return 0.0;
-    }
-    let onset = logistic(m, 0.013, 0.002);
-    1e-3 * (m / 0.05).powi(2) * onset
-}
-
-/// Stefan–Boltzmann cooling luminosity for a white dwarf.
-///
-/// Reference: Koester & Chanmugam (1990) *Rep. Prog. Phys.* 53, 837.
-fn white_dwarf_luminosity(r_solar: f64) -> f64 {
-    const T_EFF: f64 = 10_000.0;
-    const T_SUN: f64 = 5_778.0;
-    let t_ratio = T_EFF / T_SUN;
-    r_solar * r_solar * t_ratio.powi(4)
-}
+/// Solar radius in astronomical units. Used internally by
+/// [`Body::from_preset`] to convert `physical_radius` (in simulation
+/// length units, i.e. AU under `solar_au`) to solar radii for the
+/// luminosity model.
+const SOLAR_RADIUS_AU: f64 = 0.00465047;
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn solar_mass_star_has_unit_luminosity() {
-        let l = main_sequence_luminosity_smooth(1.0);
-        assert!((l - 1.0).abs() < 0.01, "L(1 M☉) = {l}, expected ~1");
-    }
-
-    #[test]
-    fn luminosity_increases_with_mass() {
-        let l1 = main_sequence_luminosity_smooth(1.0);
-        let l2 = main_sequence_luminosity_smooth(2.0);
-        assert!(l2 > l1);
-    }
-
-    #[test]
-    fn luminosity_continuous_at_low_mass_boundary() {
-        let eps = 1e-4;
-        let l_lo = main_sequence_luminosity_smooth(0.43 - eps);
-        let l_hi = main_sequence_luminosity_smooth(0.43 + eps);
-        let slope = (l_hi - l_lo) / (2.0 * eps);
-        assert!(slope.is_finite(), "discontinuity at 0.43 M☉");
-        assert!(slope > 0.0, "luminosity must increase with mass");
-    }
-
-    #[test]
-    fn luminosity_continuous_at_eddington_boundary() {
-        let eps = 1e-3;
-        let l_lo = main_sequence_luminosity_smooth(50.0 - eps);
-        let l_hi = main_sequence_luminosity_smooth(50.0 + eps);
-        let slope = (l_hi - l_lo) / (2.0 * eps);
-        assert!(slope.is_finite());
-        assert!(slope > 0.0);
-    }
-
-    #[test]
-    fn brown_dwarf_below_threshold_is_zero() {
-        assert_eq!(brown_dwarf_luminosity(0.01), 0.0);
-    }
-
-    #[test]
-    fn brown_dwarf_increases_with_mass() {
-        let l1 = brown_dwarf_luminosity(0.03);
-        let l2 = brown_dwarf_luminosity(0.07);
-        assert!(l2 > l1);
-    }
-
-    #[test]
-    fn white_dwarf_typical_luminosity_in_range() {
-        let l = white_dwarf_luminosity(0.01);
-        assert!(l > 1e-4 && l < 0.1, "WD luminosity out of expected range: {l}");
-    }
 
     #[test]
     fn unsoftened_zeroes_softening() {
@@ -444,7 +400,6 @@ mod tests {
         assert_eq!(b.vy, 1.0);
         assert_eq!(b.vz, 0.0);
         assert_eq!(b.mass, 3e-6);
-        assert_eq!(b.material, Material::Rocky);
     }
 
     #[test]
@@ -486,31 +441,89 @@ mod tests {
         assert_eq!(b.vz, 3.0);
     }
 
+    // ── Density / luminosity propagation from presets ────────────────────────
+
     #[test]
-    fn material_constructors_use_material_default_density() {
+    fn rocky_preset_uses_material_default_density() {
+        let earth = Body::rocky(1.0);
+        // ρ_0 = 5514 kg/m³ at anchor mass 1.0; Earth is at the anchor.
+        assert!((earth.density - 5514.0).abs() < 1.0);
+    }
+
+    #[test]
+    fn icy_density_differs_from_rocky() {
         let rocky = Body::rocky(1.0);
         let icy = Body::icy(1.0);
-        assert!(rocky.density > 0.0);
-        assert!(icy.density > 0.0);
-        assert!(rocky.density != icy.density);
+        assert_ne!(rocky.density, icy.density);
     }
 
     #[test]
-    fn non_luminous_materials_return_zero() {
-        let body = Body::rocky(1.0);
-        assert_eq!(body.luminosity_solar(1.0, 1.0), 0.0);
+    fn star_preset_sets_luminosity() {
+        let sun = Body::star(1.0);
+        // Mass=1 in solar units → luminosity ≈ 1 solar luminosity.
+        assert!((sun.luminosity - 1.0).abs() < 0.05, "L = {}", sun.luminosity);
     }
 
     #[test]
-    fn is_luminous_false_before_update() {
-        let body = Body::star(1.0);
-        assert!(!body.is_luminous());
+    fn rocky_preset_has_zero_luminosity() {
+        assert_eq!(Body::rocky(1.0).luminosity, 0.0);
     }
 
     #[test]
-    fn is_luminous_true_after_update() {
-        let mut body = Body::star(1.0);
-        body.update_luminosity(1.0, 1.0 / 0.00465, 1.0);
-        assert!(body.is_luminous());
+    fn is_luminous_false_for_planets() {
+        assert!(!Body::rocky(1.0).is_luminous());
+        assert!(!Body::gas_giant(317.0).is_luminous());
+    }
+
+    #[test]
+    fn is_luminous_true_for_main_sequence_star() {
+        assert!(Body::star(1.0).is_luminous());
+    }
+
+    // ── Q_pr propagation ─────────────────────────────────────────────────────
+
+    #[test]
+    fn dust_class_presets_have_positive_q_pr() {
+        assert!(Body::asteroid(1e-4).q_pr > 0.0);
+        assert!(Body::comet(1e-6).q_pr > 0.0);
+        assert!(Body::icy(1.0).q_pr > 0.0);
+    }
+
+    #[test]
+    fn massive_classes_have_zero_q_pr() {
+        assert_eq!(Body::rocky(1.0).q_pr, 0.0);
+        assert_eq!(Body::star(1.0).q_pr, 0.0);
+    }
+
+    #[test]
+    fn with_q_pr_overrides_preset_default() {
+        let custom = Body::rocky(1.0).with_q_pr(0.5);
+        assert_eq!(custom.q_pr, 0.5);
+    }
+
+    // ── Low-level Body::new ──────────────────────────────────────────────────
+
+    #[test]
+    fn body_new_uses_explicit_density_and_zero_optionals() {
+        let b = Body::new(1.0, 2000.0);
+        assert_eq!(b.mass, 1.0);
+        assert_eq!(b.density, 2000.0);
+        assert_eq!(b.luminosity, 0.0);
+        assert_eq!(b.q_pr, 0.0);
+        assert_eq!(b.color, [180, 180, 180]);
+    }
+
+    #[test]
+    fn body_new_recovers_radius_from_density() {
+        let b = Body::new(1.0, 2000.0);
+        let expected = radius_from_density_mass(2000.0, 1.0);
+        assert_eq!(b.physical_radius, expected);
+    }
+
+    #[test]
+    fn with_density_recomputes_radius() {
+        let b = Body::rocky(1.0).with_density(10_000.0);
+        let expected = radius_from_density_mass(10_000.0, b.mass);
+        assert_eq!(b.physical_radius, expected);
     }
 }
