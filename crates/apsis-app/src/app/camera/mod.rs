@@ -32,6 +32,75 @@ const ELEVATION_LIMIT: f64 = std::f64::consts::FRAC_PI_2 - 1e-3;
 /// epsilons of the pivot and prevents division-by-zero in `view_matrix`.
 const MIN_DISTANCE: f64 = 1e-6;
 
+/// Phase-locked transition between two camera viewpoints.
+///
+/// Captured on click-to-focus. Each frame the follow loop derives a
+/// single fraction `t = 1 - alpha_remaining` and applies it to all
+/// four pose dimensions (pivot, azimuth, elevation, distance) in
+/// lockstep, so distance and pivot reach the same perceptual
+/// progress at the same wall time. The eye trajectory is the
+/// geometric interpolation between the two viewpoints — no separate
+/// "zoom" then "walk" phases.
+///
+/// The pivot endpoint tracks the body's current position each frame
+/// (instead of being pinned to where the body was at click time), so
+/// fast-moving targets stay in frame throughout the transition.
+#[derive(Debug, Clone, Copy)]
+pub struct FollowTransition {
+    pub body_idx: usize,
+    pub initial: CameraPose,
+    pub target_azimuth: f64,
+    pub target_elevation: f64,
+    pub target_distance: f64,
+    /// Decays from 1 (untransitioned) to 0 (settled).
+    pub alpha_remaining: f64,
+    pub tau: f64,
+}
+
+impl FollowTransition {
+    /// `alpha_remaining` falls by `1/e` in 150 ms; visually settled
+    /// in roughly 3·τ.
+    pub const DEFAULT_TAU: f64 = 0.15;
+    /// Below this remaining alpha the transition is considered done
+    /// and the caller hands off to steady-state feedforward.
+    pub const SETTLED_EPS: f64 = 1e-3;
+
+    pub fn capture(
+        body_idx: usize,
+        initial: CameraPose,
+        target_azimuth: f64,
+        target_elevation: f64,
+        target_distance: f64,
+    ) -> Self {
+        Self {
+            body_idx,
+            initial,
+            target_azimuth,
+            target_elevation,
+            target_distance,
+            alpha_remaining: 1.0,
+            tau: Self::DEFAULT_TAU,
+        }
+    }
+
+    /// Advance the phase by `dt`. Returns `true` once `alpha_remaining`
+    /// drops below [`SETTLED_EPS`].
+    pub fn step(&mut self, dt: f64) -> bool {
+        self.alpha_remaining *= (-dt / self.tau).exp();
+        if self.alpha_remaining < Self::SETTLED_EPS {
+            self.alpha_remaining = 0.0;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Lerp fraction `t = 1 - alpha_remaining` ∈ [0, 1].
+    pub fn t(&self) -> f64 {
+        1.0 - self.alpha_remaining
+    }
+}
+
 /// One camera pose: pivot, spherical-coordinate orientation, and
 /// distance. Lives twice in [`OrbitCamera`] (current vs. target).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -91,6 +160,21 @@ impl CameraPose {
     pub fn view_matrix(&self) -> DMat4 {
         DMat4::look_at_rh(self.eye(), self.pivot, DVec3::Y)
     }
+
+    /// Phase-locked interpolation between two poses by fraction `t`.
+    /// Distance lerps in log space; angles take the shortest arc;
+    /// pivot lerps linearly. `t = 0` returns `self`, `t = 1` returns
+    /// `other`.
+    pub fn lerp_to(&self, other: &CameraPose, t: f64) -> CameraPose {
+        let log_a = self.distance.max(MIN_DISTANCE).ln();
+        let log_b = other.distance.max(MIN_DISTANCE).ln();
+        CameraPose::new(
+            self.pivot.lerp(other.pivot, t),
+            lerp_angle(self.azimuth, other.azimuth, t),
+            self.elevation + t * (other.elevation - self.elevation),
+            (log_a + t * (log_b - log_a)).exp(),
+        )
+    }
 }
 
 impl Default for CameraPose {
@@ -123,17 +207,24 @@ impl OrbitCamera {
         self.target = pose;
     }
 
-    /// Advance `current` toward `target` by `dt` seconds using a
-    /// critically damped exponential approach. Frame-rate independent.
+    /// Advance `current` toward `target` by `dt` seconds.
+    /// Distance lerps in log space so a click reframe feels uniform
+    /// across the AU-to-light-year dynamic range.
     pub fn integrate(&mut self, dt: f64) {
         let alpha = 1.0 - (-self.omega_n * dt).exp();
+        if alpha == 0.0 {
+            return;
+        }
         let c = &mut self.current;
         let t = &self.target;
 
         c.pivot = c.pivot.lerp(t.pivot, alpha);
         c.azimuth = lerp_angle(c.azimuth, t.azimuth, alpha);
-        c.elevation = c.elevation + alpha * (t.elevation - c.elevation);
-        c.distance = c.distance + alpha * (t.distance - c.distance);
+        c.elevation += alpha * (t.elevation - c.elevation);
+
+        let log_c = c.distance.max(MIN_DISTANCE).ln();
+        let log_t = t.distance.max(MIN_DISTANCE).ln();
+        c.distance = (log_c + alpha * (log_t - log_c)).exp();
 
         c.elevation = c.elevation.clamp(-ELEVATION_LIMIT, ELEVATION_LIMIT);
         c.distance = c.distance.max(MIN_DISTANCE);
@@ -160,6 +251,32 @@ impl OrbitCamera {
         let r = self.target.right();
         let u = self.target.up();
         self.target.pivot += r * dx + u * dy;
+    }
+
+    /// Pivot target that cancels the spring's discrete-step lag for
+    /// motion at most quadratic in time. The factor `(1/α − 1)`
+    /// (with `α = 1 - exp(-ω·dt)`) reduces to `1/ω` in the
+    /// `dt → 0` limit while staying exact at the actual frame rate.
+    /// Inputs are wall-time derivatives sampled *after* the
+    /// integrator step that produced `body_pos` (matches what the
+    /// physics thread publishes), hence the negative sign on the
+    /// `½·a·dt²` term: it removes the `a·dt²` contribution that
+    /// `wall_vel` already carries vs. the velocity that drove the
+    /// last position step.
+    pub fn feedforward_pivot(
+        &self,
+        dt: f64,
+        body_pos: DVec3,
+        wall_vel: DVec3,
+        wall_acc: DVec3,
+    ) -> DVec3 {
+        let omega = self.omega_n.max(1e-9);
+        let alpha = 1.0 - (-omega * dt).exp();
+        if alpha < 1e-12 {
+            return body_pos;
+        }
+        let k = 1.0 / alpha - 1.0;
+        body_pos + (wall_vel * dt - wall_acc * (0.5 * dt * dt)) * k
     }
 
     /// `true` when `current` is close enough to `target` that further
@@ -346,5 +463,160 @@ mod tests {
         // At identity pose: right = +X, up = +Y, forward = −Z.
         cam.pan_screen(3.0, 4.0);
         assert!(vec_approx_eq(cam.target.pivot, DVec3::new(3.0, 4.0, 0.0), 1e-12));
+    }
+
+    // ── Log-space distance lerp ──────────────────────────────────────────────
+
+    #[test]
+    fn distance_log_lerp_uniform_per_step_ratio() {
+        // 10 → 0.001 in log-space: each integration step covers the
+        // same RATIO of the remaining log-distance, so 60 frames
+        // cover most of the 4-decade gap.
+        let mut cam = OrbitCamera::new(CameraPose::new(DVec3::ZERO, 0.0, 0.0, 10.0));
+        cam.target.distance = 0.001;
+        for _ in 0..60 {
+            cam.integrate(1.0 / 60.0);
+        }
+        // After 1 s at ω_n = 12 the spring covers 1 - exp(-12) ≈ 1.
+        // In log space that means 4 decades of progress.
+        let progress_decades = (10.0_f64.log10() - cam.current.distance.log10())
+            / (10.0_f64.log10() - 0.001_f64.log10());
+        assert!(progress_decades > 0.999, "log progress = {progress_decades}");
+    }
+
+    #[test]
+    fn distance_log_lerp_no_overshoot() {
+        let mut cam = OrbitCamera::new(CameraPose::new(DVec3::ZERO, 0.0, 0.0, 100.0));
+        cam.target.distance = 1.0;
+        for _ in 0..600 {
+            cam.integrate(1.0 / 60.0);
+            assert!(
+                cam.current.distance >= 1.0 - 1e-6,
+                "distance {} undershot target",
+                cam.current.distance
+            );
+        }
+    }
+
+    // ── PD-with-feedforward ──────────────────────────────────────────────────
+
+    #[test]
+    fn feedforward_zero_for_static_body() {
+        let cam = OrbitCamera::new(CameraPose::new(DVec3::ZERO, 0.0, 0.0, 10.0));
+        let pos = DVec3::new(1.0, 2.0, 3.0);
+        let ff = cam.feedforward_pivot(1.0 / 60.0, pos, DVec3::ZERO, DVec3::ZERO);
+        assert!(vec_approx_eq(ff, pos, 1e-12));
+    }
+
+    #[test]
+    fn feedforward_cancels_constant_velocity_lag() {
+        // Discrete-aware feedforward should pin the spring to the
+        // body for any constant-velocity motion at the actual dt.
+        let dt = 1.0 / 60.0;
+        let v = DVec3::new(2.0, 0.0, 0.0);
+        let mut cam = OrbitCamera::new(CameraPose::new(DVec3::ZERO, 0.0, 0.0, 10.0));
+
+        let mut body_pos = DVec3::ZERO;
+        for _ in 0..120 {
+            body_pos += v * dt;
+            let ff = cam.feedforward_pivot(dt, body_pos, v, DVec3::ZERO);
+            cam.target.pivot = ff;
+            cam.integrate(dt);
+        }
+        assert!(
+            vec_approx_eq(cam.current.pivot, body_pos, 1e-9),
+            "current {:?} vs body {:?}",
+            cam.current.pivot,
+            body_pos,
+        );
+    }
+
+    #[test]
+    fn feedforward_cancels_constant_acceleration_lag() {
+        // Body advances Verlet-style — `body += v·dt + ½·a·dt²` —
+        // matching the discrete model the feedforward inverts.
+        let dt = 1.0 / 60.0;
+        let a = DVec3::new(0.0, 1.0, 0.0);
+        let mut cam = OrbitCamera::new(CameraPose::new(DVec3::ZERO, 0.0, 0.0, 10.0));
+
+        let mut body_pos = DVec3::ZERO;
+        let mut body_vel = DVec3::ZERO;
+        for _ in 0..120 {
+            body_pos += body_vel * dt + a * (0.5 * dt * dt);
+            body_vel += a * dt;
+            let ff = cam.feedforward_pivot(dt, body_pos, body_vel, a);
+            cam.target.pivot = ff;
+            cam.integrate(dt);
+        }
+        assert!(
+            vec_approx_eq(cam.current.pivot, body_pos, 1e-9),
+            "current {:?} vs body {:?}",
+            cam.current.pivot,
+            body_pos,
+        );
+    }
+
+    // ── FollowTransition (phase-locked) ──────────────────────────────────────
+
+    fn pose_at(distance: f64) -> CameraPose {
+        CameraPose::new(DVec3::ZERO, 0.0, 0.0, distance)
+    }
+
+    #[test]
+    fn follow_transition_alpha_decays_at_expected_rate() {
+        // After one τ ≈ 9 frames at 60 fps, alpha_remaining ≈ e⁻¹.
+        let mut t = FollowTransition::capture(0, pose_at(10.0), 0.0, 0.0, 1.0);
+        let dt = 1.0 / 60.0;
+        let frames = (FollowTransition::DEFAULT_TAU / dt).round() as u32;
+        for _ in 0..frames {
+            t.step(dt);
+        }
+        assert!(
+            (t.alpha_remaining - (-1.0_f64).exp()).abs() < 0.02,
+            "alpha_remaining = {}",
+            t.alpha_remaining,
+        );
+    }
+
+    #[test]
+    fn follow_transition_settles_within_two_seconds() {
+        let mut t = FollowTransition::capture(0, pose_at(10.0), 0.0, 0.0, 1.0);
+        let dt = 1.0 / 60.0;
+        let mut steps = 0;
+        while !t.step(dt) {
+            steps += 1;
+            assert!(steps < 120, "transition failed to settle in 2 s");
+        }
+        assert_eq!(t.alpha_remaining, 0.0);
+    }
+
+    #[test]
+    fn follow_transition_t_is_zero_at_capture_one_at_settle() {
+        let mut t = FollowTransition::capture(0, pose_at(10.0), 0.0, 0.0, 1.0);
+        assert!((t.t() - 0.0).abs() < 1e-12);
+        while !t.step(1.0 / 60.0) {}
+        assert!((t.t() - 1.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn pose_lerp_distance_midpoint_is_geometric_mean() {
+        // 100 → 0.01 in log space gives a midpoint of 1.0
+        // (geometric mean), not 50.005 (arithmetic).
+        let initial = CameraPose::new(DVec3::new(10.0, 0.0, 0.0), 0.0, 0.0, 100.0);
+        let target = CameraPose::new(DVec3::new(0.0, 5.0, 0.0), 1.0, 0.5, 0.01);
+        let mid = initial.lerp_to(&target, 0.5);
+        assert!((mid.distance - 1.0).abs() < 1e-12, "midpoint distance = {}", mid.distance);
+    }
+
+    #[test]
+    fn pose_lerp_endpoints_match_inputs() {
+        let a = CameraPose::new(DVec3::new(1.0, 2.0, 3.0), 0.4, -0.2, 5.0);
+        let b = CameraPose::new(DVec3::new(7.0, 8.0, 9.0), -0.6, 1.0, 50.0);
+        let at0 = a.lerp_to(&b, 0.0);
+        let at1 = a.lerp_to(&b, 1.0);
+        assert!(vec_approx_eq(at0.pivot, a.pivot, 1e-9));
+        assert!((at0.distance - a.distance).abs() < 1e-9);
+        assert!(vec_approx_eq(at1.pivot, b.pivot, 1e-9));
+        assert!((at1.distance - b.distance).abs() < 1e-9);
     }
 }
