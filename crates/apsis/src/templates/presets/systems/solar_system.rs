@@ -42,7 +42,7 @@ use std::f64::consts::TAU;
 use rand::rngs::SmallRng;
 use rand::{RngExt, SeedableRng};
 
-use crate::domain::materials::Material;
+use crate::domain::body_preset::{self, BodyPreset};
 use crate::templates::keplerian::{
     parent_equator_basis, state_from_elements, state_from_elements_in_basis,
 };
@@ -69,7 +69,7 @@ struct PlanetData {
     i_deg: f64,
     raan_deg: f64,
     argp_deg: f64,
-    material: Material,
+    preset: &'static BodyPreset,
 }
 
 /// J2000 ecliptic mean orbital elements (NASA JPL `approx_pos.html`,
@@ -84,7 +84,7 @@ const PLANETS: &[PlanetData] = &[
         i_deg: 7.005,
         raan_deg: 48.331,
         argp_deg: 29.130,
-        material: Material::Rocky,
+        preset: &body_preset::ROCKY,
     },
     PlanetData {
         name: "Venus",
@@ -94,7 +94,7 @@ const PLANETS: &[PlanetData] = &[
         i_deg: 3.395,
         raan_deg: 76.680,
         argp_deg: 54.852,
-        material: Material::Rocky,
+        preset: &body_preset::ROCKY,
     },
     PlanetData {
         name: "Earth",
@@ -104,7 +104,7 @@ const PLANETS: &[PlanetData] = &[
         i_deg: 0.000,
         raan_deg: 0.000,
         argp_deg: 102.938,
-        material: Material::Rocky,
+        preset: &body_preset::ROCKY,
     },
     PlanetData {
         name: "Mars",
@@ -114,7 +114,7 @@ const PLANETS: &[PlanetData] = &[
         i_deg: 1.850,
         raan_deg: 49.558,
         argp_deg: 286.502,
-        material: Material::Rocky,
+        preset: &body_preset::ROCKY,
     },
     PlanetData {
         name: "Jupiter",
@@ -124,7 +124,7 @@ const PLANETS: &[PlanetData] = &[
         i_deg: 1.304,
         raan_deg: 100.464,
         argp_deg: 274.255,
-        material: Material::Gas,
+        preset: &body_preset::GAS,
     },
     PlanetData {
         name: "Saturn",
@@ -134,7 +134,7 @@ const PLANETS: &[PlanetData] = &[
         i_deg: 2.486,
         raan_deg: 113.665,
         argp_deg: 338.766,
-        material: Material::Gas,
+        preset: &body_preset::GAS,
     },
     PlanetData {
         name: "Uranus",
@@ -144,7 +144,7 @@ const PLANETS: &[PlanetData] = &[
         i_deg: 0.773,
         raan_deg: 74.006,
         argp_deg: 96.999,
-        material: Material::IceGiant,
+        preset: &body_preset::ICE_GIANT,
     },
     PlanetData {
         name: "Neptune",
@@ -154,7 +154,7 @@ const PLANETS: &[PlanetData] = &[
         i_deg: 1.770,
         raan_deg: 131.784,
         argp_deg: 273.187,
-        material: Material::IceGiant,
+        preset: &body_preset::ICE_GIANT,
     },
 ];
 
@@ -171,7 +171,7 @@ const DWARFS: &[PlanetData] = &[
         i_deg: 10.594,
         raan_deg: 80.305,
         argp_deg: 73.598,
-        material: Material::Asteroid,
+        preset: &body_preset::ASTEROID,
     },
     PlanetData {
         name: "Pluto",
@@ -181,7 +181,7 @@ const DWARFS: &[PlanetData] = &[
         i_deg: 17.16,
         raan_deg: 110.299,
         argp_deg: 113.834,
-        material: Material::Icy,
+        preset: &body_preset::ICY,
     },
     PlanetData {
         name: "Haumea",
@@ -191,7 +191,7 @@ const DWARFS: &[PlanetData] = &[
         i_deg: 28.214,
         raan_deg: 121.79,
         argp_deg: 240.20,
-        material: Material::Icy,
+        preset: &body_preset::ICY,
     },
     PlanetData {
         name: "Makemake",
@@ -201,7 +201,7 @@ const DWARFS: &[PlanetData] = &[
         i_deg: 29.007,
         raan_deg: 79.382,
         argp_deg: 294.834,
-        material: Material::Icy,
+        preset: &body_preset::ICY,
     },
     PlanetData {
         name: "Eris",
@@ -211,7 +211,7 @@ const DWARFS: &[PlanetData] = &[
         i_deg: 44.044,
         raan_deg: 35.951,
         argp_deg: 151.639,
-        material: Material::Icy,
+        preset: &body_preset::ICY,
     },
     PlanetData {
         // Mass uncertain (~1×10²¹ kg); JPL lists no determined value.
@@ -225,7 +225,7 @@ const DWARFS: &[PlanetData] = &[
         i_deg: 11.931,
         raan_deg: 144.248,
         argp_deg: 311.352,
-        material: Material::Icy,
+        preset: &body_preset::ICY,
     },
     PlanetData {
         name: "Quaoar",
@@ -235,7 +235,7 @@ const DWARFS: &[PlanetData] = &[
         i_deg: 7.989,
         raan_deg: 188.83,
         argp_deg: 147.479,
-        material: Material::Icy,
+        preset: &body_preset::ICY,
     },
     PlanetData {
         name: "Orcus",
@@ -245,7 +245,7 @@ const DWARFS: &[PlanetData] = &[
         i_deg: 20.592,
         raan_deg: 268.799,
         argp_deg: 72.310,
-        material: Material::Icy,
+        preset: &body_preset::ICY,
     },
     PlanetData {
         name: "Gonggong",
@@ -255,7 +255,7 @@ const DWARFS: &[PlanetData] = &[
         i_deg: 30.627,
         raan_deg: 336.866,
         argp_deg: 207.628,
-        material: Material::Icy,
+        preset: &body_preset::ICY,
     },
 ];
 
@@ -281,7 +281,7 @@ struct MoonData {
     i_deg: f64,
     raan_deg: f64,
     argp_deg: f64,
-    material: Material,
+    preset: &'static BodyPreset,
 }
 
 const MOONS: &[MoonData] = &[
@@ -295,7 +295,7 @@ const MOONS: &[MoonData] = &[
         i_deg: 5.145,
         raan_deg: 125.08,
         argp_deg: 318.15,
-        material: Material::Rocky,
+        preset: &body_preset::ROCKY,
     },
     // Jupiter — Galilean moons (Jupiter equatorial frame)
     MoonData {
@@ -307,7 +307,7 @@ const MOONS: &[MoonData] = &[
         i_deg: 0.050,
         raan_deg: 43.977,
         argp_deg: 84.129,
-        material: Material::Rocky,
+        preset: &body_preset::ROCKY,
     },
     MoonData {
         name: "Europa",
@@ -318,7 +318,7 @@ const MOONS: &[MoonData] = &[
         i_deg: 0.471,
         raan_deg: 219.106,
         argp_deg: 88.970,
-        material: Material::Icy,
+        preset: &body_preset::ICY,
     },
     MoonData {
         name: "Ganymede",
@@ -329,7 +329,7 @@ const MOONS: &[MoonData] = &[
         i_deg: 0.204,
         raan_deg: 63.552,
         argp_deg: 192.417,
-        material: Material::Icy,
+        preset: &body_preset::ICY,
     },
     MoonData {
         name: "Callisto",
@@ -340,7 +340,7 @@ const MOONS: &[MoonData] = &[
         i_deg: 0.205,
         raan_deg: 298.848,
         argp_deg: 52.643,
-        material: Material::Icy,
+        preset: &body_preset::ICY,
     },
     // Saturn (Saturn equatorial frame)
     MoonData {
@@ -352,7 +352,7 @@ const MOONS: &[MoonData] = &[
         i_deg: 1.566,
         raan_deg: 173.027,
         argp_deg: 332.499,
-        material: Material::Icy,
+        preset: &body_preset::ICY,
     },
     MoonData {
         name: "Enceladus",
@@ -363,7 +363,7 @@ const MOONS: &[MoonData] = &[
         i_deg: 0.009,
         raan_deg: 169.506,
         argp_deg: 0.000,
-        material: Material::Icy,
+        preset: &body_preset::ICY,
     },
     MoonData {
         name: "Dione",
@@ -374,7 +374,7 @@ const MOONS: &[MoonData] = &[
         i_deg: 0.019,
         raan_deg: 290.415,
         argp_deg: 168.820,
-        material: Material::Icy,
+        preset: &body_preset::ICY,
     },
     MoonData {
         name: "Rhea",
@@ -385,7 +385,7 @@ const MOONS: &[MoonData] = &[
         i_deg: 0.345,
         raan_deg: 351.042,
         argp_deg: 256.609,
-        material: Material::Icy,
+        preset: &body_preset::ICY,
     },
     MoonData {
         name: "Titan",
@@ -396,7 +396,7 @@ const MOONS: &[MoonData] = &[
         i_deg: 0.349,
         raan_deg: 28.058,
         argp_deg: 78.371,
-        material: Material::Icy,
+        preset: &body_preset::ICY,
     },
     MoonData {
         name: "Iapetus",
@@ -407,7 +407,7 @@ const MOONS: &[MoonData] = &[
         i_deg: 15.470,
         raan_deg: 75.831,
         argp_deg: 271.606,
-        material: Material::Icy,
+        preset: &body_preset::ICY,
     },
     // Uranus (Uranus equatorial frame — pole tilted 97.77° from
     // ecliptic, so satellites orbit ~perpendicular to it).
@@ -420,7 +420,7 @@ const MOONS: &[MoonData] = &[
         i_deg: 0.340,
         raan_deg: 99.771,
         argp_deg: 165.522,
-        material: Material::Icy,
+        preset: &body_preset::ICY,
     },
     // Neptune — Triton orbits retrograde (i > 90° relative to parent
     // equator), the only large moon known to do so. The result in
@@ -434,7 +434,7 @@ const MOONS: &[MoonData] = &[
         i_deg: 156.865,
         raan_deg: 177.608,
         argp_deg: 234.412,
-        material: Material::Icy,
+        preset: &body_preset::ICY,
     },
 ];
 
@@ -489,7 +489,7 @@ pub fn solar_system(seed: u64) -> Template {
     bodies.push(TemplateBody {
         name: Some("Sun"),
         mass: M_SUN,
-        material: Material::Star,
+        preset: &body_preset::STAR,
         position: Some([0.0, 0.0, 0.0]),
         velocity: [0.0, 0.0, 0.0],
     });
@@ -537,7 +537,7 @@ pub fn solar_system(seed: u64) -> Template {
         bodies.push(TemplateBody {
             name: Some(data.name),
             mass: data.mass,
-            material: data.material,
+            preset: data.preset,
             position: Some(pos),
             velocity: vel,
         });
@@ -588,7 +588,7 @@ pub fn solar_system(seed: u64) -> Template {
         bodies.push(TemplateBody {
             name: Some(m.name),
             mass: m.mass,
-            material: m.material,
+            preset: m.preset,
             position: Some([
                 parent_pos[0] + rel_pos[0],
                 parent_pos[1] + rel_pos[1],
@@ -628,7 +628,7 @@ pub fn solar_system(seed: u64) -> Template {
         bodies.push(TemplateBody {
             name: None,
             mass: 1e-10,
-            material: Material::Asteroid,
+            preset: &body_preset::ASTEROID,
             position: Some(pos),
             velocity: vel,
         });
@@ -676,7 +676,7 @@ pub fn solar_system(seed: u64) -> Template {
         bodies.push(TemplateBody {
             name: None,
             mass: 1e-12,
-            material: Material::Comet,
+            preset: &body_preset::COMET,
             position: Some(pos),
             velocity: vel,
         });

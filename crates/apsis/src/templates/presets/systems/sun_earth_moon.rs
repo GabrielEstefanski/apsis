@@ -15,7 +15,7 @@ use rand::{RngExt, SeedableRng};
 use std::f64::consts::TAU;
 
 use crate::{
-    domain::materials::Material,
+    domain::body_preset,
     templates::{Template, TemplateBody, UnitSystem, builders::circular_orbit},
 };
 
@@ -56,21 +56,21 @@ pub fn sun_earth_moon(seed: u64) -> Template {
                 mass: M_SUN,
                 position: Some([0.0, 0.0, 0.0]),
                 velocity: [0.0, 0.0, 0.0],
-                material: Material::Star,
+                preset: &body_preset::STAR,
             },
             TemplateBody {
                 name: Some("Earth"),
                 mass: M_EARTH,
                 position: Some(earth_pos),
                 velocity: earth_vel,
-                material: Material::Rocky,
+                preset: &body_preset::ROCKY,
             },
             TemplateBody {
                 name: Some("Moon"),
                 mass: M_MOON,
                 position: Some(moon_pos),
                 velocity: moon_vel,
-                material: Material::Icy,
+                preset: &body_preset::ICY,
             },
         ],
         display_scale: 1.0,
