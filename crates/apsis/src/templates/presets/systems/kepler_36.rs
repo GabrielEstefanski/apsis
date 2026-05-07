@@ -15,8 +15,8 @@ pub fn kepler_36(seed: u64) -> Template {
         name: Some("Kepler-36"),
         mass: 1.07,
         material: Material::Star,
-        position: Some([0.0, 0.0]),
-        velocity: [0.0, 0.0],
+        position: Some([0.0, 0.0, 0.0]),
+        velocity: [0.0, 0.0, 0.0],
     });
 
     // Planets

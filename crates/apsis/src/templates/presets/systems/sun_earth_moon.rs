@@ -34,8 +34,16 @@ pub fn sun_earth_moon(seed: u64) -> Template {
 
     let moon_phase = rng.random::<f64>() * TAU;
     let (moon_rel_pos, moon_rel_vel) = circular_orbit(M_EARTH, A_MOON, moon_phase);
-    let moon_pos = [earth_pos[0] + moon_rel_pos[0], earth_pos[1] + moon_rel_pos[1]];
-    let moon_vel = [earth_vel[0] + moon_rel_vel[0], earth_vel[1] + moon_rel_vel[1]];
+    let moon_pos = [
+        earth_pos[0] + moon_rel_pos[0],
+        earth_pos[1] + moon_rel_pos[1],
+        earth_pos[2] + moon_rel_pos[2],
+    ];
+    let moon_vel = [
+        earth_vel[0] + moon_rel_vel[0],
+        earth_vel[1] + moon_rel_vel[1],
+        earth_vel[2] + moon_rel_vel[2],
+    ];
 
     Template {
         name: "Sun–Earth–Moon",
@@ -46,8 +54,8 @@ pub fn sun_earth_moon(seed: u64) -> Template {
             TemplateBody {
                 name: Some("Sun"),
                 mass: M_SUN,
-                position: Some([0.0, 0.0]),
-                velocity: [0.0, 0.0],
+                position: Some([0.0, 0.0, 0.0]),
+                velocity: [0.0, 0.0, 0.0],
                 material: Material::Star,
             },
             TemplateBody {

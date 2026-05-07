@@ -17,11 +17,11 @@ pub fn sun_earth_unstable_lagrange(_seed: u64) -> Template {
     let r_l = a * (mu / 3.0).cbrt(); // ≈ 0.01 AU
 
     // L1 (between Sun and Earth)
-    let l1_pos = [earth_pos[0] - r_l, earth_pos[1]];
+    let l1_pos = [earth_pos[0] - r_l, earth_pos[1], earth_pos[2]];
     let l1_vel = earth_vel;
 
     // L2 (beyond Earth)
-    let l2_pos = [earth_pos[0] + r_l, earth_pos[1]];
+    let l2_pos = [earth_pos[0] + r_l, earth_pos[1], earth_pos[2]];
     let l2_vel = earth_vel;
 
     // L3 (opposite side of the Sun)
@@ -35,8 +35,8 @@ pub fn sun_earth_unstable_lagrange(_seed: u64) -> Template {
             TemplateBody {
                 name: Some("Sun"),
                 mass: m_sun,
-                position: Some([0.0, 0.0]),
-                velocity: [0.0, 0.0],
+                position: Some([0.0, 0.0, 0.0]),
+                velocity: [0.0, 0.0, 0.0],
                 material: Material::Star,
             },
             // Earth

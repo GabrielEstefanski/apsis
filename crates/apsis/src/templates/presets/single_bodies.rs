@@ -8,8 +8,8 @@ pub fn star(_seed: u64) -> Template {
         bodies: vec![TemplateBody {
             name: Some("Star"),
             mass: 1.0,
-            position: Some([0.0, 0.0]),
-            velocity: [0.0, 0.0],
+            position: Some([0.0, 0.0, 0.0]),
+            velocity: [0.0, 0.0, 0.0],
             material: Material::Star,
         }],
         display_scale: 1.0,
@@ -25,8 +25,8 @@ pub fn brown_dwarf(_seed: u64) -> Template {
         bodies: vec![TemplateBody {
             name: Some("Brown Dwarf"),
             mass: 0.04,
-            position: Some([0.0, 0.0]),
-            velocity: [0.0, 0.0],
+            position: Some([0.0, 0.0, 0.0]),
+            velocity: [0.0, 0.0, 0.0],
             material: Material::BrownDwarf,
         }],
         display_scale: 1.0,
@@ -42,8 +42,8 @@ pub fn gas_giant(_seed: u64) -> Template {
         bodies: vec![TemplateBody {
             name: Some("Gas Giant"),
             mass: 9.5e-4, // ≈ Jupiter mass in solar units
-            position: Some([0.0, 0.0]),
-            velocity: [0.0, 0.0],
+            position: Some([0.0, 0.0, 0.0]),
+            velocity: [0.0, 0.0, 0.0],
             material: Material::Gas,
         }],
         display_scale: 1.0,
@@ -59,8 +59,8 @@ pub fn rocky_planet(_seed: u64) -> Template {
         bodies: vec![TemplateBody {
             name: Some("Rocky Planet"),
             mass: 3.0e-6, // ≈ Earth mass in solar units
-            position: Some([0.0, 0.0]),
-            velocity: [0.0, 0.0],
+            position: Some([0.0, 0.0, 0.0]),
+            velocity: [0.0, 0.0, 0.0],
             material: Material::Rocky,
         }],
         display_scale: 1.0,

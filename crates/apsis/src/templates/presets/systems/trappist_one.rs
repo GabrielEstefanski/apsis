@@ -15,8 +15,8 @@ pub fn trappist_1(seed: u64) -> Template {
         name: Some("TRAPPIST-1"),
         mass: 0.089,
         material: Material::Star,
-        position: Some([0.0, 0.0]),
-        velocity: [0.0, 0.0],
+        position: Some([0.0, 0.0, 0.0]),
+        velocity: [0.0, 0.0, 0.0],
     });
 
     let planets = [
