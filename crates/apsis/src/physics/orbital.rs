@@ -1042,47 +1042,75 @@ pub fn elements_anchored_to_body(
     let a = -gm / (2.0 * inv.energy);
     let period = TAU * (a * a * a / gm).sqrt();
 
-    // Anchor algebra is planar: it operates in the orbital plane and
-    // returns `inclination = 0`, `Ω = 0`. The perifocal → world
-    // rotation in [`OrbitalElements::sample_orbit`] handles the lift
-    // back to 3D for the rendered ellipse.
-    let rx = body.x - primary.x;
-    let ry = body.y - primary.y;
-    let r = (rx * rx + ry * ry).sqrt();
-    if r < 1e-15 {
+    // 3D state vectors in the primary's frame.
+    let r_vec = Vec3::new(body.x - primary.x, body.y - primary.y, body.z - primary.z);
+    let v_vec = Vec3::new(body.vx - primary.vx, body.vy - primary.vy, body.vz - primary.vz);
+
+    let h_mag = inv.h_vec.length();
+
+    // Out-of-plane projection breaks down without a defined orbital
+    // normal; fall back to the unanchored elements.
+    if h_mag < 1e-15 {
         return elements_from_invariants(inv, primary_idx, gm);
     }
-    let vrx = body.vx - primary.vx;
-    let vry = body.vy - primary.vy;
+    let h_hat = inv.h_vec / h_mag;
+
+    // Project the body's position onto the smoothed orbital plane to
+    // get an in-plane radius `r_eff`. Any out-of-plane component is
+    // discarded — the displayed ellipse always lives in that plane,
+    // so the body's projection is the closest point that can possibly
+    // sit on it. For a body whose true plane matches the smoothed
+    // plane, `r_eff ≈ |r_vec|` and the anchor reduces to the planar
+    // case below.
+    let r_in_plane = r_vec - h_hat * r_vec.dot(h_hat);
+    let r_eff = r_in_plane.length();
+    if r_eff < 1e-15 {
+        return elements_from_invariants(inv, primary_idx, gm);
+    }
+
+    // Reference frame inside the orbital plane. `node_hat` is the
+    // standard ascending-node direction (ẑ × ĥ). When the orbit is
+    // planar (h_hat ≈ ±ẑ) this collapses; pick the world x-axis as a
+    // stable fallback so atan2 keeps a meaningful zero.
+    let node_raw = Vec3::new(-h_hat.y, h_hat.x, 0.0);
+    let node_mag = node_raw.length();
+    let node_hat = if node_mag > 1e-9 {
+        node_raw / node_mag
+    } else {
+        let proj = Vec3::new(1.0, 0.0, 0.0);
+        let proj = proj - h_hat * proj.dot(h_hat);
+        let pl = proj.length();
+        if pl > 1e-15 {
+            proj / pl
+        } else {
+            return elements_from_invariants(inv, primary_idx, gm);
+        }
+    };
+    let perp_node_hat = h_hat.cross(node_hat);
 
     // Solve focus-conic for cos ν, clamping to absorb body distances
     // slightly outside the smoothed ellipse's apsidal range.
     let p = a * (1.0 - e * e);
-    let cos_nu = ((p / r - 1.0) / e).clamp(-1.0, 1.0);
+    let cos_nu = ((p / r_eff - 1.0) / e).clamp(-1.0, 1.0);
 
-    // sign(sin ν) = sign(h_inst · (r⃗·v⃗)). Both factors are needed:
-    // h_inst alone gives orbit chirality (prograde/retrograde);
-    // (r⃗·v⃗) alone is wrong for retrograde. The product encodes both
-    // the leg (outbound/inbound) and the chirality.
-    //
-    // Near peri/apo the (r⃗·v⃗) term passes through zero and its sign
-    // is FP-fragile, but sin ν ≈ 0 there too — both ν = +ε and ν = −ε
-    // map to nearly identical positions, so a flicker is sub-pixel.
-    let h_inst = rx * vry - ry * vrx;
-    let r_dot_v = rx * vrx + ry * vry;
-    let s = (h_inst * r_dot_v).signum();
-    // signum() returns 0 only when h·(r·v) = 0 exactly; pick +1 then.
+    // sign(sin ν) = sign((r⃗ × v⃗)·ĥ · (r⃗·v⃗)). The triple product gives
+    // the orbit chirality relative to the smoothed plane; (r⃗·v⃗) gives
+    // outbound/inbound. Their product disambiguates the ±ν branch.
+    let h_inst_signed = r_vec.cross(v_vec).dot(h_hat);
+    let r_dot_v = r_vec.dot(v_vec);
+    let s = (h_inst_signed * r_dot_v).signum();
     let sin_nu_sign = if s == 0.0 { 1.0 } else { s };
-
     let nu = sin_nu_sign * cos_nu.acos();
-    let theta_body = ry.atan2(rx);
+
+    // Body's azimuthal angle inside the smoothed orbital plane,
+    // measured from the line of nodes. ω anchors the perifocal
+    // x-axis so the body lands at parametric angle ν on the ellipse.
+    let theta_body = r_in_plane.dot(perp_node_hat).atan2(r_in_plane.dot(node_hat));
     let omega = wrap_pi(theta_body - nu);
 
-    // Eccentric and mean anomalies follow the same elliptical identities
-    // used in [`anomalies`]; the planar anchor reuses `nu` from above.
-    // `mean_anomaly` is not wrapped — see the doc on
-    // `OrbitalElements::mean_anomaly` for why snapshot M is not collapsed
-    // to `[−π, π]`.
+    let inclination = h_hat.z.clamp(-1.0, 1.0).acos();
+    let lon_ascending_node = if node_mag > 1e-9 { node_hat.y.atan2(node_hat.x) } else { 0.0 };
+
     let half_nu = 0.5 * nu;
     let (s_half, c_half) = half_nu.sin_cos();
     let big_e = 2.0 * ((1.0 - e).sqrt() * s_half).atan2((1.0 + e).sqrt() * c_half);
@@ -1096,8 +1124,8 @@ pub fn elements_anchored_to_body(
         h_vec: inv.h_vec,
         energy: inv.energy,
         omega,
-        inclination: 0.0,
-        lon_ascending_node: 0.0,
+        inclination,
+        lon_ascending_node,
         true_anomaly: nu,
         eccentric_anomaly: big_e,
         mean_anomaly,
