@@ -1,18 +1,9 @@
-//! Tonemapping composite pass: linear HDR → sRGB swapchain.
+//! Composite + tonemap pass: dual HDR → sRGB swapchain.
 //!
-//! Samples the `Rgba16Float` scene target produced by the scene passes
-//! (see [`crate::render::hdr`]), applies a user-controlled exposure, runs
-//! the **ACES filmic** response curve, and writes the result to the egui
-//! swapchain attachment.
-//!
-//! # Why ACES (not Reinhard / linear)
-//!
-//! The simulation will soon accumulate additive contributions from multiple
-//! stars. A linear output blows out to pure white the moment the sum exceeds
-//! 1.0, destroying hue information. Reinhard avoids the clip but flattens
-//! highlights into a mushy grey. ACES compresses highlights while preserving
-//! hue separation — it's the standard in filmic rendering precisely because
-//! it handles "several bright sources sharing a pixel" gracefully.
+//! Samples the reflective and luminous planes from
+//! [`crate::render::hdr::HdrTarget`], multiplies the reflective sample by
+//! the exposure scalar (auto-exposure × user EV), sums both in HDR, and
+//! runs a single ACES filmic curve.
 //!
 //! # Gamma
 //!
@@ -24,9 +15,9 @@
 //!
 //! # Resize tracking
 //!
-//! The bind group samples the HDR texture view, which is recreated on every
-//! canvas resize. [`TonemapPipeline::refresh_if_resized`] checks the HDR
-//! target's generation counter and rebuilds the bind group lazily.
+//! The bind group samples both HDR texture views, which are recreated on
+//! every canvas resize. [`TonemapPipeline::refresh_if_resized`] checks the
+//! HDR target's generation counter and rebuilds the bind group lazily.
 
 use std::mem::size_of;
 
@@ -37,15 +28,14 @@ use crate::render::hdr::HdrTarget;
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct TonemapUniform {
-    /// Linear multiplier applied **before** the ACES curve.
-    /// Default `1.0` — future F4 wires this to an auto-exposure system.
-    exposure: f32,
+    /// Linear multiplier on the reflective plane.
+    exposure_r: f32,
     _pad: [f32; 3],
 }
 
 impl Default for TonemapUniform {
     fn default() -> Self {
-        Self { exposure: 1.0, _pad: [0.0; 3] }
+        Self { exposure_r: 1.0, _pad: [0.0; 3] }
     }
 }
 
@@ -67,6 +57,7 @@ impl TonemapPipeline {
         let bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("tonemap::bgl"),
             entries: &[
+                // 0: reflective HDR
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
                     visibility: wgpu::ShaderStages::FRAGMENT,
@@ -77,14 +68,27 @@ impl TonemapPipeline {
                     },
                     count: None,
                 },
+                // 1: luminous HDR
                 wgpu::BindGroupLayoutEntry {
                     binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                // 2: shared sampler
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
                 },
+                // 3: tonemap uniform
                 wgpu::BindGroupLayoutEntry {
-                    binding: 2,
+                    binding: 3,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
@@ -185,20 +189,24 @@ impl TonemapPipeline {
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: wgpu::BindingResource::TextureView(hdr.view()),
+                    resource: wgpu::BindingResource::TextureView(hdr.view_r()),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
+                    resource: wgpu::BindingResource::TextureView(hdr.view_l()),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
                     resource: wgpu::BindingResource::Sampler(&self.sampler),
                 },
-                wgpu::BindGroupEntry { binding: 2, resource: self.uniform_buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 3, resource: self.uniform_buf.as_entire_binding() },
             ],
         }));
         self.bound_generation = hdr.generation();
     }
 
     pub fn upload(&self, queue: &wgpu::Queue) {
-        let u = TonemapUniform { exposure: self.exposure, _pad: [0.0; 3] };
+        let u = TonemapUniform { exposure_r: self.exposure, _pad: [0.0; 3] };
         queue.write_buffer(&self.uniform_buf, 0, bytemuck::bytes_of(&u));
     }
 
@@ -216,15 +224,16 @@ impl TonemapPipeline {
 
 const TONEMAP_SHADER: &str = r#"
 struct TonemapUniform {
-    exposure: f32,
-    _pad0:    f32,
-    _pad1:    f32,
-    _pad2:    f32,
+    exposure_r: f32,
+    _pad0:      f32,
+    _pad1:      f32,
+    _pad2:      f32,
 };
 
-@group(0) @binding(0) var hdr_tex : texture_2d<f32>;
-@group(0) @binding(1) var hdr_samp: sampler;
-@group(0) @binding(2) var<uniform> u: TonemapUniform;
+@group(0) @binding(0) var hdr_r_tex : texture_2d<f32>;
+@group(0) @binding(1) var hdr_l_tex : texture_2d<f32>;
+@group(0) @binding(2) var hdr_samp  : sampler;
+@group(0) @binding(3) var<uniform> u: TonemapUniform;
 
 struct VSOut {
     @builtin(position) pos: vec4<f32>,
@@ -271,10 +280,11 @@ fn aces(x: vec3<f32>) -> vec3<f32> {
 
 @fragment
 fn fs_tonemap(in: VSOut) -> @location(0) vec4<f32> {
-    let src   = textureSample(hdr_tex, hdr_samp, in.uv);
-    let lit   = aces(src.rgb * u.exposure);
-    // Pass alpha straight through — the swapchain ALPHA_BLENDING composite
-    // reapplies it against whatever egui drew behind the canvas rect.
-    return vec4<f32>(lit, src.a);
+    let src_r = textureSample(hdr_r_tex, hdr_samp, in.uv);
+    let src_l = textureSample(hdr_l_tex, hdr_samp, in.uv);
+    let combined = src_r.rgb * u.exposure_r + src_l.rgb;
+    let lit = aces(combined);
+    let alpha = max(src_r.a, src_l.a);
+    return vec4<f32>(lit, alpha);
 }
 "#;

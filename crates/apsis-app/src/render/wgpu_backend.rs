@@ -59,6 +59,10 @@ struct CircleInstance {
 /// of half-size `radius_world` (with a small padding factor). The fragment
 /// stage solves a ray-sphere intersection for the actual surface point
 /// and writes corrected depth, so spheres self-occlude correctly.
+///
+/// `is_luminous` is `1.0` for self-luminous bodies (stars, brown dwarfs)
+/// and `0.0` for reflective ones (planets, asteroids). The fragment
+/// shader routes the lit colour to the matching colour attachment.
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct BodyInstance {
@@ -66,6 +70,8 @@ struct BodyInstance {
     radius_world: f32,
     albedo: [f32; 4],
     emissive: [f32; 4],
+    is_luminous: f32,
+    _pad: [f32; 3],
 }
 
 #[repr(C)]
@@ -370,20 +376,23 @@ impl WgpuBackend {
     ///
     /// `world_pos` is the body centre in world units. `radius_world` is the
     /// physical radius. `albedo` is the diffuse base colour (stars near
-    /// zero); `emissive` is the self-lit term (stars use their body colour
-    /// here so they glow).
+    /// zero); `emissive` is the self-lit term. `is_luminous` routes the
+    /// fragment to the luminous HDR plane instead of the reflective one.
     pub fn draw_body(
         &mut self,
         world_pos: [f32; 3],
         radius_world: f32,
         albedo: [f32; 4],
         emissive: [f32; 4],
+        is_luminous: bool,
     ) {
         self.bodies.push(BodyInstance {
             center_world: world_pos,
             radius_world: radius_world.max(0.0),
             albedo,
             emissive,
+            is_luminous: if is_luminous { 1.0 } else { 0.0 },
+            _pad: [0.0; 3],
         });
     }
 
@@ -556,14 +565,14 @@ impl WgpuBackend {
         }
 
         // ── Pass 1: flat 2D layers (grid, trails, lines, circles) ───────────
-        // No depth attachment; layer order is draw order. Bodies are deferred
-        // to pass 2 where they can self-occlude through the depth buffer.
+        // Writes to the reflective plane. Luminous plane is cleared at
+        // the start of pass 2.
         let hdr = self.hdr.as_ref().unwrap();
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("scene::flat_pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: hdr.view(),
+                    view: hdr.view_r(),
                     resolve_target: None,
                     depth_slice: None,
                     ops: wgpu::Operations {
@@ -599,20 +608,38 @@ impl WgpuBackend {
             }
         }
 
-        // ── Pass 2: 3D bodies with depth ────────────────────────────────────
-        // Reverse-Z: depth cleared to 0.0 (far plane) so the body pipeline's
-        // `Greater` compare keeps the nearest hit. Sphere impostors write
-        // corrected per-fragment depth so overlapping spheres self-occlude
-        // correctly across the AU-to-light-year range.
+        // ── Pass 2: 3D bodies with MRT (reflective + luminous) ──────────────
+        // Two colour attachments: location 0 = reflective HDR, location
+        // 1 = luminous HDR. The fragment shader writes the lit colour to
+        // the attachment matching the per-instance `is_luminous` flag
+        // and (0,0,0,0) to the other.
+        //
+        // Reverse-Z: depth cleared to 0.0 (far plane), `Greater` compare
+        // keeps the nearest hit. Both planes share the depth buffer so
+        // bodies on either plane can occlude bodies on the other.
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("scene::body_pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: hdr.view(),
-                    resolve_target: None,
-                    depth_slice: None,
-                    ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store },
-                })],
+                color_attachments: &[
+                    Some(wgpu::RenderPassColorAttachment {
+                        view: hdr.view_r(),
+                        resolve_target: None,
+                        depth_slice: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Store,
+                        },
+                    }),
+                    Some(wgpu::RenderPassColorAttachment {
+                        view: hdr.view_l(),
+                        resolve_target: None,
+                        depth_slice: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    }),
+                ],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                     view: hdr.depth_view(),
                     depth_ops: Some(wgpu::Operations {
@@ -812,7 +839,8 @@ fn build_body_pipeline(
         0 => Float32x3,   // center_world
         1 => Float32,     // radius_world
         2 => Float32x4,   // albedo
-        3 => Float32x4    // emissive
+        3 => Float32x4,   // emissive
+        4 => Float32      // is_luminous (1.0 = luminous, 0.0 = reflective)
     ];
 
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -831,11 +859,19 @@ fn build_body_pipeline(
         fragment: Some(wgpu::FragmentState {
             module: shader,
             entry_point: Some("fs_body"),
-            targets: &[Some(wgpu::ColorTargetState {
-                format,
-                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                write_mask: wgpu::ColorWrites::ALL,
-            })],
+            // location 0 = reflective HDR, location 1 = luminous HDR.
+            targets: &[
+                Some(wgpu::ColorTargetState {
+                    format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                }),
+                Some(wgpu::ColorTargetState {
+                    format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                }),
+            ],
             compilation_options: wgpu::PipelineCompilationOptions::default(),
         }),
         primitive: wgpu::PrimitiveState {
@@ -1031,11 +1067,16 @@ struct BodyVarying {
     /// Approximate projected radius in pixels — drives the sub-pixel
     /// flat-shading fallback so distant bodies stay legible as solid dots.
     @location(5)       radius_screen: f32,
+    /// 1.0 if this body is self-luminous (star), 0.0 if reflective.
+    /// Constant per instance; carried as `@interpolate(flat)` so the
+    /// rasteriser passes the value through unchanged.
+    @location(6) @interpolate(flat) is_luminous: f32,
 };
 
 struct BodyOutput {
-    @location(0)         color: vec4<f32>,
-    @builtin(frag_depth) depth: f32,
+    @location(0)         color_r: vec4<f32>,
+    @location(1)         color_l: vec4<f32>,
+    @builtin(frag_depth) depth:   f32,
 };
 
 @vertex
@@ -1045,6 +1086,7 @@ fn vs_body(
     @location(1)           radius_world: f32,
     @location(2)           albedo:       vec4<f32>,
     @location(3)           emissive:     vec4<f32>,
+    @location(4)           is_luminous:  f32,
 ) -> BodyVarying {
     var quad = array<vec2<f32>, 6>(
         vec2<f32>(-1.0, -1.0),
@@ -1095,6 +1137,7 @@ fn vs_body(
     out.emissive      = emissive;
     out.vert_world    = vert_world;
     out.radius_screen = r_screen;
+    out.is_luminous   = is_luminous;
     return out;
 }
 
@@ -1148,15 +1191,20 @@ fn fs_body(in: BodyVarying) -> BodyOutput {
     let effective   = mix(lit_factor, 1.0, flat_weight);
 
     let rgb   = in.albedo.rgb * effective + in.emissive.rgb;
-    let alpha = in.albedo.a;
+    let alpha = max(in.albedo.a, in.emissive.a);
 
     // Reverse-Z depth from the actual hit point, not the quad surface, so
     // overlapping spheres self-occlude correctly.
     let hit_clip = camera.view_proj * vec4<f32>(hit_world, 1.0);
 
+    let lit_color = vec4<f32>(rgb, alpha);
+    let zero      = vec4<f32>(0.0, 0.0, 0.0, 0.0);
+    let luminous  = in.is_luminous > 0.5;
+
     var out: BodyOutput;
-    out.color = vec4<f32>(rgb, alpha);
-    out.depth = hit_clip.z / max(hit_clip.w, 1e-9);
+    out.color_r = select(lit_color, zero, luminous);
+    out.color_l = select(zero, lit_color, luminous);
+    out.depth   = hit_clip.z / max(hit_clip.w, 1e-9);
     return out;
 }
 

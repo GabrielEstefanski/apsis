@@ -522,7 +522,7 @@ impl SimulationApp {
                 };
                 let world_pos = [b.x as f32, b.y as f32, b.z as f32];
 
-                backend.draw_body(world_pos, r_world, albedo, emissive);
+                backend.draw_body(world_pos, r_world, albedo, emissive, b.is_luminous());
             }
 
             // Predicted Keplerian orbits — pure visual annotation, never
