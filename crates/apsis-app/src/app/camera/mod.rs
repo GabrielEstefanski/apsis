@@ -32,6 +32,38 @@ const ELEVATION_LIMIT: f64 = std::f64::consts::FRAC_PI_2 - 1e-3;
 /// epsilons of the pivot and prevents division-by-zero in `view_matrix`.
 const MIN_DISTANCE: f64 = 1e-6;
 
+/// Body-relative pivot offset used by the follow loop during a
+/// target-switch transition. Decays exponentially to zero, then the
+/// caller drops the struct.
+#[derive(Debug, Clone, Copy)]
+pub struct FollowTransition {
+    pub body_idx: usize,
+    pub pivot_offset: DVec3,
+    pub transition_tau: f64,
+}
+
+impl FollowTransition {
+    /// Pivot offset drops by `1/e` in 150 ms; settles in ~450 ms.
+    pub const DEFAULT_TAU: f64 = 0.15;
+    /// Offset is treated as zero once below ~1 µAU — sub-pixel at
+    /// any reasonable view distance.
+    pub const SETTLED_EPS_SQ: f64 = 1e-12;
+
+    pub fn capture(body_idx: usize, current_pivot: DVec3, body_pos: DVec3) -> Self {
+        Self { body_idx, pivot_offset: current_pivot - body_pos, transition_tau: Self::DEFAULT_TAU }
+    }
+
+    /// Returns `true` once the offset hits the settled epsilon.
+    pub fn decay(&mut self, dt: f64) -> bool {
+        self.pivot_offset *= (-dt / self.transition_tau).exp();
+        let settled = self.pivot_offset.length_squared() < Self::SETTLED_EPS_SQ;
+        if settled {
+            self.pivot_offset = DVec3::ZERO;
+        }
+        settled
+    }
+}
+
 /// One camera pose: pivot, spherical-coordinate orientation, and
 /// distance. Lives twice in [`OrbitCamera`] (current vs. target).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -123,17 +155,24 @@ impl OrbitCamera {
         self.target = pose;
     }
 
-    /// Advance `current` toward `target` by `dt` seconds using a
-    /// critically damped exponential approach. Frame-rate independent.
+    /// Advance `current` toward `target` by `dt` seconds.
+    /// Distance lerps in log space so a click reframe feels uniform
+    /// across the AU-to-light-year dynamic range.
     pub fn integrate(&mut self, dt: f64) {
         let alpha = 1.0 - (-self.omega_n * dt).exp();
+        if alpha == 0.0 {
+            return;
+        }
         let c = &mut self.current;
         let t = &self.target;
 
         c.pivot = c.pivot.lerp(t.pivot, alpha);
         c.azimuth = lerp_angle(c.azimuth, t.azimuth, alpha);
-        c.elevation = c.elevation + alpha * (t.elevation - c.elevation);
-        c.distance = c.distance + alpha * (t.distance - c.distance);
+        c.elevation += alpha * (t.elevation - c.elevation);
+
+        let log_c = c.distance.max(MIN_DISTANCE).ln();
+        let log_t = t.distance.max(MIN_DISTANCE).ln();
+        c.distance = (log_c + alpha * (log_t - log_c)).exp();
 
         c.elevation = c.elevation.clamp(-ELEVATION_LIMIT, ELEVATION_LIMIT);
         c.distance = c.distance.max(MIN_DISTANCE);
@@ -160,6 +199,32 @@ impl OrbitCamera {
         let r = self.target.right();
         let u = self.target.up();
         self.target.pivot += r * dx + u * dy;
+    }
+
+    /// Pivot target that cancels the spring's discrete-step lag for
+    /// motion at most quadratic in time. The factor `(1/α − 1)`
+    /// (with `α = 1 - exp(-ω·dt)`) reduces to `1/ω` in the
+    /// `dt → 0` limit while staying exact at the actual frame rate.
+    /// Inputs are wall-time derivatives sampled *after* the
+    /// integrator step that produced `body_pos` (matches what the
+    /// physics thread publishes), hence the negative sign on the
+    /// `½·a·dt²` term: it removes the `a·dt²` contribution that
+    /// `wall_vel` already carries vs. the velocity that drove the
+    /// last position step.
+    pub fn feedforward_pivot(
+        &self,
+        dt: f64,
+        body_pos: DVec3,
+        wall_vel: DVec3,
+        wall_acc: DVec3,
+    ) -> DVec3 {
+        let omega = self.omega_n.max(1e-9);
+        let alpha = 1.0 - (-omega * dt).exp();
+        if alpha < 1e-12 {
+            return body_pos;
+        }
+        let k = 1.0 / alpha - 1.0;
+        body_pos + (wall_vel * dt - wall_acc * (0.5 * dt * dt)) * k
     }
 
     /// `true` when `current` is close enough to `target` that further
@@ -346,5 +411,133 @@ mod tests {
         // At identity pose: right = +X, up = +Y, forward = −Z.
         cam.pan_screen(3.0, 4.0);
         assert!(vec_approx_eq(cam.target.pivot, DVec3::new(3.0, 4.0, 0.0), 1e-12));
+    }
+
+    // ── Log-space distance lerp ──────────────────────────────────────────────
+
+    #[test]
+    fn distance_log_lerp_uniform_per_step_ratio() {
+        // 10 → 0.001 in log-space: each integration step covers the
+        // same RATIO of the remaining log-distance, so 60 frames
+        // cover most of the 4-decade gap.
+        let mut cam = OrbitCamera::new(CameraPose::new(DVec3::ZERO, 0.0, 0.0, 10.0));
+        cam.target.distance = 0.001;
+        for _ in 0..60 {
+            cam.integrate(1.0 / 60.0);
+        }
+        // After 1 s at ω_n = 12 the spring covers 1 - exp(-12) ≈ 1.
+        // In log space that means 4 decades of progress.
+        let progress_decades = (10.0_f64.log10() - cam.current.distance.log10())
+            / (10.0_f64.log10() - 0.001_f64.log10());
+        assert!(progress_decades > 0.999, "log progress = {progress_decades}");
+    }
+
+    #[test]
+    fn distance_log_lerp_no_overshoot() {
+        let mut cam = OrbitCamera::new(CameraPose::new(DVec3::ZERO, 0.0, 0.0, 100.0));
+        cam.target.distance = 1.0;
+        for _ in 0..600 {
+            cam.integrate(1.0 / 60.0);
+            assert!(
+                cam.current.distance >= 1.0 - 1e-6,
+                "distance {} undershot target",
+                cam.current.distance
+            );
+        }
+    }
+
+    // ── PD-with-feedforward ──────────────────────────────────────────────────
+
+    #[test]
+    fn feedforward_zero_for_static_body() {
+        let cam = OrbitCamera::new(CameraPose::new(DVec3::ZERO, 0.0, 0.0, 10.0));
+        let pos = DVec3::new(1.0, 2.0, 3.0);
+        let ff = cam.feedforward_pivot(1.0 / 60.0, pos, DVec3::ZERO, DVec3::ZERO);
+        assert!(vec_approx_eq(ff, pos, 1e-12));
+    }
+
+    #[test]
+    fn feedforward_cancels_constant_velocity_lag() {
+        // Discrete-aware feedforward should pin the spring to the
+        // body for any constant-velocity motion at the actual dt.
+        let dt = 1.0 / 60.0;
+        let v = DVec3::new(2.0, 0.0, 0.0);
+        let mut cam = OrbitCamera::new(CameraPose::new(DVec3::ZERO, 0.0, 0.0, 10.0));
+
+        let mut body_pos = DVec3::ZERO;
+        for _ in 0..120 {
+            body_pos += v * dt;
+            let ff = cam.feedforward_pivot(dt, body_pos, v, DVec3::ZERO);
+            cam.target.pivot = ff;
+            cam.integrate(dt);
+        }
+        assert!(
+            vec_approx_eq(cam.current.pivot, body_pos, 1e-9),
+            "current {:?} vs body {:?}",
+            cam.current.pivot,
+            body_pos,
+        );
+    }
+
+    #[test]
+    fn feedforward_cancels_constant_acceleration_lag() {
+        // Body advances Verlet-style — `body += v·dt + ½·a·dt²` —
+        // matching the discrete model the feedforward inverts.
+        let dt = 1.0 / 60.0;
+        let a = DVec3::new(0.0, 1.0, 0.0);
+        let mut cam = OrbitCamera::new(CameraPose::new(DVec3::ZERO, 0.0, 0.0, 10.0));
+
+        let mut body_pos = DVec3::ZERO;
+        let mut body_vel = DVec3::ZERO;
+        for _ in 0..120 {
+            body_pos += body_vel * dt + a * (0.5 * dt * dt);
+            body_vel += a * dt;
+            let ff = cam.feedforward_pivot(dt, body_pos, body_vel, a);
+            cam.target.pivot = ff;
+            cam.integrate(dt);
+        }
+        assert!(
+            vec_approx_eq(cam.current.pivot, body_pos, 1e-9),
+            "current {:?} vs body {:?}",
+            cam.current.pivot,
+            body_pos,
+        );
+    }
+
+    // ── FollowTransition ─────────────────────────────────────────────────────
+
+    #[test]
+    fn follow_transition_shrinks_at_expected_rate() {
+        // After one τ (≈ 9 frames at 60 fps) the offset should drop
+        // to ~e⁻¹ ≈ 37 % of its initial length.
+        let mut t = FollowTransition::capture(0, DVec3::new(10.0, 0.0, 0.0), DVec3::ZERO);
+        let dt = 1.0 / 60.0;
+        let frames = (FollowTransition::DEFAULT_TAU / dt).round() as u32;
+        for _ in 0..frames {
+            t.decay(dt);
+        }
+        let ratio = t.pivot_offset.length() / 10.0;
+        assert!((ratio - (-1.0_f64).exp()).abs() < 0.02, "ratio = {ratio}");
+    }
+
+    #[test]
+    fn follow_transition_settles_within_a_few_seconds() {
+        let mut t = FollowTransition::capture(0, DVec3::new(10.0, 0.0, 0.0), DVec3::ZERO);
+        let dt = 1.0 / 60.0;
+        let mut steps = 0;
+        while !t.decay(dt) {
+            steps += 1;
+            assert!(steps < 600, "transition failed to settle in 10 s");
+        }
+        assert_eq!(t.pivot_offset, DVec3::ZERO);
+    }
+
+    #[test]
+    fn follow_transition_capture_records_relative_offset() {
+        let cur = DVec3::new(5.0, 6.0, 7.0);
+        let body = DVec3::new(2.0, 4.0, 1.0);
+        let t = FollowTransition::capture(42, cur, body);
+        assert_eq!(t.body_idx, 42);
+        assert!(vec_approx_eq(t.pivot_offset, DVec3::new(3.0, 2.0, 6.0), 1e-12));
     }
 }

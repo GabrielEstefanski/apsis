@@ -196,33 +196,6 @@ impl SimulationApp {
         // centre is derived AFTER any animation update
         let center = rect.center() + self.offset;
 
-        // ── Zoom with inertia ─────────────────────────────────────────────────
-        if scroll_y.abs() > 0.0 {
-            self.zoom_vel += scroll_y * 0.0004;
-            self.zoom_vel = self.zoom_vel.clamp(-0.15, 0.15);
-        }
-
-        if self.zoom_vel.abs() > 0.00005 {
-            let old_scale = self.scale;
-            self.scale = (self.scale * (1.0 + self.zoom_vel)).clamp(0.001, 50_000.0);
-
-            if let Some(mouse) = hover_pos {
-                let ratio = self.scale / old_scale;
-                self.offset += (mouse - center) * (1.0 - ratio);
-                // keep animation target in sync with the scale-adjusted offset
-                if let Some(t) = self.camera_anim_target.as_mut() {
-                    *t *= ratio;
-                }
-            }
-
-            self.zoom_vel *= 0.80;
-            if self.zoom_vel.abs() < 0.00005 {
-                self.zoom_vel = 0.0;
-            } else {
-                ctx.request_repaint();
-            }
-        }
-
         // ── 3D camera gestures ────────────────────────────────────────────────
         {
             use crate::app::camera::input::{
@@ -291,25 +264,72 @@ impl SimulationApp {
             }
         }
 
-        // ── Body-follow tracking ──────────────────────────────────────────────
-        // Drive the 3D orbit camera's pivot toward the followed body. The
-        // spring in OrbitCamera::integrate (called from the app tick) does
-        // the actual smoothing — feeding `target.pivot` is the only thing
-        // this loop owns. Runs after pan/zoom so manual gestures cannot
-        // race with follow on the same frame.
+        // ── Body-follow tracking (PD + feedforward) ──────────────────────────
+        // Pivot target = body.pos + v/ω + a/ω², so the spring settles
+        // on the body for any motion at most quadratic in time. While
+        // a transition is active, a body-relative offset decays on
+        // top so the new target stays in frame from frame one. Runs
+        // after pan/zoom so manual gestures override follow on the
+        // same frame.
         if self.follow_selected_body {
             if let Some(idx) = self.selection.single() {
-                if let Some(body) = self.system.bodies().get(idx) {
-                    self.camera.target.pivot = glam::DVec3::new(body.x, body.y, body.z);
+                if let Some(body) = self.system.bodies().get(idx).copied() {
+                    let body_pos = glam::DVec3::new(body.x, body.y, body.z);
+                    let body_vel = glam::DVec3::new(body.vx, body.vy, body.vz);
+                    let body_acc = self
+                        .system
+                        .accelerations()
+                        .get(idx)
+                        .copied()
+                        .map(|a| glam::DVec3::new(a.x, a.y, a.z))
+                        .unwrap_or(glam::DVec3::ZERO);
+
+                    let sim_rate = self.system.sim_rate().max(0.0);
+                    let wall_vel = body_vel * sim_rate;
+                    let wall_acc = body_acc * sim_rate * sim_rate;
+
+                    let ff = self.camera.feedforward_pivot(dt as f64, body_pos, wall_vel, wall_acc);
+
+                    // Apply or refresh the transition offset.
+                    let offset = match &mut self.follow_transition {
+                        Some(t) if t.body_idx == idx => {
+                            if t.decay(dt as f64) {
+                                self.follow_transition = None;
+                                glam::DVec3::ZERO
+                            } else {
+                                t.pivot_offset
+                            }
+                        },
+                        // Either no transition or it belongs to a previous
+                        // target — reseat against the active one.
+                        _ => {
+                            self.follow_transition =
+                                Some(crate::app::camera::FollowTransition::capture(
+                                    idx,
+                                    self.camera.current.pivot,
+                                    body_pos,
+                                ));
+                            self.follow_transition
+                                .as_ref()
+                                .map(|t| t.pivot_offset)
+                                .unwrap_or(glam::DVec3::ZERO)
+                        },
+                    };
+
+                    self.camera.target.pivot = ff + offset;
                     ctx.request_repaint();
                 } else {
                     self.follow_selected_body = false;
+                    self.follow_transition = None;
                     self.selection = BodySelection::default();
                     self.selection_form = None;
                 }
             } else {
                 self.follow_selected_body = false;
+                self.follow_transition = None;
             }
+        } else if self.follow_transition.is_some() {
+            self.follow_transition = None;
         }
 
         // ── Render params ─────────────────────────────────────────────────────
@@ -894,33 +914,37 @@ impl SimulationApp {
                                     },
                                 }
                             } else {
-                                // Plain click: select single body and frame
-                                // the 3D camera on it. Follow keeps the pivot
-                                // tracking the body each subsequent frame.
                                 let body = self.system.bodies()[idx];
+                                let body_pos = glam::DVec3::new(body.x, body.y, body.z);
+
                                 self.selection = BodySelection::select_single(idx);
                                 self.follow_selected_body = true;
+                                // Capture the camera's current pivot relative
+                                // to the new body. The follow loop decays it
+                                // to zero, sliding the view onto the body
+                                // without losing it from frame.
+                                self.follow_transition =
+                                    Some(crate::app::camera::FollowTransition::capture(
+                                        idx,
+                                        self.camera.current.pivot,
+                                        body_pos,
+                                    ));
                                 let name = self.system.name(idx).to_owned();
                                 self.selection_form = Some(SelectionForm::from_body(&body, &name));
 
                                 let canvas_h = rect.height().max(1.0);
                                 let focal_y = canvas_h / (2.0 * (FOV_Y_RAD * 0.5).tan());
                                 let r = (body.physical_radius as f32).max(1e-12);
-                                // Distance such that physical_radius projects
-                                // to ~FRAME_TARGET_PX. Floor at 5× the near
-                                // plane to avoid front-clipping the body, and
-                                // at 4× the body radius so the camera never
-                                // ends up inside the geometry.
                                 let dist = ((r * focal_y) / FRAME_TARGET_PX)
                                     .max(NEAR_PLANE * 5.0)
                                     .max(r * 4.0) as f64;
-                                self.camera.target.pivot = glam::DVec3::new(body.x, body.y, body.z);
                                 self.camera.target.distance = dist;
                             }
                         },
                         None => {
                             self.selection = BodySelection::default();
                             self.follow_selected_body = false;
+                            self.follow_transition = None;
                             self.selection_form = None;
                         },
                     }
