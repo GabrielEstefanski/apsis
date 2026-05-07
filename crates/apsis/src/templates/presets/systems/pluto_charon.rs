@@ -42,6 +42,7 @@ pub fn pluto_charon(_seed: u64) -> Template {
                 class_override: None,
                 preset: &body_preset::ICY,
                 density: None,
+                albedo: None,
             },
             TemplateBody {
                 name: Some("Charon"),
@@ -51,6 +52,7 @@ pub fn pluto_charon(_seed: u64) -> Template {
                 class_override: None,
                 preset: &body_preset::ICY,
                 density: None,
+                albedo: None,
             },
         ],
         display_scale: 1.0,

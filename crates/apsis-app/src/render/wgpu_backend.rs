@@ -305,8 +305,6 @@ pub struct WgpuBackend {
 
     pub trail_buffer: Option<Arc<apsis::core::trail::TrailBuffer>>,
     pub trail_visibility: Option<Vec<bool>>,
-    pub center: [f32; 2],
-    pub scale: f32,
     pub show_grid: bool,
     /// Visual style for trail rendering. Injected as a value object so
     /// presets swap atomically. See [`crate::render::TrailStylePreset`].
@@ -331,8 +329,6 @@ impl WgpuBackend {
 
             trail_buffer: None,
             trail_visibility: None,
-            center: [0.0, 0.0],
-            scale: 1.0,
             show_grid: true,
             trail_style: crate::render::TrailStylePreset::UniverseSandbox.style(1.5),
         }
@@ -468,14 +464,10 @@ impl WgpuBackend {
         physical_size: [u32; 2],
         pixels_per_point: f32,
         swapchain_format: wgpu::TextureFormat,
-        center: [f32; 2],
-        scale: f32,
         view_proj: [[f32; 4]; 4],
         camera_pos: [f32; 3],
     ) {
         self.ensure_gpu(device, swapchain_format);
-        self.center = center;
-        self.scale = scale;
 
         // Keep the HDR target sized to the canvas.
         let hdr = self.hdr.get_or_insert_with(|| HdrTarget::new(device, physical_size));

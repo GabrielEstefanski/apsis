@@ -34,6 +34,7 @@ pub fn hd_80606(seed: u64) -> Template {
         mass: m_star,
         preset: &body_preset::STAR,
         density: Some(1500.0 * KG_M3_TO_SOLAR_AU3),
+        albedo: None,
         position: Some([0.0, 0.0, 0.0]),
         velocity: [0.0, 0.0, 0.0],
         class_override: None,
@@ -59,6 +60,7 @@ pub fn hd_80606(seed: u64) -> Template {
         // 2010). Slightly less dense than Saturn — typical for an
         // inflated tidally heated giant.
         density: Some(980.0 * KG_M3_TO_SOLAR_AU3),
+        albedo: None,
         position: Some(pos),
         velocity: vel,
         class_override: None,

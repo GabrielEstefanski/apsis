@@ -313,6 +313,13 @@ pub struct BodyPreset {
     /// Moon is a [`ROCKY`] preset classed as
     /// [`Moon`](BodyClass::Moon)).
     pub default_class: BodyClass,
+
+    /// Class-typical Bond albedo (`[0, 1]`, dimensionless), used by
+    /// the photometry pipeline as a placeholder when the body's
+    /// surface reflectivity isn't quoted directly. Real-body templates
+    /// override via [`Body::with_albedo`] with the published value.
+    /// Stars carry `0.0` — they emit, they don't reflect.
+    pub default_albedo: f64,
 }
 
 impl BodyPreset {
@@ -362,6 +369,9 @@ pub const COMET: BodyPreset = BodyPreset {
     }),
     luminosity: None,
     default_class: BodyClass::Comet,
+    // Halley-class nucleus Bond ≈ 0.04; comet nuclei are among the
+    // darkest natural surfaces in the solar system.
+    default_albedo: 0.04,
 };
 
 /// Rubble-pile or monolithic rock (C/S/M-type asteroids).
@@ -380,6 +390,9 @@ pub const ASTEROID: BodyPreset = BodyPreset {
     }),
     luminosity: None,
     default_class: BodyClass::Asteroid,
+    // C-type / S-type asteroids span Bond 0.03–0.20; the default
+    // sits at the population median (Tedesco & Veeder 1992).
+    default_albedo: 0.10,
 };
 
 /// Silicate / iron body (terrestrial planets). ρ₀ = 5514 kg/m³
@@ -399,6 +412,10 @@ pub const ROCKY: BodyPreset = BodyPreset {
     }),
     luminosity: None,
     default_class: BodyClass::Planet,
+    // Terrestrial-planet population median (Mercury 0.07, Mars
+    // 0.25, Earth 0.31, Venus 0.77 — the spread is huge, so this
+    // is a placeholder; named bodies override.
+    default_albedo: 0.30,
 };
 
 /// Volatile-rich body (icy moons, ocean worlds, KBOs). Calibrated to
@@ -417,6 +434,10 @@ pub const ICY: BodyPreset = BodyPreset {
     }),
     luminosity: None,
     default_class: BodyClass::Moon,
+    // Icy moon Bond spans 0.10 (Callisto) to 0.99 (Enceladus);
+    // 0.50 lands at the population mean for Galilean / Saturnian
+    // satellites.
+    default_albedo: 0.50,
 };
 
 /// Ice-dominated giant with small rocky core (Uranus/Neptune).
@@ -435,6 +456,8 @@ pub const ICE_GIANT: BodyPreset = BodyPreset {
     }),
     luminosity: None,
     default_class: BodyClass::Planet,
+    // Uranus 0.30, Neptune 0.29 — population mean.
+    default_albedo: 0.29,
 };
 
 /// Gas-dominated giant (Jupiter/Saturn/hot Jupiters). Calibrated to
@@ -453,6 +476,8 @@ pub const GAS: BodyPreset = BodyPreset {
     }),
     luminosity: None,
     default_class: BodyClass::Planet,
+    // Jupiter 0.50, Saturn 0.34 — population mean.
+    default_albedo: 0.42,
 };
 
 /// Sub-stellar object below the hydrogen-burning limit (~13–80 M_Jup).
@@ -473,6 +498,9 @@ pub const BROWN_DWARF: BodyPreset = BodyPreset {
     }),
     luminosity: Some(LuminositySource::Model(LuminosityModel::BrownDwarfBurrows)),
     default_class: BodyClass::Star,
+    // Self-luminous body — emits its own flux. Reflected
+    // contribution is negligible against the intrinsic output.
+    default_albedo: 0.0,
 };
 
 /// Main-sequence star, F/G/K spectral type (Sun-like and warmer).
@@ -497,6 +525,7 @@ pub const STAR: BodyPreset = BodyPreset {
     }),
     luminosity: Some(LuminositySource::Model(LuminosityModel::MainSequence)),
     default_class: BodyClass::Star,
+    default_albedo: 0.0,
 };
 
 /// Low-mass main-sequence star, M spectral type (TRAPPIST-1,
@@ -524,6 +553,7 @@ pub const RED_DWARF: BodyPreset = BodyPreset {
     }),
     luminosity: Some(LuminositySource::Model(LuminosityModel::MainSequence)),
     default_class: BodyClass::Star,
+    default_albedo: 0.0,
 };
 
 /// Degenerate stellar remnant supported by electron degeneracy.
@@ -547,6 +577,7 @@ pub const WHITE_DWARF: BodyPreset = BodyPreset {
     }),
     luminosity: Some(LuminositySource::Model(LuminosityModel::WhiteDwarfRadius)),
     default_class: BodyClass::Star,
+    default_albedo: 0.0,
 };
 
 /// Catalogue of built-in presets. Used by the spawn UI to populate

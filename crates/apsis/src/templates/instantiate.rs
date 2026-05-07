@@ -55,6 +55,14 @@ pub fn instantiate_at(template: &Template, cx: f64, cy: f64) -> Vec<NamedBody> {
                 b = b.with_density(rho);
             }
 
+            // Per-body Bond-albedo override — same rationale: real
+            // bodies override the preset placeholder so the
+            // photometry pipeline computes the published apparent
+            // magnitude, not a class-typical guess.
+            if let Some(a) = t.albedo {
+                b = b.with_albedo(a);
+            }
+
             // Fall back to the preset's display name when the
             // template author didn't pick one explicitly. The
             // system-level numerator turns repeated prefixes into
