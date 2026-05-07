@@ -1,19 +1,25 @@
-use bytemuck::{Pod, Zeroable};
-use egui;
-use std::mem::size_of;
+//! Ecliptic-plane grid drawn in world space.
+//!
+//! Full-screen quad whose fragment shader unprojects each pixel
+//! through the inverse view-projection matrix, intersects the camera
+//! ray with `z = 0`, and shades grid lines on the resulting world
+//! `(x, y)` coordinates. Same LOD logic as the legacy 2D grid (line
+//! spacing chosen so visible lines stay ~60 px apart) but anchored to
+//! the world plane the bodies live on rather than to screen-space
+//! coordinates.
 
-// ── Uniform ───────────────────────────────────────────────────────────────────
+use bytemuck::{Pod, Zeroable};
+use std::mem::size_of;
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct GridUniform {
+    inv_view_proj: [[f32; 4]; 4],
+    camera_pos: [f32; 3],
+    _pad0: f32,
     screen_size: [f32; 2],
-    center: [f32; 2],
-    scale: f32,
-    _pad: [f32; 3],
+    _pad1: [f32; 2],
 }
-
-// ── GridRenderer ──────────────────────────────────────────────────────────────
 
 pub struct GridRenderer {
     pipeline: wgpu::RenderPipeline,
@@ -96,8 +102,20 @@ impl GridRenderer {
         Self { pipeline, uniform_buf, bind_group }
     }
 
-    pub fn upload(&self, queue: &wgpu::Queue, center: [f32; 2], scale: f32, screen: [f32; 2]) {
-        let u = GridUniform { screen_size: screen, center, scale, _pad: [0.0; 3] };
+    pub fn upload(
+        &self,
+        queue: &wgpu::Queue,
+        inv_view_proj: [[f32; 4]; 4],
+        camera_pos: [f32; 3],
+        screen: [f32; 2],
+    ) {
+        let u = GridUniform {
+            inv_view_proj,
+            camera_pos,
+            _pad0: 0.0,
+            screen_size: screen,
+            _pad1: [0.0; 2],
+        };
         queue.write_buffer(&self.uniform_buf, 0, bytemuck::bytes_of(&u));
     }
 
@@ -106,174 +124,22 @@ impl GridRenderer {
         pass.set_bind_group(0, &self.bind_group, &[]);
         pass.draw(0..6, 0..1);
     }
-
-    /// Overlay coordinate labels on top of the GPU grid using egui.
-    ///
-    /// Call this every frame after [`draw`], inside your egui paint callback
-    /// or immediate-mode panel that covers the simulation viewport.
-    ///
-    /// Labels are drawn at the "medium" grid level (every 5 fine lines) so
-    /// they are sparse enough not to clutter the view. The label for the
-    /// origin is suppressed to avoid overlap with the axis intersection.
-    ///
-    /// `rect` must be the egui [`Rect`] that matches the wgpu viewport so
-    /// that pixel coordinates are consistent between the two renderers.
-    /// `unit` is the distance unit label shown on x-axis tick labels (e.g. "AU").
-    /// Pass an empty string for dimensionless worlds.
-    pub fn draw_labels(
-        &self,
-        ui: &egui::Ui,
-        center: [f32; 2],
-        scale: f32,
-        rect: egui::Rect,
-        unit: &str,
-    ) {
-        let painter = ui.painter_at(rect);
-        let font = egui::FontId::monospace(10.0);
-        let color = egui::Color32::from_rgba_unmultiplied(180, 180, 220, 180);
-
-        let step = nice_number(60.0 / scale) * 5.0;
-
-        // ── X-axis labels: numeric + unit suffix ─────────────────────────────
-        let y_label = center[1].clamp(rect.min.y + 16.0, rect.max.y - 16.0);
-        let x_world_min = (rect.min.x - center[0]) / scale;
-        let x_world_max = (rect.max.x - center[0]) / scale;
-
-        let ix_min = (x_world_min / step).floor() as i32;
-        let ix_max = (x_world_max / step).ceil() as i32;
-
-        for ix in ix_min..=ix_max {
-            let wx = ix as f32 * step;
-            if wx.abs() < step * 0.1 {
-                continue;
-            }
-            let sx = center[0] + wx * scale;
-            painter.text(
-                egui::pos2(sx, y_label + 4.0),
-                egui::Align2::CENTER_TOP,
-                format_coord_unit(wx, unit),
-                font.clone(),
-                color,
-            );
-        }
-
-        // ── Y-axis labels: numeric only (unit shown on x-axis to avoid clutter)
-        let x_label = center[0].clamp(rect.min.x + 36.0, rect.max.x - 8.0);
-        let y_world_min = (rect.min.y - center[1]) / scale;
-        let y_world_max = (rect.max.y - center[1]) / scale;
-
-        let iy_min = (y_world_min / step).floor() as i32;
-        let iy_max = (y_world_max / step).ceil() as i32;
-
-        for iy in iy_min..=iy_max {
-            let wy = iy as f32 * step;
-            if wy.abs() < step * 0.1 {
-                continue;
-            }
-            let sy = center[1] + wy * scale;
-            painter.text(
-                egui::pos2(x_label - 4.0, sy),
-                egui::Align2::RIGHT_CENTER,
-                format_coord(wy),
-                font.clone(),
-                color,
-            );
-        }
-
-        // ── Origin ────────────────────────────────────────────────────────────
-        painter.text(
-            egui::pos2(
-                center[0].clamp(rect.min.x + 20.0, rect.max.x - 8.0) - 4.0,
-                center[1].clamp(rect.min.y + 8.0, rect.max.y - 8.0) + 4.0,
-            ),
-            egui::Align2::RIGHT_TOP,
-            "0",
-            font,
-            color,
-        );
-
-        // ── Unit badge (bottom-right corner) when a named unit is in use ─────
-        if !unit.is_empty() {
-            painter.text(
-                rect.right_bottom() + egui::vec2(-10.0, -10.0),
-                egui::Align2::RIGHT_BOTTOM,
-                unit,
-                egui::FontId::monospace(9.0),
-                egui::Color32::from_rgba_unmultiplied(140, 140, 180, 110),
-            );
-        }
-    }
 }
 
-// ── Coordinate formatting ─────────────────────────────────────────────────────
-
-/// Format a world coordinate for display as a grid label.
-///
-/// Uses compact scientific notation (`1.2e4`) for very large or very small
-/// values, plain integers when the value is whole, and two decimal places
-/// otherwise. This keeps labels readable across many orders of magnitude,
-/// which is common in astronomical simulations.
-fn format_coord(v: f32) -> String {
-    let abs = v.abs();
-    if abs == 0.0 {
-        return "0".into();
-    }
-    if abs >= 1.0e4 || abs < 1.0e-2 {
-        let exp = abs.log10().floor() as i32;
-        let mantissa = v / 10_f32.powi(exp);
-        return if (mantissa - mantissa.round()).abs() < 0.05 {
-            format!("{}e{exp}", mantissa.round() as i32)
-        } else {
-            format!("{mantissa:.1}e{exp}")
-        };
-    }
-    if (v - v.round()).abs() < 1.0e-3 {
-        return format!("{}", v.round() as i32);
-    }
-    format!("{v:.2}")
-}
-
-fn format_coord_unit(v: f32, unit: &str) -> String {
-    let n = format_coord(v);
-    if unit.is_empty() { n } else { format!("{n} {unit}") }
-}
-
-/// Round `raw` up to the nearest "nice" number: 1, 2, 5, 10, 20, 50, …
-///
-/// This is the standard Wilkinson / Heckbert algorithm used by most
-/// scientific plotting libraries to choose axis tick spacing.
-fn nice_number(raw: f32) -> f32 {
-    let e = raw.abs().log10().floor();
-    let base = 10_f32.powf(e);
-    let frac = raw / base;
-    if frac < 1.5 {
-        base
-    } else if frac < 3.5 {
-        base * 2.0
-    } else if frac < 7.5 {
-        base * 5.0
-    } else {
-        base * 10.0
-    }
-}
-
-// ── WGSL Shader ───────────────────────────────────────────────────────────────
+// ── WGSL ─────────────────────────────────────────────────────────────────────
 
 const GRID_SHADER: &str = r#"
 
 struct GridUniform {
-    screen_size : vec2<f32>,
-    center      : vec2<f32>,
-    scale       : f32,
-    _pad0       : f32,
-    _pad1       : f32,
-    _pad2       : f32,
+    inv_view_proj : mat4x4<f32>,
+    camera_pos    : vec3<f32>,
+    _pad0         : f32,
+    screen_size   : vec2<f32>,
+    _pad1         : vec2<f32>,
 };
 
 @group(0) @binding(0)
 var<uniform> u : GridUniform;
-
-// ── Vertex: procedural full-screen quad, no vertex buffer ─────────────────── //
 
 @vertex
 fn vs_grid(@builtin(vertex_index) vi : u32) -> @builtin(position) vec4<f32> {
@@ -288,12 +154,8 @@ fn vs_grid(@builtin(vertex_index) vi : u32) -> @builtin(position) vec4<f32> {
     return vec4<f32>(verts[vi], 0.0, 1.0);
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────── //
-
-/// Antialiased coverage of a grid line at coordinate `v` with spacing `s`.
-/// Uses the screen-space derivative (fwidth) of the normalised coordinate so
-/// line width is always exactly one pixel regardless of zoom level.
-/// Returns 0..1 where 1 is the centre of the line.
+// Antialiased grid line at `v` with spacing `s`. Uses screen-space
+// derivative so line width is ~1 px regardless of zoom.
 fn grid_aa(v : f32, s : f32) -> f32 {
     let c    = v / s;
     let d    = fwidth(c);
@@ -301,25 +163,41 @@ fn grid_aa(v : f32, s : f32) -> f32 {
     return 1.0 - smoothstep(0.0, d, dist);
 }
 
-/// Maximum coverage across both grid axes for a 2-D grid.
 fn grid_line(world : vec2<f32>, s : f32) -> f32 {
     return max(grid_aa(world.x, s), grid_aa(world.y, s));
 }
 
-// ── Fragment ──────────────────────────────────────────────────────────────── //
-
 @fragment
 fn fs_grid(@builtin(position) frag_coord : vec4<f32>) -> @location(0) vec4<f32> {
+    // ── Reconstruct world ray from this fragment ─────────────────────── //
+    let ndc = vec2<f32>(
+         (frag_coord.x / u.screen_size.x) * 2.0 - 1.0,
+        -(frag_coord.y / u.screen_size.y) * 2.0 + 1.0,
+    );
+    // Reverse-Z infinite-far: a point at clip z=0 sits on the far
+    // plane. Unproject that to obtain a world-space "far ray endpoint",
+    // then build the camera ray as endpoint − camera.
+    let far_clip  = vec4<f32>(ndc, 0.0, 1.0);
+    let far_world = u.inv_view_proj * far_clip;
+    let far_pos   = far_world.xyz / far_world.w;
+    let ray_dir   = normalize(far_pos - u.camera_pos);
 
-    // World-space coordinate for this fragment.
-    let world = (frag_coord.xy - u.center) / u.scale;
+    // ── Intersect with z = 0 plane ──────────────────────────────────── //
+    // Reject grazing or upside-down rays so the grid doesn't spit out
+    // numerical noise at the horizon.
+    if abs(ray_dir.z) < 1e-4 { discard; }
+    let t = -u.camera_pos.z / ray_dir.z;
+    if t <= 0.0 { discard; }
 
-    // ── LOD: choose a "nice" fine-grid spacing so lines stay ~60 px apart ── //
-    //
-    // Using log(x)/log(10) instead of log2(x)/log2(10) avoids the
-    // floating-point boundary errors that the mixed-base form can produce
-    // near exact powers of ten.
-    let raw        = 60.0 / u.scale;
+    let world_hit = u.camera_pos + ray_dir * t;
+    let world_xy  = world_hit.xy;
+
+    // ── LOD: nice line spacing keyed off screen-space derivative ────── //
+    // fwidth on world coordinates gives the "size of one fragment" in
+    // world units at this point on the plane — same idea as the 2D
+    // grid's `60 / scale`, but generalised to perspective.
+    let pixel_size = max(fwidth(world_xy.x), fwidth(world_xy.y));
+    let raw        = pixel_size * 60.0;
     let log10_raw  = log(abs(raw) + 1e-30) / log(10.0);
     let e          = floor(log10_raw);
     let base       = pow(10.0, e);
@@ -331,47 +209,48 @@ fn fs_grid(@builtin(position) frag_coord : vec4<f32>) -> @location(0) vec4<f32> 
     else if frac < 7.5 { fine = base * 5.0; }
     else               { fine = base * 10.0; }
 
-    let med    = fine * 5.0;   // one medium line every 5 fine lines
-    let coarse = fine * 25.0;  // broad orientation lines
+    let med    = fine * 5.0;
+    let coarse = fine * 25.0;
 
-    // ── Fine-grid fade ───────────────────────────────────────────────────── //
-    // Fine lines fade in only once they are at least ~20 px apart, so they
-    // never clutter the view when zoomed far out.
-    let fine_px   = fine * u.scale;
-    let fine_fade = smoothstep(14.0, 40.0, fine_px);
+    // Per-LOD pixel-spacing fade. A LOD fades out before its lines
+    // are dense enough to alias to a uniform tint — the same idea
+    // applied to fine, med and coarse so coarse lines don't keep
+    // painting alpha after they crowd to ~1 px apart.
+    let inv_px      = 1.0 / max(pixel_size, 1e-30);
+    let fine_px     = fine   * inv_px;
+    let med_px      = med    * inv_px;
+    let coarse_px   = coarse * inv_px;
+    let fine_fade   = smoothstep(14.0, 40.0, fine_px);
+    let med_fade    = smoothstep(14.0, 40.0, med_px);
+    let coarse_fade = smoothstep(14.0, 40.0, coarse_px);
 
-    // ── Per-level coverage ───────────────────────────────────────────────── //
-    let gl_fine   = grid_line(world, fine)   * fine_fade;
-    let gl_med    = grid_line(world, med);
-    let gl_coarse = grid_line(world, coarse);
+    let gl_fine   = grid_line(world_xy, fine)   * fine_fade;
+    let gl_med    = grid_line(world_xy, med)    * med_fade;
+    let gl_coarse = grid_line(world_xy, coarse) * coarse_fade;
 
-    // ── Compositing: brightest level wins ────────────────────────────────── //
-    // Each level has its own neutral-blue-gray tint. More prominent levels
-    // are progressively brighter. The axis colours (red / green) override
-    // the neutral tints when the fragment is on a principal axis.
-    var best_a   = 0.0;
-    var best_rgb = vec3<f32>(0.15, 0.15, 0.24);
+    let neutral = vec3<f32>(0.32, 0.34, 0.38);
 
-    let a_fine   = gl_fine   * 0.18;
-    let a_med    = gl_med    * 0.42;
-    let a_coarse = gl_coarse * 0.55;
+    let a_fine   = gl_fine   * 0.10;
+    let a_med    = gl_med    * 0.22;
+    let a_coarse = gl_coarse * 0.32;
 
-    if a_fine > best_a {
-        best_a   = a_fine;
-        best_rgb = vec3<f32>(0.15, 0.15, 0.24);
-    }
-    if a_med > best_a {
-        best_a   = a_med;
-        best_rgb = vec3<f32>(0.22, 0.22, 0.32);
-    }
-    if a_coarse > best_a {
-        best_a   = a_coarse;
-        best_rgb = vec3<f32>(0.30, 0.30, 0.42);
-    }
+    let best_a = max(a_coarse, max(a_med, a_fine));
 
-    if best_a < 0.004 { discard; }
+    // Tight distance fade keyed off camera height + planar offset so
+    // the grid stays a local plate of reference instead of bleeding to
+    // the horizon. 10× / 30× of the camera's distance from origin
+    // covers the working volume without painting the whole canvas.
+    let r          = length(world_xy);
+    let cam_r      = length(u.camera_pos.xy);
+    let cam_h      = max(cam_r + abs(u.camera_pos.z), 1e-3);
+    let fade_inner = 10.0 * cam_h;
+    let fade_outer = 30.0 * cam_h;
+    let dist_fade  = 1.0 - smoothstep(fade_inner, fade_outer, r);
 
-    return vec4<f32>(best_rgb, best_a);
+    let a = best_a * dist_fade;
+    if a < 0.02 { discard; }
+
+    return vec4<f32>(neutral, a);
 }
 
 "#;

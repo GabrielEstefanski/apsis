@@ -3,7 +3,10 @@ use crate::app::render_params::{RenderParams, compute_render_radius};
 use crate::app::ui::{BodySelection, SelectionForm, SemanticScaleMode, SimulationApp, UndoRecord};
 use crate::render::CallbackFn;
 use crate::render::lighting::{LightSpec, SceneLighting};
-use crate::render::orbit_overlay::{OrbitOverlayStyle, draw_orbit_apsides, draw_orbit_polyline};
+use crate::render::orbit_overlay::{
+    OrbitOverlayStyle, closest_sample_index, draw_orbit_apsides, draw_orbit_polyline,
+    draw_orbit_polyline_with_halo,
+};
 use apsis::physics::orbital::{compute_elements, dominant_primary, is_system_root};
 use apsis::templates::instantiate_at;
 use eframe::egui::{self, Color32, FontId, Pos2, Stroke};
@@ -354,10 +357,7 @@ impl SimulationApp {
         {
             let mut backend = self.backend.lock().unwrap();
             backend.begin();
-            // Grid, trails and orbit overlay still draw in the legacy 2D
-            // screen-space pass; force them off until each one is moved
-            // onto the camera-driven path.
-            backend.show_grid = false;
+            backend.show_grid = self.show_grid;
 
             let bodies = self.system.bodies();
 
@@ -489,7 +489,19 @@ impl SimulationApp {
                 let scale = self.scale;
                 let cx = center_after_pan.x;
                 let cy = center_after_pan.y;
-                let project = |p: [f64; 3]| [cx + p[0] as f32 * scale, cy + p[1] as f32 * scale];
+                let project = |p: [f64; 3]| -> ([f32; 2], f32) {
+                    let world = glam::Vec3::new(p[0] as f32, p[1] as f32, p[2] as f32);
+                    let clip = view_proj * world.extend(1.0);
+                    let w = clip.w;
+                    if w > 0.0 {
+                        let ndc = clip.truncate() / w;
+                        let sx = rect.min.x + (ndc.x * 0.5 + 0.5) * rect.width();
+                        let sy = rect.min.y + (-ndc.y * 0.5 + 0.5) * rect.height();
+                        ([sx, sy], w)
+                    } else {
+                        ([f32::NAN, f32::NAN], w)
+                    }
+                };
 
                 self.orbit_hierarchy.tick(bodies, g_factor);
 
@@ -528,13 +540,7 @@ impl SimulationApp {
                     siblings_by_primary.get(&p).map(|v| v.as_slice()).unwrap_or(&empty_siblings)
                 };
 
-                // Suspended while the overlay is screen-space-only — it
-                // would render relative to the legacy 2D camera while the
-                // bodies sit on the 3D camera. Reinstated when the orbit
-                // overlay is rebuilt against `view_proj`.
-                let render_orbit_overlay = false;
-
-                if render_orbit_overlay && self.show_orbit_ellipses {
+                if self.show_orbit_ellipses {
                     let bg_style = OrbitOverlayStyle::background_default();
                     let vp_center = rect.center();
                     let vp_half_diag = (rect.width().powi(2) + rect.height().powi(2)).sqrt() * 0.5;
@@ -614,14 +620,14 @@ impl SimulationApp {
                             continue;
                         };
                         let primary = &bodies[*primary_idx];
-                        let primary_pos = [primary.x, primary.y, 0.0];
+                        let primary_pos = [primary.x, primary.y, primary.z];
                         let sampled = el.sample_orbit(primary_pos, 64);
-                        draw_orbit_polyline(&mut backend, &sampled, project, &bg_style);
+                        draw_orbit_polyline(&mut backend, &sampled, project, &bg_style, None, None);
                         draw_orbit_apsides(&mut backend, &el, primary_pos, project, &bg_style);
                     }
                 }
 
-                if render_orbit_overlay && !self.pinned_orbits.is_empty() {
+                if !self.pinned_orbits.is_empty() {
                     let fg_style = OrbitOverlayStyle::selected_default();
                     let pins: Vec<usize> = self.pinned_orbits.iter().copied().collect();
                     for i in pins {
@@ -648,14 +654,23 @@ impl SimulationApp {
                             continue;
                         };
                         let primary_b = &bodies[primary_idx];
-                        let primary_pos = [primary_b.x, primary_b.y, 0.0];
+                        let primary_pos = [primary_b.x, primary_b.y, primary_b.z];
                         let sampled = el.sample_orbit(primary_pos, 96);
-                        draw_orbit_polyline(&mut backend, &sampled, project, &fg_style);
+                        let body = &bodies[i];
+                        let anchor = closest_sample_index(&sampled, [body.x, body.y, body.z]);
+                        draw_orbit_polyline(
+                            &mut backend,
+                            &sampled,
+                            project,
+                            &fg_style,
+                            None,
+                            anchor,
+                        );
                         draw_orbit_apsides(&mut backend, &el, primary_pos, project, &fg_style);
                     }
                 }
 
-                if render_orbit_overlay && let Some(idx) = self.selection.single() {
+                if let Some(idx) = self.selection.single() {
                     if idx < bodies.len() && !is_system_root(bodies, idx) {
                         let primary = self
                             .orbit_hierarchy
@@ -672,10 +687,19 @@ impl SimulationApp {
                                 t_sim,
                             ) {
                                 let primary = &bodies[primary_idx];
-                                let primary_pos = [primary.x, primary.y, 0.0];
+                                let primary_pos = [primary.x, primary.y, primary.z];
                                 let sampled = el.sample_orbit(primary_pos, 128);
                                 let style = OrbitOverlayStyle::selected_default();
-                                draw_orbit_polyline(&mut backend, &sampled, project, &style);
+                                let body = &bodies[idx];
+                                let anchor =
+                                    closest_sample_index(&sampled, [body.x, body.y, body.z]);
+                                draw_orbit_polyline_with_halo(
+                                    &mut backend,
+                                    &sampled,
+                                    project,
+                                    &style,
+                                    anchor,
+                                );
                                 draw_orbit_apsides(&mut backend, &el, primary_pos, project, &style);
                             }
                         }
@@ -954,12 +978,6 @@ impl SimulationApp {
                 camera_pos,
             },
         ));
-
-        // ── Grid labels (AU ticks, on top of GPU grid, below body overlay) ───
-        {
-            let backend = self.backend.lock().unwrap();
-            backend.draw_labels_overlay(ui, rect, &self.physics_cfg.dist_label);
-        }
 
         // ── Overlay: rings + labels (on top of GPU layer) ─────────────────────
         self.draw_overlay(ui, rect, view_proj, time);
