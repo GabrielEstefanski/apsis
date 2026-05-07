@@ -6,13 +6,53 @@ use crate::render::{TrailRenderer, WgpuBackend};
 use apsis::core::physics_thread::{PhysicsHandle, spawn as spawn_physics};
 use apsis::core::system::System;
 use apsis::domain::body::Body;
-use apsis::domain::body_preset::{self, BodyPreset};
+use apsis::domain::body_preset::{self, BodyClass, BodyPreset};
 use apsis::io::recorder::SimRecorder;
 use apsis::io::snapshot::{SaveEntry, SimSnapshot, list_saves};
 use apsis::physics::integrator::IntegratorKind;
 use apsis::templates::{Template, UnitSystem};
 use std::collections::{BTreeSet, HashSet};
 use std::sync::{Arc, Mutex};
+
+// ── Trail class filter ────────────────────────────────────────────────────────
+
+/// Per-class visibility checkboxes for the trail overlay.
+///
+/// `Star`, `Planet`, and `Moon` start visible; `Asteroid` and `Comet`
+/// start hidden so a freshly-loaded `solar_system` template does not
+/// drown the canvas in 600+ minor-body trails. Toggle individually
+/// from the view tab.
+#[derive(Debug, Clone, Copy)]
+pub struct TrailClassFilter {
+    pub star: bool,
+    pub planet: bool,
+    pub moon: bool,
+    pub asteroid: bool,
+    pub comet: bool,
+}
+
+impl Default for TrailClassFilter {
+    fn default() -> Self {
+        Self { star: true, planet: true, moon: true, asteroid: false, comet: false }
+    }
+}
+
+impl TrailClassFilter {
+    /// Whether the given class passes the filter. Bodies whose class
+    /// is [`BodyClass::Unknown`] always pass — class filtering only
+    /// gates explicitly tagged bodies, leaving authored-set + per-body
+    /// override to drive the rest.
+    pub fn allows(&self, class: BodyClass) -> bool {
+        match class {
+            BodyClass::Star => self.star,
+            BodyClass::Planet => self.planet,
+            BodyClass::Moon => self.moon,
+            BodyClass::Asteroid => self.asteroid,
+            BodyClass::Comet => self.comet,
+            BodyClass::Unknown => true,
+        }
+    }
+}
 
 // ── Body selection ────────────────────────────────────────────────────────────
 
@@ -342,10 +382,17 @@ pub struct SimulationApp {
     pub(super) trail_style_preset: crate::render::TrailStylePreset,
     /// Render-side trail recorder. Owns the ring buffer and sampling policy.
     pub(super) trail_recorder: apsis::core::trail::TrailRecorder,
-    /// Minimum body-mass / dominant-mass ratio required to show a trail.
-    /// Bodies below this threshold have their trail alpha zeroed out.
-    /// Default 1e-6 suppresses asteroid-mass bodies automatically.
-    pub(super) trail_min_mass_ratio: f64,
+    /// Per-class visibility for trails (Star, Planet, Moon, Asteroid,
+    /// Comet). A body whose class checkbox is unchecked has its trail
+    /// hidden regardless of the authored-set rule. Class
+    /// [`BodyClass::Unknown`] is not gated — those bodies fall under
+    /// the per-body override only.
+    pub(super) trail_class_filter: TrailClassFilter,
+    /// Per-body explicit overrides keyed by body index. `Some(true)`
+    /// forces a trail on, `Some(false)` forces it off. Absent entries
+    /// fall back to the authored-set + class default. Index validity
+    /// follows the same swap_remove-aware pruning as `pinned_orbits`.
+    pub(super) trail_per_body_override: std::collections::HashMap<usize, bool>,
 
     pub(super) place_preset: &'static BodyPreset,
 
@@ -585,7 +632,8 @@ impl SimulationApp {
             trail_width: 1.5,
             trail_style_preset: crate::render::TrailStylePreset::UniverseSandbox,
             trail_recorder: apsis::core::trail::TrailRecorder::new(),
-            trail_min_mass_ratio: 1e-7,
+            trail_class_filter: TrailClassFilter::default(),
+            trail_per_body_override: std::collections::HashMap::new(),
             place_preset: &body_preset::ROCKY,
             trail: None,
 
@@ -980,6 +1028,17 @@ impl SimulationApp {
         self.pinned_orbits.remove(&removed_idx);
         if old_last != removed_idx && self.pinned_orbits.remove(&old_last) {
             self.pinned_orbits.insert(removed_idx);
+        }
+
+        // Same swap_remove dance for the per-body trail override map: drop
+        // the entry at the removed slot, then move the entry at `old_last`
+        // (which physically migrates into `removed_idx`) so the explicit
+        // override survives the body shuffle.
+        self.trail_per_body_override.remove(&removed_idx);
+        if old_last != removed_idx
+            && let Some(v) = self.trail_per_body_override.remove(&old_last)
+        {
+            self.trail_per_body_override.insert(removed_idx, v);
         }
     }
 

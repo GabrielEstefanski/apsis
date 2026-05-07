@@ -732,11 +732,25 @@ impl SimulationApp {
 
             if self.show_trails {
                 let bodies = self.system.bodies();
-                let dom_mass = bodies.iter().map(|b| b.mass).fold(0.0_f64, f64::max);
+                let names = self.system.names();
+                // Three-tier visibility: per-body override wins; otherwise
+                // an authored body (one with a non-empty template name)
+                // shows iff its class passes the per-class filter; bodies
+                // without a name are off by default. The mass-ratio
+                // heuristic is gone — it failed for compact-object
+                // systems and multi-system scenes where the dominant
+                // mass scale was unrelated to "is this body interesting".
                 backend.trail_visibility = Some(
                     bodies
                         .iter()
-                        .map(|b| dom_mass == 0.0 || b.mass / dom_mass >= self.trail_min_mass_ratio)
+                        .enumerate()
+                        .map(|(i, b)| match self.trail_per_body_override.get(&i) {
+                            Some(&explicit) => explicit,
+                            None => {
+                                let authored = names.get(i).map_or(false, |n| !n.is_empty());
+                                authored && self.trail_class_filter.allows(b.class)
+                            },
+                        })
                         .collect(),
                 );
                 backend.trail_buffer =
