@@ -312,6 +312,10 @@ pub struct SimulationApp {
     pub(super) pinned_orbits: HashSet<usize>,
     pub(super) show_grid: bool,
     pub(super) show_vectors: bool,
+    /// User-controlled exposure offset in stops. Multiplies the
+    /// reflective HDR plane by `2^exposure_ev` on top of the auto-
+    /// exposure scalar. Zero is "no offset"; positive brightens.
+    pub(super) exposure_ev: f32,
     /// Target sim-time advance per real second (sim units/s).
     /// Maps directly to `PhysicsCmd::SetSimRateTarget`.
     /// Default: 2π ≈ 1 yr/s in internal units (G=1, AU, solar masses).
@@ -590,6 +594,7 @@ impl SimulationApp {
             pinned_orbits: HashSet::new(),
             show_grid: true,
             show_vectors: false,
+            exposure_ev: 0.0,
             sim_rate_target: std::f64::consts::TAU,
             ias15_epsilon: 1e-9,
             // Default: roughly one "internal year" at the default

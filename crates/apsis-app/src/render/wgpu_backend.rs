@@ -7,11 +7,13 @@ use egui;
 use std::time::Instant;
 
 use crate::render::TrailRenderer;
+use crate::render::bloom::BloomPipeline;
 use crate::render::exposure::{ExposureState, decode_reduced_texel};
 use crate::render::grid_renderer::GridRenderer;
 use crate::render::hdr::{DEPTH_FORMAT, HDR_FORMAT, HdrTarget};
 use crate::render::lighting::{LightingUniform, SceneLighting};
 use crate::render::luminance_reducer::LuminanceReducer;
+use crate::render::point_renderer::{PointInstance, PointRenderer};
 use crate::render::tonemap::TonemapPipeline;
 
 const MIN_BUFFER_CAPACITY: u32 = 256;
@@ -292,11 +294,15 @@ pub struct WgpuBackend {
     gpu: Option<GpuResources>,
     trail: Option<TrailRenderer>,
     grid: Option<GridRenderer>,
+    point: Option<PointRenderer>,
+    /// Sub-pixel reflective body sprites accumulated this frame.
+    points: Vec<PointInstance>,
 
     /// HDR scene colour target. Scene passes render into this linear-space
     /// texture; the tonemap pass composites it onto the swapchain.
     hdr: Option<HdrTarget>,
     tonemap: Option<TonemapPipeline>,
+    bloom: Option<BloomPipeline>,
 
     /// GPU-side luminance metering for auto-exposure. Reduces the HDR
     /// target to a single `mean(L^p)` texel per frame; the CPU side
@@ -304,6 +310,9 @@ pub struct WgpuBackend {
     luma_reducer: Option<LuminanceReducer>,
     /// EMA-smoothed exposure scale fed into the tonemap pipeline.
     pub exposure: ExposureState,
+    /// User EV offset in stops. The composite multiplies the reflective
+    /// plane by `auto_scale × 2^stops`.
+    pub user_ev_stops: f32,
     /// Timestamp of the previous exposure tick — the EMA half-life
     /// needs wall-clock dt, not frame count, so adaptation feels the
     /// same at 30 fps and 240 fps.
@@ -327,10 +336,14 @@ impl WgpuBackend {
             gpu: None,
             trail: None,
             grid: None,
+            point: None,
+            points: Vec::new(),
             hdr: None,
             tonemap: None,
+            bloom: None,
             luma_reducer: None,
             exposure: ExposureState::default(),
+            user_ev_stops: 0.0,
             last_exposure_tick: None,
 
             trail_buffer: None,
@@ -344,6 +357,7 @@ impl WgpuBackend {
         self.bodies.clear();
         self.circles.clear();
         self.lines.clear();
+        self.points.clear();
         // Reset lighting to the empty-scene default. The canvas layer
         // overwrites it later via `set_scene_lighting` if the frame has any
         // luminous bodies; otherwise the body shader falls back to pure
@@ -394,6 +408,17 @@ impl WgpuBackend {
             is_luminous: if is_luminous { 1.0 } else { 0.0 },
             _pad: [0.0; 3],
         });
+    }
+
+    /// Submits a sub-pixel reflective body as a Gaussian point sprite.
+    /// `intensity_linear` is the body's full HDR contribution; the
+    /// renderer's normalised kernel sums to 1.0. Energy-matched against
+    /// the disc path for bodies in the cross-fade band.
+    pub fn draw_point(&mut self, screen_pos: [f32; 2], intensity_linear: f32, color: [f32; 3]) {
+        if intensity_linear <= 0.0 {
+            return;
+        }
+        self.points.push(PointInstance::new(screen_pos, intensity_linear, color));
     }
 
     /// Submits an annular ring (stroke) — flat, unlit. Used for annotations
@@ -449,8 +474,16 @@ impl WgpuBackend {
         if self.grid.is_none() {
             self.grid = Some(GridRenderer::new(device, HDR_FORMAT));
         }
+        if self.point.is_none() {
+            let gpu = self.gpu.as_ref().unwrap();
+            self.point =
+                Some(PointRenderer::new(device, &gpu.bind_group_layout_screen, HDR_FORMAT));
+        }
         if self.tonemap.is_none() {
             self.tonemap = Some(TonemapPipeline::new(device, swapchain_format));
+        }
+        if self.bloom.is_none() {
+            self.bloom = Some(BloomPipeline::new(device));
         }
         if self.luma_reducer.is_none() {
             self.luma_reducer = Some(LuminanceReducer::new(device));
@@ -507,11 +540,17 @@ impl WgpuBackend {
             }
         }
 
-        // Refresh the tonemap bind group if the HDR view was reallocated,
-        // push the current exposure scale, and upload the uniform.
-        if let Some(tm) = self.tonemap.as_mut() {
-            tm.set_exposure(self.exposure.current_scale);
-            tm.refresh_if_resized(device, hdr);
+        // Refresh bloom textures + bind groups first so the tonemap can
+        // pick up the new bloom view in the same frame.
+        if let Some(bloom) = self.bloom.as_mut() {
+            bloom.refresh(device, hdr);
+        }
+        if let (Some(tm), Some(bloom_view)) =
+            (self.tonemap.as_mut(), self.bloom.as_ref().and_then(|b| b.final_view()))
+        {
+            let ev = 2.0_f32.powf(self.user_ev_stops);
+            tm.set_exposure(self.exposure.current_scale * ev);
+            tm.refresh_if_resized(device, hdr, bloom_view);
             tm.upload(queue);
         }
 
@@ -564,6 +603,9 @@ impl WgpuBackend {
             );
         }
 
+        let point_count =
+            self.point.as_mut().map(|p| p.upload(device, queue, &self.points)).unwrap_or(0);
+
         // ── Pass 1: flat 2D layers (grid, trails, lines, circles) ───────────
         // Writes to the reflective plane. Luminous plane is cleared at
         // the start of pass 2.
@@ -605,6 +647,12 @@ impl WgpuBackend {
             {
                 let gpu = self.gpu.as_ref().unwrap();
                 gpu.draw_flat(&mut pass, circle_count, line_count);
+            }
+
+            // Sub-pixel reflective sprites accumulate additively on top.
+            if let Some(point_renderer) = self.point.as_ref() {
+                let gpu = self.gpu.as_ref().unwrap();
+                point_renderer.draw(&mut pass, &gpu.bind_group_screen, point_count);
             }
         }
 
@@ -653,6 +701,11 @@ impl WgpuBackend {
                 multiview_mask: None,
             });
             self.gpu.as_ref().unwrap().draw_bodies(&mut pass, body_count);
+        }
+
+        // ── Bloom: threshold + blur over the luminous plane ─────────────────
+        if let Some(bloom) = self.bloom.as_mut() {
+            bloom.encode(queue, encoder, hdr);
         }
 
         // ── Luminance reduce chain ───────────────────────────────────────────

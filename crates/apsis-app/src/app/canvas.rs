@@ -411,6 +411,7 @@ impl SimulationApp {
             let mut backend = self.backend.lock().unwrap();
             backend.begin();
             backend.show_grid = self.show_grid;
+            backend.user_ev_stops = self.exposure_ev;
 
             let bodies = self.system.bodies();
 
@@ -488,6 +489,27 @@ impl SimulationApp {
                 SemanticScaleMode::Comparative => 3.0,
                 SemanticScaleMode::Illustrative => 5.0,
             };
+
+            // Photometry lights: every luminous body's position +
+            // intrinsic luminosity, consumed by the bolometric flux
+            // pipeline that drives sub-pixel reflective point sprites.
+            let photometry_lights: Vec<(apsis::math::Vec3, f64)> = bodies
+                .iter()
+                .filter(|b| b.is_luminous())
+                .map(|b| (apsis::math::Vec3::new(b.x, b.y, b.z), b.luminosity))
+                .collect();
+
+            // Reference magnitude that maps to linear pixel = 1.0
+            // before auto-exposure metering compresses around the peak.
+            // Shifted by the user EV offset (positive = brighter scene).
+            let m_ref_base = -4.0_f64;
+            let m_ref = m_ref_base - self.exposure_ev as f64;
+
+            // Cross-fade band between disc and point sprite, in pixels
+            // of projected radius.
+            const DISK_OFF_PX: f32 = 0.5;
+            const DISK_FULL_PX: f32 = 2.5;
+
             for (i, b) in bodies.iter().enumerate() {
                 let rgb = match body_colors_override.as_ref() {
                     Some(colors) => colors[i],
@@ -502,17 +524,15 @@ impl SimulationApp {
                     body_dist,
                     body_focal_y,
                 );
+                let r_px = projected_radius_px(body_world, r_world, body_camera_pos, body_canvas_h);
 
                 let base = [rgb[0] as f32 / 255.0, rgb[1] as f32 / 255.0, rgb[2] as f32 / 255.0];
-                let (albedo, emissive) = if b.is_luminous() {
-                    // Scale emissive by luminosity so HDR has dynamic
-                    // range for the auto-exposure to work with.
-                    // Without this every star peaks at albedo cap (≤ 1)
-                    // and the tone-map cannot tell a Sun apart from a
-                    // fully-lit planet — resulting in "everything dark
-                    // except the star" after exposure compression.
-                    // Saturating sigmoid: brown dwarf ≈ 1×, Sun ≈ 7×,
-                    // O-star bounded near 10×.
+                let luminous = b.is_luminous();
+
+                let (albedo_full, emissive_full) = if luminous {
+                    // Emissive scales with luminosity so HDR has dynamic
+                    // range for the bloom to grade against. Saturating
+                    // sigmoid: brown dwarf ≈ 1×, Sun ≈ 7×, O-star ≤ 10×.
                     let lum_solar = b.luminosity as f32;
                     let scale = 1.0 + 9.0 * (1.0 - (-lum_solar).exp());
                     let e = [base[0] * scale, base[1] * scale, base[2] * scale, 1.0];
@@ -522,7 +542,51 @@ impl SimulationApp {
                 };
                 let world_pos = [b.x as f32, b.y as f32, b.z as f32];
 
-                backend.draw_body(world_pos, r_world, albedo, emissive, b.is_luminous());
+                // Luminous bodies always go through the disc path;
+                // bloom on the luminous plane handles the halo.
+                if luminous {
+                    backend.draw_body(world_pos, r_world, albedo_full, emissive_full, true);
+                    continue;
+                }
+
+                // Reflective: cross-fade disc ↔ point.
+                let t = ((r_px - DISK_OFF_PX) / (DISK_FULL_PX - DISK_OFF_PX)).clamp(0.0, 1.0);
+                let weight_disk = t * t * (3.0 - 2.0 * t);
+                let weight_point = 1.0 - weight_disk;
+
+                if weight_disk > 0.001 {
+                    let albedo = [
+                        albedo_full[0] * weight_disk,
+                        albedo_full[1] * weight_disk,
+                        albedo_full[2] * weight_disk,
+                        albedo_full[3],
+                    ];
+                    backend.draw_body(world_pos, r_world, albedo, emissive_full, false);
+                }
+
+                if weight_point > 0.001 {
+                    if let Some(pix) = world_to_screen(body_world, view_proj, rect) {
+                        let body_pos = apsis::math::Vec3::new(b.x, b.y, b.z);
+                        let observer = apsis::math::Vec3::new(
+                            body_camera_pos.x as f64,
+                            body_camera_pos.y as f64,
+                            body_camera_pos.z as f64,
+                        );
+                        let mag = apsis::physics::photometry::apparent_magnitude(
+                            b,
+                            body_pos,
+                            observer,
+                            &photometry_lights,
+                        );
+                        let intensity =
+                            apsis::physics::photometry::magnitude_to_linear_intensity(mag, m_ref)
+                                as f32
+                                * weight_point;
+                        if intensity.is_finite() && intensity > 0.0 {
+                            backend.draw_point([pix.x, pix.y], intensity, base);
+                        }
+                    }
+                }
             }
 
             // Predicted Keplerian orbits — pure visual annotation, never

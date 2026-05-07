@@ -79,16 +79,27 @@ impl TonemapPipeline {
                     },
                     count: None,
                 },
-                // 2: shared sampler
+                // 2: bloom (blurred luminous, bilinear-upscaled at sample time)
                 wgpu::BindGroupLayoutEntry {
                     binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                // 3: shared sampler
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
                 },
-                // 3: tonemap uniform
+                // 4: tonemap uniform
                 wgpu::BindGroupLayoutEntry {
-                    binding: 3,
+                    binding: 4,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
@@ -179,7 +190,12 @@ impl TonemapPipeline {
 
     /// Rebuilds the sampled-texture bind group when the HDR target has been
     /// reallocated since the last call.
-    pub fn refresh_if_resized(&mut self, device: &wgpu::Device, hdr: &HdrTarget) {
+    pub fn refresh_if_resized(
+        &mut self,
+        device: &wgpu::Device,
+        hdr: &HdrTarget,
+        bloom_view: &wgpu::TextureView,
+    ) {
         if self.bind_group.is_some() && self.bound_generation == hdr.generation() {
             return;
         }
@@ -197,9 +213,13 @@ impl TonemapPipeline {
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,
+                    resource: wgpu::BindingResource::TextureView(bloom_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
                     resource: wgpu::BindingResource::Sampler(&self.sampler),
                 },
-                wgpu::BindGroupEntry { binding: 3, resource: self.uniform_buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 4, resource: self.uniform_buf.as_entire_binding() },
             ],
         }));
         self.bound_generation = hdr.generation();
@@ -232,8 +252,9 @@ struct TonemapUniform {
 
 @group(0) @binding(0) var hdr_r_tex : texture_2d<f32>;
 @group(0) @binding(1) var hdr_l_tex : texture_2d<f32>;
-@group(0) @binding(2) var hdr_samp  : sampler;
-@group(0) @binding(3) var<uniform> u: TonemapUniform;
+@group(0) @binding(2) var bloom_tex : texture_2d<f32>;
+@group(0) @binding(3) var hdr_samp  : sampler;
+@group(0) @binding(4) var<uniform> u: TonemapUniform;
 
 struct VSOut {
     @builtin(position) pos: vec4<f32>,
@@ -282,9 +303,10 @@ fn aces(x: vec3<f32>) -> vec3<f32> {
 fn fs_tonemap(in: VSOut) -> @location(0) vec4<f32> {
     let src_r = textureSample(hdr_r_tex, hdr_samp, in.uv);
     let src_l = textureSample(hdr_l_tex, hdr_samp, in.uv);
-    let combined = src_r.rgb * u.exposure_r + src_l.rgb;
+    let bloom = textureSample(bloom_tex, hdr_samp, in.uv);
+    let combined = src_r.rgb * u.exposure_r + src_l.rgb + bloom.rgb;
     let lit = aces(combined);
-    let alpha = max(src_r.a, src_l.a);
+    let alpha = max(max(src_r.a, src_l.a), bloom.a);
     return vec4<f32>(lit, alpha);
 }
 "#;
