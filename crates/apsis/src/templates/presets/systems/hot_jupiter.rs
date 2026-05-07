@@ -27,8 +27,8 @@ pub fn hot_jupiter(_seed: u64) -> Template {
             TemplateBody {
                 name: Some("Star"),
                 mass: m_star,
-                position: Some([0.0, 0.0]),
-                velocity: [0.0, 0.0],
+                position: Some([0.0, 0.0, 0.0]),
+                velocity: [0.0, 0.0, 0.0],
                 material: Material::Star,
             },
             TemplateBody {

@@ -59,14 +59,16 @@ pub struct TemplateBody {
     /// Material class — determines density, colour, and collision behaviour.
     pub material: Material,
 
-    /// Initial position [simulation length units].
+    /// Initial position `[x, y, z]` [simulation length units].
     ///
     /// `None` defers placement to the instantiation logic (e.g. the engine
     /// applies a centre-of-mass correction or places bodies on a grid).
-    pub position: Option<[f64; 2]>,
+    /// 2D scenarios set `z = 0`.
+    pub position: Option<[f64; 3]>,
 
-    /// Initial velocity in the inertial simulation frame [length / time].
-    pub velocity: [f64; 2],
+    /// Initial velocity `[vx, vy, vz]` in the inertial simulation frame
+    /// [length / time]. 2D scenarios set `vz = 0`.
+    pub velocity: [f64; 3],
 }
 
 impl TemplateBody {
@@ -75,15 +77,15 @@ impl TemplateBody {
     /// Convenience constructor for the common case where position and velocity
     /// will be filled in by the scenario builder.
     pub fn at_rest(mass: f64, material: Material) -> Self {
-        Self { name: None, mass, material, position: None, velocity: [0.0, 0.0] }
+        Self { name: None, mass, material, position: None, velocity: [0.0, 0.0, 0.0] }
     }
 
     /// Construct a body with explicit position and velocity, no spin.
     pub fn with_state(
         mass: f64,
         material: Material,
-        position: [f64; 2],
-        velocity: [f64; 2],
+        position: [f64; 3],
+        velocity: [f64; 3],
     ) -> Self {
         Self { name: None, mass, material, position: Some(position), velocity }
     }
@@ -280,20 +282,21 @@ impl Template {
     /// to ensure the system has zero net linear momentum in the simulation
     /// frame.  Bodies with `position = None` are included in the momentum sum
     /// using `velocity` as-is.
-    pub fn centre_of_momentum_velocity(&self) -> [f64; 2] {
+    pub fn centre_of_momentum_velocity(&self) -> [f64; 3] {
         let total = self.total_mass();
         if total <= 0.0 {
-            return [0.0, 0.0];
+            return [0.0, 0.0, 0.0];
         }
         let vx = self.bodies.iter().map(|b| b.mass * b.velocity[0]).sum::<f64>() / total;
         let vy = self.bodies.iter().map(|b| b.mass * b.velocity[1]).sum::<f64>() / total;
-        [vx, vy]
+        let vz = self.bodies.iter().map(|b| b.mass * b.velocity[2]).sum::<f64>() / total;
+        [vx, vy, vz]
     }
 
     /// Centre of mass position, computed only over bodies with known positions.
     ///
     /// Returns `None` if no body has a known position.
-    pub fn centre_of_mass(&self) -> Option<[f64; 2]> {
+    pub fn centre_of_mass(&self) -> Option<[f64; 3]> {
         let known: Vec<_> = self.bodies.iter().filter(|b| b.position.is_some()).collect();
         if known.is_empty() {
             return None;
@@ -304,6 +307,7 @@ impl Template {
         }
         let cx = known.iter().map(|b| b.mass * b.position.unwrap()[0]).sum::<f64>() / total;
         let cy = known.iter().map(|b| b.mass * b.position.unwrap()[1]).sum::<f64>() / total;
-        Some([cx, cy])
+        let cz = known.iter().map(|b| b.mass * b.position.unwrap()[2]).sum::<f64>() / total;
+        Some([cx, cy, cz])
     }
 }
