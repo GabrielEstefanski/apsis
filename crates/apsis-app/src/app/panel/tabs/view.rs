@@ -33,6 +33,23 @@ impl SimulationApp {
                 .color(TEXT_DIM),
         );
 
+        // ── EXPOSURE ────────────────────────────────────────────────────────
+        section(ui, "EXPOSURE");
+
+        let ev_tip = "Exposure value, in stops. Positive = brighter,\n\
+            negative = darker. Layered on top of the auto-exposure\n\
+            metering, so 0.0 leaves the scene at its measured\n\
+            mid-tone — same idea as a camera's EV compensation dial.";
+        kv_drag(ui, "EV", ev_tip, |ui| {
+            ui.add(
+                egui::DragValue::new(&mut self.exposure_ev)
+                    .speed(0.1)
+                    .range(-5.0_f32..=5.0)
+                    .max_decimals(1)
+                    .suffix(" stops"),
+            );
+        });
+
         // ── LAYERS ──────────────────────────────────────────────────────────
         section(ui, "LAYERS");
 

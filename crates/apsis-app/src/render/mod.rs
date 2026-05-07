@@ -7,6 +7,7 @@ pub mod lighting;
 pub mod luminance_reducer;
 pub mod orbit_overlay;
 pub mod orbit_smoother;
+pub mod point_renderer;
 pub mod tonemap;
 pub mod trail;
 pub mod trail_renderer;

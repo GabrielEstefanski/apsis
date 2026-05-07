@@ -394,6 +394,12 @@ pub struct SimulationApp {
     /// follows the same swap_remove-aware pruning as `pinned_orbits`.
     pub(super) trail_per_body_override: std::collections::HashMap<usize, bool>,
 
+    /// Camera exposure value (stops). Applied on top of the auto-
+    /// exposure metering: `m_ref_effective = m_ref_base − ev`, so a
+    /// positive `ev` brightens the rendered scene and a negative
+    /// value darkens it. Range `[−5, +5]` covers ±32× linear scale.
+    pub(super) exposure_ev: f32,
+
     pub(super) place_preset: &'static BodyPreset,
 
     pub(super) trail: Option<TrailRenderer>,
@@ -638,6 +644,7 @@ impl SimulationApp {
             trail_recorder: apsis::core::trail::TrailRecorder::new(),
             trail_class_filter: TrailClassFilter::default(),
             trail_per_body_override: std::collections::HashMap::new(),
+            exposure_ev: 0.0,
             place_preset: &body_preset::ROCKY,
             trail: None,
 

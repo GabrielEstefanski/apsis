@@ -1,5 +1,4 @@
 use crate::app::camera::{FOV_Y_RAD, NEAR_PLANE};
-use crate::app::render_params::{RenderParams, compute_render_radius};
 use crate::app::ui::{BodySelection, SelectionForm, SemanticScaleMode, SimulationApp, UndoRecord};
 use crate::render::CallbackFn;
 use crate::render::lighting::{LightSpec, SceneLighting};
@@ -63,6 +62,39 @@ fn camera_view_proj(camera: &crate::app::camera::OrbitCamera, rect: egui::Rect) 
     let proj = glam::Mat4::perspective_infinite_reverse_rh(FOV_Y_RAD, aspect, NEAR_PLANE);
     let view = camera.current.view_matrix().as_mat4();
     proj * view
+}
+
+/// Inverse of [`world_to_screen`] restricted to the ecliptic
+/// (`z = 0`). Returns `None` when the camera ray doesn't hit that
+/// plane in front of the eye — looking up, grazing, or with the
+/// pivot above the horizon.
+fn screen_to_world_on_z_plane(
+    screen_pos: egui::Pos2,
+    view_proj: glam::Mat4,
+    rect: egui::Rect,
+    camera_pos: glam::Vec3,
+) -> Option<glam::DVec3> {
+    let inv = view_proj.inverse();
+    let ndc_x = ((screen_pos.x - rect.min.x) / rect.width()) * 2.0 - 1.0;
+    let ndc_y = -(((screen_pos.y - rect.min.y) / rect.height()) * 2.0 - 1.0);
+    // Reverse-Z infinite-far: clip z = 0 lands on the far plane,
+    // so unprojecting that gives a stable far-ray endpoint.
+    let far_clip = glam::Vec4::new(ndc_x, ndc_y, 0.0, 1.0);
+    let far_world = inv * far_clip;
+    if far_world.w.abs() < 1e-12 {
+        return None;
+    }
+    let far_pos = far_world.truncate() / far_world.w;
+    let ray_dir = (far_pos - camera_pos).normalize();
+    if ray_dir.z.abs() < 1e-6 {
+        return None;
+    }
+    let t = -camera_pos.z / ray_dir.z;
+    if t <= 0.0 {
+        return None;
+    }
+    let hit = camera_pos + ray_dir * t;
+    Some(glam::DVec3::new(hit.x as f64, hit.y as f64, 0.0))
 }
 
 /// Project a world-space point onto canvas screen coordinates. Returns
@@ -345,17 +377,6 @@ impl SimulationApp {
             self.follow_transition = None;
         }
 
-        // ── Render params ─────────────────────────────────────────────────────
-        let render_params = RenderParams {
-            world_scale: self.scale,
-            mode: self.semantic_scale_mode,
-            min_px: match self.semantic_scale_mode {
-                SemanticScaleMode::Physical => 0.0,
-                SemanticScaleMode::Comparative => 3.0,
-                SemanticScaleMode::Illustrative => 5.0,
-            },
-        };
-
         // World → screen transform for the 3D body pass. Built once per
         // frame and threaded through hit-test, hover, label drawing and
         // the render callback so a single source of truth governs where
@@ -363,7 +384,6 @@ impl SimulationApp {
         let view_proj = camera_view_proj(&self.camera, rect);
 
         // ── Hover detection (before click, drives cursor + ring) ──────────────
-        let center_after_pan = rect.center() + self.offset;
         self.hovered_body = hover_pos
             .filter(|p| rect.contains(*p))
             .and_then(|p| self.find_body_at(p, view_proj, rect));
@@ -393,19 +413,6 @@ impl SimulationApp {
             backend.show_grid = self.show_grid;
 
             let bodies = self.system.bodies();
-
-            // Screen positions are still computed because lines/circles
-            // (orbit overlay, apsides, selection rings) and the legacy 2D
-            // hit-test consume them. The body pass itself uses world
-            // coords directly through the camera uniform.
-            let mut screen_positions = Vec::with_capacity(bodies.len());
-
-            for b in bodies {
-                let px = center_after_pan.x + b.x as f32 * self.scale;
-                let py = center_after_pan.y + b.y as f32 * self.scale;
-
-                screen_positions.push(([px, py], b));
-            }
 
             // Build the per-frame scene lighting from every luminous body.
             // Intensities are normalised by the brightest source so the
@@ -481,7 +488,34 @@ impl SimulationApp {
                 SemanticScaleMode::Comparative => 3.0,
                 SemanticScaleMode::Illustrative => 5.0,
             };
-            for (i, (_sp, b)) in screen_positions.iter().enumerate() {
+            // Build the photometry light list once per frame. Each
+            // entry is `(body_pos_au, intrinsic_L_solar)` for every
+            // luminous body in the scene; consumed by both the
+            // bolometric flux pipeline and the disc-shader emissive
+            // scale that follows.
+            let photometry_lights: Vec<(apsis::math::Vec3, f64)> = bodies
+                .iter()
+                .filter(|b| b.is_luminous())
+                .map(|b| (apsis::math::Vec3::new(b.x, b.y, b.z), b.luminosity))
+                .collect();
+
+            // Reference magnitude that maps to linear pixel = 1.0
+            // before the auto-exposure metering. Tuned so a Venus-
+            // bright body (m_bol ≈ −4.5 from Earth) sits near
+            // saturation; the Sun greatly exceeds it and the auto-
+            // exposure compresses the scene around its peak. The EV
+            // slider shifts this anchor in stops.
+            let m_ref_base = -4.0_f64;
+            let m_ref = m_ref_base - self.exposure_ev as f64;
+
+            // Cross-fade band between disk and point in pixels of
+            // projected radius. Below `disk_off_px` the disk would
+            // alias; above `disk_full_px` the point sprite has no
+            // useful contribution.
+            const DISK_OFF_PX: f32 = 0.5;
+            const DISK_FULL_PX: f32 = 2.5;
+
+            for (i, b) in bodies.iter().enumerate() {
                 let rgb = match body_colors_override.as_ref() {
                     Some(colors) => colors[i],
                     None => b.color,
@@ -495,17 +529,17 @@ impl SimulationApp {
                     body_dist,
                     body_focal_y,
                 );
+                let r_px = projected_radius_px(body_world, r_world, body_camera_pos, body_canvas_h);
+
+                // smoothstep(off, full, r) → 1 when fully a disc, 0
+                // when fully a point. Both paths render with
+                // complementary weights inside the band.
+                let t = ((r_px - DISK_OFF_PX) / (DISK_FULL_PX - DISK_OFF_PX)).clamp(0.0, 1.0);
+                let weight_disk = t * t * (3.0 - 2.0 * t);
+                let weight_point = 1.0 - weight_disk;
 
                 let base = [rgb[0] as f32 / 255.0, rgb[1] as f32 / 255.0, rgb[2] as f32 / 255.0];
-                let (albedo, emissive) = if b.is_luminous() {
-                    // Scale emissive by luminosity so HDR has dynamic
-                    // range for the auto-exposure to work with.
-                    // Without this every star peaks at albedo cap (≤ 1)
-                    // and the tone-map cannot tell a Sun apart from a
-                    // fully-lit planet — resulting in "everything dark
-                    // except the star" after exposure compression.
-                    // Saturating sigmoid: brown dwarf ≈ 1×, Sun ≈ 7×,
-                    // O-star bounded near 10×.
+                let (albedo_full, emissive_full) = if b.is_luminous() {
                     let lum_solar = b.luminosity as f32;
                     let scale = 1.0 + 9.0 * (1.0 - (-lum_solar).exp());
                     let e = [base[0] * scale, base[1] * scale, base[2] * scale, 1.0];
@@ -515,7 +549,45 @@ impl SimulationApp {
                 };
                 let world_pos = [b.x as f32, b.y as f32, b.z as f32];
 
-                backend.draw_body(world_pos, r_world, albedo, emissive);
+                if weight_disk > 0.001 {
+                    let albedo = [
+                        albedo_full[0] * weight_disk,
+                        albedo_full[1] * weight_disk,
+                        albedo_full[2] * weight_disk,
+                        albedo_full[3],
+                    ];
+                    let emissive = [
+                        emissive_full[0] * weight_disk,
+                        emissive_full[1] * weight_disk,
+                        emissive_full[2] * weight_disk,
+                        emissive_full[3],
+                    ];
+                    backend.draw_body(world_pos, r_world, albedo, emissive);
+                }
+
+                if weight_point > 0.001 {
+                    if let Some(pix) = world_to_screen(body_world, view_proj, rect) {
+                        let body_pos = apsis::math::Vec3::new(b.x, b.y, b.z);
+                        let observer = apsis::math::Vec3::new(
+                            body_camera_pos.x as f64,
+                            body_camera_pos.y as f64,
+                            body_camera_pos.z as f64,
+                        );
+                        let mag = apsis::physics::photometry::apparent_magnitude(
+                            b,
+                            body_pos,
+                            observer,
+                            &photometry_lights,
+                        );
+                        let intensity =
+                            apsis::physics::photometry::magnitude_to_linear_intensity(mag, m_ref)
+                                as f32
+                                * weight_point;
+                        if intensity.is_finite() && intensity > 0.0 {
+                            backend.draw_point([pix.x, pix.y], intensity, base);
+                        }
+                    }
+                }
             }
 
             // Predicted Keplerian orbits — pure visual annotation, never
@@ -532,9 +604,6 @@ impl SimulationApp {
             {
                 let g_factor = self.system.g_factor();
                 let t_sim = self.system.t();
-                let scale = self.scale;
-                let cx = center_after_pan.x;
-                let cy = center_after_pan.y;
                 let project = |p: [f64; 3]| -> ([f32; 2], f32) {
                     let world = glam::Vec3::new(p[0] as f32, p[1] as f32, p[2] as f32);
                     let clip = view_proj * world.extend(1.0);
@@ -632,10 +701,17 @@ impl SimulationApp {
                         }
 
                         let b = &bodies[i];
-                        let sp_x = cx + b.x as f32 * scale;
-                        let sp_y = cy + b.y as f32 * scale;
-                        let dx = sp_x - vp_center.x;
-                        let dy = sp_y - vp_center.y;
+                        // Viewport-proximity weight from the actual 3D
+                        // projection of the body. Off-screen and
+                        // behind-camera bodies skip the candidate
+                        // pool — the orbit ranking only looks at what
+                        // the user might plausibly be looking at.
+                        let world = glam::Vec3::new(b.x as f32, b.y as f32, b.z as f32);
+                        let Some(sp) = world_to_screen(world, view_proj, rect) else {
+                            continue;
+                        };
+                        let dx = sp.x - vp_center.x;
+                        let dy = sp.y - vp_center.y;
                         let d_norm = (dx * dx + dy * dy).sqrt() / vp_half_diag.max(1.0);
                         if d_norm > 2.0 {
                             continue;
@@ -759,8 +835,6 @@ impl SimulationApp {
                 self.orbit_smoother_last_t = t_sim;
             }
 
-            backend.center = [center_after_pan.x, center_after_pan.y];
-            backend.scale = self.scale;
             backend.trail_style = self.trail_style_preset.style(self.trail_width);
 
             // Apply any COM shift the physics thread accumulated, then drain
@@ -850,11 +924,23 @@ impl SimulationApp {
                             Color32::from_rgba_premultiplied(120, 200, 255, 200),
                             Stroke::NONE,
                         ));
-                        // Velocity label
-                        let v_scale = 0.5 / self.scale as f64;
-                        let vx = delta.x as f64 * v_scale;
-                        let vy = delta.y as f64 * v_scale;
-                        let speed = (vx * vx + vy * vy).sqrt();
+                        // Velocity preview from the drag delta in
+                        // world AU on the ecliptic. Both endpoints
+                        // unproject through the same view_proj, so
+                        // their difference is dimensional regardless
+                        // of camera zoom or tilt.
+                        let cam = self.camera.current.eye();
+                        let cam_pos = glam::Vec3::new(cam.x as f32, cam.y as f32, cam.z as f32);
+                        let speed = match (
+                            screen_to_world_on_z_plane(start, view_proj, rect, cam_pos),
+                            screen_to_world_on_z_plane(cur, view_proj, rect, cam_pos),
+                        ) {
+                            (Some(s), Some(e)) => {
+                                let d = e - s;
+                                (d.x * d.x + d.y * d.y).sqrt() * 0.5
+                            },
+                            _ => 0.0,
+                        };
                         painter.text(
                             cur + egui::vec2(8.0, -12.0),
                             egui::Align2::LEFT_CENTER,
@@ -873,16 +959,28 @@ impl SimulationApp {
                     // Don't spawn if clicking an existing body
                     if self.find_body_at(cursor, view_proj, rect).is_none() {
                         let spawn_pos = start.unwrap_or(cursor);
-                        let wx = (spawn_pos.x - center_after_pan.x) as f64 / self.scale as f64;
-                        let wy = (spawn_pos.y - center_after_pan.y) as f64 / self.scale as f64;
+                        let cam = self.camera.current.eye();
+                        let cam_pos = glam::Vec3::new(cam.x as f32, cam.y as f32, cam.z as f32);
+                        let Some(spawn_world) =
+                            screen_to_world_on_z_plane(spawn_pos, view_proj, rect, cam_pos)
+                        else {
+                            self.place_drag_start = None;
+                            return;
+                        };
+                        let wx = spawn_world.x;
+                        let wy = spawn_world.y;
 
-                        // Velocity from drag delta
-                        let v_scale = 0.5 / self.scale as f64;
-                        let (vx, vy) = if let Some(s) = start {
-                            let d = cursor - s;
-                            (d.x as f64 * v_scale, d.y as f64 * v_scale)
-                        } else {
-                            (0.0, 0.0)
+                        // Velocity from drag delta — same dimensional
+                        // unproject as the preview above.
+                        let (vx, vy) = match start
+                            .and_then(|s| screen_to_world_on_z_plane(s, view_proj, rect, cam_pos))
+                            .zip(screen_to_world_on_z_plane(cursor, view_proj, rect, cam_pos))
+                        {
+                            Some((s, e)) => {
+                                let d = e - s;
+                                (d.x * 0.5, d.y * 0.5)
+                            },
+                            None => (0.0, 0.0),
                         };
 
                         let body = apsis::domain::body::Body::from_preset(
@@ -989,9 +1087,19 @@ impl SimulationApp {
             if released {
                 if let (Some(build_fn), Some(screen_pos)) = (self.template_drag.take(), drop_pos) {
                     if rect.contains(screen_pos) {
-                        // Convert screen pos → world pos
-                        let wx = (screen_pos.x - center_after_pan.x) as f64 / self.scale as f64;
-                        let wy = (screen_pos.y - center_after_pan.y) as f64 / self.scale as f64;
+                        // Convert screen pos → world pos by ray-
+                        // casting through the camera onto the
+                        // ecliptic. Drop is rejected when the camera
+                        // can't see that plane at the cursor.
+                        let cam = self.camera.current.eye();
+                        let cam_pos = glam::Vec3::new(cam.x as f32, cam.y as f32, cam.z as f32);
+                        let Some(world) =
+                            screen_to_world_on_z_plane(screen_pos, view_proj, rect, cam_pos)
+                        else {
+                            return;
+                        };
+                        let wx = world.x;
+                        let wy = world.y;
                         let template = build_fn();
                         self.active_units = template.units;
                         let bodies = instantiate_at(&template, wx, wy);

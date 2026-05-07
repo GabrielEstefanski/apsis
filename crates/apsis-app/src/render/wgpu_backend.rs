@@ -12,6 +12,7 @@ use crate::render::grid_renderer::GridRenderer;
 use crate::render::hdr::{DEPTH_FORMAT, HDR_FORMAT, HdrTarget};
 use crate::render::lighting::{LightingUniform, SceneLighting};
 use crate::render::luminance_reducer::LuminanceReducer;
+use crate::render::point_renderer::{PointInstance, PointRenderer};
 use crate::render::tonemap::TonemapPipeline;
 
 const MIN_BUFFER_CAPACITY: u32 = 256;
@@ -286,6 +287,9 @@ pub struct WgpuBackend {
     gpu: Option<GpuResources>,
     trail: Option<TrailRenderer>,
     grid: Option<GridRenderer>,
+    point: Option<PointRenderer>,
+    /// Sub-pixel body sprites accumulated this frame.
+    points: Vec<PointInstance>,
 
     /// HDR scene colour target. Scene passes render into this linear-space
     /// texture; the tonemap pass composites it onto the swapchain.
@@ -305,8 +309,6 @@ pub struct WgpuBackend {
 
     pub trail_buffer: Option<Arc<apsis::core::trail::TrailBuffer>>,
     pub trail_visibility: Option<Vec<bool>>,
-    pub center: [f32; 2],
-    pub scale: f32,
     pub show_grid: bool,
     /// Visual style for trail rendering. Injected as a value object so
     /// presets swap atomically. See [`crate::render::TrailStylePreset`].
@@ -323,6 +325,8 @@ impl WgpuBackend {
             gpu: None,
             trail: None,
             grid: None,
+            point: None,
+            points: Vec::new(),
             hdr: None,
             tonemap: None,
             luma_reducer: None,
@@ -331,8 +335,6 @@ impl WgpuBackend {
 
             trail_buffer: None,
             trail_visibility: None,
-            center: [0.0, 0.0],
-            scale: 1.0,
             show_grid: true,
             trail_style: crate::render::TrailStylePreset::UniverseSandbox.style(1.5),
         }
@@ -342,6 +344,7 @@ impl WgpuBackend {
         self.bodies.clear();
         self.circles.clear();
         self.lines.clear();
+        self.points.clear();
         // Reset lighting to the empty-scene default. The canvas layer
         // overwrites it later via `set_scene_lighting` if the frame has any
         // luminous bodies; otherwise the body shader falls back to pure
@@ -389,6 +392,20 @@ impl WgpuBackend {
             albedo,
             emissive,
         });
+    }
+
+    /// Submits a sub-pixel body as a Gaussian point sprite. The
+    /// `intensity_linear` value is the body's full HDR contribution
+    /// — the renderer's normalised kernel sums to 1.0, so what the
+    /// caller passes is exactly the photometric flux that lands on
+    /// the screen. Energy-matched against the disk path; bodies in
+    /// the cross-fade band (~0.5–2.5 px) appear in both passes with
+    /// complementary weights.
+    pub fn draw_point(&mut self, screen_pos: [f32; 2], intensity_linear: f32, color: [f32; 3]) {
+        if intensity_linear <= 0.0 {
+            return;
+        }
+        self.points.push(PointInstance::new(screen_pos, intensity_linear, color));
     }
 
     /// Submits an annular ring (stroke) — flat, unlit. Used for annotations
@@ -444,6 +461,11 @@ impl WgpuBackend {
         if self.grid.is_none() {
             self.grid = Some(GridRenderer::new(device, HDR_FORMAT));
         }
+        if self.point.is_none() {
+            let gpu = self.gpu.as_ref().unwrap();
+            self.point =
+                Some(PointRenderer::new(device, &gpu.bind_group_layout_screen, HDR_FORMAT));
+        }
         if self.tonemap.is_none() {
             self.tonemap = Some(TonemapPipeline::new(device, swapchain_format));
         }
@@ -468,14 +490,10 @@ impl WgpuBackend {
         physical_size: [u32; 2],
         pixels_per_point: f32,
         swapchain_format: wgpu::TextureFormat,
-        center: [f32; 2],
-        scale: f32,
         view_proj: [[f32; 4]; 4],
         camera_pos: [f32; 3],
     ) {
         self.ensure_gpu(device, swapchain_format);
-        self.center = center;
-        self.scale = scale;
 
         // Keep the HDR target sized to the canvas.
         let hdr = self.hdr.get_or_insert_with(|| HdrTarget::new(device, physical_size));
@@ -563,6 +581,9 @@ impl WgpuBackend {
             );
         }
 
+        let point_count =
+            self.point.as_mut().map(|p| p.upload(device, queue, &self.points)).unwrap_or(0);
+
         // ── Pass 1: flat 2D layers (grid, trails, lines, circles) ───────────
         // No depth attachment; layer order is draw order. Bodies are deferred
         // to pass 2 where they can self-occlude through the depth buffer.
@@ -604,6 +625,16 @@ impl WgpuBackend {
             {
                 let gpu = self.gpu.as_ref().unwrap();
                 gpu.draw_flat(&mut pass, circle_count, line_count);
+            }
+
+            // Sub-pixel body sprites — additive into the same flat
+            // pass so they accumulate on top of trails / overlays.
+            // The body disc pass (pass 2) handles resolved bodies;
+            // this path covers everything past the cross-fade
+            // threshold.
+            if let Some(point_renderer) = self.point.as_ref() {
+                let gpu = self.gpu.as_ref().unwrap();
+                point_renderer.draw(&mut pass, &gpu.bind_group_screen, point_count);
             }
         }
 
