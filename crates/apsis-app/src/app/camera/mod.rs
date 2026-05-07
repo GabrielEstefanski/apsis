@@ -161,6 +161,16 @@ impl CameraPose {
         DMat4::look_at_rh(self.eye(), self.pivot, DVec3::Y)
     }
 
+    /// Rotation-only view matrix — the look-at rebuilt as if the eye
+    /// sat at the world origin. Consumed by the render path under
+    /// Floating Origin: scene geometry has already been shifted by
+    /// `render_origin = eye()`, so the camera is effectively at the
+    /// origin and only the orientation transforms matter.
+    pub fn view_rotation_only(&self) -> DMat4 {
+        let look_dir = self.pivot - self.eye();
+        DMat4::look_at_rh(DVec3::ZERO, look_dir, DVec3::Y)
+    }
+
     /// Phase-locked interpolation between two poses by fraction `t`.
     /// Distance lerps in log space; angles take the shortest arc;
     /// pivot lerps linearly. `t = 0` returns `self`, `t = 1` returns

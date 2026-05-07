@@ -64,6 +64,21 @@ fn camera_view_proj(camera: &crate::app::camera::OrbitCamera, rect: egui::Rect) 
     proj * view
 }
 
+/// Render-frame projection: `projection × rotation_only_view`. Consumed
+/// by shaders whose geometry has already been shifted by the current
+/// `render_origin`, so the camera sits at `(0,0,0)` and only the view
+/// rotation matters. Same `proj` as the absolute path so the depth
+/// distribution and clip-space conventions stay identical.
+fn camera_view_proj_relative(
+    camera: &crate::app::camera::OrbitCamera,
+    rect: egui::Rect,
+) -> glam::Mat4 {
+    let aspect = (rect.width() / rect.height().max(1.0)).max(0.001);
+    let proj = glam::Mat4::perspective_infinite_reverse_rh(FOV_Y_RAD, aspect, NEAR_PLANE);
+    let view = camera.current.view_rotation_only().as_mat4();
+    proj * view
+}
+
 /// Inverse of [`world_to_screen`] restricted to the ecliptic
 /// (`z = 0`). Returns `None` when the camera ray doesn't hit that
 /// plane in front of the eye — looking up, grazing, or with the
@@ -412,6 +427,10 @@ impl SimulationApp {
             backend.begin();
             backend.show_grid = self.show_grid;
             backend.user_ev_stops = self.exposure_ev;
+            // Floating Origin anchor for the frame. Renderers that
+            // upload geometry consume this to produce camera-relative
+            // `f32` positions.
+            backend.render_origin = self.camera.current.eye();
 
             let bodies = self.system.bodies();
 
@@ -1145,6 +1164,8 @@ impl SimulationApp {
         let format = self.format.unwrap();
 
         let view_proj_arr = view_proj.to_cols_array_2d();
+        let view_proj_relative_arr =
+            camera_view_proj_relative(&self.camera, rect).to_cols_array_2d();
         let eye = self.camera.current.eye();
         let camera_pos = [eye.x as f32, eye.y as f32, eye.z as f32];
 
@@ -1158,6 +1179,7 @@ impl SimulationApp {
                 screen: [rect.width(), rect.height()],
                 viewport_min: [rect.min.x, rect.min.y],
                 view_proj: view_proj_arr,
+                view_proj_relative: view_proj_relative_arr,
                 camera_pos,
             },
         ));

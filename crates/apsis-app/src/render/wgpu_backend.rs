@@ -29,10 +29,18 @@ struct ScreenUniform {
     viewport_min: [f32; 2],
 }
 
-/// Camera state for the body pass: world → clip transform plus the
-/// world-space eye position needed for ray-sphere intersection in the
-/// fragment stage. `screen_size` lets the vertex stage compute an
-/// approximate projected radius for the sub-pixel flat-shading fallback.
+/// Camera state for the body pass.
+///
+/// `view_proj` is the absolute world → clip transform; `view_proj_relative`
+/// is the rotation-only variant for use under Floating Origin (geometry
+/// has already been shifted by `render_origin`, so the camera sits at
+/// `(0,0,0)` and only the orientation matters). Both are uploaded each
+/// frame; downstream shaders pick the one that matches their geometry's
+/// frame.
+///
+/// `camera_pos` is the world-space eye position for absolute-frame
+/// shaders. Once every shader runs in the render frame this field will
+/// hold `(0,0,0)` and can be removed entirely.
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct CameraUniform {
@@ -41,6 +49,7 @@ struct CameraUniform {
     _pad0: f32,
     screen_size: [f32; 2],
     _pad1: [f32; 2],
+    view_proj_relative: [[f32; 4]; 4],
 }
 
 /// Flat circle / ring primitive — used strictly for annotations (apsides
@@ -323,6 +332,11 @@ pub struct WgpuBackend {
     /// User EV offset in stops. The composite multiplies the reflective
     /// plane by `auto_scale × 2^stops`.
     pub user_ev_stops: f32,
+    /// Floating Origin anchor: the camera eye position in absolute
+    /// world coordinates, set once per frame. Geometry uploads consume
+    /// this to produce camera-relative `f32` positions that keep full
+    /// mantissa precision regardless of the absolute world scale.
+    pub render_origin: glam::DVec3,
     /// Timestamp of the previous exposure tick — the EMA half-life
     /// needs wall-clock dt, not frame count, so adaptation feels the
     /// same at 30 fps and 240 fps.
@@ -356,6 +370,7 @@ impl WgpuBackend {
             luma_reducer: None,
             exposure: ExposureState::default(),
             user_ev_stops: 0.0,
+            render_origin: glam::DVec3::ZERO,
             last_exposure_tick: None,
 
             trail_buffer: None,
@@ -544,6 +559,7 @@ impl WgpuBackend {
         pixels_per_point: f32,
         swapchain_format: wgpu::TextureFormat,
         view_proj: [[f32; 4]; 4],
+        view_proj_relative: [[f32; 4]; 4],
         camera_pos: [f32; 3],
     ) {
         self.ensure_gpu(device, swapchain_format);
@@ -598,6 +614,7 @@ impl WgpuBackend {
             _pad0: 0.0,
             screen_size: screen,
             _pad1: [0.0; 2],
+            view_proj_relative,
         };
 
         let (body_count, circle_count, line_count) = {
@@ -1100,11 +1117,12 @@ struct LightingUniform {
 @group(0) @binding(1) var<uniform> lighting: LightingUniform;
 
 struct CameraUniform {
-    view_proj:   mat4x4<f32>,
-    camera_pos:  vec3<f32>,
-    _pad0:       f32,
-    screen_size: vec2<f32>,
-    _pad1:       vec2<f32>,
+    view_proj:          mat4x4<f32>,
+    camera_pos:         vec3<f32>,
+    _pad0:              f32,
+    screen_size:        vec2<f32>,
+    _pad1:              vec2<f32>,
+    view_proj_relative: mat4x4<f32>,
 };
 
 @group(1) @binding(0) var<uniform> camera: CameraUniform;
