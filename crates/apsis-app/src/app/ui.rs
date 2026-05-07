@@ -11,8 +11,85 @@ use apsis::io::recorder::SimRecorder;
 use apsis::io::snapshot::{SaveEntry, SimSnapshot, list_saves};
 use apsis::physics::integrator::IntegratorKind;
 use apsis::templates::{Template, UnitSystem};
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 use std::sync::{Arc, Mutex};
+
+// ── Body selection ────────────────────────────────────────────────────────────
+
+/// Selection state for bodies on the canvas.
+///
+/// Invariant: `Multi` always contains `len >= 2` indices. Transitions through
+/// [`BodySelection::toggle`], [`BodySelection::select_single`], and
+/// [`BodySelection::default`] maintain this invariant automatically.
+#[derive(Default)]
+pub enum BodySelection {
+    #[default]
+    None,
+    /// Exactly one body — the primary/focused body for camera-follow and single
+    /// body inspector.
+    Single(usize),
+    /// Two or more bodies selected simultaneously. `len >= 2` always.
+    Multi(BTreeSet<usize>),
+}
+
+impl BodySelection {
+    pub fn is_some(&self) -> bool {
+        !matches!(self, Self::None)
+    }
+
+    /// Returns the index when exactly one body is selected; `None` otherwise.
+    pub fn single(&self) -> Option<usize> {
+        match self {
+            Self::Single(i) => Some(*i),
+            _ => None,
+        }
+    }
+
+    /// Returns `true` if `idx` is anywhere in the selection.
+    pub fn contains(&self, idx: usize) -> bool {
+        match self {
+            Self::None => false,
+            Self::Single(i) => *i == idx,
+            Self::Multi(set) => set.contains(&idx),
+        }
+    }
+
+    /// Toggle `idx` into/out of the selection, normalising the invariant:
+    /// - `None + idx` → `Single(idx)`
+    /// - `Single(idx) + idx` → `None`
+    /// - `Single(i) + idx` → `Multi({i, idx})`
+    /// - `Multi(set) + idx` → removes if present; collapses to `Single` / `None`
+    ///   when the set shrinks below two elements.
+    pub fn toggle(self, idx: usize) -> Self {
+        match self {
+            Self::None => Self::Single(idx),
+            Self::Single(i) if i == idx => Self::None,
+            Self::Single(i) => {
+                let mut set = BTreeSet::new();
+                set.insert(i);
+                set.insert(idx);
+                Self::Multi(set)
+            },
+            Self::Multi(mut set) => {
+                if set.contains(&idx) {
+                    set.remove(&idx);
+                } else {
+                    set.insert(idx);
+                }
+                match set.len() {
+                    0 => Self::None,
+                    1 => Self::Single(*set.iter().next().unwrap()),
+                    _ => Self::Multi(set),
+                }
+            },
+        }
+    }
+
+    /// Replace the selection with exactly one body.
+    pub fn select_single(idx: usize) -> Self {
+        Self::Single(idx)
+    }
+}
 
 // ── Undo ──────────────────────────────────────────────────────────────────────
 
@@ -160,7 +237,6 @@ pub struct SimulationApp {
     pub(super) system: PhysicsHandle,
     pub(super) paused: bool,
     pub(super) scale: f32,
-    pub(super) body_size_boost: f32,
     pub(super) semantic_scale_mode: SemanticScaleMode,
     pub(super) offset: egui::Vec2,
     pub(super) form: BodyForm,
@@ -244,7 +320,7 @@ pub struct SimulationApp {
     pub(super) spawn_cluster_mass: f64,
     pub(super) spawn_cluster_vel_disp: f64,
     pub(super) spawn_cluster_material: Material,
-    pub(super) selected_body: Option<usize>,
+    pub(super) selection: BodySelection,
     /// Persistent state for the new design-system Inspector — `More`
     /// expander toggles plus the Bloomberg-flash tracker. Lives on
     /// the app rather than inside [`InspectorData`] so the per-frame
@@ -389,6 +465,21 @@ pub struct SimulationApp {
     /// Last resolved data range from the active colour view. Cached so the
     /// colour bar and numeric readouts can render without re-evaluating.
     pub(super) color_view_range: Option<(f64, f64)>,
+
+    // ── Perturbation catalog ──────────────────────────────────────────────────
+    /// User-facing list of available non-gravitational perturbations. Each
+    /// entry holds an `enabled` flag; toggling it calls `apply_perturbations`
+    /// which rebuilds and sends the active stack to the physics thread.
+    pub(super) perturbation_catalog: Vec<crate::app::perturbation::PerturbationCatalogEntry>,
+
+    // ── Render-loop diagnostics ───────────────────────────────────────────────
+    pub(super) diagnostics: crate::app::diagnostics::Diagnostics,
+    pub(super) show_fps_hud: bool,
+
+    // ── 3D camera ─────────────────────────────────────────────────────────────
+    pub(super) camera: crate::app::camera::OrbitCamera,
+    pub(super) camera_input_config: crate::app::camera::input::CameraInputConfig,
+    pub(super) show_camera_triad: bool,
 }
 
 impl SimulationApp {
@@ -409,6 +500,18 @@ impl SimulationApp {
         "Precision run in progress — editing is disabled until the run completes"
     }
 
+    /// Rebuild and push the active perturbation stack to the physics thread.
+    /// Call whenever an entry in `perturbation_catalog` changes.
+    pub(super) fn apply_perturbations(&mut self) {
+        let ps: Vec<Box<dyn apsis::physics::integrator::PerturbationForce>> = self
+            .perturbation_catalog
+            .iter()
+            .filter(|e| e.enabled)
+            .map(|e| e.descriptor.build())
+            .collect();
+        self.system.set_perturbations(ps);
+    }
+
     pub fn new(system: System) -> Self {
         let mut physics_cfg = PhysicsConfig::default();
         physics_cfg.integrator = system.integrator_kind();
@@ -421,7 +524,6 @@ impl SimulationApp {
             system: physics,
             paused: true,
             scale: 10.0,
-            body_size_boost: 64.0,
             semantic_scale_mode: SemanticScaleMode::Comparative,
             offset: egui::Vec2::ZERO,
             form: BodyForm::default(),
@@ -468,7 +570,7 @@ impl SimulationApp {
             spawn_cluster_mass: 1.0,
             spawn_cluster_vel_disp: 0.5,
             spawn_cluster_material: Material::Rocky,
-            selected_body: None,
+            selection: BodySelection::default(),
             inspector_state: crate::app::inspector::InspectorState::default(),
             dragging_body: None,
             drag_start_world: None,
@@ -545,6 +647,20 @@ impl SimulationApp {
             normalizer_registry: crate::render::color::NormalizerRegistry::standard(),
             color_view: None,
             color_view_range: None,
+
+            perturbation_catalog: crate::app::perturbation::default_catalog(),
+
+            diagnostics: crate::app::diagnostics::Diagnostics::new(),
+            show_fps_hud: true,
+
+            camera: crate::app::camera::OrbitCamera::new(crate::app::camera::CameraPose::new(
+                glam::DVec3::ZERO,
+                0.5,
+                0.3,
+                50.0,
+            )),
+            camera_input_config: crate::app::camera::input::CameraInputConfig::default(),
+            show_camera_triad: true,
         }
     }
 
@@ -579,6 +695,16 @@ impl SimulationApp {
         if should_advance {
             let wall_delta = ctx.input(|i| i.unstable_dt as f64).min(0.2);
             self.system.advance_render_time(wall_delta, rate);
+        }
+
+        let animating =
+            should_advance || self.camera_anim_target.is_some() || self.dragging_body.is_some();
+        self.diagnostics.tick(animating);
+
+        let cam_dt = ctx.input(|i| i.stable_dt as f64).min(0.1);
+        self.camera.integrate(cam_dt);
+        if !self.camera.is_at_rest() {
+            ctx.request_repaint();
         }
 
         // ── Single-step: re-pause after one frame of physics ─────────────────
@@ -887,12 +1013,26 @@ impl SimulationApp {
                     // be defensive: drop any pin that lands out of range after undo.
                     let new_len = self.system.bodies().len();
                     self.pinned_orbits.retain(|&i| i < new_len);
-                    // If the selected body was one of the removed ones, clear selection.
-                    if let Some(sel) = self.selected_body {
-                        if sel >= total.saturating_sub(n) {
-                            self.selected_body = None;
-                            self.selection_form = None;
-                        }
+                    // Drop any selected indices that landed in the removed range.
+                    let first_removed = total.saturating_sub(n);
+                    let new_sel = match &self.selection {
+                        BodySelection::Single(sel) if *sel >= first_removed => {
+                            Some(BodySelection::default())
+                        },
+                        BodySelection::Multi(set) => {
+                            let valid: BTreeSet<usize> =
+                                set.iter().copied().filter(|&i| i < first_removed).collect();
+                            (valid.len() < set.len()).then(|| match valid.len() {
+                                0 => BodySelection::default(),
+                                1 => BodySelection::Single(*valid.iter().next().unwrap()),
+                                _ => BodySelection::Multi(valid),
+                            })
+                        },
+                        _ => None,
+                    };
+                    if let Some(sel) = new_sel {
+                        self.selection = sel;
+                        self.selection_form = None;
                     }
                 },
                 UndoRecord::RemovedBody { body, name } => {
@@ -905,14 +1045,14 @@ impl SimulationApp {
                     self.system.update_body(idx, old_body);
                     self.system.set_name(idx, old_name.clone());
                     // Keep the inspector form in sync if this body is selected.
-                    if self.selected_body == Some(idx) {
+                    if self.selection.single() == Some(idx) {
                         self.selection_form = Some(SelectionForm::from_body(&old_body, &old_name));
                     }
                 },
                 UndoRecord::ReplacedBodies { previous } => {
                     self.system.load_named_bodies(previous);
                     self.pinned_orbits.clear();
-                    self.selected_body = None;
+                    self.selection = BodySelection::default();
                     self.selection_form = None;
                     self.pending_fit = true;
                     self.reset_drift_peaks();

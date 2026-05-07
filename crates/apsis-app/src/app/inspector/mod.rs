@@ -16,7 +16,8 @@ pub mod unit_strategy;
 pub mod view;
 
 pub use data::{
-    ActionData, ActionKind, CameraRelativeData, EnergyData, Header, Identity, InspectorData,
-    KinematicState, OrbitData, PerturbationData, PerturbationReadout, RelationKind, RelationsData,
+    ActionData, ActionKind, AggregateData, CameraRelativeData, EnergyData, Header, Identity,
+    InspectorData, KinematicState, OrbitData, PerturbationData, PerturbationReadout, RelationKind,
+    RelationsData,
 };
-pub use view::{InspectorState, show};
+pub use view::{InspectorState, show, show_aggregate};

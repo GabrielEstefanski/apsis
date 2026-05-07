@@ -9,7 +9,7 @@ use std::time::Instant;
 use crate::render::TrailRenderer;
 use crate::render::exposure::{ExposureState, decode_reduced_texel};
 use crate::render::grid_renderer::GridRenderer;
-use crate::render::hdr::{HDR_FORMAT, HdrTarget};
+use crate::render::hdr::{DEPTH_FORMAT, HDR_FORMAT, HdrTarget};
 use crate::render::lighting::{LightingUniform, SceneLighting};
 use crate::render::luminance_reducer::LuminanceReducer;
 use crate::render::tonemap::TonemapPipeline;
@@ -27,6 +27,20 @@ struct ScreenUniform {
     viewport_min: [f32; 2],
 }
 
+/// Camera state for the body pass: world → clip transform plus the
+/// world-space eye position needed for ray-sphere intersection in the
+/// fragment stage. `screen_size` lets the vertex stage compute an
+/// approximate projected radius for the sub-pixel flat-shading fallback.
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct CameraUniform {
+    view_proj: [[f32; 4]; 4],
+    camera_pos: [f32; 3],
+    _pad0: f32,
+    screen_size: [f32; 2],
+    _pad1: [f32; 2],
+}
+
 /// Flat circle / ring primitive — used strictly for annotations (apsides
 /// markers, selection rings, etc.) that must *not* be affected by scene
 /// lighting. Bodies go through the dedicated [`BodyInstance`] pipeline.
@@ -39,22 +53,17 @@ struct CircleInstance {
     color: [f32; 4],
 }
 
-/// Per-body sphere-from-disc instance.
+/// Per-body sphere-impostor instance.
 ///
-/// Geometry data (`center_screen`, `radius_screen`) drives the 2D quad
-/// expansion in the vertex stage. Lighting data (`center_world`, `albedo`,
-/// `emissive`) lives alongside so the fragment shader can reconstruct a
-/// sphere normal and compute a world-space Lambert term in one pass.
-///
-/// `albedo` is the diffuse base colour (RGBA, alpha controls fade for UI
-/// blending). `emissive` is added unattenuated on top — stars set this to
-/// their body colour and albedo near zero so their disc glows self-lit.
+/// The vertex stage expands a screen-aligned quad around `center_world`
+/// of half-size `radius_world` (with a small padding factor). The fragment
+/// stage solves a ray-sphere intersection for the actual surface point
+/// and writes corrected depth, so spheres self-occlude correctly.
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct BodyInstance {
-    center_screen: [f32; 2],
     center_world: [f32; 3],
-    radius_screen: f32,
+    radius_world: f32,
     albedo: [f32; 4],
     emissive: [f32; 4],
 }
@@ -81,6 +90,9 @@ struct GpuResources {
     bind_group_screen: wgpu::BindGroup,
     bind_group_layout_screen: wgpu::BindGroupLayout,
 
+    camera_buf: wgpu::Buffer,
+    bind_group_camera: wgpu::BindGroup,
+
     body_buf: wgpu::Buffer,
     body_cap: u32,
     circle_buf: wgpu::Buffer,
@@ -92,19 +104,25 @@ struct GpuResources {
 impl GpuResources {
     fn init(device: &wgpu::Device) -> Self {
         let screen_bgl = build_bind_group_layout(device);
+        let camera_bgl = build_camera_bind_group_layout(device);
         let shader = build_shader(device);
 
-        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("pipeline_layout"),
+        // Flat 2D primitives use the screen group only.
+        let flat_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("pipeline_layout::flat"),
             bind_group_layouts: &[Some(&screen_bgl)],
             immediate_size: 0,
         });
+        // Bodies need both the lighting (group 0) and the camera (group 1).
+        let body_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("pipeline_layout::body"),
+            bind_group_layouts: &[Some(&screen_bgl), Some(&camera_bgl)],
+            immediate_size: 0,
+        });
 
-        // Scene primitives always render into the HDR offscreen target; the
-        // swapchain format is handled by the tonemap pass.
-        let body_pipeline = build_body_pipeline(device, &shader, &pipeline_layout, HDR_FORMAT);
-        let circle_pipeline = build_circle_pipeline(device, &shader, &pipeline_layout, HDR_FORMAT);
-        let line_pipeline = build_line_pipeline(device, &shader, &pipeline_layout, HDR_FORMAT);
+        let body_pipeline = build_body_pipeline(device, &shader, &body_layout, HDR_FORMAT);
+        let circle_pipeline = build_circle_pipeline(device, &shader, &flat_layout, HDR_FORMAT);
+        let line_pipeline = build_line_pipeline(device, &shader, &flat_layout, HDR_FORMAT);
 
         let screen_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("screen_uniform"),
@@ -120,6 +138,13 @@ impl GpuResources {
             mapped_at_creation: false,
         });
 
+        let camera_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("camera_uniform"),
+            size: size_of::<CameraUniform>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
         let bind_group_screen = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("screen_bg"),
             layout: &screen_bgl,
@@ -127,6 +152,15 @@ impl GpuResources {
                 wgpu::BindGroupEntry { binding: 0, resource: screen_buf.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 1, resource: lighting_buf.as_entire_binding() },
             ],
+        });
+
+        let bind_group_camera = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("camera_bg"),
+            layout: &camera_bgl,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: camera_buf.as_entire_binding(),
+            }],
         });
 
         let (body_buf, body_cap) =
@@ -144,6 +178,8 @@ impl GpuResources {
             lighting_buf,
             bind_group_screen,
             bind_group_layout_screen: screen_bgl,
+            camera_buf,
+            bind_group_camera,
             body_buf,
             body_cap,
             circle_buf,
@@ -158,12 +194,14 @@ impl GpuResources {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         screen: ScreenUniform,
+        camera: CameraUniform,
         lighting: LightingUniform,
         bodies: &[BodyInstance],
         circles: &[CircleInstance],
         lines: &[LineInstance],
     ) -> (u32, u32, u32) {
         queue.write_buffer(&self.screen_buf, 0, bytemuck::bytes_of(&screen));
+        queue.write_buffer(&self.camera_buf, 0, bytemuck::bytes_of(&camera));
         queue.write_buffer(&self.lighting_buf, 0, bytemuck::bytes_of(&lighting));
 
         if !bodies.is_empty() {
@@ -205,16 +243,7 @@ impl GpuResources {
         (bodies.len() as u32, circles.len() as u32, lines.len() as u32)
     }
 
-    fn draw(
-        &self,
-        pass: &mut wgpu::RenderPass<'_>,
-        body_count: u32,
-        circle_count: u32,
-        line_count: u32,
-    ) {
-        // Layer order: lines (orbits) → annotation circles (apsides rings) →
-        // bodies on top. Bodies are the visual focus and must not be
-        // occluded by their own orbit markers.
+    fn draw_flat(&self, pass: &mut wgpu::RenderPass<'_>, circle_count: u32, line_count: u32) {
         if line_count > 0 {
             pass.set_pipeline(&self.line_pipeline);
             pass.set_bind_group(0, &self.bind_group_screen, &[]);
@@ -228,13 +257,17 @@ impl GpuResources {
             pass.set_vertex_buffer(0, self.circle_buf.slice(..));
             pass.draw(0..6, 0..circle_count);
         }
+    }
 
-        if body_count > 0 {
-            pass.set_pipeline(&self.body_pipeline);
-            pass.set_bind_group(0, &self.bind_group_screen, &[]);
-            pass.set_vertex_buffer(0, self.body_buf.slice(..));
-            pass.draw(0..6, 0..body_count);
+    fn draw_bodies(&self, pass: &mut wgpu::RenderPass<'_>, body_count: u32) {
+        if body_count == 0 {
+            return;
         }
+        pass.set_pipeline(&self.body_pipeline);
+        pass.set_bind_group(0, &self.bind_group_screen, &[]);
+        pass.set_bind_group(1, &self.bind_group_camera, &[]);
+        pass.set_vertex_buffer(0, self.body_buf.slice(..));
+        pass.draw(0..6, 0..body_count);
     }
 }
 
@@ -348,26 +381,24 @@ impl WgpuBackend {
 
     // ── Draw API ──────────────────────────────────────────────────────────────
 
-    /// Submits a lit body — rendered via the sphere-from-disc pipeline with
-    /// Lambertian diffuse from the primary light and unlit emissive on top.
+    /// Submits a lit body — rendered via the sphere-impostor pipeline with
+    /// per-fragment ray-sphere intersection, Lambertian diffuse from every
+    /// registered light, and unlit emissive on top.
     ///
-    /// `screen_pos` is the body centre in logical pixels; `radius_screen` is
-    /// its projected radius. `world_pos` carries the 3D world position used
-    /// for the Lambert direction (`z = 0` for 2D top-down). `albedo` is the
-    /// diffuse base colour; `emissive` the self-lit term (stars set this to
-    /// their body colour and keep albedo near zero).
+    /// `world_pos` is the body centre in world units. `radius_world` is the
+    /// physical radius. `albedo` is the diffuse base colour (stars near
+    /// zero); `emissive` is the self-lit term (stars use their body colour
+    /// here so they glow).
     pub fn draw_body(
         &mut self,
-        screen_pos: [f32; 2],
-        radius_screen: f32,
         world_pos: [f32; 3],
+        radius_world: f32,
         albedo: [f32; 4],
         emissive: [f32; 4],
     ) {
         self.bodies.push(BodyInstance {
-            center_screen: screen_pos,
             center_world: world_pos,
-            radius_screen: radius_screen.max(0.5),
+            radius_world: radius_world.max(0.0),
             albedo,
             emissive,
         });
@@ -452,6 +483,8 @@ impl WgpuBackend {
         swapchain_format: wgpu::TextureFormat,
         center: [f32; 2],
         scale: f32,
+        view_proj: [[f32; 4]; 4],
+        camera_pos: [f32; 3],
     ) {
         self.ensure_gpu(device, swapchain_format);
         self.center = center;
@@ -495,6 +528,13 @@ impl WgpuBackend {
         }
 
         let screen_uniform = ScreenUniform { size: screen, viewport_min };
+        let camera_uniform = CameraUniform {
+            view_proj,
+            camera_pos,
+            _pad0: 0.0,
+            screen_size: screen,
+            _pad1: [0.0; 2],
+        };
 
         let (body_count, circle_count, line_count) = {
             let gpu = self.gpu.as_mut().unwrap();
@@ -502,6 +542,7 @@ impl WgpuBackend {
                 device,
                 queue,
                 screen_uniform,
+                camera_uniform,
                 self.lighting,
                 &self.bodies,
                 &self.circles,
@@ -545,15 +586,15 @@ impl WgpuBackend {
             );
         }
 
-        // ── Offscreen scene pass ─────────────────────────────────────────────
-        // Wrapped in its own scope so the `RenderPass` is dropped before the
-        // luminance reducer can record further passes on the same encoder.
+        // ── Pass 1: flat 2D layers (grid, trails, lines, circles) ───────────
+        // No depth attachment; layer order is draw order. Bodies are deferred
+        // to pass 2 where they can self-occlude through the depth buffer.
+        let hdr = self.hdr.as_ref().unwrap();
         {
-            let hdr_view = self.hdr.as_ref().unwrap().view();
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("scene::hdr_pass"),
+                label: Some("scene::flat_pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: hdr_view,
+                    view: hdr.view(),
                     resolve_target: None,
                     depth_slice: None,
                     ops: wgpu::Operations {
@@ -570,7 +611,6 @@ impl WgpuBackend {
                 multiview_mask: None,
             });
 
-            // Scene layer order: grid → trails → primitives (circles + lines).
             if self.show_grid {
                 if let Some(grid) = &self.grid {
                     grid.draw(&mut pass);
@@ -586,8 +626,37 @@ impl WgpuBackend {
 
             {
                 let gpu = self.gpu.as_ref().unwrap();
-                gpu.draw(&mut pass, body_count, circle_count, line_count);
+                gpu.draw_flat(&mut pass, circle_count, line_count);
             }
+        }
+
+        // ── Pass 2: 3D bodies with depth ────────────────────────────────────
+        // Reverse-Z: depth cleared to 0.0 (far plane) so the body pipeline's
+        // `Greater` compare keeps the nearest hit. Sphere impostors write
+        // corrected per-fragment depth so overlapping spheres self-occlude
+        // correctly across the AU-to-light-year range.
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("scene::body_pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: hdr.view(),
+                    resolve_target: None,
+                    depth_slice: None,
+                    ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: hdr.depth_view(),
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(0.0),
+                        store: wgpu::StoreOp::Discard,
+                    }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            self.gpu.as_ref().unwrap().draw_bodies(&mut pass, body_count);
         }
 
         // ── Luminance reduce chain ───────────────────────────────────────────
@@ -693,6 +762,22 @@ fn build_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
     })
 }
 
+fn build_camera_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+    device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("grav_sim::bgl::camera"),
+        entries: &[wgpu::BindGroupLayoutEntry {
+            binding: 0,
+            visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Uniform,
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        }],
+    })
+}
+
 fn build_shader(device: &wgpu::Device) -> wgpu::ShaderModule {
     device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("grav_sim::primitives"),
@@ -754,14 +839,11 @@ fn build_body_pipeline(
     layout: &wgpu::PipelineLayout,
     format: wgpu::TextureFormat,
 ) -> wgpu::RenderPipeline {
-    // center_screen(2) + center_world(3) + radius_screen(1) + albedo(4) + emissive(4).
-    // Tight packing: offsets 0, 8, 20, 24, 40 — matches #[repr(C)] BodyInstance.
     let attrs = wgpu::vertex_attr_array![
-        0 => Float32x2,   // center_screen
-        1 => Float32x3,   // center_world
-        2 => Float32,     // radius_screen
-        3 => Float32x4,   // albedo
-        4 => Float32x4    // emissive
+        0 => Float32x3,   // center_world
+        1 => Float32,     // radius_world
+        2 => Float32x4,   // albedo
+        3 => Float32x4    // emissive
     ];
 
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -791,7 +873,16 @@ fn build_body_pipeline(
             topology: wgpu::PrimitiveTopology::TriangleList,
             ..Default::default()
         },
-        depth_stencil: None,
+        // Reverse-Z: clear=0.0, far plane at z=0, near plane at z=1, compare
+        // function `Greater` keeps the nearest fragment. Spheres write
+        // corrected depth in the fragment shader.
+        depth_stencil: Some(wgpu::DepthStencilState {
+            format: DEPTH_FORMAT,
+            depth_write_enabled: Some(true),
+            depth_compare: Some(wgpu::CompareFunction::Greater),
+            stencil: wgpu::StencilState::default(),
+            bias: wgpu::DepthBiasState::default(),
+        }),
         multisample: wgpu::MultisampleState::default(),
         multiview_mask: None,
         cache: None,
@@ -882,6 +973,16 @@ struct LightingUniform {
 @group(0) @binding(0) var<uniform> screen:   ScreenUniform;
 @group(0) @binding(1) var<uniform> lighting: LightingUniform;
 
+struct CameraUniform {
+    view_proj:   mat4x4<f32>,
+    camera_pos:  vec3<f32>,
+    _pad0:       f32,
+    screen_size: vec2<f32>,
+    _pad1:       vec2<f32>,
+};
+
+@group(1) @binding(0) var<uniform> camera: CameraUniform;
+
 fn to_ndc(p: vec2<f32>) -> vec4<f32> {
     let local = p - screen.viewport_min;
     let x =  (local.x / screen.size.x) * 2.0 - 1.0;
@@ -941,40 +1042,40 @@ fn fs_circle(in: CircleVarying) -> @location(0) vec4<f32> {
     return vec4<f32>(in.color.rgb, alpha);
 }
 
-// ── BODIES (sphere-from-disc + multi-light + emissive) ───────────────────────
-// Bodies expand into a screen-aligned quad per instance. The fragment shader
-// reconstructs a unit-sphere surface normal from the quad's (u, v) local
-// coordinate — world X/Y align with screen X/Y, Z is out of the screen toward
-// the camera — and loops over every registered light, summing wrap-softened
-// Lambert contributions attenuated by r_ref²/(r²+bias²). Emissive is added
-// unattenuated on top so stars self-illuminate; a multiplicative ambient
-// floor keeps the dark side from vanishing into the HDR black.
+// ── BODIES (sphere impostor + multi-light + emissive) ───────────────────────
+// The vertex stage expands a screen-aligned quad of half-size radius_world
+// (with 10% padding to capture grazing-angle silhouettes) around each body
+// in world space. The fragment stage casts a ray from the camera through
+// the quad and intersects it analytically against the body's bounding
+// sphere — proper sphere impostor, depth-correct, self-occluding via the
+// body pass's depth attachment.
 
 struct BodyVarying {
     @builtin(position) clip_pos:      vec4<f32>,
-    /// Quad-local coordinate in [-1, 1]². Doubles as the XY sphere normal.
-    @location(0)       local:         vec2<f32>,
-    /// Body center in world coordinates. Fragments compute their own
-    /// world position as `center_world + vec3(local, 0) * scale` — but
-    /// since the body radius is negligible versus inter-body distance,
-    /// we treat the whole disc as sitting at the center for lighting.
-    /// That keeps the per-fragment cost to a scalar divide per light.
-    @location(1)       center_world:  vec3<f32>,
+    @location(0)       center_world:  vec3<f32>,
+    @location(1)       radius_world:  f32,
     @location(2)       albedo:        vec4<f32>,
     @location(3)       emissive:      vec4<f32>,
-    /// Screen radius in logical pixels — used in the fragment to blend
-    /// toward flat shading on sub-pixel bodies (see `fs_body`).
-    @location(4)       radius_screen: f32,
+    /// World position of this quad vertex, interpolated to fragment.
+    /// Defines the ray endpoint for ray-sphere intersection.
+    @location(4)       vert_world:    vec3<f32>,
+    /// Approximate projected radius in pixels — drives the sub-pixel
+    /// flat-shading fallback so distant bodies stay legible as solid dots.
+    @location(5)       radius_screen: f32,
+};
+
+struct BodyOutput {
+    @location(0)         color: vec4<f32>,
+    @builtin(frag_depth) depth: f32,
 };
 
 @vertex
 fn vs_body(
-    @builtin(vertex_index) vi:             u32,
-    @location(0)           center_screen:  vec2<f32>,
-    @location(1)           center_world:   vec3<f32>,
-    @location(2)           radius_screen:  f32,
-    @location(3)           albedo:         vec4<f32>,
-    @location(4)           emissive:       vec4<f32>,
+    @builtin(vertex_index) vi:           u32,
+    @location(0)           center_world: vec3<f32>,
+    @location(1)           radius_world: f32,
+    @location(2)           albedo:       vec4<f32>,
+    @location(3)           emissive:     vec4<f32>,
 ) -> BodyVarying {
     var quad = array<vec2<f32>, 6>(
         vec2<f32>(-1.0, -1.0),
@@ -984,82 +1085,110 @@ fn vs_body(
         vec2<f32>( 1.0,  1.0),
         vec2<f32>(-1.0,  1.0),
     );
+    let local = quad[vi];
 
-    let local    = quad[vi];
-    let screen_p = center_screen + local * radius_screen;
+    // Build screen-aligned axes facing the camera. world_up is +Y; when
+    // the camera looks straight up or down that pair degenerates, so swap
+    // to +Z as the auxiliary axis there.
+    let to_body = center_world - camera.camera_pos;
+    let dist    = length(to_body);
+    let forward = to_body / max(dist, 1e-9);
+    let world_up = select(
+        vec3<f32>(0.0, 1.0, 0.0),
+        vec3<f32>(0.0, 0.0, 1.0),
+        abs(forward.y) > 0.999,
+    );
+    let right = normalize(cross(forward, world_up));
+    let up    = normalize(cross(right, forward));
+
+    // 10% padding catches grazing silhouettes the screen-aligned quad
+    // would otherwise clip — convention from Crytek's sphere-impostor
+    // notes (Far Cry 2, 2009).
+    let pad           = 1.1;
+    let radius_padded = radius_world * pad;
+    let world_offset  = right * (radius_padded * local.x) + up * (radius_padded * local.y);
+    let vert_world    = center_world + world_offset;
+
+    // Approximate screen radius from the projected width of a unit
+    // right-vector at radius_world distance from the centre. Used by
+    // the fragment for the sub-pixel flat-shading fallback.
+    let c_clip   = camera.view_proj * vec4<f32>(center_world, 1.0);
+    let e_clip   = camera.view_proj * vec4<f32>(center_world + right * radius_world, 1.0);
+    let c_ndc    = c_clip.xy / max(c_clip.w, 1e-9);
+    let e_ndc    = e_clip.xy / max(e_clip.w, 1e-9);
+    let r_screen = length(e_ndc - c_ndc) * 0.5 * camera.screen_size.y;
 
     var out: BodyVarying;
-    out.clip_pos      = to_ndc(screen_p);
-    out.local         = local;
+    out.clip_pos      = camera.view_proj * vec4<f32>(vert_world, 1.0);
     out.center_world  = center_world;
+    out.radius_world  = radius_world;
     out.albedo        = albedo;
     out.emissive      = emissive;
-    out.radius_screen = radius_screen;
+    out.vert_world    = vert_world;
+    out.radius_screen = r_screen;
     return out;
 }
 
 @fragment
-fn fs_body(in: BodyVarying) -> @location(0) vec4<f32> {
-    let r2 = dot(in.local, in.local);
-    let r  = sqrt(r2);
-    let aa = fwidth(r);
-    let mask = 1.0 - smoothstep(1.0 - aa, 1.0 + aa, r);
-    if mask <= 0.001 { discard; }
+fn fs_body(in: BodyVarying) -> BodyOutput {
+    // Ray-sphere intersection in world space. The ray origin is the camera
+    // and the ray direction passes through this fragment's world position
+    // on the screen-aligned quad. Quadratic in t reduces to:
+    //   |p + t·d|² = R²    with p = origin − centre
+    let ray_dir = normalize(in.vert_world - camera.camera_pos);
+    let p       = camera.camera_pos - in.center_world;
+    let b       = dot(p, ray_dir);
+    let c       = dot(p, p) - in.radius_world * in.radius_world;
+    let disc    = b * b - c;
+    if (disc < 0.0) { discard; }
+    let t = -b - sqrt(disc);
+    if (t < 0.0) { discard; }
 
-    // Sphere-from-disc normal. The camera looks down -Z in world, so the
-    // visible hemisphere has n.z > 0. `max(0, …)` guards the corner near
-    // r = 1 where floating-point noise could drive the argument slightly
-    // negative and turn `sqrt` into NaN.
-    let nz = sqrt(max(0.0, 1.0 - r2));
-    let n  = vec3<f32>(in.local, nz);
+    let hit_world = camera.camera_pos + ray_dir * t;
+    let n         = (hit_world - in.center_world) / in.radius_world;
 
-    // Accumulate per-light contributions. The loop over num_lights runs
-    // zero iterations on empty / dark systems, so the body collapses to
-    // ambient × albedo + emissive without needing a has_light flag.
+    // Per-fragment lighting (Lambert + half-Lambert wrap) with the same
+    // attenuation model used by the disc shader. Loop runs zero iterations
+    // on dark scenes so the body collapses to ambient × albedo + emissive
+    // without a special-case flag.
     var diffuse_total = 0.0;
     for (var i: u32 = 0u; i < lighting.num_lights; i = i + 1u) {
         let L       = lighting.lights[i];
         let to_l    = L.world_pos - in.center_world;
         let d2      = dot(to_l, to_l);
-        // Pre-squared reference distance + bias: attenuation = r_ref²/(r²+bias²).
-        // The bias prevents the singularity when a body overlaps its own light
-        // (e.g. a star shading itself) and gives an artistic knob for soft falloff.
         let att     = lighting.r_ref_sq / (d2 + lighting.bias_sq);
         let inv_len = inverseSqrt(max(d2, 1e-20));
         let dir     = to_l * inv_len;
 
         let ndotl   = dot(n, dir);
         let lambert = max(ndotl, 0.0);
-        // Half-Lambert wrap: ((n·L + 1) / 2)². Softens the terminator so
-        // back-facing fragments still pick up a little light — physically
-        // motivated for dusty / atmospheric bodies, aesthetically for
-        // avoiding hard black crescents that eat the silhouette.
-        let wrapped = ((ndotl + 1.0) * 0.5) * ((ndotl + 1.0) * 0.5);
+        let half_l  = (ndotl + 1.0) * 0.5;
+        let wrapped = half_l * half_l;
         let shading = mix(lambert, wrapped, lighting.wrap);
 
         diffuse_total = diffuse_total + shading * att * L.intensity;
     }
 
-    // Multiplicative ambient floor: mix(floor, 1, diffuse). Small values
-    // (~0.05) keep the unlit side readable in HDR black without washing
-    // out the lit side — additive ambient would over-brighten the day
-    // hemisphere since it's already at 1.0.
     let lit_factor = mix(lighting.ambient_floor, 1.0, clamp(diffuse_total, 0.0, 1.0));
 
-    // Sub-pixel resolution fallback.
-    // When a body is only a few pixels wide, the Lambert terminator sweeps
-    // across most of the disc and the unlit hemisphere reads as "half-moon
-    // cutout" or "missing body" against the black backdrop — the eye can't
-    // resolve the phase at that scale anyway. Blend `lit_factor` toward 1.0
-    // (flat-shaded full disc) as the screen radius shrinks below ~6 px, so
-    // distant planets still register as solid coloured dots while the
-    // beautifully-phased large discs keep their crescents intact.
+    // Flat-shade fallback for sub-pixel bodies: at <~6 px the Lambert
+    // terminator sweeps across most of the disc and the dark hemisphere
+    // reads as "missing body". Blend toward fully-lit so distant planets
+    // stay legible as solid coloured dots.
     let flat_weight = 1.0 - smoothstep(2.5, 6.0, in.radius_screen);
     let effective   = mix(lit_factor, 1.0, flat_weight);
 
     let rgb   = in.albedo.rgb * effective + in.emissive.rgb;
-    let alpha = in.albedo.a * mask;
-    return vec4<f32>(rgb, alpha);
+    let alpha = in.albedo.a;
+
+    // Reverse-Z depth from the actual hit point, not the quad surface, so
+    // overlapping spheres self-occlude correctly.
+    let hit_clip = camera.view_proj * vec4<f32>(hit_world, 1.0);
+
+    var out: BodyOutput;
+    out.color = vec4<f32>(rgb, alpha);
+    out.depth = hit_clip.z / max(hit_clip.w, 1e-9);
+    return out;
 }
 
 // ── LINES ─────────────────────────────────────────────────────────────────────

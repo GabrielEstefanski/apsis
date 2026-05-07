@@ -229,6 +229,32 @@ impl PerturbationForce for PostNewtonian1PN {
     }
 }
 
+/// Federation entry point — a [`PerturbationDescriptor`] that consumers
+/// register without ever naming [`PostNewtonian1PN`] directly.
+///
+/// The descriptor delegates `kernel_requirements` to the produced
+/// perturbation; metadata (`name`, `description`) is the single
+/// authoritative source for any UI surface that lists this plugin.
+pub struct Descriptor;
+
+impl apsis::physics::integrator::PerturbationDescriptor for Descriptor {
+    fn name(&self) -> &str {
+        "General Relativity (1PN)"
+    }
+
+    fn description(&self) -> &str {
+        "Schwarzschild perihelion advance — Mercury 43 arcsec/century"
+    }
+
+    fn kernel_requirements(&self) -> KernelRequirements {
+        PostNewtonian1PN::solar_units().kernel_requirements()
+    }
+
+    fn build(&self) -> Box<dyn apsis::physics::integrator::PerturbationForce> {
+        Box::new(PostNewtonian1PN::solar_units())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
