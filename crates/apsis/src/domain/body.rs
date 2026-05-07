@@ -381,9 +381,48 @@ pub(crate) fn default_softening(mass: f64) -> f64 {
     EPS_BASE * mass.abs().cbrt()
 }
 
-/// Radius from density and mass: r = (3m / 4πρ)^(1/3).
-pub fn radius_from_density_mass(density: f64, mass: f64) -> f64 {
-    let vol = mass / density.max(1e-30);
+/// Conversion factor: `1 kg/m³ = KG_M3_TO_SOLAR_AU3 M_☉/AU³`.
+///
+/// Derivation, with `MSUN_KG = 1.98892 × 10³⁰` kg and
+/// `AU_M = 1.495978707 × 10¹¹` m:
+///
+/// ```text
+/// 1 kg/m³ × (1 M_☉ / MSUN_KG kg) × (AU_M m / AU)³
+///   = AU_M³ / MSUN_KG  M_☉/AU³
+///   = 3.34793 × 10³³ / 1.98892 × 10³⁰
+///   ≈ 1683.26  M_☉/AU³
+/// ```
+///
+/// Held as a literal so `radius_from_density_mass` stays pure (no
+/// `cbrt` const-fn dependency). Reproducible from
+/// `apsis::units::{AU_M, MSUN_KG}` to the precision below.
+const KG_M3_TO_SOLAR_AU3: f64 = 1683.262;
+
+/// Radius of a uniform sphere from its bulk density and mass.
+///
+/// **Unit contract** — the inputs and output share the project's
+/// canonical solar_au convention:
+///
+/// | Parameter        | Unit           |
+/// |------------------|----------------|
+/// | `density_kg_m3`  | kg/m³ (SI)     |
+/// | `mass_solar`     | M_☉            |
+/// | return value     | AU             |
+///
+/// The mixed-unit boundary (kg/m³ ↔ M_☉/AU³) is crossed once, here,
+/// via [`KG_M3_TO_SOLAR_AU3`]. The remainder is geometry:
+/// `r = (3V / 4π)^(1/3)` with both `V` and `r` in coherent
+/// solar_au units. No silent rescaling, no SI fall-through.
+///
+/// Callers working in other unit systems must either (a) convert
+/// their inputs to solar_au before invoking, or (b) use a
+/// dedicated geometric helper — `radius_from_density_mass` is not
+/// unit-agnostic on purpose, because the codebase has no
+/// non-solar_au call sites today and a polymorphic API would dilute
+/// the audit trail of the unit conversion.
+pub fn radius_from_density_mass(density_kg_m3: f64, mass_solar: f64) -> f64 {
+    let density_coherent = density_kg_m3 * KG_M3_TO_SOLAR_AU3;
+    let vol = mass_solar / density_coherent.max(1e-30);
     sphere_radius_from_volume(vol)
 }
 
@@ -467,8 +506,9 @@ mod tests {
 
     #[test]
     fn rocky_preset_uses_material_default_density() {
-        let earth = Body::rocky(1.0);
-        // ρ_0 = 5514 kg/m³ at anchor mass 1.0; Earth is at the anchor.
+        // Anchor mass is 1 M_⊕ ≈ 3.0034e-6 M_☉. Construct Body at that mass
+        // so the EOS pivot lands on ρ₀ = 5514 kg/m³ (Earth's bulk density).
+        let earth = Body::rocky(3.0034e-6);
         assert!((earth.density - 5514.0).abs() < 1.0);
     }
 
