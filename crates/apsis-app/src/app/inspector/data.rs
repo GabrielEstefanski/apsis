@@ -13,8 +13,13 @@ use eframe::egui::Color32;
 /// sections that are `Some`. Auto-shown sections (`perturbations`,
 /// `camera_relative`) follow the same rule — `Some` means "ready and
 /// physically active", `None` means "not applicable now".
+///
+/// `Id` is the action-identifier type chosen by the caller. The view is
+/// agnostic to its meaning — clicking an action returns the
+/// corresponding [`ActionData::id`] verbatim, so the caller dispatches
+/// against its own typed vocabulary instead of fragile integer indices.
 #[derive(Debug, Clone)]
-pub struct InspectorData {
+pub struct InspectorData<Id = ()> {
     pub header: Header,
     pub identity: Identity,
     pub state: KinematicState,
@@ -26,7 +31,7 @@ pub struct InspectorData {
     pub energy: Option<EnergyData>,
     pub perturbations: Vec<PerturbationData>,
     pub camera_relative: Option<CameraRelativeData>,
-    pub actions: Vec<ActionData>,
+    pub actions: Vec<ActionData<Id>>,
 }
 
 #[derive(Debug, Clone)]
@@ -131,6 +136,28 @@ pub struct RelationsData {
     pub frame_label: String,
 }
 
+/// Inspector payload for a multi-body selection.
+///
+/// Sections that are semantically undefined for groups (Orbit, Energy,
+/// Relations, Camera-relative) are intentionally absent. Only
+/// mass-aggregate quantities and COM kinematics are reported.
+#[derive(Debug, Clone)]
+pub struct AggregateData<Id = ()> {
+    pub count: usize,
+    /// Body names in selection order, for the breadcrumb listing under
+    /// the header. The view truncates with an ellipsis when the list
+    /// would exceed the available width.
+    pub body_names: Vec<String>,
+    pub total_mass_kg: f64,
+    /// Centre-of-mass position in metres.
+    pub com_m: [f64; 3],
+    /// Centre-of-mass velocity in m/s.
+    pub v_com_m_s: [f64; 3],
+    /// `max(|r_i − COM|)` — maximum distance from COM to any selected body.
+    pub bounding_radius_m: f64,
+    pub actions: Vec<ActionData<Id>>,
+}
+
 #[derive(Debug, Clone)]
 pub struct CameraRelativeData {
     pub distance_m: f64,
@@ -140,8 +167,16 @@ pub struct CameraRelativeData {
     pub off_axis_rad: f64,
 }
 
+/// One row in the `Actions` section.
+///
+/// `id` is the caller-defined dispatch token. The view treats it as
+/// opaque payload — when an action row is clicked, [`view::show`]
+/// returns the corresponding `id` verbatim. Callers typically use a
+/// `#[derive(Copy, Clone, …)]` enum so the dispatch site is exhaustive
+/// and reorder-safe.
 #[derive(Debug, Clone)]
-pub struct ActionData {
+pub struct ActionData<Id = ()> {
+    pub id: Id,
     pub label: String,
     pub icon: Option<String>,
     pub shortcut: Option<String>,

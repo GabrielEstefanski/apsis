@@ -9,8 +9,8 @@ use eframe::egui::{self, Align, FontFamily, FontId, Layout, RichText, Sense, Ui}
 use egui_phosphor::regular::{CARET_DOWN, CARET_RIGHT};
 
 use super::data::{
-    ActionKind, CameraRelativeData, EnergyData, Identity, InspectorData, KinematicState, OrbitData,
-    PerturbationData, RelationsData,
+    ActionKind, AggregateData, CameraRelativeData, EnergyData, Identity, InspectorData,
+    KinematicState, OrbitData, PerturbationData, RelationsData,
 };
 use super::format::{QuantityType, format_value};
 use crate::app::design::primitives::{
@@ -28,12 +28,16 @@ pub struct InspectorState {
     pub flash: FlashTracker,
 }
 
-/// Render one Inspector frame and return the index of the action that
-/// was clicked this frame, if any. The caller dispatches intent against
-/// its own action vocabulary; this module knows nothing about what
-/// "Focus camera" or "Delete" mean.
-pub fn show(ui: &mut Ui, data: &InspectorData, state: &mut InspectorState) -> Option<usize> {
-    let mut clicked_action: Option<usize> = None;
+/// Render one Inspector frame and return the [`ActionData::id`] of the
+/// action clicked this frame, if any. The caller dispatches intent
+/// against its own action vocabulary — this module never inspects the
+/// id beyond cloning the value.
+pub fn show<Id: Clone>(
+    ui: &mut Ui,
+    data: &InspectorData<Id>,
+    state: &mut InspectorState,
+) -> Option<Id> {
+    let mut clicked_action: Option<Id> = None;
     ui.allocate_ui_with_layout(
         egui::vec2(ui.available_width(), ui.available_height()),
         Layout::top_down(Align::LEFT),
@@ -90,6 +94,101 @@ pub fn show(ui: &mut Ui, data: &InspectorData, state: &mut InspectorState) -> Op
         },
     );
     clicked_action
+}
+
+/// Render the aggregate (multi-select) inspector frame and return the
+/// [`ActionData::id`] of the action clicked this frame, if any.
+pub fn show_aggregate<Id: Clone>(ui: &mut Ui, data: &AggregateData<Id>) -> Option<Id> {
+    let mut clicked: Option<Id> = None;
+    ui.allocate_ui_with_layout(
+        egui::vec2(ui.available_width(), ui.available_height()),
+        Layout::top_down(Align::LEFT),
+        |ui| {
+            egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+                ui.add_space(space::S5);
+                show_aggregate_header(ui, data.count, &data.body_names);
+                ui.add_space(space::S4);
+                hairline(ui, space::S4);
+
+                Section::new("Selection").show(ui, |ui| aggregate_rows(ui, data));
+
+                if !data.actions.is_empty() {
+                    Section::new("Actions").show(ui, |ui| {
+                        clicked = action_rows(ui, &data.actions);
+                    });
+                }
+
+                ui.add_space(space::S5);
+            });
+        },
+    );
+    clicked
+}
+
+fn show_aggregate_header(ui: &mut Ui, count: usize, body_names: &[String]) {
+    let medium = FontFamily::Name(typography::font::SANS_MEDIUM.into());
+    ui.horizontal(|ui| {
+        ui.add_space(space::S4);
+        ui.label(
+            RichText::new(format!("System · {count} bodies"))
+                .font(FontId::new(typography::text::LG, medium))
+                .color(color::fg::PRIMARY),
+        );
+    });
+    ui.horizontal(|ui| {
+        ui.add_space(space::S4);
+        ui.label(
+            RichText::new(format_body_names_breadcrumb(body_names))
+                .font(FontId::new(typography::text::XS, FontFamily::Proportional))
+                .color(color::fg::TERTIARY),
+        );
+    });
+}
+
+/// Comma-separated body-name list for the multi-select breadcrumb,
+/// truncated with an ellipsis when it would exceed five names or sixty
+/// characters. Both bounds are perceptual; tighten them only after a
+/// real overflow is observed.
+fn format_body_names_breadcrumb(names: &[String]) -> String {
+    const MAX_NAMES: usize = 5;
+    const MAX_CHARS: usize = 60;
+    if names.is_empty() {
+        return String::new();
+    }
+    let truncated_by_count = names.len() > MAX_NAMES;
+    let head: Vec<&str> = names.iter().take(MAX_NAMES).map(|s| s.as_str()).collect();
+    let mut joined = head.join(", ");
+    if truncated_by_count {
+        let extra = names.len() - MAX_NAMES;
+        joined.push_str(&format!(", +{extra} more"));
+    }
+    if joined.chars().count() > MAX_CHARS {
+        let mut clipped: String = joined.chars().take(MAX_CHARS - 1).collect();
+        clipped.push('…');
+        clipped
+    } else {
+        joined
+    }
+}
+
+fn aggregate_rows<Id>(ui: &mut Ui, data: &AggregateData<Id>) {
+    let (s, u) = format_value(data.total_mass_kg, QuantityType::Mass);
+    ui.add(FieldRow::new("Total mass", &s, u));
+
+    Subgroup::new("COM position").show(ui, |ui| {
+        for (axis, value) in ["x", "y", "z"].iter().zip(data.com_m.iter()) {
+            let (val, unit) = format_value(*value, QuantityType::DistanceVector);
+            ui.add(FieldRow::new(axis, &val, unit).indented(1));
+        }
+    });
+
+    let v_speed =
+        (data.v_com_m_s[0].powi(2) + data.v_com_m_s[1].powi(2) + data.v_com_m_s[2].powi(2)).sqrt();
+    let (val, unit) = format_value(v_speed, QuantityType::VelocityVector);
+    ui.add(FieldRow::new("|v_COM|", &val, unit));
+
+    let (val, unit) = format_value(data.bounding_radius_m, QuantityType::DistanceVector);
+    ui.add(FieldRow::new("Bounding radius", &val, unit));
 }
 
 // ── Header ───────────────────────────────────────────────────────────────────
@@ -283,9 +382,9 @@ fn camera_rows(ui: &mut Ui, c: &CameraRelativeData, flash: &mut FlashTracker) {
 
 // ── Actions ──────────────────────────────────────────────────────────────────
 
-fn action_rows(ui: &mut Ui, actions: &[super::data::ActionData]) -> Option<usize> {
+fn action_rows<Id: Clone>(ui: &mut Ui, actions: &[super::data::ActionData<Id>]) -> Option<Id> {
     let mut clicked = None;
-    for (i, a) in actions.iter().enumerate() {
+    for a in actions.iter() {
         let mut btn = IconButton::new(&a.label);
         if let Some(ico) = &a.icon {
             btn = btn.with_icon(ico);
@@ -297,7 +396,7 @@ fn action_rows(ui: &mut Ui, actions: &[super::data::ActionData]) -> Option<usize
             btn = btn.danger();
         }
         if ui.add(btn).clicked() {
-            clicked = Some(i);
+            clicked = Some(a.id.clone());
         }
     }
     clicked

@@ -12,6 +12,11 @@ pub struct CallbackFn {
     pub screen: [f32; 2],
     /// Canvas origin in logical pixels: [rect.min.x, rect.min.y].
     pub viewport_min: [f32; 2],
+    /// World → clip transform driving the body pass. Column-major.
+    pub view_proj: [[f32; 4]; 4],
+    /// Eye position in world space — fragment shader needs it for
+    /// ray-sphere intersection.
+    pub camera_pos: [f32; 3],
 }
 
 impl CallbackTrait for CallbackFn {
@@ -47,6 +52,8 @@ impl CallbackTrait for CallbackFn {
             self.format,
             center,
             scale,
+            self.view_proj,
+            self.camera_pos,
         );
         Vec::new()
     }

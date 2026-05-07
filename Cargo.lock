@@ -254,11 +254,13 @@ name = "apsis-app"
 version = "0.1.0"
 dependencies = [
  "apsis",
+ "apsis-1pn",
  "bytemuck",
  "eframe",
  "egui",
  "egui-phosphor",
  "egui_kittest",
+ "glam",
  "insta",
  "pollster",
  "pretty_assertions",
@@ -1555,6 +1557,15 @@ dependencies = [
  "khronos_api",
  "log",
  "xml-rs",
+]
+
+[[package]]
+name = "glam"
+version = "0.30.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "19fc433e8437a212d1b6f1e68c7824af3aed907da60afa994e7f542d18d12aa9"
+dependencies = [
+ "bytemuck",
 ]
 
 [[package]]

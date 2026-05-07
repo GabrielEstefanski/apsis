@@ -1,10 +1,13 @@
+pub mod camera;
 pub mod canvas;
 pub mod config;
 pub mod design;
+pub mod diagnostics;
 pub mod icons;
 pub mod inspector;
 pub mod notifications;
 pub mod panel;
+pub mod perturbation;
 pub mod render_hints;
 pub mod render_params;
 pub mod theme;

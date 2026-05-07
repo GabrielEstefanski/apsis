@@ -36,8 +36,9 @@ mod tool_rail;
 mod toolbar;
 
 use crate::app::theme::{BORDER, PANEL_BG};
-use crate::app::ui::SimulationApp;
+use crate::app::ui::{BodySelection, SimulationApp};
 use eframe::egui::{self, Stroke};
+use std::collections::BTreeSet;
 
 const CONTEXTUAL_MIN: f32 = 240.0;
 const CONTEXTUAL_DEFAULT: f32 = 300.0;
@@ -78,21 +79,46 @@ impl SimulationApp {
 
     // ── Inspector (right, auto-show when a body is selected) ───────────────
     pub(super) fn draw_inspector(&mut self, ctx: &egui::Context) {
-        let idx = match self.selected_body {
-            Some(i) => i,
-            None => {
-                self.system.set_orbital_elements_needed(false);
-                return;
-            },
-        };
-        self.system.set_orbital_elements_needed(true);
-
-        if idx >= self.system.bodies().len() {
-            self.selected_body = None;
-            self.follow_selected_body = false;
-            self.selection_form = None;
+        if matches!(self.selection, BodySelection::None) {
+            self.system.set_orbital_elements_needed(false);
             return;
         }
+
+        // Stale-index guard: prune selected indices that have gone out of range.
+        let n_bodies = self.system.bodies().len();
+        let stale = match &self.selection {
+            BodySelection::Single(i) if *i >= n_bodies => Some(BodySelection::default()),
+            BodySelection::Multi(set) => {
+                let valid: BTreeSet<usize> =
+                    set.iter().copied().filter(|&i| i < n_bodies).collect();
+                (valid.len() < set.len()).then(|| match valid.len() {
+                    0 => BodySelection::default(),
+                    1 => BodySelection::Single(*valid.iter().next().unwrap()),
+                    _ => BodySelection::Multi(valid),
+                })
+            },
+            _ => None,
+        };
+        if let Some(sel) = stale {
+            if matches!(sel, BodySelection::None) {
+                self.follow_selected_body = false;
+                self.selection_form = None;
+                self.system.set_orbital_elements_needed(false);
+            }
+            self.selection = sel;
+            if matches!(self.selection, BodySelection::None) {
+                return;
+            }
+        }
+
+        // Extract dispatch info before the closure to avoid borrow conflicts.
+        let single_idx = self.selection.single();
+        let multi_set: Option<BTreeSet<usize>> = match &self.selection {
+            BodySelection::Multi(s) => Some(s.clone()),
+            _ => None,
+        };
+
+        self.system.set_orbital_elements_needed(single_idx.is_some());
 
         egui::Panel::right("inspector")
             .frame(
@@ -108,7 +134,11 @@ impl SimulationApp {
             .show(ctx, |ui| {
                 egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
                     ui.set_width(ui.available_width());
-                    self.inspector_content(ui, idx);
+                    if let Some(idx) = single_idx {
+                        self.inspector_content(ui, idx);
+                    } else if let Some(ref indices) = multi_set {
+                        self.aggregate_content(ui, indices);
+                    }
                 });
             });
     }
@@ -121,28 +151,36 @@ impl SimulationApp {
             return;
         }
 
-        let mut min_x = f64::INFINITY;
-        let mut max_x = f64::NEG_INFINITY;
-        let mut min_y = f64::INFINITY;
-        let mut max_y = f64::NEG_INFINITY;
+        let (mut min_x, mut max_x) = (f64::INFINITY, f64::NEG_INFINITY);
+        let (mut min_y, mut max_y) = (f64::INFINITY, f64::NEG_INFINITY);
+        let (mut min_z, mut max_z) = (f64::INFINITY, f64::NEG_INFINITY);
 
         for b in bodies {
             min_x = min_x.min(b.x);
             max_x = max_x.max(b.x);
             min_y = min_y.min(b.y);
             max_y = max_y.max(b.y);
+            min_z = min_z.min(b.z);
+            max_z = max_z.max(b.z);
         }
 
-        let width = (max_x - min_x) as f32;
-        let height = (max_y - min_y) as f32;
-        let size = width.max(height).max(1e-9);
+        let centroid =
+            glam::DVec3::new((min_x + max_x) * 0.5, (min_y + max_y) * 0.5, (min_z + max_z) * 0.5);
+        // Half the longest bounding-box axis is the smallest sphere that
+        // still contains every body — a safe over-estimate of the true
+        // bounding sphere that avoids a second pass over the body list.
+        let extent = (max_x - min_x).max(max_y - min_y).max(max_z - min_z) * 0.5;
+        let extent = extent.max(1e-9);
 
-        self.scale = 400.0 / (size * 1.2);
+        // Distance such that `extent` projects to half the vertical FOV,
+        // with a 1.2× margin so bodies don't sit exactly on the screen
+        // edge. Floored at 5× the near plane so degenerate single-body
+        // systems don't end up clipped against the camera.
+        let half_fov = (crate::app::camera::FOV_Y_RAD as f64) * 0.5;
+        let dist = (extent / half_fov.tan() * 1.2).max(crate::app::camera::NEAR_PLANE as f64 * 5.0);
 
-        let center_x = (min_x + max_x) as f32 * 0.5;
-        let center_y = (min_y + max_y) as f32 * 0.5;
-
-        self.offset = egui::vec2(-center_x * self.scale, -center_y * self.scale);
+        self.camera.target.pivot = centroid;
+        self.camera.target.distance = dist;
         self.follow_selected_body = false;
     }
 }
