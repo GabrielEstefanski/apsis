@@ -310,3 +310,11 @@ fn fs_tonemap(in: VSOut) -> @location(0) vec4<f32> {
     return vec4<f32>(lit, alpha);
 }
 "#;
+
+#[cfg(test)]
+mod shader_tests {
+    #[test]
+    fn tonemap_shader_validates() {
+        crate::render::validate_wgsl("tonemap", super::TONEMAP_SHADER);
+    }
+}

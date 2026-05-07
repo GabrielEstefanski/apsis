@@ -32,15 +32,14 @@ struct ScreenUniform {
 
 /// Camera state for the body pass.
 ///
-/// `view_proj` is the absolute world → clip transform; `view_proj_relative`
-/// is the rotation-only variant for shaders consuming geometry already
-/// shifted by `render_origin`. `screen_size` lets the vertex stage
-/// compute an approximate projected radius for the sub-pixel
+/// Render-frame projection (`projection × rotation_only_view`) consumed
+/// by every shader on this pipeline; geometry has already been shifted
+/// by `render_origin` on the CPU side. `screen_size` lets the vertex
+/// stage compute an approximate projected radius for the sub-pixel
 /// flat-shading fallback.
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct CameraUniform {
-    view_proj: [[f32; 4]; 4],
     view_proj_relative: [[f32; 4]; 4],
     screen_size: [f32; 2],
     _pad: [f32; 2],
@@ -559,9 +558,7 @@ impl WgpuBackend {
         physical_size: [u32; 2],
         pixels_per_point: f32,
         swapchain_format: wgpu::TextureFormat,
-        view_proj: [[f32; 4]; 4],
         view_proj_relative: [[f32; 4]; 4],
-        camera_pos: [f32; 3],
     ) {
         self.ensure_gpu(device, swapchain_format);
 
@@ -610,7 +607,7 @@ impl WgpuBackend {
 
         let screen_uniform = ScreenUniform { size: screen, viewport_min };
         let camera_uniform =
-            CameraUniform { view_proj, view_proj_relative, screen_size: screen, _pad: [0.0; 2] };
+            CameraUniform { view_proj_relative, screen_size: screen, _pad: [0.0; 2] };
 
         let (body_count, circle_count, line_count) = {
             let gpu = self.gpu.as_mut().unwrap();
@@ -628,12 +625,17 @@ impl WgpuBackend {
 
         if self.show_grid {
             if let Some(grid) = &self.grid {
-                let vp = glam::Mat4::from_cols_array_2d(&view_proj);
-                let inv = vp.inverse().to_cols_array_2d();
+                let vp_rel = glam::Mat4::from_cols_array_2d(&view_proj_relative);
+                let inv_rel = vp_rel.inverse().to_cols_array_2d();
+                let origin_f32 = [
+                    self.render_origin.x as f32,
+                    self.render_origin.y as f32,
+                    self.render_origin.z as f32,
+                ];
                 grid.upload(
                     queue,
-                    inv,
-                    camera_pos,
+                    inv_rel,
+                    origin_f32,
                     [physical_size[0] as f32, physical_size[1] as f32],
                 );
             }
@@ -647,7 +649,8 @@ impl WgpuBackend {
                 queue,
                 trail_buf,
                 self.trail_visibility.as_deref(),
-                view_proj,
+                view_proj_relative,
+                self.render_origin,
                 &self.trail_style,
             );
         }
@@ -1112,7 +1115,6 @@ struct LightingUniform {
 @group(0) @binding(1) var<uniform> lighting: LightingUniform;
 
 struct CameraUniform {
-    view_proj:          mat4x4<f32>,
     view_proj_relative: mat4x4<f32>,
     screen_size:        vec2<f32>,
     _pad:               vec2<f32>,
@@ -1424,3 +1426,11 @@ fn fs_line(in: LineVarying) -> @location(0) vec4<f32> {
     return vec4<f32>(in.color.rgb, final_alpha);
 }
 "#;
+
+#[cfg(test)]
+mod shader_tests {
+    #[test]
+    fn primitives_shader_validates() {
+        crate::render::validate_wgsl("primitives", super::PRIMITIVES_SHADER);
+    }
+}

@@ -1,12 +1,13 @@
-//! Ecliptic-plane grid drawn in world space.
+//! Ecliptic-plane grid drawn in world space, with Floating Origin.
 //!
 //! Full-screen quad whose fragment shader unprojects each pixel
-//! through the inverse view-projection matrix, intersects the camera
-//! ray with `z = 0`, and shades grid lines on the resulting world
-//! `(x, y)` coordinates. Same LOD logic as the legacy 2D grid (line
-//! spacing chosen so visible lines stay ~60 px apart) but anchored to
-//! the world plane the bodies live on rather than to screen-space
-//! coordinates.
+//! through the inverse render-frame view-projection, intersects the
+//! camera ray with the absolute-world `z = 0` plane (which sits at
+//! `z = -render_origin.z` in the render frame), and shades grid lines
+//! on the recovered absolute `(x, y)` coordinates. Same LOD logic as
+//! the legacy 2D grid (line spacing chosen so visible lines stay
+//! ~60 px apart) but anchored to the world plane the bodies live on
+//! rather than to screen-space coordinates.
 
 use bytemuck::{Pod, Zeroable};
 use std::mem::size_of;
@@ -14,8 +15,13 @@ use std::mem::size_of;
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct GridUniform {
-    inv_view_proj: [[f32; 4]; 4],
-    camera_pos: [f32; 3],
+    /// Inverse of the render-frame view-projection. Camera sits at
+    /// the origin in this frame.
+    inv_view_proj_relative: [[f32; 4]; 4],
+    /// Floating-Origin anchor in absolute world units. The ray-plane
+    /// intersection runs in the render frame and we add this back to
+    /// recover absolute `(x, y)` for the grid LOD math.
+    render_origin: [f32; 3],
     _pad0: f32,
     screen_size: [f32; 2],
     _pad1: [f32; 2],
@@ -105,13 +111,13 @@ impl GridRenderer {
     pub fn upload(
         &self,
         queue: &wgpu::Queue,
-        inv_view_proj: [[f32; 4]; 4],
-        camera_pos: [f32; 3],
+        inv_view_proj_relative: [[f32; 4]; 4],
+        render_origin: [f32; 3],
         screen: [f32; 2],
     ) {
         let u = GridUniform {
-            inv_view_proj,
-            camera_pos,
+            inv_view_proj_relative,
+            render_origin,
             _pad0: 0.0,
             screen_size: screen,
             _pad1: [0.0; 2],
@@ -131,11 +137,11 @@ impl GridRenderer {
 const GRID_SHADER: &str = r#"
 
 struct GridUniform {
-    inv_view_proj : mat4x4<f32>,
-    camera_pos    : vec3<f32>,
-    _pad0         : f32,
-    screen_size   : vec2<f32>,
-    _pad1         : vec2<f32>,
+    inv_view_proj_relative : mat4x4<f32>,
+    render_origin          : vec3<f32>,
+    _pad0                  : f32,
+    screen_size            : vec2<f32>,
+    _pad1                  : vec2<f32>,
 };
 
 @group(0) @binding(0)
@@ -169,28 +175,32 @@ fn grid_line(world : vec2<f32>, s : f32) -> f32 {
 
 @fragment
 fn fs_grid(@builtin(position) frag_coord : vec4<f32>) -> @location(0) vec4<f32> {
-    // ── Reconstruct world ray from this fragment ─────────────────────── //
+    // ── Reconstruct camera ray from this fragment ────────────────────── //
+    // Camera sits at the render-frame origin under Floating Origin, so
+    // the far-plane unproject *is* the ray direction.
     let ndc = vec2<f32>(
          (frag_coord.x / u.screen_size.x) * 2.0 - 1.0,
         -(frag_coord.y / u.screen_size.y) * 2.0 + 1.0,
     );
-    // Reverse-Z infinite-far: a point at clip z=0 sits on the far
-    // plane. Unproject that to obtain a world-space "far ray endpoint",
-    // then build the camera ray as endpoint − camera.
-    let far_clip  = vec4<f32>(ndc, 0.0, 1.0);
-    let far_world = u.inv_view_proj * far_clip;
-    let far_pos   = far_world.xyz / far_world.w;
-    let ray_dir   = normalize(far_pos - u.camera_pos);
+    let far_clip     = vec4<f32>(ndc, 0.0, 1.0);
+    let far_relative = u.inv_view_proj_relative * far_clip;
+    let far_pos      = far_relative.xyz / far_relative.w;
+    let ray_dir      = normalize(far_pos);
 
-    // ── Intersect with z = 0 plane ──────────────────────────────────── //
-    // Reject grazing or upside-down rays so the grid doesn't spit out
-    // numerical noise at the horizon.
+    // ── Intersect with the absolute z = 0 plane ──────────────────────── //
+    // The plane sits at `z_relative = -render_origin.z` in the render
+    // frame; reject grazing or upside-down rays so the grid doesn't
+    // spit out numerical noise at the horizon.
     if abs(ray_dir.z) < 1e-4 { discard; }
-    let t = -u.camera_pos.z / ray_dir.z;
+    let target_z = -u.render_origin.z;
+    let t = target_z / ray_dir.z;
     if t <= 0.0 { discard; }
 
-    let world_hit = u.camera_pos + ray_dir * t;
-    let world_xy  = world_hit.xy;
+    // Hit point in the render frame; recover absolute `(x, y)` for the
+    // grid LOD math by adding back the origin. The z component is
+    // exactly zero by construction.
+    let hit_relative = ray_dir * t;
+    let world_xy     = hit_relative.xy + u.render_origin.xy;
 
     // ── LOD: nice line spacing keyed off screen-space derivative ────── //
     // fwidth on world coordinates gives the "size of one fragment" in
@@ -238,11 +248,13 @@ fn fs_grid(@builtin(position) frag_coord : vec4<f32>) -> @location(0) vec4<f32> 
 
     // Tight distance fade keyed off camera height + planar offset so
     // the grid stays a local plate of reference instead of bleeding to
-    // the horizon. 10× / 30× of the camera's distance from origin
-    // covers the working volume without painting the whole canvas.
+    // the horizon. 10× / 30× of the camera's distance from the world
+    // origin covers the working volume without painting the whole
+    // canvas. `render_origin` is the camera's absolute position, so
+    // these expressions match the legacy meaning.
     let r          = length(world_xy);
-    let cam_r      = length(u.camera_pos.xy);
-    let cam_h      = max(cam_r + abs(u.camera_pos.z), 1e-3);
+    let cam_r      = length(u.render_origin.xy);
+    let cam_h      = max(cam_r + abs(u.render_origin.z), 1e-3);
     let fade_inner = 10.0 * cam_h;
     let fade_outer = 30.0 * cam_h;
     let dist_fade  = 1.0 - smoothstep(fade_inner, fade_outer, r);
@@ -254,3 +266,11 @@ fn fs_grid(@builtin(position) frag_coord : vec4<f32>) -> @location(0) vec4<f32> 
 }
 
 "#;
+
+#[cfg(test)]
+mod shader_tests {
+    #[test]
+    fn grid_shader_validates() {
+        crate::render::validate_wgsl("grid", super::GRID_SHADER);
+    }
+}
