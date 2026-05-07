@@ -1,6 +1,9 @@
 use crate::{
     domain::body_preset,
-    templates::{Template, TemplateBody, UnitSystem, builders::circular_orbit},
+    templates::{
+        Template, TemplateBody, UnitSystem,
+        builders::{KG_M3_TO_SOLAR_AU3, circular_orbit},
+    },
 };
 
 pub fn sun_earth_unstable_lagrange(_seed: u64) -> Template {
@@ -38,6 +41,7 @@ pub fn sun_earth_unstable_lagrange(_seed: u64) -> Template {
                 position: Some([0.0, 0.0, 0.0]),
                 velocity: [0.0, 0.0, 0.0],
                 preset: &body_preset::STAR,
+                density: Some(1408.0 * KG_M3_TO_SOLAR_AU3),
             },
             // Earth
             TemplateBody {
@@ -46,6 +50,7 @@ pub fn sun_earth_unstable_lagrange(_seed: u64) -> Template {
                 position: Some(earth_pos),
                 velocity: earth_vel,
                 preset: &body_preset::ROCKY,
+                density: Some(5514.0 * KG_M3_TO_SOLAR_AU3),
             },
             // L1 (unstable)
             TemplateBody {
@@ -54,6 +59,7 @@ pub fn sun_earth_unstable_lagrange(_seed: u64) -> Template {
                 position: Some(l1_pos),
                 velocity: l1_vel,
                 preset: &body_preset::ASTEROID,
+                density: None,
             },
             // L2 (unstable)
             TemplateBody {
@@ -62,6 +68,7 @@ pub fn sun_earth_unstable_lagrange(_seed: u64) -> Template {
                 position: Some(l2_pos),
                 velocity: l2_vel,
                 preset: &body_preset::ASTEROID,
+                density: None,
             },
             // L3 (unstable)
             TemplateBody {
@@ -70,6 +77,7 @@ pub fn sun_earth_unstable_lagrange(_seed: u64) -> Template {
                 position: Some(l3_pos),
                 velocity: l3_vel,
                 preset: &body_preset::ASTEROID,
+                density: None,
             },
         ],
         display_scale: 1.0,

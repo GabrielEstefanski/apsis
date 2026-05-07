@@ -371,9 +371,14 @@ pub const BROWN_DWARF: BodyPreset = BodyPreset {
     luminosity: Some(LuminositySource::Model(LuminosityModel::BrownDwarfBurrows)),
 };
 
-/// Main-sequence star (F/G/K/M). Density falls with mass on the
-/// upper main sequence (radiation pressure wins); luminosity from the
-/// smoothed Salaris & Cassisi mass-luminosity relation.
+/// Main-sequence star, F/G/K spectral type (Sun-like and warmer).
+/// Density falls with mass on the upper main sequence (radiation
+/// pressure wins). Luminosity from the smoothed Salaris & Cassisi
+/// mass-luminosity relation.
+///
+/// For low-mass M-dwarfs (TRAPPIST-1, Proxima, Barnard's), use
+/// [`RED_DWARF`] instead — different density-mass slope and
+/// observably different colour.
 pub const STAR: BodyPreset = BodyPreset {
     display_name: "Star",
     default_color: [255, 220, 100],
@@ -384,6 +389,32 @@ pub const STAR: BodyPreset = BodyPreset {
         alpha: -0.35,
         rho_min: 100.0,
         rho_max: 1.0e5,
+    }),
+    luminosity: Some(LuminositySource::Model(LuminosityModel::MainSequence)),
+};
+
+/// Low-mass main-sequence star, M spectral type (TRAPPIST-1,
+/// Proxima Centauri, Barnard's Star, ~75% of all stars by count).
+///
+/// Distinguished from [`STAR`]:
+/// * Reddish colour (effective temperature 2300–3700 K vs 5000+ for
+///   G/K stars).
+/// * Density rises sharply at the bottom of the main sequence —
+///   very-low-mass M dwarfs approach the brown-dwarf regime in
+///   compactness (TRAPPIST-1 ≈ 50 000 kg/m³, Proxima ≈ 56 000).
+/// * Anchor at 0.1 M_☉, where ρ ≈ 50 000 kg/m³ is well-measured.
+///
+/// Reference: Chabrier & Baraffe (2000) ARA&A 38; Mann et al. (2019).
+pub const RED_DWARF: BodyPreset = BodyPreset {
+    display_name: "Red Dwarf",
+    default_color: [220, 100, 60],
+    default_q_pr: 0.0,
+    density: DensitySource::Model(DensityModel {
+        rho_0: 50_000.0,
+        anchor_mass: 0.1,
+        alpha: -0.5,
+        rho_min: 1_000.0,
+        rho_max: 2.0e5,
     }),
     luminosity: Some(LuminositySource::Model(LuminosityModel::MainSequence)),
 };
@@ -412,8 +443,18 @@ pub const WHITE_DWARF: BodyPreset = BodyPreset {
 /// Catalogue of built-in presets. Used by the spawn UI to populate
 /// dropdowns and by snapshot loaders to reconstruct legacy material
 /// references.
-pub const ALL: &[&BodyPreset] =
-    &[&COMET, &ASTEROID, &ROCKY, &ICY, &ICE_GIANT, &GAS, &BROWN_DWARF, &STAR, &WHITE_DWARF];
+pub const ALL: &[&BodyPreset] = &[
+    &COMET,
+    &ASTEROID,
+    &ROCKY,
+    &ICY,
+    &ICE_GIANT,
+    &GAS,
+    &BROWN_DWARF,
+    &RED_DWARF,
+    &STAR,
+    &WHITE_DWARF,
+];
 
 // ── Luminosity model implementations ─────────────────────────────────────────
 
