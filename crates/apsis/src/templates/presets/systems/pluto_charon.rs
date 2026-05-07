@@ -39,6 +39,7 @@ pub fn pluto_charon(_seed: u64) -> Template {
                 mass: m_pluto,
                 position: Some([-r_pluto, 0.0, 0.0]),
                 velocity: [0.0, -v_pluto, 0.0],
+                class_override: None,
                 preset: &body_preset::ICY,
             },
             TemplateBody {
@@ -46,6 +47,7 @@ pub fn pluto_charon(_seed: u64) -> Template {
                 mass: m_charon,
                 position: Some([r_charon, 0.0, 0.0]),
                 velocity: [0.0, v_charon, 0.0],
+                class_override: None,
                 preset: &body_preset::ICY,
             },
         ],

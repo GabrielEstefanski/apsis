@@ -492,6 +492,7 @@ pub fn solar_system(seed: u64) -> Template {
         preset: &body_preset::STAR,
         position: Some([0.0, 0.0, 0.0]),
         velocity: [0.0, 0.0, 0.0],
+        class_override: None,
     });
 
     // ── Planets and dwarfs share the same heliocentric construction ──────── //
@@ -540,6 +541,7 @@ pub fn solar_system(seed: u64) -> Template {
             preset: data.preset,
             position: Some(pos),
             velocity: vel,
+            class_override: None,
         });
     };
 
@@ -599,6 +601,11 @@ pub fn solar_system(seed: u64) -> Template {
                 parent_vel[1] + rel_vel[1],
                 parent_vel[2] + rel_vel[2],
             ],
+            // Moons orbit a planet regardless of which preset (ROCKY for the
+            // Moon, ICY for the Galileans/Saturnians, etc.) supplies their
+            // density. The class filter groups them all under Moon so the
+            // user can hide moons en masse without touching planets.
+            class_override: Some(crate::domain::body_preset::BodyClass::Moon),
         });
     }
 
@@ -631,6 +638,7 @@ pub fn solar_system(seed: u64) -> Template {
             preset: &body_preset::ASTEROID,
             position: Some(pos),
             velocity: vel,
+            class_override: None,
         });
     }
 
@@ -679,6 +687,7 @@ pub fn solar_system(seed: u64) -> Template {
             preset: &body_preset::COMET,
             position: Some(pos),
             velocity: vel,
+            class_override: None,
         });
     }
 

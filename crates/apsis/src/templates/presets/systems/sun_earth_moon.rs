@@ -56,6 +56,7 @@ pub fn sun_earth_moon(seed: u64) -> Template {
                 mass: M_SUN,
                 position: Some([0.0, 0.0, 0.0]),
                 velocity: [0.0, 0.0, 0.0],
+                class_override: None,
                 preset: &body_preset::STAR,
             },
             TemplateBody {
@@ -63,6 +64,7 @@ pub fn sun_earth_moon(seed: u64) -> Template {
                 mass: M_EARTH,
                 position: Some(earth_pos),
                 velocity: earth_vel,
+                class_override: None,
                 preset: &body_preset::ROCKY,
             },
             TemplateBody {
@@ -70,6 +72,7 @@ pub fn sun_earth_moon(seed: u64) -> Template {
                 mass: M_MOON,
                 position: Some(moon_pos),
                 velocity: moon_vel,
+                class_override: None,
                 preset: &body_preset::ICY,
             },
         ],

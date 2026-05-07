@@ -15,6 +15,7 @@ pub fn three_body_chaotic_ejection(_seed: u64) -> Template {
                 mass: 1.0,
                 position: Some([-1.0, 0.0, 0.0]),
                 velocity: [0.3, 0.4, 0.0],
+                class_override: None,
                 preset: &body_preset::ROCKY,
             },
             TemplateBody {
@@ -22,6 +23,7 @@ pub fn three_body_chaotic_ejection(_seed: u64) -> Template {
                 mass: 1.0,
                 position: Some([1.0, 0.0, 0.0]),
                 velocity: [0.3, 0.4 + eps, 0.0],
+                class_override: None,
                 preset: &body_preset::ROCKY,
             },
             TemplateBody {
@@ -29,6 +31,7 @@ pub fn three_body_chaotic_ejection(_seed: u64) -> Template {
                 mass: 1.0,
                 position: Some([0.0, 0.1, 0.0]),
                 velocity: [-0.6, -0.8, 0.0],
+                class_override: None,
                 preset: &body_preset::ROCKY,
             },
         ],

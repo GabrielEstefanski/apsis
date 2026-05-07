@@ -40,6 +40,7 @@ pub fn alpha_centauri_ab(_seed: u64) -> Template {
                 mass: m_a,
                 position: Some([-r1, 0.0, 0.0]),
                 velocity: [0.0, -v1, 0.0],
+                class_override: None,
                 preset: &body_preset::STAR,
             },
             TemplateBody {
@@ -47,6 +48,7 @@ pub fn alpha_centauri_ab(_seed: u64) -> Template {
                 mass: m_b,
                 position: Some([r2, 0.0, 0.0]),
                 velocity: [0.0, v2, 0.0],
+                class_override: None,
                 preset: &body_preset::STAR,
             },
         ],

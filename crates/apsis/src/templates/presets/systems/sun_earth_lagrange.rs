@@ -28,6 +28,7 @@ pub fn sun_earth_lagrange(_seed: u64) -> Template {
                 mass: m_sun,
                 position: Some([0.0, 0.0, 0.0]),
                 velocity: [0.0, 0.0, 0.0],
+                class_override: None,
                 preset: &body_preset::STAR,
             },
             // Earth
@@ -36,6 +37,7 @@ pub fn sun_earth_lagrange(_seed: u64) -> Template {
                 mass: m_earth,
                 position: Some(earth_pos),
                 velocity: earth_vel,
+                class_override: None,
                 preset: &body_preset::ROCKY,
             },
             // Trojan at L4
@@ -44,6 +46,7 @@ pub fn sun_earth_lagrange(_seed: u64) -> Template {
                 mass: 1e-12,
                 position: Some(l4_pos),
                 velocity: l4_vel,
+                class_override: None,
                 preset: &body_preset::ASTEROID,
             },
             // Trojan at L5
@@ -52,6 +55,7 @@ pub fn sun_earth_lagrange(_seed: u64) -> Template {
                 mass: 1e-12,
                 position: Some(l5_pos),
                 velocity: l5_vel,
+                class_override: None,
                 preset: &body_preset::ASTEROID,
             },
         ],
