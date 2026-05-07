@@ -182,6 +182,23 @@ impl SimulationApp {
             "Net gravitational force for each body",
         );
 
+        // ── EXPOSURE ────────────────────────────────────────────────────────
+        section(ui, "EXPOSURE");
+
+        let ev_tip = "User exposure offset, in stops, on top of\n\
+            auto-exposure. Each stop is 2× linear intensity.\n\
+            Affects the reflective scene only; stars stay\n\
+            stable.";
+        kv_drag(ui, "EV", ev_tip, |ui| {
+            ui.add(
+                egui::DragValue::new(&mut self.exposure_ev)
+                    .speed(0.05)
+                    .range(-5.0_f32..=5.0)
+                    .max_decimals(2)
+                    .suffix(" stops"),
+            );
+        });
+
         // ── COLOUR ──────────────────────────────────────────────────────────
         // Data-driven colouring (SPLASH / yt-style). Off = material colours.
         section(ui, "COLOUR");
