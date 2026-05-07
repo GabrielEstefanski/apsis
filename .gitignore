@@ -1,6 +1,7 @@
 /target
 /target-3d
 /target-tests
+/target-demo
 .venv
 /memory
 /saves
