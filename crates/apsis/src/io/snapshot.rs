@@ -54,25 +54,27 @@
 //! | 5   | `integrator` byte extended: `2 = WisdomHolman` |
 //! | 6   | Removed `omega_z` and `moment_inertia` from per-body record |
 //! | 7   | Added `z` and `vz` to per-body record (3D port) |
+//! | 8   | Replaced `material` byte with `q_pr` (8 bytes f64); `Body` no longer carries a material taxonomy field |
 //!
 //! Older files (ver < 5) round-trip cleanly; the `WisdomHolman` variant
 //! simply cannot be expressed in them and defaults to `VelocityVerlet` on
 //! load. v6 and earlier files default `z = 0`, `vz = 0` on load — the
 //! 3D port introduces those components but a planar-only file remains
-//! mathematically equivalent under the v7 reader.
+//! mathematically equivalent under the v7 reader. v7 and earlier files
+//! reconstruct `q_pr` from the legacy material byte via a fixed lookup
+//! that mirrors the pre-refactor `Material::q_pr()` table.
 
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::domain::body::Body;
-use crate::domain::materials::Material;
 use crate::physics::integrator::IntegratorKind;
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 pub const MAGIC: [u8; 4] = *b"GRAV";
-pub const SCHEMA_VERSION: u16 = 7;
+pub const SCHEMA_VERSION: u16 = 8;
 
 // ── Snapshot ──────────────────────────────────────────────────────────────────
 
@@ -117,7 +119,8 @@ pub struct SimSnapshot {
 /// Per-body fields stored in a [`SimSnapshot`].
 ///
 /// Mirrors [`Body`] exactly, but uses `Copy` semantics so snapshots can be
-/// cloned without heap allocation per body.
+/// cloned without heap allocation per body. As of schema v8 the record
+/// stores `q_pr` directly rather than a material taxonomy byte.
 #[derive(Clone, Copy)]
 pub struct BodyRecord {
     pub x: f64,
@@ -130,8 +133,10 @@ pub struct BodyRecord {
     pub density: f64,
     pub softening: f64,
     pub physical_radius: f64,
-    pub material: Material,
     pub color: [u8; 3],
+    /// Radiation-pressure receiver coefficient. v8+ persists it
+    /// directly; v1–7 reconstructed it from the legacy material byte.
+    pub q_pr: f64,
 }
 
 impl BodyRecord {
@@ -148,20 +153,24 @@ impl BodyRecord {
             density: b.density,
             softening: b.softening,
             physical_radius: b.physical_radius,
-            material: b.material,
             color: b.color,
+            q_pr: b.q_pr,
         }
     }
 
     /// Reconstruct a [`Body`] from this record.
+    ///
+    /// Uses the low-level [`Body::new`] constructor and overlays each
+    /// stored field explicitly — the snapshot is the canonical source
+    /// for every quantity, so no preset is consulted on load.
     pub fn into_body(self) -> Body {
-        let mut b = Body::of(self.mass, self.material)
+        let mut b = Body::new(self.mass, self.density)
             .at_3d(self.x, self.y, self.z)
             .with_velocity_3d(self.vx, self.vy, self.vz);
-        b.density = self.density;
         b.softening = self.softening;
         b.physical_radius = self.physical_radius;
         b.color = self.color;
+        b.q_pr = self.q_pr;
         b
     }
 }
@@ -321,34 +330,23 @@ fn u8_to_integrator(v: u8) -> IntegratorKind {
     }
 }
 
-// ── Material codec ────────────────────────────────────────────────────────────
+// ── Legacy material codec (v1–v7 only) ───────────────────────────────────────
+//
+// Schema versions ≤ 7 stored a single byte naming a fixed `Material`
+// taxonomy variant. v8 replaced that with a direct `q_pr` field. The
+// table below mirrors the pre-refactor `Material::q_pr()` values and
+// is consulted only when reading a v1–v7 file.
 
-fn material_to_u8(m: Material) -> u8 {
-    match m {
-        Material::Rocky => 0,
-        Material::Icy => 1,
-        Material::Gas => 2,
-        Material::IceGiant => 3,
-        Material::Asteroid => 4,
-        Material::Comet => 5,
-        Material::Star => 6,
-        Material::BrownDwarf => 7,
-        Material::WhiteDwarf => 8,
-    }
-}
-
-/// Unknown material IDs fall back to `Rocky` for forward compatibility.
-fn u8_to_material(v: u8) -> Material {
+/// Reconstruct `q_pr` from the legacy material byte. Unknown values
+/// fall back to `0.0` (non-receiver) so a forward-incompatible byte
+/// never injects radiation pressure on a body that wasn't a receiver.
+fn legacy_q_pr_from_material_byte(v: u8) -> f64 {
     match v {
-        1 => Material::Icy,
-        2 => Material::Gas,
-        3 => Material::IceGiant,
-        4 => Material::Asteroid,
-        5 => Material::Comet,
-        6 => Material::Star,
-        7 => Material::BrownDwarf,
-        8 => Material::WhiteDwarf,
-        _ => Material::Rocky,
+        // 0=Rocky, 6=Star, 7=BrownDwarf, 8=WhiteDwarf, 2=Gas, 3=IceGiant — none receive
+        1 => 0.7, // Icy
+        4 => 1.0, // Asteroid
+        5 => 0.9, // Comet
+        _ => 0.0,
     }
 }
 
@@ -413,7 +411,8 @@ impl SimSnapshot {
         // v4: reproducibility seed
         wu64(&mut w, self.seed)?;
 
-        // Body records (v7: x, y, z, vx, vy, vz, mass, ...)
+        // Body records (v8: x, y, z, vx, vy, vz, mass, density, softening,
+        //                    physical_radius, color[3], q_pr)
         wu32(&mut w, self.bodies.len() as u32)?;
         for b in &self.bodies {
             wf64(&mut w, b.x)?;
@@ -426,8 +425,8 @@ impl SimSnapshot {
             wf64(&mut w, b.density)?;
             wf64(&mut w, b.softening)?;
             wf64(&mut w, b.physical_radius)?;
-            wu8(&mut w, material_to_u8(b.material))?;
             w.write_all(&b.color)?;
+            wf64(&mut w, b.q_pr)?;
         }
 
         // v2: per-body names
@@ -521,11 +520,19 @@ impl SimSnapshot {
                 let _ = rf64(&mut r)?;
                 let _ = rf64(&mut r)?;
             }
-            let mut mat_byte = [0u8; 1];
-            r.read_exact(&mut mat_byte)?;
-            let material = u8_to_material(mat_byte[0]);
+            // v8 dropped the material byte and added a q_pr f64 after color.
+            // Older versions encoded both as `[material_id u8][color rgb]`;
+            // q_pr is reconstructed via the legacy lookup.
+            let q_pr = if ver < 8 {
+                let mut mat_byte = [0u8; 1];
+                r.read_exact(&mut mat_byte)?;
+                legacy_q_pr_from_material_byte(mat_byte[0])
+            } else {
+                0.0 // placeholder; replaced after the color read below
+            };
             let mut color = [0u8; 3];
             r.read_exact(&mut color)?;
+            let q_pr = if ver >= 8 { rf64(&mut r)? } else { q_pr };
 
             bodies.push(BodyRecord {
                 x,
@@ -538,8 +545,8 @@ impl SimSnapshot {
                 density,
                 softening,
                 physical_radius,
-                material,
                 color,
+                q_pr,
             });
         }
 

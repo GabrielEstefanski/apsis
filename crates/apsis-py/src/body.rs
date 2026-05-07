@@ -1,6 +1,6 @@
 //! Python-side wrapper of [`apsis::domain::body::Body`].
 //!
-//! The wrapper exposes a researcher-first API: nine material factories
+//! The wrapper exposes a researcher-first API: nine preset factories
 //! (`Body.star`, `Body.rocky`, `Body.gas_giant`, ...) that mirror the
 //! corresponding constructors in [`apsis::domain::body::Body`], a
 //! kwargs-only signature on each factory so position and velocity
@@ -12,10 +12,20 @@
 //!
 //! Every `#[pymethods]` body in this file delegates to a single call on
 //! [`apsis::domain::body::Body`] — the wrapper translates types at the
-//! boundary and never composes physics. The set of valid materials,
-//! the default softening rule, the density model, and the body-state
+//! boundary and never composes physics. The set of valid presets, the
+//! default softening rule, the density model, and the body-state
 //! invariants are all owned by the core crate; this module is the
 //! Python-shaped door into them.
+//!
+//! # Material slug as binding-layer tag
+//!
+//! [`apsis::domain::body::Body`] no longer carries a runtime material
+//! taxonomy field — physical defaults are applied once at construction
+//! by the preset and never referenced again. The Python wrapper still
+//! exposes a `body.material` slug for ergonomic introspection (`"star"`,
+//! `"rocky"`, ...), tracked locally by [`PyBody::slug`] and propagated
+//! through the fluent builder methods. The slug is a binding-layer
+//! convenience, not a core-crate concept.
 //!
 //! # Why builders return new bodies
 //!
@@ -34,18 +44,19 @@
 //! ```
 
 use apsis::domain::body::Body as CoreBody;
-use apsis::domain::materials::Material;
+use apsis::domain::body_preset::{self, BodyPreset};
 use pyo3::prelude::*;
 use pyo3::types::PyAny;
 
 use crate::convert::{value_error, xyz_triple};
 
-/// Point-mass body with kinematics, mass, softening, and material class.
+/// Point-mass body with kinematics, mass, softening, and a binding-
+/// layer material slug.
 ///
-/// Bodies are constructed through one of the nine material factories
-/// (`Body.star`, `Body.rocky`, ...) — each chooses sensible defaults for
-/// density, softening, and any visual/physical properties tied to the
-/// material class. Position and velocity always default to zero; pass
+/// Bodies are constructed through one of the nine preset factories
+/// (`Body.star`, `Body.rocky`, ...) — each chooses sensible defaults
+/// for density, softening, and any visual/physical properties tied to
+/// the preset. Position and velocity always default to zero; pass
 /// them as kwargs (`position=(x, y)`, `velocity=(vx, vy)`) at the
 /// factory or via the fluent builder methods (`at`, `with_velocity`).
 ///
@@ -79,14 +90,21 @@ use crate::convert::{value_error, xyz_triple};
 #[derive(Clone, Copy)]
 pub(crate) struct PyBody {
     pub(crate) inner: CoreBody,
+    /// Construction-time tag exposed via [`material`](Self::material).
+    /// Tracked alongside the core body so the Python `body.material`
+    /// property keeps returning a stable slug after chained builder
+    /// calls — pure binding-layer convenience.
+    pub(crate) slug: &'static str,
 }
 
 impl PyBody {
-    /// Build a `PyBody` of `material` with kwargs-driven kinematics.
-    /// Single point of construction for every factory below; per-factory
-    /// methods are one-liner wrappers that name a specific material.
+    /// Build a `PyBody` from a `BodyPreset` with kwargs-driven
+    /// kinematics. Single point of construction for every factory
+    /// below; per-factory methods are one-liner wrappers that name a
+    /// specific preset.
     fn build(
-        material: Material,
+        preset: &'static BodyPreset,
+        slug: &'static str,
         mass: f64,
         position: Option<&Bound<'_, PyAny>>,
         velocity: Option<&Bound<'_, PyAny>>,
@@ -102,7 +120,7 @@ impl PyBody {
             ));
         }
 
-        let mut inner = CoreBody::of(mass, material);
+        let mut inner = CoreBody::from_preset(preset, mass);
 
         if let Some(obj) = position {
             let (x, y, z) = xyz_triple("position", obj)?;
@@ -126,15 +144,15 @@ impl PyBody {
             inner.softening = eps;
         }
 
-        Ok(Self { inner })
+        Ok(Self { inner, slug })
     }
 }
 
 #[pymethods]
 impl PyBody {
-    // ── Material factories ───────────────────────────────────────────────
+    // ── Preset factories ─────────────────────────────────────────────────
 
-    /// Main-sequence luminous body. Default density and luminous material.
+    /// Main-sequence luminous body. Default density and luminous preset.
     #[staticmethod]
     #[pyo3(signature = (*, mass, position=None, velocity=None, softening=None))]
     fn star(
@@ -143,7 +161,7 @@ impl PyBody {
         velocity: Option<&Bound<'_, PyAny>>,
         softening: Option<f64>,
     ) -> PyResult<Self> {
-        Self::build(Material::Star, mass, position, velocity, softening)
+        Self::build(&body_preset::STAR, "star", mass, position, velocity, softening)
     }
 
     /// Brown dwarf — sub-stellar, deuterium-burning regime.
@@ -155,7 +173,7 @@ impl PyBody {
         velocity: Option<&Bound<'_, PyAny>>,
         softening: Option<f64>,
     ) -> PyResult<Self> {
-        Self::build(Material::BrownDwarf, mass, position, velocity, softening)
+        Self::build(&body_preset::BROWN_DWARF, "brown_dwarf", mass, position, velocity, softening)
     }
 
     /// White dwarf — compact stellar remnant.
@@ -167,7 +185,7 @@ impl PyBody {
         velocity: Option<&Bound<'_, PyAny>>,
         softening: Option<f64>,
     ) -> PyResult<Self> {
-        Self::build(Material::WhiteDwarf, mass, position, velocity, softening)
+        Self::build(&body_preset::WHITE_DWARF, "white_dwarf", mass, position, velocity, softening)
     }
 
     /// Gas giant — Jupiter-class hydrogen/helium envelope.
@@ -179,7 +197,7 @@ impl PyBody {
         velocity: Option<&Bound<'_, PyAny>>,
         softening: Option<f64>,
     ) -> PyResult<Self> {
-        Self::build(Material::Gas, mass, position, velocity, softening)
+        Self::build(&body_preset::GAS, "gas_giant", mass, position, velocity, softening)
     }
 
     /// Ice giant — Neptune-class water/methane envelope.
@@ -191,7 +209,7 @@ impl PyBody {
         velocity: Option<&Bound<'_, PyAny>>,
         softening: Option<f64>,
     ) -> PyResult<Self> {
-        Self::build(Material::IceGiant, mass, position, velocity, softening)
+        Self::build(&body_preset::ICE_GIANT, "ice_giant", mass, position, velocity, softening)
     }
 
     /// Rocky body — terrestrial planet or large rocky satellite.
@@ -203,7 +221,7 @@ impl PyBody {
         velocity: Option<&Bound<'_, PyAny>>,
         softening: Option<f64>,
     ) -> PyResult<Self> {
-        Self::build(Material::Rocky, mass, position, velocity, softening)
+        Self::build(&body_preset::ROCKY, "rocky", mass, position, velocity, softening)
     }
 
     /// Icy body — water-dominated composition (outer satellites, KBOs).
@@ -215,7 +233,7 @@ impl PyBody {
         velocity: Option<&Bound<'_, PyAny>>,
         softening: Option<f64>,
     ) -> PyResult<Self> {
-        Self::build(Material::Icy, mass, position, velocity, softening)
+        Self::build(&body_preset::ICY, "icy", mass, position, velocity, softening)
     }
 
     /// Asteroid — rocky minor body.
@@ -227,7 +245,7 @@ impl PyBody {
         velocity: Option<&Bound<'_, PyAny>>,
         softening: Option<f64>,
     ) -> PyResult<Self> {
-        Self::build(Material::Asteroid, mass, position, velocity, softening)
+        Self::build(&body_preset::ASTEROID, "asteroid", mass, position, velocity, softening)
     }
 
     /// Comet — volatile-rich minor body.
@@ -239,7 +257,7 @@ impl PyBody {
         velocity: Option<&Bound<'_, PyAny>>,
         softening: Option<f64>,
     ) -> PyResult<Self> {
-        Self::build(Material::Comet, mass, position, velocity, softening)
+        Self::build(&body_preset::COMET, "comet", mass, position, velocity, softening)
     }
 
     // ── Fluent builder ───────────────────────────────────────────────────
@@ -255,7 +273,7 @@ impl PyBody {
         inner.x = x;
         inner.y = y;
         inner.z = z;
-        Ok(Self { inner })
+        Ok(Self { inner, slug: self.slug })
     }
 
     /// Set the body's velocity to `(vx, vy)` or `(vx, vy, vz)`. Returns
@@ -267,10 +285,10 @@ impl PyBody {
         inner.vx = vx;
         inner.vy = vy;
         inner.vz = vz;
-        Ok(Self { inner })
+        Ok(Self { inner, slug: self.slug })
     }
 
-    /// Override the material-default density. Physical radius is
+    /// Override the preset-default density. Physical radius is
     /// recomputed from the new value at the call site (delegated to
     /// `apsis::domain::body::Body::with_density`). Returns a new `Body`.
     fn with_density(&self, density: f64) -> PyResult<Self> {
@@ -280,17 +298,17 @@ impl PyBody {
                 format!("expected a strictly positive finite float, got {density}"),
             ));
         }
-        Ok(Self { inner: self.inner.with_density(density) })
+        Ok(Self { inner: self.inner.with_density(density), slug: self.slug })
     }
 
     /// Drop this body's Plummer softening to zero, restoring the exact
     /// $1/r$ potential for every interaction it participates in. Use
     /// when measuring a deviation-from-Kepler signal whose magnitude
     /// is below the apsidal precession introduced by the default
-    /// material-scaled softening (post-Newtonian, $J_2$ oblateness,
+    /// preset-scaled softening (post-Newtonian, $J_2$ oblateness,
     /// tidal dissipation). Returns a new `Body`.
     fn unsoftened(&self) -> Self {
-        Self { inner: self.inner.unsoftened() }
+        Self { inner: self.inner.unsoftened(), slug: self.slug }
     }
 
     // ── Read-only properties ─────────────────────────────────────────────
@@ -372,26 +390,36 @@ impl PyBody {
         self.inner.physical_radius
     }
 
-    /// Material class as a canonical slug (e.g. `"star"`, `"rocky"`,
-    /// `"gas_giant"`). The slug round-trips with the factory names:
-    /// `Body.star(...).material == "star"`.
+    /// Construction-time preset slug (e.g. `"star"`, `"rocky"`,
+    /// `"gas_giant"`). Round-trips with the factory names:
+    /// `Body.star(...).material == "star"`. The slug is a binding-
+    /// layer convenience; the underlying core body holds no material
+    /// taxonomy field.
     #[getter]
     fn material(&self) -> &'static str {
-        material_slug(self.inner.material)
+        self.slug
     }
 
-    /// Bolometric luminosity in internal energy / time units. Stays at
-    /// zero for non-luminous materials and for luminous bodies that
-    /// have not been processed by the radiation pipeline.
+    /// Bolometric luminosity in solar luminosities. Set at construction
+    /// time by luminous presets ([`star`], [`brown_dwarf`],
+    /// [`white_dwarf`]); zero for non-luminous classes.
     #[getter]
     fn luminosity(&self) -> f64 {
         self.inner.luminosity
     }
 
+    /// Radiation-pressure receiver coefficient `Q_pr`. Positive on
+    /// radiation receivers (asteroids, comets, icy grains); zero on
+    /// emitters and large planets.
+    #[getter]
+    fn q_pr(&self) -> f64 {
+        self.inner.q_pr
+    }
+
     fn __repr__(&self) -> String {
         format!(
             "Body(material={:?}, mass={}, position=({}, {}, {}), velocity=({}, {}, {}), softening={})",
-            material_slug(self.inner.material),
+            self.slug,
             self.inner.mass,
             self.inner.x,
             self.inner.y,
@@ -401,27 +429,6 @@ impl PyBody {
             self.inner.vz,
             self.inner.softening,
         )
-    }
-}
-
-/// Map a core `Material` variant to its canonical Python slug.
-/// Compile-checked exhaustive — a new variant in
-/// `apsis::domain::materials` will surface as a missing-arm error here
-/// at the next `cargo build` and force a deliberate decision on the
-/// Python-facing name. That deliberate-decision property is the entire
-/// reason this lives in the binding rather than in the core: the Python
-/// slug is part of the binding's API contract, not of the physics.
-fn material_slug(m: Material) -> &'static str {
-    match m {
-        Material::Star => "star",
-        Material::BrownDwarf => "brown_dwarf",
-        Material::WhiteDwarf => "white_dwarf",
-        Material::Gas => "gas_giant",
-        Material::IceGiant => "ice_giant",
-        Material::Rocky => "rocky",
-        Material::Icy => "icy",
-        Material::Asteroid => "asteroid",
-        Material::Comet => "comet",
     }
 }
 

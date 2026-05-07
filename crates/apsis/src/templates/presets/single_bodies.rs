@@ -1,4 +1,4 @@
-use crate::domain::materials::Material;
+use crate::domain::body_preset;
 use crate::templates::{Template, TemplateBody, UnitSystem};
 
 pub fn star(_seed: u64) -> Template {
@@ -10,7 +10,7 @@ pub fn star(_seed: u64) -> Template {
             mass: 1.0,
             position: Some([0.0, 0.0, 0.0]),
             velocity: [0.0, 0.0, 0.0],
-            material: Material::Star,
+            preset: &body_preset::STAR,
         }],
         display_scale: 1.0,
         suggested_dt: None,
@@ -27,7 +27,7 @@ pub fn brown_dwarf(_seed: u64) -> Template {
             mass: 0.04,
             position: Some([0.0, 0.0, 0.0]),
             velocity: [0.0, 0.0, 0.0],
-            material: Material::BrownDwarf,
+            preset: &body_preset::BROWN_DWARF,
         }],
         display_scale: 1.0,
         suggested_dt: None,
@@ -44,7 +44,7 @@ pub fn gas_giant(_seed: u64) -> Template {
             mass: 9.5e-4, // ≈ Jupiter mass in solar units
             position: Some([0.0, 0.0, 0.0]),
             velocity: [0.0, 0.0, 0.0],
-            material: Material::Gas,
+            preset: &body_preset::GAS,
         }],
         display_scale: 1.0,
         suggested_dt: None,
@@ -61,7 +61,7 @@ pub fn rocky_planet(_seed: u64) -> Template {
             mass: 3.0e-6, // ≈ Earth mass in solar units
             position: Some([0.0, 0.0, 0.0]),
             velocity: [0.0, 0.0, 0.0],
-            material: Material::Rocky,
+            preset: &body_preset::ROCKY,
         }],
         display_scale: 1.0,
         suggested_dt: None,

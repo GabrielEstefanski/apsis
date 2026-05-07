@@ -10,7 +10,7 @@
 //! Historically used as a benchmark for adaptive integrators.
 
 use crate::{
-    domain::materials::Material,
+    domain::body_preset,
     templates::{Template, TemplateBody, UnitSystem},
 };
 
@@ -26,21 +26,21 @@ pub fn three_body_pythagorean(_seed: u64) -> Template {
                 mass: 3.0,
                 position: Some([1.0, 3.0, 0.0]),
                 velocity: [0.0, 0.0, 0.0],
-                material: Material::Rocky,
+                preset: &body_preset::ROCKY,
             },
             TemplateBody {
                 name: Some("m = 4"),
                 mass: 4.0,
                 position: Some([-2.0, -1.0, 0.0]),
                 velocity: [0.0, 0.0, 0.0],
-                material: Material::Rocky,
+                preset: &body_preset::ROCKY,
             },
             TemplateBody {
                 name: Some("m = 5"),
                 mass: 5.0,
                 position: Some([1.0, -1.0, 0.0]),
                 velocity: [0.0, 0.0, 0.0],
-                material: Material::Rocky,
+                preset: &body_preset::ROCKY,
             },
         ],
         display_scale: 1.0,

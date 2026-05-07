@@ -6,11 +6,11 @@
 //!
 //! # Responsibility boundary
 //!
-//! - [`Material`] owns `q_pr()` — a scalar property of surface composition.
-//! - This module owns the translation from `(Body, Material)` → [`RadiationParams`],
-//!   because that requires knowing both the geometry (`physical_radius`) and
-//!   the composition (`q_pr`). Neither `Body` nor `Material` alone has enough
-//!   information.
+//! - [`Body`] carries `q_pr` directly as a physical property (set by the
+//!   construction preset for receiver classes — asteroids, comets, icy
+//!   bodies — and zero on emitters and large planets).
+//! - This module reads `(Body::q_pr, Body::physical_radius, Body::mass)`
+//!   and packs them into [`RadiationParams`] for the force kernels.
 
 use std::f64::consts::PI;
 
@@ -152,20 +152,19 @@ impl PerturbationForce for RadiationField {
 
 // ── Private helper ────────────────────────────────────────────────────────────
 
-/// Derives [`RadiationParams`] for a body from its geometry and material.
+/// Derives [`RadiationParams`] for a body from its geometry and the
+/// `q_pr` it carries.
 ///
-/// Returns `None` if the material is not a radiation receiver (`q_pr == 0`),
-/// which covers stars, planets, and all massive bodies. This is the single
-/// site where [`Material::q_pr`] and [`Body::physical_radius`] are combined —
-/// neither type needs to know about the other.
+/// Returns `None` for non-receiver bodies (`q_pr == 0`), which covers
+/// stars, planets, and any user body that opted out via
+/// [`Body::with_q_pr(0.0)`].
 fn body_radiation_params(body: &Body) -> Option<RadiationParams> {
-    let q_pr = body.material.q_pr();
-    if q_pr <= 0.0 {
+    if body.q_pr <= 0.0 {
         return None;
     }
     Some(RadiationParams {
         area: PI * body.physical_radius * body.physical_radius,
         mass: body.mass,
-        q_pr,
+        q_pr: body.q_pr,
     })
 }
