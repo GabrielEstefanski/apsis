@@ -15,6 +15,15 @@ pub mod input;
 
 use glam::{DMat4, DVec3};
 
+/// Vertical field of view used by the body pass, in radians.
+/// Shared so canvas projection and any framing helper that has to
+/// reason about on-screen pixel sizes cannot drift apart.
+pub const FOV_Y_RAD: f32 = 0.698_131_7; // 40°.to_radians()
+/// Near plane of the reverse-Z perspective. 0.001 AU ≈ 150 000 km —
+/// past the surface of any planet, well inside the camera's typical
+/// orbit; framing helpers floor distances at a small multiple of this.
+pub const NEAR_PLANE: f32 = 0.001;
+
 /// Singularity guard for elevation: at exactly ±π/2 the up-vector
 /// degenerates and azimuth becomes ill-defined. Clamping at this
 /// margin (≈ 0.057°) is invisible in practice.

@@ -1,3 +1,4 @@
+use crate::app::camera::{FOV_Y_RAD, NEAR_PLANE};
 use crate::app::render_params::{RenderParams, compute_render_radius};
 use crate::app::ui::{BodySelection, SelectionForm, SemanticScaleMode, SimulationApp, UndoRecord};
 use crate::render::CallbackFn;
@@ -25,14 +26,12 @@ const RING_GAP: f32 = 5.0;
 
 /// Camera pan animation: fraction of remaining distance applied each frame.
 const CAM_LERP: f32 = 0.16;
-/// Follow-mode exponential smoothing rate (1/s). Higher = tighter tracking.
-/// At 60 fps, `alpha = 1 - exp(-dt * FOLLOW_RATE) ≈ 0.55` — responsive without
-/// feeling jolty on the first-click transition.
-const FOLLOW_RATE: f32 = 48.0;
-/// If the body has moved farther than this many pixels between frames, snap
-/// the camera instead of lerping. Prevents losing fast bodies at high sim
-/// speeds (where a single publish can advance the body across the viewport).
-const FOLLOW_SNAP_PX: f32 = 120.0;
+
+/// Body framing: target on-screen pixel size for a body when click-to-focus
+/// reframes the camera. The chosen distance puts `physical_radius` at
+/// roughly this many pixels; mode-specific min-px floors take over when the
+/// body would otherwise be sub-pixel.
+const FRAME_TARGET_PX: f32 = 80.0;
 
 /// Eccentricity window around 1.0 within which an orbit is considered
 /// numerically degenerate (near-parabolic). Chosen deliberately tight so
@@ -52,6 +51,80 @@ fn project(
     label: &'static str,
 ) -> (f32, f32, f32, eframe::egui::Color32, &'static str) {
     (cam.x as f32, -cam.y as f32, cam.z as f32, color, label)
+}
+
+// ── World → screen projection ────────────────────────────────────────────────
+
+fn camera_view_proj(camera: &crate::app::camera::OrbitCamera, rect: egui::Rect) -> glam::Mat4 {
+    let aspect = (rect.width() / rect.height().max(1.0)).max(0.001);
+    let proj = glam::Mat4::perspective_infinite_reverse_rh(FOV_Y_RAD, aspect, NEAR_PLANE);
+    let view = camera.current.view_matrix().as_mat4();
+    proj * view
+}
+
+/// Project a world-space point onto canvas screen coordinates. Returns
+/// `None` when the point is at or behind the near plane (clip-space
+/// `w ≤ 0`) — caller should skip drawing or hit-testing such bodies.
+fn world_to_screen(
+    world_pos: glam::Vec3,
+    view_proj: glam::Mat4,
+    rect: egui::Rect,
+) -> Option<egui::Pos2> {
+    let clip = view_proj * world_pos.extend(1.0);
+    if clip.w <= 0.0 {
+        return None;
+    }
+    let ndc = clip.truncate() / clip.w;
+    let sx = rect.min.x + (ndc.x * 0.5 + 0.5) * rect.width();
+    // Egui screen-y grows downward; flip the y-NDC sign.
+    let sy = rect.min.y + (-ndc.y * 0.5 + 0.5) * rect.height();
+    Some(egui::pos2(sx, sy))
+}
+
+/// Pixel radius of a sphere at `center` of physical size `radius_world`
+/// as seen by a perspective camera at `camera_pos`. Matches the formula
+/// used by the body shader so hit-test and ring overlays land on the
+/// rendered silhouette.
+fn projected_radius_px(
+    center: glam::Vec3,
+    radius_world: f32,
+    camera_pos: glam::Vec3,
+    canvas_height_px: f32,
+) -> f32 {
+    let dist = (center - camera_pos).length().max(1e-6);
+    let focal_y = canvas_height_px / (2.0 * (FOV_Y_RAD * 0.5).tan());
+    radius_world * focal_y / dist
+}
+
+/// World-space render radius for a body under the active semantic scale mode.
+///
+/// Mirrors `compute_render_radius` but works in world units so the result can
+/// be passed directly to `draw_body` and `projected_radius_px`. The semantic
+/// modes own visibility on their own — `Comparative` floors at `min_px`-
+/// equivalent world units, `Illustrative` compresses to a 2.5–20 px window —
+/// so no post-multiplier is applied at the call sites.
+fn radius_world_3d(
+    physical_radius: f64,
+    mode: SemanticScaleMode,
+    min_px: f32,
+    camera_dist: f32,
+    focal_y: f32,
+) -> f32 {
+    let r = physical_radius as f32;
+    let px_to_world = camera_dist / focal_y;
+
+    match mode {
+        SemanticScaleMode::Physical => r,
+
+        SemanticScaleMode::Comparative => r.max(min_px * px_to_world),
+
+        SemanticScaleMode::Illustrative => {
+            let physical_px = r * focal_y / camera_dist;
+            let k = 0.15;
+            let scaled_px = (1.0 - (-k * physical_px).exp()) * 20.0;
+            scaled_px.max(min_px).max(2.5) * px_to_world
+        },
+    }
 }
 
 // ── Orbit overlay filter helpers ──────────────────────────────────────────────
@@ -169,6 +242,14 @@ impl SimulationApp {
             });
 
             if pointer_in_canvas && (rmb || mmb) && ptr_delta != egui::Vec2::ZERO {
+                // Pan moves the pivot in world space — incompatible with the
+                // body-follow loop, which clobbers the pivot each frame. Drop
+                // follow on pan so the user's manual drag is what they see.
+                // Orbit (RMB) and zoom keep follow alive, matching the
+                // Universe Sandbox / KSP map-view idiom.
+                if mmb {
+                    self.follow_selected_body = false;
+                }
                 apply_drag(
                     &mut self.camera,
                     DragInput {
@@ -208,22 +289,15 @@ impl SimulationApp {
         }
 
         // ── Body-follow tracking ──────────────────────────────────────────────
-        // Applied AFTER zoom and pan so neither can drag the followed body off
-        // centre. Uses frame-rate-independent exponential smoothing and snaps
-        // to the target when the body outran the lerp in a single frame.
+        // Drive the 3D orbit camera's pivot toward the followed body. The
+        // spring in OrbitCamera::integrate (called from the app tick) does
+        // the actual smoothing — feeding `target.pivot` is the only thing
+        // this loop owns. Runs after pan/zoom so manual gestures cannot
+        // race with follow on the same frame.
         if self.follow_selected_body {
             if let Some(idx) = self.selection.single() {
                 if let Some(body) = self.system.bodies().get(idx) {
-                    let target =
-                        egui::vec2(-body.x as f32 * self.scale, -body.y as f32 * self.scale);
-                    let delta = target - self.offset;
-                    let alpha = 1.0 - (-dt * FOLLOW_RATE).exp();
-                    if delta.length_sq() >= FOLLOW_SNAP_PX * FOLLOW_SNAP_PX {
-                        // Body moved further than we can smoothly catch — snap.
-                        self.offset = target;
-                    } else if delta.length_sq() > 0.01 {
-                        self.offset += delta * alpha;
-                    }
+                    self.camera.target.pivot = glam::DVec3::new(body.x, body.y, body.z);
                     ctx.request_repaint();
                 } else {
                     self.follow_selected_body = false;
@@ -246,11 +320,17 @@ impl SimulationApp {
             },
         };
 
+        // World → screen transform for the 3D body pass. Built once per
+        // frame and threaded through hit-test, hover, label drawing and
+        // the render callback so a single source of truth governs where
+        // each body lives on screen.
+        let view_proj = camera_view_proj(&self.camera, rect);
+
         // ── Hover detection (before click, drives cursor + ring) ──────────────
         let center_after_pan = rect.center() + self.offset;
         self.hovered_body = hover_pos
             .filter(|p| rect.contains(*p))
-            .and_then(|p| self.find_body_at(p, center_after_pan, render_params));
+            .and_then(|p| self.find_body_at(p, view_proj, rect));
 
         // Cursor: pointer over bodies, grab over empty space, grabbing while dragging
         if response.dragged() {
@@ -274,10 +354,17 @@ impl SimulationApp {
         {
             let mut backend = self.backend.lock().unwrap();
             backend.begin();
-            backend.show_grid = self.show_grid;
+            // Grid, trails and orbit overlay still draw in the legacy 2D
+            // screen-space pass; force them off until each one is moved
+            // onto the camera-driven path.
+            backend.show_grid = false;
 
             let bodies = self.system.bodies();
 
+            // Screen positions are still computed because lines/circles
+            // (orbit overlay, apsides, selection rings) and the legacy 2D
+            // hit-test consume them. The body pass itself uses world
+            // coords directly through the camera uniform.
             let mut screen_positions = Vec::with_capacity(bodies.len());
 
             for b in bodies {
@@ -347,25 +434,42 @@ impl SimulationApp {
                 ..Default::default()
             });
 
-            for (i, (sp, b)) in screen_positions.iter().enumerate() {
+            let body_camera_pos = {
+                let e = self.camera.current.eye();
+                glam::Vec3::new(e.x as f32, e.y as f32, e.z as f32)
+            };
+            let body_canvas_h = rect.height().max(1.0);
+            let body_focal_y = body_canvas_h / (2.0 * (FOV_Y_RAD * 0.5).tan());
+            let body_mode = self.semantic_scale_mode;
+            let body_min_px: f32 = match body_mode {
+                SemanticScaleMode::Physical => 0.0,
+                SemanticScaleMode::Comparative => 3.0,
+                SemanticScaleMode::Illustrative => 5.0,
+            };
+            for (i, (_sp, b)) in screen_positions.iter().enumerate() {
                 let rgb = match body_colors_override.as_ref() {
                     Some(colors) => colors[i],
                     None => b.color,
                 };
-                let r = compute_render_radius(b.physical_radius, render_params);
+                let body_world = glam::Vec3::new(b.x as f32, b.y as f32, b.z as f32);
+                let body_dist = (body_world - body_camera_pos).length().max(1e-6);
+                let r_world = radius_world_3d(
+                    b.physical_radius,
+                    body_mode,
+                    body_min_px,
+                    body_dist,
+                    body_focal_y,
+                );
 
-                // Luminous bodies: self-lit disc (emissive carries the colour,
-                // albedo stays dark so the unlit side doesn't darken their
-                // surface). Non-luminous: pure albedo, no self-emission.
                 let base = [rgb[0] as f32 / 255.0, rgb[1] as f32 / 255.0, rgb[2] as f32 / 255.0];
                 let (albedo, emissive) = if b.is_luminous() {
                     ([0.0, 0.0, 0.0, 1.0], [base[0], base[1], base[2], 1.0])
                 } else {
                     ([base[0], base[1], base[2], 1.0], [0.0, 0.0, 0.0, 1.0])
                 };
-                let world_pos = [b.x as f32, b.y as f32, 0.0];
+                let world_pos = [b.x as f32, b.y as f32, b.z as f32];
 
-                backend.draw_body(*sp, r, world_pos, albedo, emissive);
+                backend.draw_body(world_pos, r_world, albedo, emissive);
             }
 
             // Predicted Keplerian orbits — pure visual annotation, never
@@ -424,7 +528,13 @@ impl SimulationApp {
                     siblings_by_primary.get(&p).map(|v| v.as_slice()).unwrap_or(&empty_siblings)
                 };
 
-                if self.show_orbit_ellipses {
+                // Suspended while the overlay is screen-space-only — it
+                // would render relative to the legacy 2D camera while the
+                // bodies sit on the 3D camera. Reinstated when the orbit
+                // overlay is rebuilt against `view_proj`.
+                let render_orbit_overlay = false;
+
+                if render_orbit_overlay && self.show_orbit_ellipses {
                     let bg_style = OrbitOverlayStyle::background_default();
                     let vp_center = rect.center();
                     let vp_half_diag = (rect.width().powi(2) + rect.height().powi(2)).sqrt() * 0.5;
@@ -511,7 +621,7 @@ impl SimulationApp {
                     }
                 }
 
-                if !self.pinned_orbits.is_empty() {
+                if render_orbit_overlay && !self.pinned_orbits.is_empty() {
                     let fg_style = OrbitOverlayStyle::selected_default();
                     let pins: Vec<usize> = self.pinned_orbits.iter().copied().collect();
                     for i in pins {
@@ -545,7 +655,7 @@ impl SimulationApp {
                     }
                 }
 
-                if let Some(idx) = self.selection.single() {
+                if render_orbit_overlay && let Some(idx) = self.selection.single() {
                     if idx < bodies.len() && !is_system_root(bodies, idx) {
                         let primary = self
                             .orbit_hierarchy
@@ -611,6 +721,10 @@ impl SimulationApp {
                 backend.trail_visibility = None;
                 backend.trail_buffer = None;
             };
+            // Force trails off until they ride on the 3D camera. See the
+            // `show_grid = false` note above.
+            backend.trail_buffer = None;
+            backend.trail_visibility = None;
         }
 
         // ── Place-mode: click or drag-release to spawn a body ────────────────
@@ -628,7 +742,7 @@ impl SimulationApp {
             if response.drag_started() {
                 if let Some(pos) = pointer.press_origin() {
                     // Only start a place-drag if not clicking an existing body
-                    if self.find_body_at(pos, center_after_pan, render_params).is_none() {
+                    if self.find_body_at(pos, view_proj, rect).is_none() {
                         self.place_drag_start = Some(pos);
                     }
                 }
@@ -677,7 +791,7 @@ impl SimulationApp {
                 let start = self.place_drag_start.take();
                 if let Some(cursor) = ctx.input(|i| i.pointer.interact_pos()) {
                     // Don't spawn if clicking an existing body
-                    if self.find_body_at(cursor, center_after_pan, render_params).is_none() {
+                    if self.find_body_at(cursor, view_proj, rect).is_none() {
                         let spawn_pos = start.unwrap_or(cursor);
                         let wx = (spawn_pos.x - center_after_pan.x) as f64 / self.scale as f64;
                         let wy = (spawn_pos.y - center_after_pan.y) as f64 / self.scale as f64;
@@ -715,7 +829,7 @@ impl SimulationApp {
             if response.clicked() {
                 if let Some(cursor) = ctx.input(|i| i.pointer.interact_pos()) {
                     let shift = ctx.input(|i| i.modifiers.shift);
-                    match self.find_body_at(cursor, center_after_pan, render_params) {
+                    match self.find_body_at(cursor, view_proj, rect) {
                         Some(idx) => {
                             if shift {
                                 // Shift+click: toggle body into/out of the selection.
@@ -742,30 +856,28 @@ impl SimulationApp {
                                     },
                                 }
                             } else {
-                                // Plain click: select single body and pan to it.
+                                // Plain click: select single body and frame
+                                // the 3D camera on it. Follow keeps the pivot
+                                // tracking the body each subsequent frame.
                                 let body = self.system.bodies()[idx];
                                 self.selection = BodySelection::select_single(idx);
                                 self.follow_selected_body = true;
                                 let name = self.system.name(idx).to_owned();
                                 self.selection_form = Some(SelectionForm::from_body(&body, &name));
 
-                                self.pan_vel = egui::Vec2::ZERO;
-                                self.zoom_vel = 0.0;
-
-                                let screen_r =
-                                    compute_render_radius(body.physical_radius, render_params);
-                                if screen_r < 6.0 && body.physical_radius > 1e-30 {
-                                    let desired_px = 24.0_f32;
-                                    let new_scale = (desired_px / body.physical_radius as f32)
-                                        .clamp(self.scale * 2.0, self.scale * 500.0)
-                                        .min(50_000.0);
-                                    self.scale = new_scale;
-                                }
-
-                                self.camera_anim_target = Some(egui::vec2(
-                                    -body.x as f32 * self.scale,
-                                    -body.y as f32 * self.scale,
-                                ));
+                                let canvas_h = rect.height().max(1.0);
+                                let focal_y = canvas_h / (2.0 * (FOV_Y_RAD * 0.5).tan());
+                                let r = (body.physical_radius as f32).max(1e-12);
+                                // Distance such that physical_radius projects
+                                // to ~FRAME_TARGET_PX. Floor at 5× the near
+                                // plane to avoid front-clipping the body, and
+                                // at 4× the body radius so the camera never
+                                // ends up inside the geometry.
+                                let dist = ((r * focal_y) / FRAME_TARGET_PX)
+                                    .max(NEAR_PLANE * 5.0)
+                                    .max(r * 4.0) as f64;
+                                self.camera.target.pivot = glam::DVec3::new(body.x, body.y, body.z);
+                                self.camera.target.distance = dist;
                             }
                         },
                         None => {
@@ -821,6 +933,10 @@ impl SimulationApp {
         let queue = self.queue.as_ref().unwrap().clone();
         let format = self.format.unwrap();
 
+        let view_proj_arr = view_proj.to_cols_array_2d();
+        let eye = self.camera.current.eye();
+        let camera_pos = [eye.x as f32, eye.y as f32, eye.z as f32];
+
         ui.painter().add(egui_wgpu::Callback::new_paint_callback(
             rect,
             CallbackFn {
@@ -828,10 +944,10 @@ impl SimulationApp {
                 device,
                 queue,
                 format,
-                // Canvas dimensions (not full window) so `to_ndc` maps correctly
-                // into the canvas-rect viewport that egui_wgpu sets for callbacks.
                 screen: [rect.width(), rect.height()],
                 viewport_min: [rect.min.x, rect.min.y],
+                view_proj: view_proj_arr,
+                camera_pos,
             },
         ));
 
@@ -842,7 +958,7 @@ impl SimulationApp {
         }
 
         // ── Overlay: rings + labels (on top of GPU layer) ─────────────────────
-        self.draw_overlay(ui, center_after_pan, time);
+        self.draw_overlay(ui, rect, view_proj, time);
 
         // ── FPS / frame-time HUD (top-right of canvas, subtle) ────────────────
         if self.show_fps_hud {
@@ -916,7 +1032,7 @@ impl SimulationApp {
 
     // ── Overlay ───────────────────────────────────────────────────────────────
 
-    fn draw_overlay(&self, ui: &egui::Ui, center: Pos2, time: f32) {
+    fn draw_overlay(&self, ui: &egui::Ui, rect: egui::Rect, view_proj: glam::Mat4, time: f32) {
         let bodies = self.system.bodies();
         let names = self.system.names();
 
@@ -925,22 +1041,30 @@ impl SimulationApp {
         }
 
         let max_mass = bodies.iter().map(|b| b.mass).fold(0.0_f64, f64::max);
-
-        // !! Use the SAME min_px as the GPU renderer so rings/labels are anchored
-        //    to the visible disc, not to the (possibly sub-pixel) physical radius.
-        let render_params = RenderParams {
-            world_scale: self.scale,
-            mode: self.semantic_scale_mode,
-            min_px: match self.semantic_scale_mode {
-                SemanticScaleMode::Physical => 0.0,
-                SemanticScaleMode::Comparative => 3.0,
-                SemanticScaleMode::Illustrative => 5.0,
-            },
+        let camera_pos = {
+            let e = self.camera.current.eye();
+            glam::Vec3::new(e.x as f32, e.y as f32, e.z as f32)
+        };
+        let canvas_h = rect.height().max(1.0);
+        let focal_y = canvas_h / (2.0 * (FOV_Y_RAD * 0.5).tan());
+        let mode = self.semantic_scale_mode;
+        let min_px: f32 = match mode {
+            SemanticScaleMode::Physical => 0.0,
+            SemanticScaleMode::Comparative => 3.0,
+            SemanticScaleMode::Illustrative => 5.0,
         };
 
-        // Label visibility: show when body is large enough on screen OR important
-        // enough given current zoom. threshold ↑ at low zoom → fewer labels.
-        let importance_threshold = (2.0_f64 / self.scale as f64).clamp(0.001, 1.0);
+        // Label visibility threshold scales with camera distance so a wide
+        // overview shows fewer labels than a close-up framing.
+        let cam_dist = (camera_pos
+            - glam::Vec3::new(
+                self.camera.current.pivot.x as f32,
+                self.camera.current.pivot.y as f32,
+                self.camera.current.pivot.z as f32,
+            ))
+        .length()
+        .max(1e-3);
+        let importance_threshold = (2.0_f64 / cam_dist as f64).clamp(0.001, 1.0);
 
         let painter = ui.painter();
         let font = FontId::proportional(LABEL_FONT_SIZE);
@@ -949,12 +1073,15 @@ impl SimulationApp {
         let pulse = (time * 3.5).sin() * 1.5_f32;
 
         for (i, (body, name)) in bodies.iter().zip(names.iter()).enumerate() {
-            // visual_r = how big the body actually appears on screen (matches GPU)
-            let visual_r = compute_render_radius(body.physical_radius, render_params);
-
-            let px = center.x + body.x as f32 * self.scale;
-            let py = center.y + body.y as f32 * self.scale;
-            let body_pos = egui::pos2(px, py);
+            let world = glam::Vec3::new(body.x as f32, body.y as f32, body.z as f32);
+            let Some(body_pos) = world_to_screen(world, view_proj, rect) else {
+                continue;
+            };
+            let body_dist = (world - camera_pos).length().max(1e-6);
+            let r_world = radius_world_3d(body.physical_radius, mode, min_px, body_dist, focal_y);
+            let visual_r = projected_radius_px(world, r_world, camera_pos, canvas_h);
+            let px = body_pos.x;
+            let py = body_pos.y;
 
             // Single body selected → pulsing ring; one of many selected → dim ring.
             let is_primary = self.selection.single() == Some(i);
@@ -1101,33 +1228,42 @@ impl SimulationApp {
 
     // ── Hit-test ──────────────────────────────────────────────────────────────
 
-    fn find_body_at(
-        &self,
-        cursor: Pos2,
-        center: Pos2,
-        render_params: RenderParams,
-    ) -> Option<usize> {
+    fn find_body_at(&self, cursor: Pos2, view_proj: glam::Mat4, rect: egui::Rect) -> Option<usize> {
         let bodies = self.system.bodies();
+        let camera_pos = {
+            let e = self.camera.current.eye();
+            glam::Vec3::new(e.x as f32, e.y as f32, e.z as f32)
+        };
+        let canvas_h = rect.height().max(1.0);
+        let focal_y = canvas_h / (2.0 * (FOV_Y_RAD * 0.5).tan());
+        let mode = self.semantic_scale_mode;
+        let min_px: f32 = match mode {
+            SemanticScaleMode::Physical => 0.0,
+            SemanticScaleMode::Comparative => 3.0,
+            SemanticScaleMode::Illustrative => 5.0,
+        };
 
-        // Iterate in reverse so top-rendered (last) body wins ties
-        for i in (0..bodies.len()).rev() {
-            let b = &bodies[i];
-
-            let px = center.x + b.x as f32 * self.scale;
-            let py = center.y + b.y as f32 * self.scale;
-
-            // Hit radius: visual size + generous minimum for easy clicking
-            let r = compute_render_radius(b.physical_radius, render_params).max(MIN_HIT_PX);
-
-            let dx = cursor.x - px;
-            let dy = cursor.y - py;
-
-            if dx * dx + dy * dy <= r * r {
-                return Some(i);
+        // Pick the front-most candidate among bodies whose projected disc
+        // covers the cursor. Front-to-back ordering matters in 3D where
+        // bodies can occlude each other regardless of insertion order.
+        let mut best: Option<(usize, f32)> = None;
+        for (i, b) in bodies.iter().enumerate() {
+            let world = glam::Vec3::new(b.x as f32, b.y as f32, b.z as f32);
+            let Some(screen) = world_to_screen(world, view_proj, rect) else { continue };
+            let body_dist = (world - camera_pos).length().max(1e-6);
+            let r_world = radius_world_3d(b.physical_radius, mode, min_px, body_dist, focal_y);
+            let r = projected_radius_px(world, r_world, camera_pos, canvas_h).max(MIN_HIT_PX);
+            let dx = cursor.x - screen.x;
+            let dy = cursor.y - screen.y;
+            if dx * dx + dy * dy > r * r {
+                continue;
+            }
+            let cam_dist_sq = (world - camera_pos).length_squared();
+            if best.is_none_or(|(_, prev_d2)| cam_dist_sq < prev_d2) {
+                best = Some((i, cam_dist_sq));
             }
         }
-
-        None
+        best.map(|(i, _)| i)
     }
 
     /// Resolve the active [`ColorViewSelection`] against current state.

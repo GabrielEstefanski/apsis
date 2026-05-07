@@ -151,28 +151,36 @@ impl SimulationApp {
             return;
         }
 
-        let mut min_x = f64::INFINITY;
-        let mut max_x = f64::NEG_INFINITY;
-        let mut min_y = f64::INFINITY;
-        let mut max_y = f64::NEG_INFINITY;
+        let (mut min_x, mut max_x) = (f64::INFINITY, f64::NEG_INFINITY);
+        let (mut min_y, mut max_y) = (f64::INFINITY, f64::NEG_INFINITY);
+        let (mut min_z, mut max_z) = (f64::INFINITY, f64::NEG_INFINITY);
 
         for b in bodies {
             min_x = min_x.min(b.x);
             max_x = max_x.max(b.x);
             min_y = min_y.min(b.y);
             max_y = max_y.max(b.y);
+            min_z = min_z.min(b.z);
+            max_z = max_z.max(b.z);
         }
 
-        let width = (max_x - min_x) as f32;
-        let height = (max_y - min_y) as f32;
-        let size = width.max(height).max(1e-9);
+        let centroid =
+            glam::DVec3::new((min_x + max_x) * 0.5, (min_y + max_y) * 0.5, (min_z + max_z) * 0.5);
+        // Half the longest bounding-box axis is the smallest sphere that
+        // still contains every body — a safe over-estimate of the true
+        // bounding sphere that avoids a second pass over the body list.
+        let extent = (max_x - min_x).max(max_y - min_y).max(max_z - min_z) * 0.5;
+        let extent = extent.max(1e-9);
 
-        self.scale = 400.0 / (size * 1.2);
+        // Distance such that `extent` projects to half the vertical FOV,
+        // with a 1.2× margin so bodies don't sit exactly on the screen
+        // edge. Floored at 5× the near plane so degenerate single-body
+        // systems don't end up clipped against the camera.
+        let half_fov = (crate::app::camera::FOV_Y_RAD as f64) * 0.5;
+        let dist = (extent / half_fov.tan() * 1.2).max(crate::app::camera::NEAR_PLANE as f64 * 5.0);
 
-        let center_x = (min_x + max_x) as f32 * 0.5;
-        let center_y = (min_y + max_y) as f32 * 0.5;
-
-        self.offset = egui::vec2(-center_x * self.scale, -center_y * self.scale);
+        self.camera.target.pivot = centroid;
+        self.camera.target.distance = dist;
         self.follow_selected_body = false;
     }
 }
