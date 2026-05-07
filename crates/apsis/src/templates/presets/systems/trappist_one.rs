@@ -15,6 +15,7 @@ pub fn trappist_1(seed: u64) -> Template {
         name: Some("TRAPPIST-1"),
         mass: 0.089,
         preset: &body_preset::STAR,
+        density: None,
         position: Some([0.0, 0.0, 0.0]),
         velocity: [0.0, 0.0, 0.0],
     });
@@ -38,6 +39,7 @@ pub fn trappist_1(seed: u64) -> Template {
             name: Some(name),
             mass,
             preset: &body_preset::ROCKY,
+            density: None,
             position: Some(pos),
             velocity: vel,
         });

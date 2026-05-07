@@ -19,6 +19,7 @@ pub fn hd_80606(seed: u64) -> Template {
         name: Some("HD 80606"),
         mass: m_star,
         preset: &body_preset::STAR,
+        density: None,
         position: Some([0.0, 0.0, 0.0]),
         velocity: [0.0, 0.0, 0.0],
     });
@@ -39,6 +40,7 @@ pub fn hd_80606(seed: u64) -> Template {
         name: Some("HD 80606 b"),
         mass: m_planet,
         preset: &body_preset::GAS,
+        density: None,
         position: Some(pos),
         velocity: vel,
     });

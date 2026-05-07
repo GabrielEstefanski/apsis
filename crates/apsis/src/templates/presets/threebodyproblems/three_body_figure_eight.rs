@@ -14,6 +14,7 @@ pub fn three_body_figure_eight(_seed: u64) -> Template {
                 position: Some([-0.97000436, 0.24308753, 0.0]),
                 velocity: [0.4662036850, 0.4323657300, 0.0],
                 preset: &body_preset::ROCKY,
+                density: None,
             },
             TemplateBody {
                 name: Some("Body 2"),
@@ -21,6 +22,7 @@ pub fn three_body_figure_eight(_seed: u64) -> Template {
                 position: Some([0.97000436, -0.24308753, 0.0]),
                 velocity: [0.4662036850, 0.4323657300, 0.0],
                 preset: &body_preset::ROCKY,
+                density: None,
             },
             TemplateBody {
                 name: Some("Body 3"),
@@ -28,6 +30,7 @@ pub fn three_body_figure_eight(_seed: u64) -> Template {
                 position: Some([0.0, 0.0, 0.0]),
                 velocity: [-0.93240737, -0.86473146, 0.0],
                 preset: &body_preset::ROCKY,
+                density: None,
             },
         ],
         display_scale: 1.0,

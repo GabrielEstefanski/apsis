@@ -47,6 +47,7 @@ pub fn three_body_lagrange_equilateral(_seed: u64) -> Template {
                 position: Some(p1),
                 velocity: tangential(p1, v),
                 preset: &body_preset::ROCKY,
+                density: None,
             },
             TemplateBody {
                 name: Some("Body 2"),
@@ -54,6 +55,7 @@ pub fn three_body_lagrange_equilateral(_seed: u64) -> Template {
                 position: Some(p2),
                 velocity: tangential(p2, v),
                 preset: &body_preset::ROCKY,
+                density: None,
             },
             TemplateBody {
                 name: Some("Body 3"),
@@ -61,6 +63,7 @@ pub fn three_body_lagrange_equilateral(_seed: u64) -> Template {
                 position: Some(p3),
                 velocity: tangential(p3, v),
                 preset: &body_preset::ROCKY,
+                density: None,
             },
         ],
         display_scale: 1.0,
