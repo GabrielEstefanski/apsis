@@ -350,9 +350,12 @@ pub const COMET: BodyPreset = BodyPreset {
     display_name: "Comet",
     default_color: [160, 190, 215],
     default_q_pr: 0.9,
+    // 67P-class anchor: ≈10¹³ kg = 5e-18 M_☉. The α = 0.01 makes the
+    // power law nearly flat across the cometary mass range, so the
+    // exact anchor mostly sets the rho_min branch.
     density: DensitySource::Model(DensityModel {
         rho_0: 500.0,
-        anchor_mass: 1e-6,
+        anchor_mass: 5e-18,
         alpha: 0.01,
         rho_min: 200.0,
         rho_max: 900.0,
@@ -367,9 +370,10 @@ pub const ASTEROID: BodyPreset = BodyPreset {
     display_name: "Asteroid",
     default_color: [80, 75, 68],
     default_q_pr: 1.0,
+    // Ceres-class anchor: 9.4 × 10²⁰ kg ≈ 4.7e-10 M_☉.
     density: DensitySource::Model(DensityModel {
         rho_0: 2500.0,
-        anchor_mass: 1e-4,
+        anchor_mass: 4.7e-10,
         alpha: 0.02,
         rho_min: 1200.0,
         rho_max: 5500.0,
@@ -385,9 +389,10 @@ pub const ROCKY: BodyPreset = BodyPreset {
     display_name: "Rocky",
     default_color: [139, 90, 43],
     default_q_pr: 0.0,
+    // Earth anchor: 1 M_⊕ = 3.0034 × 10⁻⁶ M_☉.
     density: DensitySource::Model(DensityModel {
         rho_0: 5514.0,
-        anchor_mass: 1.0,
+        anchor_mass: 3.0034e-6,
         alpha: 0.115,
         rho_min: 3000.0,
         rho_max: 13_000.0,
@@ -402,9 +407,10 @@ pub const ICY: BodyPreset = BodyPreset {
     display_name: "Icy",
     default_color: [180, 220, 240],
     default_q_pr: 0.7,
+    // Ganymede anchor: 0.025 M_⊕ ≈ 7.45 × 10⁻⁸ M_☉.
     density: DensitySource::Model(DensityModel {
         rho_0: 1936.0,
-        anchor_mass: 0.025,
+        anchor_mass: 7.45e-8,
         alpha: 0.05,
         rho_min: 800.0,
         rho_max: 3500.0,
@@ -419,9 +425,10 @@ pub const ICE_GIANT: BodyPreset = BodyPreset {
     display_name: "Ice Giant",
     default_color: [64, 164, 223],
     default_q_pr: 0.0,
+    // Neptune anchor: 17.15 M_⊕ ≈ 5.151 × 10⁻⁵ M_☉.
     density: DensitySource::Model(DensityModel {
         rho_0: 1638.0,
-        anchor_mass: 17.15,
+        anchor_mass: 5.151e-5,
         alpha: 0.12,
         rho_min: 900.0,
         rho_max: 3000.0,
@@ -436,9 +443,10 @@ pub const GAS: BodyPreset = BodyPreset {
     display_name: "Gas Giant",
     default_color: [210, 140, 60],
     default_q_pr: 0.0,
+    // Jupiter anchor: 317.8 M_⊕ ≈ 9.5435 × 10⁻⁴ M_☉.
     density: DensitySource::Model(DensityModel {
         rho_0: 1326.0,
-        anchor_mass: 317.8,
+        anchor_mass: 9.5435e-4,
         alpha: 0.18,
         rho_min: 200.0,
         rho_max: 8_000.0,
@@ -454,9 +462,11 @@ pub const BROWN_DWARF: BodyPreset = BodyPreset {
     display_name: "Brown Dwarf",
     default_color: [160, 60, 20],
     default_q_pr: 0.0,
+    // 40 M_Jup anchor (Chabrier et al. 2009): 40 × 9.5435 × 10⁻⁴
+    // ≈ 0.0382 M_☉.
     density: DensitySource::Model(DensityModel {
         rho_0: 50_000.0,
-        anchor_mass: 13_000.0,
+        anchor_mass: 0.0382,
         alpha: 0.22,
         rho_min: 20_000.0,
         rho_max: 2.0e5,
@@ -472,9 +482,10 @@ pub const STAR: BodyPreset = BodyPreset {
     display_name: "Star",
     default_color: [255, 220, 100],
     default_q_pr: 0.0,
+    // Solar anchor: 1 M_☉, ρ₀ = 1408 kg/m³ (Sun's bulk density).
     density: DensitySource::Model(DensityModel {
         rho_0: 1408.0,
-        anchor_mass: 1_000_000.0,
+        anchor_mass: 1.0,
         alpha: -0.35,
         rho_min: 100.0,
         rho_max: 1.0e5,
@@ -490,9 +501,10 @@ pub const WHITE_DWARF: BodyPreset = BodyPreset {
     display_name: "White Dwarf",
     default_color: [200, 220, 255],
     default_q_pr: 0.0,
+    // Sirius B anchor ≈ 1.018 M_☉; treat as 1.0 M_☉ for the EOS pivot.
     density: DensitySource::Model(DensityModel {
         rho_0: 3.0e6,
-        anchor_mass: 600_000.0,
+        anchor_mass: 1.0,
         // Observational fit; Chandrasekhar α = 2 diverges outside
         // [0.4, 1.2] M_☉ so the empirical 1.2 keeps the model in a
         // physically-bounded range across the merger / accretion
@@ -561,34 +573,41 @@ mod tests {
     }
 
     // ── Density model parity with the previous Material taxonomy ─────────────
+    //
+    // Mass arguments are in M_☉ — the canonical solar_au unit. Earlier
+    // revisions of these tests passed M_⊕ because the anchor masses
+    // were specified in M_⊕; the unit-mismatch fix moved every anchor
+    // to M_☉ so the assertions had to follow.
+
+    const M_EARTH_IN_SOLAR: f64 = 3.0034e-6;
 
     #[test]
     fn rocky_earth_density_recovers_observed_value() {
-        let rho = ROCKY.density.density_at(1.0);
+        let rho = ROCKY.density.density_at(M_EARTH_IN_SOLAR);
         assert!(approx_eq(rho, 5514.0, 0.10), "Earth ρ = {rho}");
     }
 
     #[test]
     fn rocky_moon_density_recovers_observed_value() {
-        let rho = ROCKY.density.density_at(0.0123);
+        let rho = ROCKY.density.density_at(0.0123 * M_EARTH_IN_SOLAR);
         assert!(approx_eq(rho, 3346.0, 0.10), "Moon ρ = {rho}");
     }
 
     #[test]
     fn gas_jupiter_density_recovers_observed_value() {
-        let rho = GAS.density.density_at(317.8);
+        let rho = GAS.density.density_at(317.8 * M_EARTH_IN_SOLAR);
         assert!(approx_eq(rho, 1326.0, 0.10), "Jupiter ρ = {rho}");
     }
 
     #[test]
     fn star_sun_density_recovers_observed_value() {
-        let rho = STAR.density.density_at(1_000_000.0);
+        let rho = STAR.density.density_at(1.0);
         assert!(approx_eq(rho, 1408.0, 0.10), "Sun ρ = {rho}");
     }
 
     #[test]
     fn icy_pluto_density_recovers_observed_value() {
-        let rho = ICY.density.density_at(0.0022);
+        let rho = ICY.density.density_at(0.0022 * M_EARTH_IN_SOLAR);
         assert!(approx_eq(rho, 1854.0, 0.10), "Pluto ρ = {rho}");
     }
 
@@ -672,9 +691,9 @@ mod tests {
 
     #[test]
     fn default_mass_pulls_from_density_anchor() {
-        assert_eq!(ROCKY.default_mass(), 1.0);
-        assert_eq!(STAR.default_mass(), 1_000_000.0);
-        assert_eq!(GAS.default_mass(), 317.8);
+        assert_eq!(ROCKY.default_mass(), M_EARTH_IN_SOLAR);
+        assert_eq!(STAR.default_mass(), 1.0);
+        assert_eq!(GAS.default_mass(), 9.5435e-4);
     }
 
     #[test]
