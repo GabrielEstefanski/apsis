@@ -19,8 +19,8 @@ pub fn hd_80606(seed: u64) -> Template {
         name: Some("HD 80606"),
         mass: m_star,
         material: Material::Star,
-        position: Some([0.0, 0.0]),
-        velocity: [0.0, 0.0],
+        position: Some([0.0, 0.0, 0.0]),
+        velocity: [0.0, 0.0, 0.0],
     });
 
     // ── Planet (placed at periapsis) ───── //
@@ -32,8 +32,8 @@ pub fn hd_80606(seed: u64) -> Template {
         if seed == 0 { rand::make_rng() } else { SmallRng::seed_from_u64(seed) };
     let phase = rng.random::<f64>() * std::f64::consts::TAU;
 
-    let pos = [r_peri * phase.cos(), r_peri * phase.sin()];
-    let vel = [-v_peri * phase.sin(), v_peri * phase.cos()];
+    let pos = [r_peri * phase.cos(), r_peri * phase.sin(), 0.0];
+    let vel = [-v_peri * phase.sin(), v_peri * phase.cos(), 0.0];
 
     bodies.push(TemplateBody {
         name: Some("HD 80606 b"),

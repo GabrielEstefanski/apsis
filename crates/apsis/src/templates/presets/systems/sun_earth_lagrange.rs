@@ -26,8 +26,8 @@ pub fn sun_earth_lagrange(_seed: u64) -> Template {
             TemplateBody {
                 name: Some("Sun"),
                 mass: m_sun,
-                position: Some([0.0, 0.0]),
-                velocity: [0.0, 0.0],
+                position: Some([0.0, 0.0, 0.0]),
+                velocity: [0.0, 0.0, 0.0],
                 material: Material::Star,
             },
             // Earth

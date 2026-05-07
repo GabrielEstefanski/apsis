@@ -3,6 +3,7 @@ pub mod catalog;
 pub mod category;
 pub mod core;
 pub mod instantiate;
+pub mod keplerian;
 pub mod kind;
 pub mod presets;
 

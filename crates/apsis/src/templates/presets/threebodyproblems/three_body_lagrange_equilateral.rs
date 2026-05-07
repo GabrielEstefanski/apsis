@@ -30,9 +30,9 @@ pub fn three_body_lagrange_equilateral(_seed: u64) -> Template {
     let omega = (3.0 * m / (r * r * r)).sqrt();
     let v = omega * r;
 
-    let p1 = [r, 0.0];
-    let p2 = [-0.5 * r, (3.0_f64).sqrt() / 2.0 * r];
-    let p3 = [-0.5 * r, -(3.0_f64).sqrt() / 2.0 * r];
+    let p1 = [r, 0.0, 0.0];
+    let p2 = [-0.5 * r, (3.0_f64).sqrt() / 2.0 * r, 0.0];
+    let p3 = [-0.5 * r, -(3.0_f64).sqrt() / 2.0 * r, 0.0];
 
     Template {
         name: "Lagrange Equilateral (unstable)",
@@ -69,7 +69,7 @@ pub fn three_body_lagrange_equilateral(_seed: u64) -> Template {
     }
 }
 
-fn tangential(position: [f64; 2], speed: f64) -> [f64; 2] {
+fn tangential(position: [f64; 3], speed: f64) -> [f64; 3] {
     let r = (position[0] * position[0] + position[1] * position[1]).sqrt();
-    [-position[1] * speed / r, position[0] * speed / r]
+    [-position[1] * speed / r, position[0] * speed / r, 0.0]
 }

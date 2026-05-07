@@ -1,17 +1,41 @@
-//! Solar system template.
+//! Solar System template — heliocentric ecliptic J2000 frame.
 //!
-//! ## Unit conventions
+//! ## Sources
 //!
-//! | Quantity | Unit                  | Notes                          |
-//! |----------|-----------------------|--------------------------------|
-//! | Mass     | M_☉ (solar masses)    | Sun = 1.0                      |
-//! | Distance | AU (astronomical units)| Earth–Sun = 1.0               |
-//! | Velocity | AU / time_unit        | derived from circular_orbit    |
-//! | G        | 4π² (in AU/M_☉/yr²)   | so that Earth period = 1 yr    |
+//! All orbital elements are heliocentric and quoted in the J2000 mean
+//! ecliptic frame, except moons of giant planets, whose elements are
+//! given relative to the parent body's equator (IAU 2009 WGCCRE pole
+//! orientation) and rotated into the ecliptic frame at template
+//! instantiation by [`crate::templates::keplerian::parent_equator_basis`].
 //!
-//! All planetary masses and semi-major axes are from the IAU 2012 nominal
-//! planetary values (Prša et al. 2016, AJ 152, 41).
-//! Moon orbital radius from Chapront et al. (2002).
+//! | Quantity                              | Source                               |
+//! |---------------------------------------|--------------------------------------|
+//! | Planet `(a, e, i, Ω, ω̃)`              | NASA JPL `approx_pos.html` (J2000)   |
+//! | Planet masses                         | IAU 2012 nominal (Prša et al. 2016)  |
+//! | Dwarf planet elements                 | JPL Horizons body pages              |
+//! | Moon elements                         | NASA SSD body fact sheets            |
+//! | Parent pole orientations              | IAU 2009 WGCCRE Report               |
+//! | Earth Moon ecliptic inclination       | Williams (2023) Moon fact sheet      |
+//! | Asteroid main-belt i distribution     | Bottke et al. (2005)                 |
+//! | Jupiter-family / long-period comet i  | Levison & Duncan (1997)              |
+//!
+//! ## Phase convention
+//!
+//! `(a, e, i, Ω, ω)` are real for every named body so orbital planes
+//! and apsidal lines line up with the literature. The mean anomaly
+//! at epoch `M₀` is randomised per seed: an interactive simulator
+//! benefits from variety, and any specific J2000 phase would be
+//! immediately obsolete by the next integration step anyway.
+//!
+//! ## Mass units
+//!
+//! All masses are in solar masses (`M_☉`); the planet masses translate
+//! the IAU 2012 nominal values via `1 M_☉ = 1.989 × 10³⁰ kg`. Dwarf-
+//! planet masses come from JPL's published kg values.
+//!
+//! ## Unit system
+//!
+//! `M_☉ / AU / T_AU` (with `G = 1`), so `Earth period = 2π T_AU = 1 yr`.
 
 use std::f64::consts::TAU;
 
@@ -19,255 +43,659 @@ use rand::rngs::SmallRng;
 use rand::{RngExt, SeedableRng};
 
 use crate::domain::materials::Material;
-use crate::templates::{Template, TemplateBody, UnitSystem, builders::circular_orbit};
+use crate::templates::keplerian::{
+    parent_equator_basis, state_from_elements, state_from_elements_in_basis,
+};
+use crate::templates::{Template, TemplateBody, UnitSystem};
 
-// ── Physical constants in simulation units ────────────────────────────────────
+// ── Fundamental constants ─────────────────────────────────────────────────────
 
-/// Solar mass [simulation mass units]. All other masses are fractions of this.
+/// Sun mass in simulation units (canonical anchor).
 const M_SUN: f64 = 1.0;
 
-/// Earth mass in solar masses (IAU 2012).
+/// Earth mass in solar masses (IAU 2012 nominal).
 const M_EARTH: f64 = 3.003e-6;
 
-/// Moon-to-Earth mass ratio (IAU 2012: k² = 1/81.3005).
+/// Earth–Moon mass ratio: k² = 1 / 81.3005 (IAU 2012).
 const M_MOON: f64 = M_EARTH / 81.3005;
 
-// ── Planet table ──────────────────────────────────────────────────────────────
+// ── Major-planet table ────────────────────────────────────────────────────────
 
-struct Planet {
-    /// Name for documentation; unused at runtime.
-    #[allow(dead_code)]
+struct PlanetData {
     name: &'static str,
-    /// Mass [M_☉].
     mass: f64,
-    /// Semi-major axis [AU].
     a: f64,
+    e: f64,
+    i_deg: f64,
+    raan_deg: f64,
+    argp_deg: f64,
     material: Material,
 }
 
-/// IAU 2012 nominal planetary masses and semi-major axes.
-/// Sources: Prša et al. (2016); Williams (2023) NASA fact sheets.
-const PLANETS: &[Planet] = &[
-    Planet { name: "Mercury", mass: 1.652e-7, a: 0.38710, material: Material::Rocky },
-    Planet { name: "Venus", mass: 2.448e-6, a: 0.72333, material: Material::Rocky },
-    Planet { name: "Earth", mass: M_EARTH, a: 1.00000, material: Material::Rocky },
-    Planet { name: "Mars", mass: 3.213e-7, a: 1.52366, material: Material::Rocky },
-    Planet { name: "Jupiter", mass: 9.543e-4, a: 5.20336, material: Material::Gas },
-    Planet { name: "Saturn", mass: 2.857e-4, a: 9.53707, material: Material::Gas },
-    Planet { name: "Uranus", mass: 4.366e-5, a: 19.1913, material: Material::IceGiant },
-    Planet { name: "Neptune", mass: 5.151e-5, a: 30.0690, material: Material::IceGiant },
-    Planet { name: "Pluto", mass: 6.591e-9, a: 39.4817, material: Material::Icy },
+/// J2000 ecliptic mean orbital elements (NASA JPL `approx_pos.html`,
+/// 1800-2050 fit). Argument of periapsis is computed from the published
+/// longitude of periapsis ω̃ as `ω = ω̃ − Ω`.
+const PLANETS: &[PlanetData] = &[
+    PlanetData {
+        name: "Mercury",
+        mass: 1.660e-7,
+        a: 0.38710,
+        e: 0.20564,
+        i_deg: 7.005,
+        raan_deg: 48.331,
+        argp_deg: 29.130,
+        material: Material::Rocky,
+    },
+    PlanetData {
+        name: "Venus",
+        mass: 2.448e-6,
+        a: 0.72333,
+        e: 0.00678,
+        i_deg: 3.395,
+        raan_deg: 76.680,
+        argp_deg: 54.852,
+        material: Material::Rocky,
+    },
+    PlanetData {
+        name: "Earth",
+        mass: M_EARTH,
+        a: 1.00000,
+        e: 0.01671,
+        i_deg: 0.000,
+        raan_deg: 0.000,
+        argp_deg: 102.938,
+        material: Material::Rocky,
+    },
+    PlanetData {
+        name: "Mars",
+        mass: 3.213e-7,
+        a: 1.52366,
+        e: 0.09339,
+        i_deg: 1.850,
+        raan_deg: 49.558,
+        argp_deg: 286.502,
+        material: Material::Rocky,
+    },
+    PlanetData {
+        name: "Jupiter",
+        mass: 9.543e-4,
+        a: 5.20336,
+        e: 0.04839,
+        i_deg: 1.304,
+        raan_deg: 100.464,
+        argp_deg: 274.255,
+        material: Material::Gas,
+    },
+    PlanetData {
+        name: "Saturn",
+        mass: 2.857e-4,
+        a: 9.53707,
+        e: 0.05415,
+        i_deg: 2.486,
+        raan_deg: 113.665,
+        argp_deg: 338.766,
+        material: Material::Gas,
+    },
+    PlanetData {
+        name: "Uranus",
+        mass: 4.366e-5,
+        a: 19.1913,
+        e: 0.04717,
+        i_deg: 0.773,
+        raan_deg: 74.006,
+        argp_deg: 96.999,
+        material: Material::IceGiant,
+    },
+    PlanetData {
+        name: "Neptune",
+        mass: 5.151e-5,
+        a: 30.0690,
+        e: 0.00859,
+        i_deg: 1.770,
+        raan_deg: 131.784,
+        argp_deg: 273.187,
+        material: Material::IceGiant,
+    },
 ];
 
-// ── Moon placement ────────────────────────────────────────────────────────────
+// ── Dwarf planets and large TNOs ──────────────────────────────────────────────
 
-/// Place a satellite in a stable circular orbit around a parent body.
-///
-/// Stability criterion: the satellite must be within the parent's Hill sphere.
-/// The Hill radius is:
-///
-/// ```text
-/// r_Hill = a_parent · (m_parent / 3·M_primary)^(1/3)
-/// ```
-///
-/// For the Earth–Moon system: r_Hill ≈ 0.01 AU; the Moon orbits at 0.00257 AU,
-/// which is ~26% of r_Hill — well within the stable zone (< 50% r_Hill).
-///
-/// No velocity correction factor is applied. The three-body perturbation from
-/// the Sun is naturally handled by computing the satellite velocity in the
-/// inertial frame by adding the parent's velocity vectorially.
-fn place_moon(
-    parent_pos: [f64; 2],
-    parent_vel: [f64; 2],
-    parent_mass: f64,
-    a_moon: f64,
-    phase: f64,
-) -> ([f64; 2], [f64; 2]) {
-    // Circular orbital speed around the parent in the parent's rest frame.
-    // v = sqrt(G · m_parent / r); in our units G = 4π² so the circular_orbit
-    // builder already embeds this — we replicate the formula directly here
-    // to keep the parent-relative computation explicit.
-    let v_circ = (M_SUN * (parent_mass / M_SUN) / a_moon).sqrt();
+/// Reuses [`PlanetData`]: same shape, different physical category.
+/// Pluto is included here so the IAU dwarf set sits together.
+const DWARFS: &[PlanetData] = &[
+    PlanetData {
+        name: "Ceres",
+        mass: 4.72e-10,
+        a: 2.7691,
+        e: 0.0760,
+        i_deg: 10.594,
+        raan_deg: 80.305,
+        argp_deg: 73.598,
+        material: Material::Asteroid,
+    },
+    PlanetData {
+        name: "Pluto",
+        mass: 6.55e-9,
+        a: 39.4817,
+        e: 0.2488,
+        i_deg: 17.16,
+        raan_deg: 110.299,
+        argp_deg: 113.834,
+        material: Material::Icy,
+    },
+    PlanetData {
+        name: "Haumea",
+        mass: 2.014e-9,
+        a: 43.218,
+        e: 0.19501,
+        i_deg: 28.214,
+        raan_deg: 121.79,
+        argp_deg: 240.20,
+        material: Material::Icy,
+    },
+    PlanetData {
+        name: "Makemake",
+        mass: 1.56e-9,
+        a: 45.430,
+        e: 0.16126,
+        i_deg: 29.007,
+        raan_deg: 79.382,
+        argp_deg: 294.834,
+        material: Material::Icy,
+    },
+    PlanetData {
+        name: "Eris",
+        mass: 8.28e-9,
+        a: 67.781,
+        e: 0.43607,
+        i_deg: 44.044,
+        raan_deg: 35.951,
+        argp_deg: 151.639,
+        material: Material::Icy,
+    },
+    PlanetData {
+        // Mass uncertain (~1×10²¹ kg); JPL lists no determined value.
+        // The estimate keeps Sedna in the dwarf-planet mass band and
+        // makes its trajectory observable; it is not a Voyager-grade
+        // physical claim.
+        name: "Sedna",
+        mass: 5.0e-10,
+        a: 506.8,
+        e: 0.8496,
+        i_deg: 11.931,
+        raan_deg: 144.248,
+        argp_deg: 311.352,
+        material: Material::Icy,
+    },
+    PlanetData {
+        name: "Quaoar",
+        mass: 7.04e-10,
+        a: 43.694,
+        e: 0.0392,
+        i_deg: 7.989,
+        raan_deg: 188.83,
+        argp_deg: 147.479,
+        material: Material::Icy,
+    },
+    PlanetData {
+        name: "Orcus",
+        mass: 3.18e-10,
+        a: 39.387,
+        e: 0.22701,
+        i_deg: 20.592,
+        raan_deg: 268.799,
+        argp_deg: 72.310,
+        material: Material::Icy,
+    },
+    PlanetData {
+        name: "Gonggong",
+        mass: 8.80e-10,
+        a: 67.485,
+        e: 0.5063,
+        i_deg: 30.627,
+        raan_deg: 336.866,
+        argp_deg: 207.628,
+        material: Material::Icy,
+    },
+];
 
-    // Position and velocity relative to parent.
-    let rel_pos = [a_moon * phase.cos(), a_moon * phase.sin()];
-    let rel_vel = [-v_circ * phase.sin(), v_circ * phase.cos()];
+// ── Moon table ────────────────────────────────────────────────────────────────
 
-    // Inertial-frame state = parent state + relative state.
-    (
-        [parent_pos[0] + rel_pos[0], parent_pos[1] + rel_pos[1]],
-        [parent_vel[0] + rel_vel[0], parent_vel[1] + rel_vel[1]],
-    )
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+enum Parent {
+    Earth,
+    Jupiter,
+    Saturn,
+    Uranus,
+    Neptune,
 }
 
-/// Compute the Hill radius for a body orbiting a primary.
-///
-/// ```text
-/// r_Hill = a · (m_body / 3·M_primary)^(1/3)
-/// ```
-fn hill_radius(a: f64, m_body: f64, m_primary: f64) -> f64 {
-    a * (m_body / (3.0 * m_primary)).powf(1.0 / 3.0)
-}
-
-// ── Comet placement ───────────────────────────────────────────────────────────
-
-/// Place a comet on a realistic eccentric orbit (e ∈ [0.6, 0.99]).
-///
-/// Rather than using `v_circular * scale_factor`, we construct the orbit
-/// correctly from the vis-viva equation at periapsis:
-///
-/// ```text
-/// v_peri = sqrt(G·M · (1 + e) / r_peri)
-/// ```
-///
-/// The comet is placed at periapsis on a random approach angle, so it will
-/// follow a proper Keplerian ellipse/hyperbola rather than a perturbed circle.
-fn place_comet(
-    sun_mass: f64,
-    r_peri: f64,
+struct MoonData {
+    name: &'static str,
+    mass: f64,
+    parent: Parent,
+    a: f64,
     e: f64,
-    omega: f64, // argument of periapsis [rad]
-) -> ([f64; 2], [f64; 2]) {
-    // Speed at periapsis from vis-viva: v² = GM(1+e)/r_peri
-    let v_peri = (sun_mass * (1.0 + e) / r_peri).sqrt();
-
-    // At periapsis the velocity is perpendicular to the position vector.
-    // Position: r_peri along the periapsis direction.
-    // Velocity: perpendicular (CCW).
-    let pos = [r_peri * omega.cos(), r_peri * omega.sin()];
-    let vel = [-v_peri * omega.sin(), v_peri * omega.cos()];
-
-    (pos, vel)
+    /// Inclination relative to the parent's equator [deg], except for
+    /// Earth's Moon, whose orbital plane is referenced to the ecliptic.
+    i_deg: f64,
+    raan_deg: f64,
+    argp_deg: f64,
+    material: Material,
 }
 
-// ── Template builder ──────────────────────────────────────────────────────────
+const MOONS: &[MoonData] = &[
+    // Earth
+    MoonData {
+        name: "Moon",
+        mass: M_MOON,
+        parent: Parent::Earth,
+        a: 0.002569,
+        e: 0.0549,
+        i_deg: 5.145,
+        raan_deg: 125.08,
+        argp_deg: 318.15,
+        material: Material::Rocky,
+    },
+    // Jupiter — Galilean moons (Jupiter equatorial frame)
+    MoonData {
+        name: "Io",
+        mass: 4.491e-8,
+        parent: Parent::Jupiter,
+        a: 0.002819,
+        e: 0.0041,
+        i_deg: 0.050,
+        raan_deg: 43.977,
+        argp_deg: 84.129,
+        material: Material::Rocky,
+    },
+    MoonData {
+        name: "Europa",
+        mass: 2.413e-8,
+        parent: Parent::Jupiter,
+        a: 0.004485,
+        e: 0.0094,
+        i_deg: 0.471,
+        raan_deg: 219.106,
+        argp_deg: 88.970,
+        material: Material::Icy,
+    },
+    MoonData {
+        name: "Ganymede",
+        mass: 7.452e-8,
+        parent: Parent::Jupiter,
+        a: 0.007155,
+        e: 0.0013,
+        i_deg: 0.204,
+        raan_deg: 63.552,
+        argp_deg: 192.417,
+        material: Material::Icy,
+    },
+    MoonData {
+        name: "Callisto",
+        mass: 5.410e-8,
+        parent: Parent::Jupiter,
+        a: 0.012585,
+        e: 0.0074,
+        i_deg: 0.205,
+        raan_deg: 298.848,
+        argp_deg: 52.643,
+        material: Material::Icy,
+    },
+    // Saturn (Saturn equatorial frame)
+    MoonData {
+        name: "Mimas",
+        mass: 1.886e-11,
+        parent: Parent::Saturn,
+        a: 0.001240,
+        e: 0.0202,
+        i_deg: 1.566,
+        raan_deg: 173.027,
+        argp_deg: 332.499,
+        material: Material::Icy,
+    },
+    MoonData {
+        name: "Enceladus",
+        mass: 5.430e-11,
+        parent: Parent::Saturn,
+        a: 0.001591,
+        e: 0.0047,
+        i_deg: 0.009,
+        raan_deg: 169.506,
+        argp_deg: 0.000,
+        material: Material::Icy,
+    },
+    MoonData {
+        name: "Dione",
+        mass: 5.508e-10,
+        parent: Parent::Saturn,
+        a: 0.002523,
+        e: 0.0022,
+        i_deg: 0.019,
+        raan_deg: 290.415,
+        argp_deg: 168.820,
+        material: Material::Icy,
+    },
+    MoonData {
+        name: "Rhea",
+        mass: 1.160e-9,
+        parent: Parent::Saturn,
+        a: 0.003524,
+        e: 0.001,
+        i_deg: 0.345,
+        raan_deg: 351.042,
+        argp_deg: 256.609,
+        material: Material::Icy,
+    },
+    MoonData {
+        name: "Titan",
+        mass: 6.764e-8,
+        parent: Parent::Saturn,
+        a: 0.008168,
+        e: 0.0288,
+        i_deg: 0.349,
+        raan_deg: 28.058,
+        argp_deg: 78.371,
+        material: Material::Icy,
+    },
+    MoonData {
+        name: "Iapetus",
+        mass: 9.082e-10,
+        parent: Parent::Saturn,
+        a: 0.023803,
+        e: 0.0286,
+        i_deg: 15.470,
+        raan_deg: 75.831,
+        argp_deg: 271.606,
+        material: Material::Icy,
+    },
+    // Uranus (Uranus equatorial frame — pole tilted 97.77° from
+    // ecliptic, so satellites orbit ~perpendicular to it).
+    MoonData {
+        name: "Titania",
+        mass: 1.774e-9,
+        parent: Parent::Uranus,
+        a: 0.002914,
+        e: 0.0011,
+        i_deg: 0.340,
+        raan_deg: 99.771,
+        argp_deg: 165.522,
+        material: Material::Icy,
+    },
+    // Neptune — Triton orbits retrograde (i > 90° relative to parent
+    // equator), the only large moon known to do so. The result in
+    // ecliptic coordinates is a strongly inclined retrograde orbit.
+    MoonData {
+        name: "Triton",
+        mass: 1.075e-8,
+        parent: Parent::Neptune,
+        a: 0.002372,
+        e: 0.000016,
+        i_deg: 156.865,
+        raan_deg: 177.608,
+        argp_deg: 234.412,
+        material: Material::Icy,
+    },
+];
 
+// ── Parent body lookup ────────────────────────────────────────────────────────
+
+struct ParentInfo {
+    mass: f64,
+    /// `(α, δ)` of the spin axis in J2000 equatorial coords [deg].
+    /// IAU 2009 WGCCRE Report, Table 1. Earth's pole is reported as
+    /// `(0, 90)` purely so the lookup is total — the Moon never uses
+    /// this rotation; its elements are already in the ecliptic frame.
+    pole_ra_deg: f64,
+    pole_dec_deg: f64,
+}
+
+fn parent_info(parent: Parent) -> ParentInfo {
+    match parent {
+        Parent::Earth => ParentInfo { mass: M_EARTH, pole_ra_deg: 0.0, pole_dec_deg: 90.0 },
+        Parent::Jupiter => {
+            ParentInfo { mass: 9.543e-4, pole_ra_deg: 268.057, pole_dec_deg: 64.495 }
+        },
+        Parent::Saturn => ParentInfo { mass: 2.857e-4, pole_ra_deg: 40.589, pole_dec_deg: 83.537 },
+        Parent::Uranus => {
+            ParentInfo { mass: 4.366e-5, pole_ra_deg: 257.311, pole_dec_deg: -15.175 }
+        },
+        Parent::Neptune => ParentInfo { mass: 5.151e-5, pole_ra_deg: 299.36, pole_dec_deg: 43.46 },
+    }
+}
+
+// ── Distribution helpers (asteroid belt, comets) ──────────────────────────────
+
+/// Box–Muller transform: convert two uniforms in `(0, 1]` into a
+/// standard normal sample. Used for asteroid-belt inclination drawn
+/// from `N(8°, 6°)` — Bottke et al. (2005) main-belt fit.
+fn normal_sample(rng: &mut SmallRng) -> f64 {
+    let u1: f64 = rng.random::<f64>().max(1e-12);
+    let u2: f64 = rng.random::<f64>();
+    (-2.0 * u1.ln()).sqrt() * (TAU * u2).cos()
+}
+
+// ── Build ─────────────────────────────────────────────────────────────────────
+
+/// Construct the heliocentric Solar System template.
 pub fn solar_system(seed: u64) -> Template {
     let mut rng: SmallRng =
         if seed == 0 { rand::make_rng() } else { SmallRng::seed_from_u64(seed) };
-    let mut bodies = Vec::with_capacity(1 + PLANETS.len() + 1 + 600 + 30);
+
+    // Capacity: Sun + 8 planets + 9 dwarfs + 13 moons + 600 asteroids + 30 comets.
+    let mut bodies = Vec::with_capacity(1 + PLANETS.len() + DWARFS.len() + MOONS.len() + 630);
 
     // ── Sun ───────────────────────────────────────────────────────────────── //
     bodies.push(TemplateBody {
         name: Some("Sun"),
         mass: M_SUN,
         material: Material::Star,
-        position: Some([0.0, 0.0]),
-        velocity: [0.0, 0.0],
+        position: Some([0.0, 0.0, 0.0]),
+        velocity: [0.0, 0.0, 0.0],
     });
 
-    // Track Earth state for Moon placement.
-    let mut earth_pos = [0.0_f64; 2];
-    let mut earth_vel = [0.0_f64; 2];
-
-    // ── Planets ───────────────────────────────────────────────────────────── //
-    for p in PLANETS {
-        // Random initial phase — physically valid for a snapshot of the system.
-        let phase = rng.random::<f64>() * TAU;
-        let (pos, vel) = circular_orbit(M_SUN, p.a, phase);
-
-        if (p.a - 1.0).abs() < 1e-6 {
-            earth_pos = pos;
-            earth_vel = vel;
+    // ── Planets and dwarfs share the same heliocentric construction ──────── //
+    // We capture each parent body's state as it is built, then use it to
+    // place its satellites (planet + relative offset = inertial state).
+    let mut parent_state: [Option<([f64; 3], [f64; 3])>; 5] = [None; 5];
+    let parent_slot = |p: Parent| -> usize {
+        match p {
+            Parent::Earth => 0,
+            Parent::Jupiter => 1,
+            Parent::Saturn => 2,
+            Parent::Uranus => 3,
+            Parent::Neptune => 4,
         }
+    };
 
+    let push_helio = |bodies: &mut Vec<TemplateBody>,
+                      parent_state: &mut [Option<([f64; 3], [f64; 3])>; 5],
+                      rng: &mut SmallRng,
+                      data: &PlanetData| {
+        let mean_anom = rng.random::<f64>() * TAU;
+        let (pos, vel) = state_from_elements(
+            M_SUN,
+            data.a,
+            data.e,
+            data.i_deg.to_radians(),
+            data.raan_deg.to_radians(),
+            data.argp_deg.to_radians(),
+            mean_anom,
+        );
+        // Cache state for any parent that has moons in the table.
+        let parent = match data.name {
+            "Earth" => Some(Parent::Earth),
+            "Jupiter" => Some(Parent::Jupiter),
+            "Saturn" => Some(Parent::Saturn),
+            "Uranus" => Some(Parent::Uranus),
+            "Neptune" => Some(Parent::Neptune),
+            _ => None,
+        };
+        if let Some(p) = parent {
+            parent_state[parent_slot(p)] = Some((pos, vel));
+        }
         bodies.push(TemplateBody {
-            name: Some(p.name),
-            mass: p.mass,
-            material: p.material,
+            name: Some(data.name),
+            mass: data.mass,
+            material: data.material,
             position: Some(pos),
             velocity: vel,
         });
+    };
+
+    for p in PLANETS {
+        push_helio(&mut bodies, &mut parent_state, &mut rng, p);
+    }
+    for d in DWARFS {
+        push_helio(&mut bodies, &mut parent_state, &mut rng, d);
     }
 
-    // ── Moon ──────────────────────────────────────────────────────────────── //
-    {
-        // Moon semi-major axis: 384 400 km = 0.002570 AU (Chapront et al. 2002).
-        let moon_a = 0.002570;
+    // ── Moons ─────────────────────────────────────────────────────────────── //
+    for m in MOONS {
+        let Some((parent_pos, parent_vel)) = parent_state[parent_slot(m.parent)] else {
+            continue;
+        };
+        let info = parent_info(m.parent);
 
-        // Verify stability: moon_a must be well within Earth's Hill sphere.
-        // r_Hill(Earth) ≈ 0.0100 AU → moon_a / r_Hill ≈ 0.26 (stable, < 0.5).
-        let r_hill_earth = hill_radius(1.0, M_EARTH, M_SUN);
-        debug_assert!(
-            moon_a < 0.5 * r_hill_earth,
-            "Moon semi-major axis {moon_a:.4} AU exceeds 50% of Earth Hill radius \
-             {r_hill_earth:.4} AU — orbit may be unstable"
-        );
-
-        let phase = rng.random::<f64>() * TAU;
-        let (moon_pos, moon_vel) = place_moon(earth_pos, earth_vel, M_EARTH, moon_a, phase);
+        // Earth's Moon uses ecliptic-frame elements directly; everything
+        // else is given in the parent's equator and rotated into the
+        // ecliptic via the IAU pole orientation.
+        let mean_anom = rng.random::<f64>() * TAU;
+        let (rel_pos, rel_vel) = if matches!(m.parent, Parent::Earth) {
+            state_from_elements(
+                info.mass,
+                m.a,
+                m.e,
+                m.i_deg.to_radians(),
+                m.raan_deg.to_radians(),
+                m.argp_deg.to_radians(),
+                mean_anom,
+            )
+        } else {
+            let basis = parent_equator_basis(info.pole_ra_deg, info.pole_dec_deg);
+            state_from_elements_in_basis(
+                info.mass,
+                m.a,
+                m.e,
+                m.i_deg.to_radians(),
+                m.raan_deg.to_radians(),
+                m.argp_deg.to_radians(),
+                mean_anom,
+                basis,
+            )
+        };
 
         bodies.push(TemplateBody {
-            name: Some("Moon"),
-            mass: M_MOON,
-            position: Some(moon_pos),
-            velocity: moon_vel,
-            material: Material::Rocky,
+            name: Some(m.name),
+            mass: m.mass,
+            material: m.material,
+            position: Some([
+                parent_pos[0] + rel_pos[0],
+                parent_pos[1] + rel_pos[1],
+                parent_pos[2] + rel_pos[2],
+            ]),
+            velocity: [
+                parent_vel[0] + rel_vel[0],
+                parent_vel[1] + rel_vel[1],
+                parent_vel[2] + rel_vel[2],
+            ],
         });
     }
 
-    // ── Asteroid belt (2.2–3.2 AU) ────────────────────────────────────────── //
+    // ── Main-belt asteroid swarm ──────────────────────────────────────────── //
     //
-    // Eccentricity distribution follows the observed main-belt distribution
-    // (Bottke et al. 2005: mean e ≈ 0.14, σ ≈ 0.08).
+    // a ∈ [2.2, 3.2] AU, e ∈ [0.06, 0.35], i ∼ N(8°, 6°) clipped to [0°, 30°].
+    // Inclination distribution from Bottke et al. (2005); the random Ω/ω
+    // give a thick disc rather than a coplanar sheet.
     for _ in 0..600 {
-        let a = 2.2 + rng.random::<f64>() * 1.0;
-        let e = (rng.random::<f64>() * 0.16 + 0.06).min(0.35); // e ∈ [0.06, 0.35]
-        let phase = rng.random::<f64>() * TAU;
+        let a = 2.2 + rng.random::<f64>();
+        let e = (0.06 + rng.random::<f64>() * 0.16).min(0.35);
+        let inc_deg = (8.0_f64 + 6.0 * normal_sample(&mut rng)).clamp(0.0, 30.0);
+        let raan_deg = rng.random::<f64>() * 360.0;
+        let argp_deg = rng.random::<f64>() * 360.0;
+        let mean_anom = rng.random::<f64>() * TAU;
 
-        // Place at a random true anomaly on the ellipse, not just at periapsis.
-        // For simplicity we use the circular speed and apply an eccentricity
-        // correction: v_tangential = v_circ * sqrt(1 + e·cos(ν) + ...) — here
-        // we use the first-order approximation v ≈ v_circ · (1 + e·cos(phase)).
-        let (pos, mut vel) = circular_orbit(M_SUN, a, phase);
-        let ecc_factor = 1.0 + e * phase.cos();
-        vel[0] *= ecc_factor;
-        vel[1] *= ecc_factor;
+        let (pos, vel) = state_from_elements(
+            M_SUN,
+            a,
+            e,
+            inc_deg.to_radians(),
+            raan_deg.to_radians(),
+            argp_deg.to_radians(),
+            mean_anom,
+        );
 
         bodies.push(TemplateBody {
             name: None,
             mass: 1e-10,
+            material: Material::Asteroid,
             position: Some(pos),
             velocity: vel,
-            material: Material::Asteroid,
         });
     }
 
-    // ── Comets (Jupiter-family + long-period) ──────────────────────────────── //
+    // ── Comets ────────────────────────────────────────────────────────────── //
     //
-    // Jupiter-family comets: e ∈ [0.5, 0.8], periapsis 1–3 AU (Levison 1996).
-    // Long-period comets:    e ∈ [0.97, 0.999], periapsis 0.5–2 AU.
+    // 20 Jupiter-family (e ∈ [0.5, 0.8], i ∈ [0°, 30°], periapsis 1–3 AU)
+    // and 10 long-period (e ∈ [0.97, 0.999], periapsis 0.5–2 AU,
+    // isotropic inclination including retrograde — Levison & Duncan 1997).
     for i in 0..30 {
-        let (r_peri, e) = if i < 20 {
-            // Jupiter-family
-            let r = 1.0 + rng.random::<f64>() * 2.0;
+        let (a, e, inc_deg, raan_deg, argp_deg) = if i < 20 {
+            // Jupiter-family: prograde, low to moderate inclination.
+            let r_peri = 1.0 + rng.random::<f64>() * 2.0;
             let e = 0.50 + rng.random::<f64>() * 0.30;
-            (r, e)
+            let a = r_peri / (1.0 - e);
+            let inc = rng.random::<f64>() * 30.0;
+            let raan = rng.random::<f64>() * 360.0;
+            let argp = rng.random::<f64>() * 360.0;
+            (a, e, inc, raan, argp)
         } else {
-            // Long-period / Oort cloud
-            let r = 0.5 + rng.random::<f64>() * 1.5;
+            // Long-period: extreme eccentricity, inclination isotropic
+            // on the sphere (uniform in cos i over [-1, 1]).
+            let r_peri = 0.5 + rng.random::<f64>() * 1.5;
             let e = 0.97 + rng.random::<f64>() * 0.029;
-            (r, e)
+            let a = r_peri / (1.0 - e);
+            let cos_i = 1.0 - 2.0 * rng.random::<f64>();
+            let inc = cos_i.acos().to_degrees();
+            let raan = rng.random::<f64>() * 360.0;
+            let argp = rng.random::<f64>() * 360.0;
+            (a, e, inc, raan, argp)
         };
 
-        let omega = rng.random::<f64>() * TAU;
-        let (pos, vel) = place_comet(M_SUN, r_peri, e, omega);
+        let mean_anom = rng.random::<f64>() * TAU;
+        let (pos, vel) = state_from_elements(
+            M_SUN,
+            a,
+            e,
+            inc_deg.to_radians(),
+            raan_deg.to_radians(),
+            argp_deg.to_radians(),
+            mean_anom,
+        );
 
         bodies.push(TemplateBody {
             name: None,
             mass: 1e-12,
+            material: Material::Comet,
             position: Some(pos),
             velocity: vel,
-            material: Material::Comet,
         });
     }
 
     Template {
         name: "Solar System",
-        description: "The Sun and eight planets, plus Pluto, the Moon, the asteroid belt, and a sprinkling of comets.",
+        description: "The Sun, eight planets, nine IAU and candidate dwarf planets (Ceres, \
+                      Pluto, Haumea, Makemake, Eris, Sedna, Quaoar, Orcus, Gonggong), thirteen \
+                      large moons (Earth's Moon plus the Galilean four, six major Saturnian \
+                      moons, Titania, and Triton), the asteroid main belt, and a sample of \
+                      Jupiter-family and long-period comets. Heliocentric ecliptic J2000 \
+                      frame; orbital elements from NASA JPL; mean anomaly randomised per seed.",
         bodies,
         display_scale: 1.0,
-        suggested_dt: Some(0.001), // ~0.36 days; ~1/1000 of Earth's orbital period
+        // Inner planets need ~Mercury-period / 1000 ≈ 0.001 yr per step
+        // for stable Velocity Verlet. The 2π factor sets the implicit
+        // period to one year for Earth.
+        suggested_dt: Some(0.001),
         units: UnitSystem::solar_au(),
     }
 }
