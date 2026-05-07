@@ -968,7 +968,7 @@ fn build_body_pipeline(
     format: wgpu::TextureFormat,
 ) -> wgpu::RenderPipeline {
     let attrs = wgpu::vertex_attr_array![
-        0 => Float32x3,   // center_world
+        0 => Float32x3,   // center_relative (camera-relative position)
         1 => Float32,     // radius_world
         2 => Float32x4,   // albedo
         3 => Float32x4,   // emissive
@@ -1347,8 +1347,9 @@ fn fs_body(in: BodyVarying) -> BodyOutput {
     let alpha = max(in.albedo.a, in.emissive.a);
 
     // Reverse-Z depth from the actual hit point, not the quad surface, so
-    // overlapping spheres self-occlude correctly.
-    let hit_clip = camera.view_proj * vec4<f32>(hit_world, 1.0);
+    // overlapping spheres self-occlude correctly. Hit point is in the
+    // render frame, projected through the matching matrix.
+    let hit_clip = camera.view_proj_relative * vec4<f32>(hit_relative, 1.0);
 
     let lit_color = vec4<f32>(rgb, alpha);
     let zero      = vec4<f32>(0.0, 0.0, 0.0, 0.0);
