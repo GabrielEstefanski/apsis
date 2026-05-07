@@ -42,3 +42,24 @@ pub(crate) fn validate_wgsl(name: &str, source: &str) {
         .validate(&module)
         .unwrap_or_else(|e| panic!("WGSL validation failed for `{name}`:\n{e:?}"));
 }
+
+/// Asserts that the Rust `#[repr(C)]` size of an instance / uniform
+/// struct matches the size the WGSL counterpart will demand at
+/// bind-group validation time. Catches the failure mode where a
+/// `vec3<f32>` field forces the WGSL struct alignment up to 16 and
+/// the Rust side stays packed tighter, producing the runtime error
+/// "buffer bound at binding index N is bound with size A where the
+/// shader expects B".
+///
+/// `expected_wgsl_size` is computed by hand from the WGSL alignment
+/// rules; the test fails loudly with both numbers if they disagree.
+#[cfg(test)]
+pub(crate) fn assert_uniform_layout<T>(name: &str, expected_wgsl_size: usize) {
+    let rust_size = std::mem::size_of::<T>();
+    assert_eq!(
+        rust_size, expected_wgsl_size,
+        "Rust `#[repr(C)]` size of `{name}` ({rust_size} B) disagrees with the \
+         WGSL struct size the shader expects ({expected_wgsl_size} B). Adjust \
+         the trailing `_pad` to bring them in line, or rework the WGSL struct."
+    );
+}

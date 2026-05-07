@@ -17,7 +17,9 @@ pub struct TrailState {
     /// matrix is applied.
     pub view_proj_relative: [[f32; 4]; 4],
     /// Floating-Origin anchor for the frame, in absolute world units.
-    /// Subtracted from each trail vertex on the GPU side.
+    /// Subtracted from each trail vertex on the GPU side. The WGSL
+    /// `vec3<f32>` forces the struct alignment to 16, so Rust has to
+    /// match the same total size — see `_pad` below.
     pub render_origin: [f32; 3],
     pub trail_width: f32,
     pub decay_k: f32,
@@ -25,7 +27,10 @@ pub struct TrailState {
     pub base_alpha: f32,
     pub feather: f32,
     pub core_boost: f32,
-    pub _pad: [f32; 1],
+    /// Tail padding to round the struct up to the WGSL alignment of 16
+    /// bytes. Without it the buffer comes out 120 B and the bind-group
+    /// validator rejects it against the shader's expected 128 B.
+    pub _pad: [f32; 3],
 }
 
 pub struct TrailRenderer {
@@ -276,7 +281,7 @@ impl TrailRenderer {
             base_alpha: style.base_alpha,
             feather: style.feather,
             core_boost: style.core_boost,
-            _pad: [0.0; 1],
+            _pad: [0.0; 3],
         };
 
         queue.write_buffer(&self.state_buf, 0, bytemuck::bytes_of(&state));
@@ -520,5 +525,13 @@ mod shader_tests {
     #[test]
     fn trail_shader_validates() {
         crate::render::validate_wgsl("trail", super::TRAIL_SHADER);
+    }
+
+    /// `4 × u32 (16) + mat4x4 (64) + vec3 (12, align 16) + 6 × f32 (24) +
+    /// 3 × f32 tail-pad (12) = 128 B`. The vec3 forces struct alignment to
+    /// 16; Rust packs tighter without an explicit pad.
+    #[test]
+    fn trail_state_layout() {
+        crate::render::assert_uniform_layout::<super::TrailState>("TrailState", 128);
     }
 }

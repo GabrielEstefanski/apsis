@@ -273,4 +273,11 @@ mod shader_tests {
     fn grid_shader_validates() {
         crate::render::validate_wgsl("grid", super::GRID_SHADER);
     }
+
+    /// mat4x4 (64) + vec3 (12) + f32 (4) + vec2 (8) + vec2 (8) = 96 B,
+    /// struct alignment 16 (mat4x4 + vec3) → 96 already aligned.
+    #[test]
+    fn grid_uniform_layout() {
+        crate::render::assert_uniform_layout::<super::GridUniform>("GridUniform", 96);
+    }
 }
