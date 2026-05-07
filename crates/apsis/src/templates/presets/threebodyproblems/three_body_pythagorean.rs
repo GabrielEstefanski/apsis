@@ -26,6 +26,7 @@ pub fn three_body_pythagorean(_seed: u64) -> Template {
                 mass: 3.0,
                 position: Some([1.0, 3.0, 0.0]),
                 velocity: [0.0, 0.0, 0.0],
+                class_override: None,
                 preset: &body_preset::ROCKY,
             },
             TemplateBody {
@@ -33,6 +34,7 @@ pub fn three_body_pythagorean(_seed: u64) -> Template {
                 mass: 4.0,
                 position: Some([-2.0, -1.0, 0.0]),
                 velocity: [0.0, 0.0, 0.0],
+                class_override: None,
                 preset: &body_preset::ROCKY,
             },
             TemplateBody {
@@ -40,6 +42,7 @@ pub fn three_body_pythagorean(_seed: u64) -> Template {
                 mass: 5.0,
                 position: Some([1.0, -1.0, 0.0]),
                 velocity: [0.0, 0.0, 0.0],
+                class_override: None,
                 preset: &body_preset::ROCKY,
             },
         ],

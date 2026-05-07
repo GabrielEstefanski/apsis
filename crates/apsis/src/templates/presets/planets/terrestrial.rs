@@ -6,6 +6,7 @@ pub fn terrestrial_planets() -> Template {
             radius: 0.38,
             position: None,
             velocity: [0.0, 0.0],
+            class_override: None,
             material: Material::Rocky,
         },
         // Vênus
@@ -14,6 +15,7 @@ pub fn terrestrial_planets() -> Template {
             radius: 0.95,
             position: [-0.2, 0.0],
             velocity: [0.0, 0.0],
+            class_override: None,
             material: Material::Rocky,
         },
         // Terra
@@ -22,6 +24,7 @@ pub fn terrestrial_planets() -> Template {
             radius: 1.0,
             position: [0.2, 0.0],
             velocity: [0.0, 0.0],
+            class_override: None,
             material: Material::Rocky,
         },
         // Marte
@@ -30,6 +33,7 @@ pub fn terrestrial_planets() -> Template {
             radius: 0.53,
             position: [0.6, 0.0],
             velocity: [0.0, 0.0],
+            class_override: None,
             material: Material::Rocky,
         },
     ];

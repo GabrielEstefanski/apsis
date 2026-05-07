@@ -38,6 +38,7 @@ pub fn three_body_euler_collinear(_seed: u64) -> Template {
                 mass: m,
                 position: Some([-d, 0.0, 0.0]),
                 velocity: [0.0, -v, 0.0],
+                class_override: None,
                 preset: &body_preset::ROCKY,
             },
             TemplateBody {
@@ -45,6 +46,7 @@ pub fn three_body_euler_collinear(_seed: u64) -> Template {
                 mass: m,
                 position: Some([0.0, 0.0, 0.0]),
                 velocity: [0.0, 0.0, 0.0],
+                class_override: None,
                 preset: &body_preset::ROCKY,
             },
             TemplateBody {
@@ -52,6 +54,7 @@ pub fn three_body_euler_collinear(_seed: u64) -> Template {
                 mass: m,
                 position: Some([d, 0.0, 0.0]),
                 velocity: [0.0, v, 0.0],
+                class_override: None,
                 preset: &body_preset::ROCKY,
             },
         ],

@@ -17,6 +17,7 @@ pub fn trappist_1(seed: u64) -> Template {
         preset: &body_preset::STAR,
         position: Some([0.0, 0.0, 0.0]),
         velocity: [0.0, 0.0, 0.0],
+        class_override: None,
     });
 
     let planets = [
@@ -40,6 +41,7 @@ pub fn trappist_1(seed: u64) -> Template {
             preset: &body_preset::ROCKY,
             position: Some(pos),
             velocity: vel,
+            class_override: None,
         });
     }
 

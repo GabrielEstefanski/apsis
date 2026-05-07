@@ -46,6 +46,7 @@ pub fn three_body_lagrange_equilateral(_seed: u64) -> Template {
                 mass: m,
                 position: Some(p1),
                 velocity: tangential(p1, v),
+                class_override: None,
                 preset: &body_preset::ROCKY,
             },
             TemplateBody {
@@ -53,6 +54,7 @@ pub fn three_body_lagrange_equilateral(_seed: u64) -> Template {
                 mass: m,
                 position: Some(p2),
                 velocity: tangential(p2, v),
+                class_override: None,
                 preset: &body_preset::ROCKY,
             },
             TemplateBody {
@@ -60,6 +62,7 @@ pub fn three_body_lagrange_equilateral(_seed: u64) -> Template {
                 mass: m,
                 position: Some(p3),
                 velocity: tangential(p3, v),
+                class_override: None,
                 preset: &body_preset::ROCKY,
             },
         ],

@@ -21,6 +21,7 @@ pub fn hd_80606(seed: u64) -> Template {
         preset: &body_preset::STAR,
         position: Some([0.0, 0.0, 0.0]),
         velocity: [0.0, 0.0, 0.0],
+        class_override: None,
     });
 
     // ── Planet (placed at periapsis) ───── //
@@ -41,6 +42,7 @@ pub fn hd_80606(seed: u64) -> Template {
         preset: &body_preset::GAS,
         position: Some(pos),
         velocity: vel,
+        class_override: None,
     });
 
     Template {

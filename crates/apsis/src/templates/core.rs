@@ -77,6 +77,16 @@ pub struct TemplateBody {
     /// Initial velocity `[vx, vy, vz]` in the inertial simulation
     /// frame [length / time]. 2D scenarios set `vz = 0`.
     pub velocity: [f64; 3],
+
+    /// Override the preset's [`default_class`](BodyPreset::default_class).
+    ///
+    /// `None` keeps the preset's natural class (a `ROCKY` body lands
+    /// as [`BodyClass::Planet`], an `ICY` body as
+    /// [`BodyClass::Moon`]). Use `Some(...)` to tag a body whose role
+    /// in the scene differs from the preset's default — e.g. Earth's
+    /// Moon is a `ROCKY` body that should render as
+    /// [`BodyClass::Moon`].
+    pub class_override: Option<crate::domain::body_preset::BodyClass>,
 }
 
 impl TemplateBody {
@@ -85,7 +95,14 @@ impl TemplateBody {
     /// Convenience constructor for the common case where position and
     /// velocity will be filled in by the scenario builder.
     pub fn at_rest(mass: f64, preset: &'static BodyPreset) -> Self {
-        Self { name: None, mass, preset, position: None, velocity: [0.0, 0.0, 0.0] }
+        Self {
+            name: None,
+            mass,
+            preset,
+            position: None,
+            velocity: [0.0, 0.0, 0.0],
+            class_override: None,
+        }
     }
 
     /// Construct a body with explicit position and velocity, no spin.
@@ -95,7 +112,7 @@ impl TemplateBody {
         position: [f64; 3],
         velocity: [f64; 3],
     ) -> Self {
-        Self { name: None, mass, preset, position: Some(position), velocity }
+        Self { name: None, mass, preset, position: Some(position), velocity, class_override: None }
     }
 }
 

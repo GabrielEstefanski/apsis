@@ -37,6 +37,7 @@ pub fn sun_earth_unstable_lagrange(_seed: u64) -> Template {
                 mass: m_sun,
                 position: Some([0.0, 0.0, 0.0]),
                 velocity: [0.0, 0.0, 0.0],
+                class_override: None,
                 preset: &body_preset::STAR,
             },
             // Earth
@@ -45,6 +46,7 @@ pub fn sun_earth_unstable_lagrange(_seed: u64) -> Template {
                 mass: m_earth,
                 position: Some(earth_pos),
                 velocity: earth_vel,
+                class_override: None,
                 preset: &body_preset::ROCKY,
             },
             // L1 (unstable)
@@ -53,6 +55,7 @@ pub fn sun_earth_unstable_lagrange(_seed: u64) -> Template {
                 mass: 1e-12,
                 position: Some(l1_pos),
                 velocity: l1_vel,
+                class_override: None,
                 preset: &body_preset::ASTEROID,
             },
             // L2 (unstable)
@@ -61,6 +64,7 @@ pub fn sun_earth_unstable_lagrange(_seed: u64) -> Template {
                 mass: 1e-12,
                 position: Some(l2_pos),
                 velocity: l2_vel,
+                class_override: None,
                 preset: &body_preset::ASTEROID,
             },
             // L3 (unstable)
@@ -69,6 +73,7 @@ pub fn sun_earth_unstable_lagrange(_seed: u64) -> Template {
                 mass: 1e-12,
                 position: Some(l3_pos),
                 velocity: l3_vel,
+                class_override: None,
                 preset: &body_preset::ASTEROID,
             },
         ],
