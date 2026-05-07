@@ -57,7 +57,7 @@ impl TrailRecorder {
     ///
     /// On topology change the buffer is reset and any stale samples are
     /// silently dropped (their column widths no longer match).
-    pub fn ingest(&mut self, samples: Vec<Vec<[f32; 2]>>, bodies: &[Body]) {
+    pub fn ingest(&mut self, samples: Vec<Vec<[f32; 3]>>, bodies: &[Body]) {
         self.ingest_with_colors(samples, bodies, None);
     }
 
@@ -71,7 +71,7 @@ impl TrailRecorder {
     /// material colour — the pre-existing behaviour.
     pub fn ingest_with_colors(
         &mut self,
-        samples: Vec<Vec<[f32; 2]>>,
+        samples: Vec<Vec<[f32; 3]>>,
         bodies: &[Body],
         colors_override: Option<&[[u8; 3]]>,
     ) {

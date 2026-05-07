@@ -9,10 +9,10 @@
 //! ```
 //!
 //! where `col` cycles through `0..capacity` as a ring buffer and each column
-//! represents one recorded time step.  This layout enables a **single
-//! contiguous `write_buffer` call** per trail-append step (one full column of
-//! `n_bodies × 8` bytes), while keeping reads for a single body's history
-//! approximately sequential in the GPU vertex shader.
+//! represents one recorded time step.  Each slot is a `[f32; 4]` (xyz plus a
+//! single trailing zero) so the layout matches the GPU's std430 stride for
+//! `array<vec3<f32>>` — uploads are a direct `write_buffer` of the underlying
+//! bytes with no per-sample repacking.
 //!
 //! # Dirty tracking
 //!
@@ -51,7 +51,7 @@ const INCREMENTAL_LIMIT: usize = 8;
 /// `capacity / 128`; capacity only affects how many distinct position samples
 /// exist within the visible trail window.
 ///
-/// Memory footprint: `n_bodies × capacity × 8 bytes`.
+/// Memory footprint: `n_bodies × capacity × 16 bytes`.
 pub fn adaptive_capacity(n_bodies: usize) -> usize {
     match n_bodies {
         0..=5 => 16_384,   // ≤ 5 bodies  → ≤ 0.7 MB  — 2/3-body problems, binary stars
@@ -86,8 +86,10 @@ enum PositionsDirty {
 /// collect what needs to be uploaded to the GPU.
 pub struct TrailBuffer {
     /// Flat position storage, column-major: `positions[col * n_bodies + body_idx]`.
-    /// Unwritten slots contain `[f32::NAN; 2]`.
-    positions: Vec<[f32; 2]>,
+    /// Each slot is `[x, y, z, 0]`; unwritten slots are `[NaN, NaN, NaN, 0]`.
+    /// The fourth component pads `vec3<f32>` to its 16-byte std430 stride so
+    /// the buffer can be uploaded raw without a per-sample repack.
+    positions: Vec<[f32; 4]>,
 
     /// RGBA colour per body (linear f32).  Updated when body colours change.
     colors: Vec<[f32; 4]>,
@@ -156,7 +158,7 @@ impl TrailBuffer {
         self.sample_count = 0;
 
         let total = n_bodies * capacity;
-        self.positions = vec![[f32::NAN; 2]; total];
+        self.positions = vec![[f32::NAN, f32::NAN, f32::NAN, 0.0]; total];
         self.colors = vec![[0.0; 4]; n_bodies];
 
         self.pos_dirty = PositionsDirty::Full;
@@ -180,7 +182,7 @@ impl TrailBuffer {
         let base = col * n;
 
         for (i, b) in bodies.iter().enumerate() {
-            self.positions[base + i] = [b.x as f32, b.y as f32];
+            self.positions[base + i] = [b.x as f32, b.y as f32, b.z as f32, 0.0];
         }
 
         // Dirty tracking — escalate to Full after too many incremental columns.
@@ -204,17 +206,20 @@ impl TrailBuffer {
 
     /// Records a pre-extracted column of world-space positions.
     ///
-    /// Equivalent to [`push`](Self::push) but accepts raw `[x, y]` pairs,
+    /// Equivalent to [`push`](Self::push) but accepts raw `[x, y, z]` triples,
     /// allowing the physics thread to hand off just the positions it sampled
-    /// without cloning full [`Body`] structs.
-    pub fn push_column(&mut self, positions: &[[f32; 2]]) {
+    /// without cloning full [`Body`] structs. Each triple is padded to four
+    /// floats on insertion to match the GPU's std430 stride.
+    pub fn push_column(&mut self, positions: &[[f32; 3]]) {
         debug_assert_eq!(positions.len(), self.n_bodies as usize);
 
         let col = self.head as usize;
         let n = self.n_bodies as usize;
         let base = col * n;
 
-        self.positions[base..base + n].copy_from_slice(positions);
+        for (i, p) in positions.iter().enumerate() {
+            self.positions[base + i] = [p[0], p[1], p[2], 0.0];
+        }
 
         self.pos_dirty = match &mut self.pos_dirty {
             PositionsDirty::Full => PositionsDirty::Full,
@@ -239,6 +244,12 @@ impl TrailBuffer {
     /// Called during COM recentering.  NaN slots (unwritten) are left as NaN.
     /// After translation the position matrix is marked for a full GPU upload
     /// because every element changes.
+    ///
+    /// The shift is currently planar — the COM-shift accumulator on the
+    /// physics side is `(f32, f32)` and the dominant solar-system test cases
+    /// keep the COM near `z = 0`. A 3D upgrade would require widening the
+    /// accumulator across `system::{mod,bodies,step,config}` and
+    /// `physics_thread`; tracked as deferred work.
     pub fn translate(&mut self, dx: f32, dy: f32) {
         if dx == 0.0 && dy == 0.0 {
             return;
@@ -332,13 +343,15 @@ impl TrailBuffer {
 
     // ── Accessors ─────────────────────────────────────────────────────────── //
 
-    /// Full flat position matrix (column-major).
-    pub fn positions(&self) -> &[[f32; 2]] {
+    /// Full flat position matrix (column-major). Each entry is `[x, y, z, 0]`
+    /// so the buffer is byte-compatible with a GPU `array<vec3<f32>>` storage
+    /// binding under std430.
+    pub fn positions(&self) -> &[[f32; 4]] {
         &self.positions
     }
 
     /// The slice of positions for one column (`col * n_bodies` elements).
-    pub fn column_slice(&self, col: u32) -> &[[f32; 2]] {
+    pub fn column_slice(&self, col: u32) -> &[[f32; 4]] {
         let n = self.n_bodies as usize;
         let base = col as usize * n;
         &self.positions[base..base + n]
@@ -387,13 +400,16 @@ impl TrailBuffer {
     // ── Snapshot persistence ──────────────────────────────────────────────── //
 
     /// Capture the full trail state into a [`TrailSnapshot`].
+    ///
+    /// On-disk samples carry only `(x, y, z)` — the trailing pad slot is
+    /// dropped when serialising and re-added on restore.
     pub fn to_snapshot(&self) -> TrailSnapshot {
         TrailSnapshot {
             n_bodies: self.n_bodies,
             capacity: self.capacity,
             head: self.head,
             len: self.len,
-            positions: self.positions.clone(),
+            positions: self.positions.iter().map(|p| [p[0], p[1], p[2]]).collect(),
         }
     }
 
@@ -407,7 +423,7 @@ impl TrailBuffer {
         self.head = snap.head;
         self.len = snap.len;
         self.sample_count = snap.len as u64;
-        self.positions = snap.positions.clone();
+        self.positions = snap.positions.iter().map(|p| [p[0], p[1], p[2], 0.0]).collect();
         self.pos_dirty = PositionsDirty::Full;
         // colours stay dirty from the reset() that preceded this call
     }

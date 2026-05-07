@@ -31,6 +31,7 @@ pub fn jupiter_trojans(seed: u64) -> Template {
             mass: m_sun,
             position: Some([0.0, 0.0, 0.0]),
             velocity: [0.0, 0.0, 0.0],
+            class_override: None,
             preset: &body_preset::STAR,
             density: Some(1408.0 * KG_M3_TO_SOLAR_AU3),
         },
@@ -40,6 +41,7 @@ pub fn jupiter_trojans(seed: u64) -> Template {
             mass: m_jupiter,
             position: Some(j_pos),
             velocity: j_vel,
+            class_override: None,
             preset: &body_preset::GAS,
             density: Some(1326.0 * KG_M3_TO_SOLAR_AU3),
         },
@@ -66,6 +68,7 @@ pub fn jupiter_trojans(seed: u64) -> Template {
                 mass: 1e-12,
                 position: Some(pos),
                 velocity: vel,
+                class_override: None,
                 preset: &body_preset::ASTEROID,
                 density: None,
             });

@@ -349,19 +349,6 @@ impl WgpuBackend {
         self.lighting = LightingUniform::default();
     }
 
-    /// Draw grid coordinate labels using egui on top of the GPU grid.
-    ///
-    /// Call this after the GPU paint callback, passing the same `rect` used for
-    /// the wgpu viewport. `unit` is appended to x-axis tick labels (e.g. "AU").
-    pub fn draw_labels_overlay(&self, ui: &egui::Ui, rect: egui::Rect, unit: &str) {
-        if !self.show_grid {
-            return;
-        }
-        if let Some(grid) = &self.grid {
-            grid.draw_labels(ui, self.center, self.scale, rect, unit);
-        }
-    }
-
     // ── Lighting API ──────────────────────────────────────────────────────────
 
     /// Installs the per-frame scene lighting — sources, ambient floor,
@@ -552,21 +539,12 @@ impl WgpuBackend {
 
         if self.show_grid {
             if let Some(grid) = &self.grid {
-                // Grid fragment shader samples `frag_coord.xy` in the HDR
-                // target's pixel space (canvas-local, physical pixels).
-                // Camera state comes from the app in logical points inside the
-                // full window, so translate by the canvas viewport and rescale
-                // by pixels_per_point before upload. Without this the grid
-                // lines and labels drift apart on the sub-pixel.
-                let grid_center = [
-                    (center[0] - viewport_min[0]) * pixels_per_point,
-                    (center[1] - viewport_min[1]) * pixels_per_point,
-                ];
-                let grid_scale = scale * pixels_per_point;
+                let vp = glam::Mat4::from_cols_array_2d(&view_proj);
+                let inv = vp.inverse().to_cols_array_2d();
                 grid.upload(
                     queue,
-                    grid_center,
-                    grid_scale,
+                    inv,
+                    camera_pos,
                     [physical_size[0] as f32, physical_size[1] as f32],
                 );
             }
@@ -580,8 +558,7 @@ impl WgpuBackend {
                 queue,
                 trail_buf,
                 self.trail_visibility.as_deref(),
-                center,
-                scale,
+                view_proj,
                 &self.trail_style,
             );
         }

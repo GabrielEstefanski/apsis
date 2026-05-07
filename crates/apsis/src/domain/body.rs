@@ -1,4 +1,4 @@
-use crate::domain::body_preset::{self, BodyPreset};
+use crate::domain::body_preset::{self, BodyClass, BodyPreset};
 use std::f64::consts::PI;
 
 /// Base softening length for a body of mass 1.0.
@@ -77,6 +77,14 @@ pub struct Body {
     /// radiation forces. Bodies with `q_pr == 0.0` are silently
     /// skipped by the radiation pipeline.
     pub q_pr: f64,
+
+    /// UX taxonomy bucket — Star, Planet, Moon, Asteroid, Comet, or
+    /// Unknown. Set from the construction preset's
+    /// [`BodyPreset::default_class`] (overridable per body via
+    /// [`Body::with_class`]); never read by physics. The render and
+    /// inspector layers use it for category-level filters and
+    /// grouping.
+    pub class: BodyClass,
 }
 
 /// Body payload with an optional explicit display name.
@@ -120,6 +128,7 @@ impl Body {
             color: [180, 180, 180],
             luminosity: 0.0,
             q_pr: 0.0,
+            class: BodyClass::Unknown,
         }
     }
 
@@ -132,7 +141,11 @@ impl Body {
     /// the resulting body's `luminosity` field manually after
     /// construction.
     pub fn from_preset(preset: &BodyPreset, mass: f64) -> Self {
-        let density = preset.density.density_at(mass);
+        // Preset density models live in human-readable kg/m³ so the
+        // source reads like the literature; cross to coherent
+        // M_☉/AU³ here, once, before any geometry runs.
+        let density_kg_m3 = preset.density.density_at(mass);
+        let density = density_kg_m3 * crate::templates::builders::KG_M3_TO_SOLAR_AU3;
         let physical_radius = radius_from_density_mass(density, mass);
         let softening = default_softening(mass);
         let luminosity = preset
@@ -154,6 +167,7 @@ impl Body {
             color: preset.default_color,
             luminosity,
             q_pr: preset.default_q_pr,
+            class: preset.default_class,
         }
     }
 
@@ -295,6 +309,18 @@ impl Body {
         self
     }
 
+    /// Override the preset-default UX class. Use to tag a body whose
+    /// preset does not match its role: Earth's Moon is constructed
+    /// from [`body_preset::ROCKY`] (default class
+    /// [`BodyClass::Planet`]) but should render under
+    /// [`BodyClass::Moon`] for filter purposes.
+    #[inline]
+    #[must_use]
+    pub fn with_class(mut self, class: BodyClass) -> Self {
+        self.class = class;
+        self
+    }
+
     /// Attach an explicit display name, producing a [`NamedBody`] consumable
     /// by [`System::add_named_body`](crate::core::system::System::add_named_body).
     #[inline]
@@ -359,7 +385,26 @@ pub(crate) fn default_softening(mass: f64) -> f64 {
     EPS_BASE * mass.abs().cbrt()
 }
 
-/// Radius from density and mass: r = (3m / 4πρ)^(1/3).
+/// Radius of a uniform sphere from its bulk density and mass.
+///
+/// **Pure geometric.** `density` and `mass` must be in coherent
+/// units of the active simulation system (e.g. for `solar_au`:
+/// mass in M_☉, density in M_☉/AU³, returned radius in AU).
+///
+/// Callers receiving SI-format physical data (kg/m³ from NASA fact
+/// sheets, GADGET parameter files, …) are responsible for
+/// converting to coherent units at the boundary. The two boundary
+/// crossings in this codebase are:
+///
+/// * `Body::from_preset`, which converts the preset's kg/m³ output
+///   via [`crate::templates::builders::KG_M3_TO_SOLAR_AU3`]; and
+/// * `templates::*`, which write per-body density as
+///   `kg_m3_value * KG_M3_TO_SOLAR_AU3` directly in the source.
+///
+/// Keeping the conversion at the construction boundary rather than
+/// inside this function lets `Body::density` mean exactly one thing
+/// (coherent M_☉/AU³ in solar_au) regardless of how the body was
+/// built.
 pub fn radius_from_density_mass(density: f64, mass: f64) -> f64 {
     let vol = mass / density.max(1e-30);
     sphere_radius_from_volume(vol)
@@ -445,9 +490,13 @@ mod tests {
 
     #[test]
     fn rocky_preset_uses_material_default_density() {
-        let earth = Body::rocky(1.0);
-        // ρ_0 = 5514 kg/m³ at anchor mass 1.0; Earth is at the anchor.
-        assert!((earth.density - 5514.0).abs() < 1.0);
+        // Anchor mass is 1 M_⊕ ≈ 3.0034e-6 M_☉. The preset's EOS pivot
+        // lands on ρ₀ = 5514 kg/m³ (Earth's bulk density); `from_preset`
+        // crosses to coherent M_☉/AU³ at construction, so the stored
+        // value is `5514 × KG_M3_TO_SOLAR_AU3 ≈ 9.28 × 10⁶`.
+        let earth = Body::rocky(3.0034e-6);
+        let expected = 5514.0 * crate::templates::builders::KG_M3_TO_SOLAR_AU3;
+        assert!((earth.density - expected).abs() / expected < 1e-3);
     }
 
     #[test]

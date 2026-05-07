@@ -11,17 +11,14 @@ pub struct TrailState {
     pub trail_len: u32,
     pub n_bodies: u32,
     pub cap: u32,
-    pub center: [f32; 2],
-    pub scale: f32,
+    pub view_proj: [[f32; 4]; 4],
     pub trail_width: f32,
     pub decay_k: f32,
     pub tail_desaturate: f32,
     pub base_alpha: f32,
     pub feather: f32,
     pub core_boost: f32,
-    // Pad to 64 bytes so the struct size is a multiple of 16 as required
-    // for WGSL uniform address space.
-    pub _pad: [f32; 3],
+    pub _pad: [f32; 2],
 }
 
 pub struct TrailRenderer {
@@ -125,7 +122,7 @@ impl TrailRenderer {
 
         let pos_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("trail::pos"),
-            size: 8,
+            size: 16,
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -175,8 +172,7 @@ impl TrailRenderer {
         queue: &wgpu::Queue,
         trail: &TrailBuffer,
         visibility: Option<&[bool]>,
-        center: [f32; 2],
-        scale: f32,
+        view_proj: [[f32; 4]; 4],
         style: &TrailStyle,
     ) {
         let n_bodies = trail.n_bodies();
@@ -189,7 +185,7 @@ impl TrailRenderer {
             self.uploaded_sample_count = 0;
             self.uploaded_len = 0;
 
-            let pos_size = (n_bodies * cap * 8).max(8);
+            let pos_size = (n_bodies * cap * 16).max(16);
             let color_size = (n_bodies * 16).max(16);
 
             self.pos_buf = device.create_buffer(&wgpu::BufferDescriptor {
@@ -231,7 +227,7 @@ impl TrailRenderer {
         if must_full_upload {
             queue.write_buffer(&self.pos_buf, 0, bytemuck::cast_slice(trail.positions()));
         } else if delta > 0 {
-            let col_bytes = n_bodies as u64 * size_of::<[f32; 2]>() as u64;
+            let col_bytes = n_bodies as u64 * size_of::<[f32; 4]>() as u64;
             let first_col = (trail.head() + cap - delta as u32) % cap;
 
             for step in 0..delta as u32 {
@@ -264,15 +260,14 @@ impl TrailRenderer {
             trail_len: trail.len(),
             n_bodies,
             cap,
-            center,
-            scale,
+            view_proj,
             trail_width: style.width,
             decay_k: style.decay_k,
             tail_desaturate: style.tail_desaturate,
             base_alpha: style.base_alpha,
             feather: style.feather,
             core_boost: style.core_boost,
-            _pad: [0.0; 3],
+            _pad: [0.0; 2],
         };
 
         queue.write_buffer(&self.state_buf, 0, bytemuck::bytes_of(&state));
@@ -312,8 +307,7 @@ struct TrailState {
     trail_len: u32,
     n_bodies: u32,
     cap: u32,
-    center: vec2<f32>,
-    scale: f32,
+    view_proj: mat4x4<f32>,
     trail_width: f32,
     decay_k: f32,
     tail_desaturate: f32,
@@ -322,12 +316,16 @@ struct TrailState {
     core_boost: f32,
     _pad0: f32,
     _pad1: f32,
-    _pad2: f32,
 };
 
-@group(1) @binding(0) var<storage, read> positions: array<vec2<f32>>;
+@group(1) @binding(0) var<storage, read> positions: array<vec4<f32>>;
 @group(1) @binding(1) var<storage, read> colors: array<vec4<f32>>;
 @group(1) @binding(2) var<uniform> state: TrailState;
+
+// Minimum positive clip-space `w` accepted for projection. Matches the
+// orbit-overlay near bias so a sample sitting on the camera horizon
+// stays numerically stable after the perspective divide.
+const NEAR_BIAS: f32 = 1.05e-3;
 
 // ── Utils ─────────────────────────────────────────────────────────────────────
 
@@ -336,6 +334,18 @@ fn to_ndc(p: vec2<f32>) -> vec4<f32> {
     let x =  (local.x / screen.size.x) * 2.0 - 1.0;
     let y = -(local.y / screen.size.y) * 2.0 + 1.0;
     return vec4<f32>(x, y, 0.0, 1.0);
+}
+
+// Project a clip-space point to canvas pixel coordinates. The trail
+// ribbon is built in screen space so a constant `trail_width` reads
+// as a constant pixel thickness regardless of the body's depth.
+fn clip_to_screen(clip: vec4<f32>) -> vec2<f32> {
+    let ndc = clip.xy / clip.w;
+    let local = vec2<f32>(
+        (ndc.x * 0.5 + 0.5) * screen.size.x,
+        (-ndc.y * 0.5 + 0.5) * screen.size.y,
+    );
+    return local + screen.viewport_min;
 }
 
 fn luminance(rgb: vec3<f32>) -> f32 {
@@ -381,8 +391,8 @@ fn vs_trail(
     let idx0 = i0 * state.n_bodies + body;
     let idx1 = i1 * state.n_bodies + body;
 
-    let p0 = positions[idx0];
-    let p1 = positions[idx1];
+    let p0 = positions[idx0].xyz;
+    let p1 = positions[idx1].xyz;
 
     if any(p0 != p0) || any(p1 != p1) {
         var out: VSOut;
@@ -393,8 +403,24 @@ fn vs_trail(
         return out;
     }
 
-    let screen_p0 = state.center + p0 * state.scale;
-    let screen_p1 = state.center + p1 * state.scale;
+    let clip0 = state.view_proj * vec4<f32>(p0, 1.0);
+    let clip1 = state.view_proj * vec4<f32>(p1, 1.0);
+
+    // Drop segments with either endpoint behind the camera near plane
+    // rather than risk a wrap-around projection. A future pass can
+    // mirror the orbit-overlay clip-extension if the cut becomes
+    // visually intrusive at extreme zoom.
+    if clip0.w <= NEAR_BIAS || clip1.w <= NEAR_BIAS {
+        var out: VSOut;
+        out.pos        = vec4<f32>(0.0);
+        out.color      = vec4<f32>(0.0);
+        out.transverse = 0.0;
+        out.age        = 0.0;
+        return out;
+    }
+
+    let screen_p0 = clip_to_screen(clip0);
+    let screen_p1 = clip_to_screen(clip1);
 
     let dir     = screen_p1 - screen_p0;
     let len     = max(length(dir), 1e-5);

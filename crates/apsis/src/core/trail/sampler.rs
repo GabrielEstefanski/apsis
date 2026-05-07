@@ -62,7 +62,7 @@ const EPS_SCALE_SQ: f32 = 1e-12;
 pub struct ArcLengthSampler {
     /// Last recorded world-space position of each body (anchor).
     /// Resized on topology change.
-    anchors: Vec<(f32, f32)>,
+    anchors: Vec<(f32, f32, f32)>,
     /// Squared trigger threshold, in units of `(displacement / scene_scale)²`.
     threshold_sq: f32,
 }
@@ -82,7 +82,7 @@ impl TrailSampler for ArcLengthSampler {
         // body's trail starts immediately.
         if self.anchors.len() != n {
             self.anchors.clear();
-            self.anchors.extend(bodies.iter().map(|b| (b.x as f32, b.y as f32)));
+            self.anchors.extend(bodies.iter().map(|b| (b.x as f32, b.y as f32, b.z as f32)));
             return n > 0;
         }
         if n == 0 {
@@ -96,7 +96,8 @@ impl TrailSampler for ArcLengthSampler {
         for b in bodies {
             let x = b.x as f32;
             let y = b.y as f32;
-            scale_sq_acc += x * x + y * y;
+            let z = b.z as f32;
+            scale_sq_acc += x * x + y * y + z * z;
         }
         let scene_scale_sq = (scale_sq_acc / n as f32).max(EPS_SCALE_SQ);
 
@@ -105,7 +106,8 @@ impl TrailSampler for ArcLengthSampler {
         for (i, b) in bodies.iter().enumerate() {
             let dx = b.x as f32 - self.anchors[i].0;
             let dy = b.y as f32 - self.anchors[i].1;
-            let d = dx * dx + dy * dy;
+            let dz = b.z as f32 - self.anchors[i].2;
+            let d = dx * dx + dy * dy + dz * dz;
             if d > max_disp_sq {
                 max_disp_sq = d;
             }
@@ -114,7 +116,7 @@ impl TrailSampler for ArcLengthSampler {
         let ratio_sq = max_disp_sq / scene_scale_sq;
         if ratio_sq >= self.threshold_sq {
             for (i, b) in bodies.iter().enumerate() {
-                self.anchors[i] = (b.x as f32, b.y as f32);
+                self.anchors[i] = (b.x as f32, b.y as f32, b.z as f32);
             }
             true
         } else {
