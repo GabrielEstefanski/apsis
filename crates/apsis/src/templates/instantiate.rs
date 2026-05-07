@@ -40,9 +40,17 @@ pub fn instantiate_at(template: &Template, cx: f64, cy: f64) -> Vec<NamedBody> {
             let [px, py, pz] = t.position.unwrap_or([0.0, 0.0, 0.0]);
             let [vx, vy, vz] = t.velocity;
 
-            let b = Body::from_preset(t.preset, t.mass)
+            let mut b = Body::from_preset(t.preset, t.mass)
                 .at_3d(px + dx, py + dy, pz)
                 .with_velocity_3d(vx, vy, vz);
+
+            // Per-body density override: templates that quote real
+            // bodies (Earth, Sun, Jupiter, …) supply published values
+            // here, replacing the preset's heuristic EOS so
+            // `physical_radius` matches NASA fact-sheet values.
+            if let Some(rho) = t.density {
+                b = b.with_density(rho);
+            }
 
             // Fall back to the preset's display name when the
             // template author didn't pick one explicitly. The

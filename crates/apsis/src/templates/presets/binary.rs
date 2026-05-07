@@ -23,6 +23,7 @@ pub fn binary_star(_seed: u64) -> Template {
                 position: Some([-r, 0.0, 0.0]),
                 velocity: [0.0, -v_body, 0.0],
                 preset: &body_preset::STAR,
+                density: None,
             },
             TemplateBody {
                 name: Some("Star B"),
@@ -30,6 +31,7 @@ pub fn binary_star(_seed: u64) -> Template {
                 position: Some([r, 0.0, 0.0]),
                 velocity: [0.0, v_body, 0.0],
                 preset: &body_preset::STAR,
+                density: None,
             },
         ],
         display_scale: 1.0,
@@ -73,6 +75,7 @@ pub fn star_companion(_seed: u64) -> Template {
                 position: Some([-r1, 0.0, 0.0]),
                 velocity: [0.0, -v1, 0.0],
                 preset: &body_preset::STAR,
+                density: None,
             },
             TemplateBody {
                 name: Some("Companion"),
@@ -80,6 +83,7 @@ pub fn star_companion(_seed: u64) -> Template {
                 position: Some([r2, 0.0, 0.0]),
                 velocity: [0.0, v2, 0.0],
                 preset: &body_preset::BROWN_DWARF,
+                density: None,
             },
         ],
         display_scale: 1.0,

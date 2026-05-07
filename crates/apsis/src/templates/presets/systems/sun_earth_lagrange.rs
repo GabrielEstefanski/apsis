@@ -1,6 +1,9 @@
 use crate::{
     domain::body_preset,
-    templates::{Template, TemplateBody, UnitSystem, builders::circular_orbit},
+    templates::{
+        Template, TemplateBody, UnitSystem,
+        builders::{KG_M3_TO_SOLAR_AU3, circular_orbit},
+    },
 };
 
 pub fn sun_earth_lagrange(_seed: u64) -> Template {
@@ -29,6 +32,7 @@ pub fn sun_earth_lagrange(_seed: u64) -> Template {
                 position: Some([0.0, 0.0, 0.0]),
                 velocity: [0.0, 0.0, 0.0],
                 preset: &body_preset::STAR,
+                density: Some(1408.0 * KG_M3_TO_SOLAR_AU3),
             },
             // Earth
             TemplateBody {
@@ -37,6 +41,7 @@ pub fn sun_earth_lagrange(_seed: u64) -> Template {
                 position: Some(earth_pos),
                 velocity: earth_vel,
                 preset: &body_preset::ROCKY,
+                density: Some(5514.0 * KG_M3_TO_SOLAR_AU3),
             },
             // Trojan at L4
             TemplateBody {
@@ -45,6 +50,7 @@ pub fn sun_earth_lagrange(_seed: u64) -> Template {
                 position: Some(l4_pos),
                 velocity: l4_vel,
                 preset: &body_preset::ASTEROID,
+                density: None,
             },
             // Trojan at L5
             TemplateBody {
@@ -53,6 +59,7 @@ pub fn sun_earth_lagrange(_seed: u64) -> Template {
                 position: Some(l5_pos),
                 velocity: l5_vel,
                 preset: &body_preset::ASTEROID,
+                density: None,
             },
         ],
         display_scale: 1.0,

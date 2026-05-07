@@ -40,6 +40,7 @@ pub fn pluto_charon(_seed: u64) -> Template {
                 position: Some([-r_pluto, 0.0, 0.0]),
                 velocity: [0.0, -v_pluto, 0.0],
                 preset: &body_preset::ICY,
+                density: None,
             },
             TemplateBody {
                 name: Some("Charon"),
@@ -47,6 +48,7 @@ pub fn pluto_charon(_seed: u64) -> Template {
                 position: Some([r_charon, 0.0, 0.0]),
                 velocity: [0.0, v_charon, 0.0],
                 preset: &body_preset::ICY,
+                density: None,
             },
         ],
         display_scale: 1.0,

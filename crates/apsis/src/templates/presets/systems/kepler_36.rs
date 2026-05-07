@@ -15,6 +15,7 @@ pub fn kepler_36(seed: u64) -> Template {
         name: Some("Kepler-36"),
         mass: 1.07,
         preset: &body_preset::STAR,
+        density: None,
         position: Some([0.0, 0.0, 0.0]),
         velocity: [0.0, 0.0, 0.0],
     });
@@ -35,6 +36,7 @@ pub fn kepler_36(seed: u64) -> Template {
             preset,
             position: Some(pos),
             velocity: vel,
+            density: None,
         });
     }
 

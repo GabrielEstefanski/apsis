@@ -11,7 +11,7 @@
 
 use crate::{
     domain::body_preset,
-    templates::{Template, TemplateBody, UnitSystem},
+    templates::{Template, TemplateBody, UnitSystem, builders::KG_M3_TO_SOLAR_AU3},
 };
 
 pub fn alpha_centauri_ab(_seed: u64) -> Template {
@@ -35,12 +35,17 @@ pub fn alpha_centauri_ab(_seed: u64) -> Template {
                       79.91-year mutual orbit at eccentricity 0.52. Proxima omitted (period \
                       too long for interactive playback).",
         bodies: vec![
+            // Densities from Bigot et al. (2006) interferometric radii
+            // combined with the dynamical masses: ρ_A ≈ 1450 kg/m³,
+            // ρ_B ≈ 1900 kg/m³. Both denser than the Sun (1408 kg/m³)
+            // because they're slightly smaller relative to mass.
             TemplateBody {
                 name: Some("Alpha Centauri A"),
                 mass: m_a,
                 position: Some([-r1, 0.0, 0.0]),
                 velocity: [0.0, -v1, 0.0],
                 preset: &body_preset::STAR,
+                density: Some(1450.0 * KG_M3_TO_SOLAR_AU3),
             },
             TemplateBody {
                 name: Some("Alpha Centauri B"),
@@ -48,6 +53,7 @@ pub fn alpha_centauri_ab(_seed: u64) -> Template {
                 position: Some([r2, 0.0, 0.0]),
                 velocity: [0.0, v2, 0.0],
                 preset: &body_preset::STAR,
+                density: Some(1900.0 * KG_M3_TO_SOLAR_AU3),
             },
         ],
         display_scale: 1.0,

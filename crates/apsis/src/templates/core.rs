@@ -61,8 +61,9 @@ pub struct TemplateBody {
     /// Mass [simulation mass units, e.g. M_☉].
     pub mass: f64,
 
-    /// Construction preset — determines density, colour, q_pr, and
-    /// (optionally) luminosity at instantiation. Reference is held by
+    /// Construction preset — determines colour, q_pr, and (optionally)
+    /// luminosity at instantiation. The preset's density model is also
+    /// consulted unless `density` overrides it. Reference is held by
     /// `&'static` so the built-in catalogue is zero-cost; user-defined
     /// presets can be `Box::leak`'d into the same shape.
     pub preset: &'static BodyPreset,
@@ -77,6 +78,19 @@ pub struct TemplateBody {
     /// Initial velocity `[vx, vy, vz]` in the inertial simulation
     /// frame [length / time]. 2D scenarios set `vz = 0`.
     pub velocity: [f64; 3],
+
+    /// Optional explicit density [simulation units].
+    ///
+    /// When `Some(ρ)`, the instantiator overrides whatever the
+    /// preset's density model would have produced for this `mass`.
+    /// The point: templates that quote real bodies (Earth, Jupiter,
+    /// Sun, …) supply published densities directly so the rendered
+    /// `physical_radius` tracks the NASA fact sheet to within a few
+    /// percent rather than being clamped to the preset's
+    /// power-law-EOS bounds. Templates whose bodies are heuristic
+    /// (asteroid swarms, ad-hoc test particles) leave this `None` and
+    /// inherit the preset model.
+    pub density: Option<f64>,
 }
 
 impl TemplateBody {
@@ -85,7 +99,7 @@ impl TemplateBody {
     /// Convenience constructor for the common case where position and
     /// velocity will be filled in by the scenario builder.
     pub fn at_rest(mass: f64, preset: &'static BodyPreset) -> Self {
-        Self { name: None, mass, preset, position: None, velocity: [0.0, 0.0, 0.0] }
+        Self { name: None, mass, preset, position: None, velocity: [0.0, 0.0, 0.0], density: None }
     }
 
     /// Construct a body with explicit position and velocity, no spin.
@@ -95,7 +109,7 @@ impl TemplateBody {
         position: [f64; 3],
         velocity: [f64; 3],
     ) -> Self {
-        Self { name: None, mass, preset, position: Some(position), velocity }
+        Self { name: None, mass, preset, position: Some(position), velocity, density: None }
     }
 }
 
