@@ -39,8 +39,6 @@ impl CallbackTrait for CallbackFn {
         ];
 
         let mut backend = self.backend.lock().unwrap();
-        let center = backend.center;
-        let scale = backend.scale;
         backend.prepare_scene(
             &self.device,
             queue,
@@ -50,8 +48,6 @@ impl CallbackTrait for CallbackFn {
             physical_size,
             ppp,
             self.format,
-            center,
-            scale,
             self.view_proj,
             self.camera_pos,
         );

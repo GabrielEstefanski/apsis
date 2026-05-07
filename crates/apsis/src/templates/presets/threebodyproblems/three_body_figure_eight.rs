@@ -16,6 +16,7 @@ pub fn three_body_figure_eight(_seed: u64) -> Template {
                 class_override: None,
                 preset: &body_preset::ROCKY,
                 density: None,
+                albedo: None,
             },
             TemplateBody {
                 name: Some("Body 2"),
@@ -25,6 +26,7 @@ pub fn three_body_figure_eight(_seed: u64) -> Template {
                 class_override: None,
                 preset: &body_preset::ROCKY,
                 density: None,
+                albedo: None,
             },
             TemplateBody {
                 name: Some("Body 3"),
@@ -34,6 +36,7 @@ pub fn three_body_figure_eight(_seed: u64) -> Template {
                 class_override: None,
                 preset: &body_preset::ROCKY,
                 density: None,
+                albedo: None,
             },
         ],
         display_scale: 1.0,

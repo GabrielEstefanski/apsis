@@ -34,6 +34,7 @@ pub fn jupiter_trojans(seed: u64) -> Template {
             class_override: None,
             preset: &body_preset::STAR,
             density: Some(1408.0 * KG_M3_TO_SOLAR_AU3),
+            albedo: None,
         },
         // Jupiter
         TemplateBody {
@@ -44,6 +45,7 @@ pub fn jupiter_trojans(seed: u64) -> Template {
             class_override: None,
             preset: &body_preset::GAS,
             density: Some(1326.0 * KG_M3_TO_SOLAR_AU3),
+            albedo: None,
         },
     ];
 
@@ -71,6 +73,7 @@ pub fn jupiter_trojans(seed: u64) -> Template {
                 class_override: None,
                 preset: &body_preset::ASTEROID,
                 density: None,
+                albedo: None,
             });
         }
     }

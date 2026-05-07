@@ -38,6 +38,7 @@ pub fn kepler_36(seed: u64) -> Template {
         mass: m_star,
         preset: &body_preset::STAR,
         density: Some(1290.0 * KG_M3_TO_SOLAR_AU3),
+        albedo: None,
         position: Some([0.0, 0.0, 0.0]),
         velocity: [0.0, 0.0, 0.0],
         class_override: None,
@@ -68,6 +69,7 @@ pub fn kepler_36(seed: u64) -> Template {
             velocity: vel,
             class_override: None,
             density: Some(density_si * KG_M3_TO_SOLAR_AU3),
+            albedo: None,
         });
     }
 
