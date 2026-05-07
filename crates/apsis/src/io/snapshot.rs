@@ -36,7 +36,9 @@
 //!   [4]  capacity    u32 LE
 //!   [4]  head        u32 LE
 //!   [4]  len         u32 LE
-//!   [n_bodies * capacity * 8]  positions  — column-major [f32; 2] pairs
+//!   [n_bodies * capacity * 12] positions  — column-major [f32; 3] triples
+//!                                            (v4–v8 stored 8 bytes per sample;
+//!                                            v9 widened to 12)
 //! ```
 //!
 //! The `save_id` field doubles as the filename: `{save_id}.grav`.
@@ -55,6 +57,7 @@
 //! | 6   | Removed `omega_z` and `moment_inertia` from per-body record |
 //! | 7   | Added `z` and `vz` to per-body record (3D port) |
 //! | 8   | Replaced `material` byte with `q_pr` (8 bytes f64); `Body` no longer carries a material taxonomy field |
+//! | 9   | Trail positions widened from `[f32; 2]` to `[f32; 3]` for the 3D camera |
 //!
 //! Older files (ver < 5) round-trip cleanly; the `WisdomHolman` variant
 //! simply cannot be expressed in them and defaults to `VelocityVerlet` on
@@ -62,7 +65,9 @@
 //! 3D port introduces those components but a planar-only file remains
 //! mathematically equivalent under the v7 reader. v7 and earlier files
 //! reconstruct `q_pr` from the legacy material byte via a fixed lookup
-//! that mirrors the pre-refactor `Material::q_pr()` table.
+//! that mirrors the pre-refactor `Material::q_pr()` table. v8 trail
+//! sections store two floats per sample; the v9 reader materialises the
+//! third component as `z = 0`.
 
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
@@ -74,7 +79,7 @@ use crate::physics::integrator::IntegratorKind;
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 pub const MAGIC: [u8; 4] = *b"GRAV";
-pub const SCHEMA_VERSION: u16 = 8;
+pub const SCHEMA_VERSION: u16 = 9;
 
 // ── Snapshot ──────────────────────────────────────────────────────────────────
 
@@ -175,12 +180,13 @@ impl BodyRecord {
     }
 }
 
-/// Serialised state of a [`TrailBuffer`](crate::render::trail_buffer::TrailBuffer).
+/// Serialised state of a [`TrailBuffer`](crate::core::trail::TrailBuffer).
 ///
 /// The `positions` array is stored column-major:
-/// `positions[col * n_bodies + body_idx]`, matching the in-memory layout of
-/// the ring buffer so restoration is a single `memcpy`-equivalent.
-/// Unwritten slots are encoded as `[f32::NAN, f32::NAN]`.
+/// `positions[col * n_bodies + body_idx]`. Each sample is a 3D world-space
+/// point; unwritten slots are encoded as `[NaN, NaN, NaN]`. The in-memory
+/// ring buffer pads each entry to four floats so its bytes match the GPU
+/// std430 stride for `vec3<f32>`; the on-disk format drops the pad.
 #[derive(Clone)]
 pub struct TrailSnapshot {
     /// Number of bodies whose trails are stored.
@@ -192,7 +198,7 @@ pub struct TrailSnapshot {
     /// Number of valid entries at save time.
     pub len: u32,
     /// Flat position array, column-major. `NaN` entries represent unwritten slots.
-    pub positions: Vec<[f32; 2]>,
+    pub positions: Vec<[f32; 3]>,
 }
 
 // ── Save-browser metadata ─────────────────────────────────────────────────────
@@ -436,7 +442,7 @@ impl SimSnapshot {
             w.write_all(bytes)?;
         }
 
-        // v4: trail ring-buffer
+        // v4: trail ring-buffer (v9 widened sample stride to 3 floats).
         match &self.trail {
             Some(trail) => {
                 wu8(&mut w, 1)?;
@@ -447,6 +453,7 @@ impl SimSnapshot {
                 for pos in &trail.positions {
                     wf32(&mut w, pos[0])?;
                     wf32(&mut w, pos[1])?;
+                    wf32(&mut w, pos[2])?;
                 }
             },
             None => wu8(&mut w, 0)?,
@@ -573,8 +580,17 @@ impl SimSnapshot {
                 let ln = ru32(&mut r)?;
                 let total = (tn as usize) * (cap as usize);
                 let mut positions = Vec::with_capacity(total);
-                for _ in 0..total {
-                    positions.push([rf32(&mut r)?, rf32(&mut r)?]);
+                if ver >= 9 {
+                    for _ in 0..total {
+                        positions.push([rf32(&mut r)?, rf32(&mut r)?, rf32(&mut r)?]);
+                    }
+                } else {
+                    // v4–v8 stored two floats per sample (planar trail);
+                    // pad the third component to 0 so the 3D ring buffer
+                    // restores planar saves equivalently.
+                    for _ in 0..total {
+                        positions.push([rf32(&mut r)?, rf32(&mut r)?, 0.0]);
+                    }
                 }
                 Some(TrailSnapshot { n_bodies: tn, capacity: cap, head: hd, len: ln, positions })
             } else {
