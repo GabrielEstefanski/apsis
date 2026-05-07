@@ -39,6 +39,7 @@ pub fn three_body_euler_collinear(_seed: u64) -> Template {
                 position: Some([-d, 0.0, 0.0]),
                 velocity: [0.0, -v, 0.0],
                 preset: &body_preset::ROCKY,
+                density: None,
             },
             TemplateBody {
                 name: Some("Centre body"),
@@ -46,6 +47,7 @@ pub fn three_body_euler_collinear(_seed: u64) -> Template {
                 position: Some([0.0, 0.0, 0.0]),
                 velocity: [0.0, 0.0, 0.0],
                 preset: &body_preset::ROCKY,
+                density: None,
             },
             TemplateBody {
                 name: Some("Outer body 2"),
@@ -53,6 +55,7 @@ pub fn three_body_euler_collinear(_seed: u64) -> Template {
                 position: Some([d, 0.0, 0.0]),
                 velocity: [0.0, v, 0.0],
                 preset: &body_preset::ROCKY,
+                density: None,
             },
         ],
         display_scale: 1.0,
