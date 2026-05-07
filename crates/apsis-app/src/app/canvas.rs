@@ -226,6 +226,9 @@ impl SimulationApp {
                 if mmb {
                     self.follow_selected_body = false;
                 }
+                // Any user drag overrides an in-flight cinematic
+                // transition — gesture intent wins immediately.
+                self.follow_transition = None;
                 apply_drag(
                     &mut self.camera,
                     DragInput {
@@ -238,6 +241,7 @@ impl SimulationApp {
             }
 
             if pointer_in_canvas && scroll_y.abs() > 0.0 {
+                self.follow_transition = None;
                 // smooth_scroll_delta is in pixels; normalise to wheel ticks.
                 apply_scroll(&mut self.camera, scroll_y as f64 / 60.0, &self.camera_input_config);
             }
@@ -250,6 +254,7 @@ impl SimulationApp {
             // Cancel smooth-pan if the user takes manual control
             self.camera_anim_target = None;
             self.follow_selected_body = false;
+            self.follow_transition = None;
             let frame_vel = delta / dt.max(1.0 / 120.0);
             self.pan_vel = self.pan_vel * 0.4 + frame_vel * 0.6;
             ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
@@ -290,34 +295,42 @@ impl SimulationApp {
 
                     let ff = self.camera.feedforward_pivot(dt as f64, body_pos, wall_vel, wall_acc);
 
-                    // Apply or refresh the transition offset.
-                    let offset = match &mut self.follow_transition {
-                        Some(t) if t.body_idx == idx => {
-                            if t.decay(dt as f64) {
-                                self.follow_transition = None;
-                                glam::DVec3::ZERO
-                            } else {
-                                t.pivot_offset
-                            }
-                        },
-                        // Either no transition or it belongs to a previous
-                        // target — reseat against the active one.
-                        _ => {
-                            self.follow_transition =
-                                Some(crate::app::camera::FollowTransition::capture(
-                                    idx,
-                                    self.camera.current.pivot,
-                                    body_pos,
-                                ));
-                            self.follow_transition
-                                .as_ref()
-                                .map(|t| t.pivot_offset)
-                                .unwrap_or(glam::DVec3::ZERO)
-                        },
-                    };
+                    // Drop any transition pointing at a different body
+                    // — happens when the user clicks a new target before
+                    // the previous transition settled.
+                    if let Some(t) = &self.follow_transition {
+                        if t.body_idx != idx {
+                            self.follow_transition = None;
+                        }
+                    }
 
-                    self.camera.target.pivot = ff + offset;
-                    ctx.request_repaint();
+                    if let Some(state) = self.follow_transition.as_mut() {
+                        let settled = state.step(dt as f64);
+                        if settled {
+                            self.follow_transition = None;
+                        } else {
+                            // Body-anchored target pose; pivot endpoint
+                            // tracks the live body so a fast target stays
+                            // in frame throughout the transition.
+                            let body_target = crate::app::camera::CameraPose::new(
+                                body_pos,
+                                state.target_azimuth,
+                                state.target_elevation,
+                                state.target_distance,
+                            );
+                            let lerped = state.initial.lerp_to(&body_target, state.t());
+                            self.camera.current = lerped;
+                            self.camera.target = body_target;
+                            ctx.request_repaint();
+                        }
+                    }
+
+                    if self.follow_transition.is_none() {
+                        // Steady state: spring + feedforward pins the
+                        // body centred without lag.
+                        self.camera.target.pivot = ff;
+                        ctx.request_repaint();
+                    }
                 } else {
                     self.follow_selected_body = false;
                     self.follow_transition = None;
@@ -915,20 +928,8 @@ impl SimulationApp {
                                 }
                             } else {
                                 let body = self.system.bodies()[idx];
-                                let body_pos = glam::DVec3::new(body.x, body.y, body.z);
-
                                 self.selection = BodySelection::select_single(idx);
                                 self.follow_selected_body = true;
-                                // Capture the camera's current pivot relative
-                                // to the new body. The follow loop decays it
-                                // to zero, sliding the view onto the body
-                                // without losing it from frame.
-                                self.follow_transition =
-                                    Some(crate::app::camera::FollowTransition::capture(
-                                        idx,
-                                        self.camera.current.pivot,
-                                        body_pos,
-                                    ));
                                 let name = self.system.name(idx).to_owned();
                                 self.selection_form = Some(SelectionForm::from_body(&body, &name));
 
@@ -938,6 +939,20 @@ impl SimulationApp {
                                 let dist = ((r * focal_y) / FRAME_TARGET_PX)
                                     .max(NEAR_PLANE * 5.0)
                                     .max(r * 4.0) as f64;
+
+                                // Capture the click-time pose. Phase-locked
+                                // transition lerps every dimension by a
+                                // single fraction so distance, pivot, and
+                                // orientation reach the same perceptual
+                                // progress at the same wall time.
+                                self.follow_transition =
+                                    Some(crate::app::camera::FollowTransition::capture(
+                                        idx,
+                                        self.camera.current,
+                                        self.camera.current.azimuth,
+                                        self.camera.current.elevation,
+                                        dist,
+                                    ));
                                 self.camera.target.distance = dist;
                             }
                         },

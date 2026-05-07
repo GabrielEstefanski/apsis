@@ -32,35 +32,72 @@ const ELEVATION_LIMIT: f64 = std::f64::consts::FRAC_PI_2 - 1e-3;
 /// epsilons of the pivot and prevents division-by-zero in `view_matrix`.
 const MIN_DISTANCE: f64 = 1e-6;
 
-/// Body-relative pivot offset used by the follow loop during a
-/// target-switch transition. Decays exponentially to zero, then the
-/// caller drops the struct.
+/// Phase-locked transition between two camera viewpoints.
+///
+/// Captured on click-to-focus. Each frame the follow loop derives a
+/// single fraction `t = 1 - alpha_remaining` and applies it to all
+/// four pose dimensions (pivot, azimuth, elevation, distance) in
+/// lockstep, so distance and pivot reach the same perceptual
+/// progress at the same wall time. The eye trajectory is the
+/// geometric interpolation between the two viewpoints — no separate
+/// "zoom" then "walk" phases.
+///
+/// The pivot endpoint tracks the body's current position each frame
+/// (instead of being pinned to where the body was at click time), so
+/// fast-moving targets stay in frame throughout the transition.
 #[derive(Debug, Clone, Copy)]
 pub struct FollowTransition {
     pub body_idx: usize,
-    pub pivot_offset: DVec3,
-    pub transition_tau: f64,
+    pub initial: CameraPose,
+    pub target_azimuth: f64,
+    pub target_elevation: f64,
+    pub target_distance: f64,
+    /// Decays from 1 (untransitioned) to 0 (settled).
+    pub alpha_remaining: f64,
+    pub tau: f64,
 }
 
 impl FollowTransition {
-    /// Pivot offset drops by `1/e` in 150 ms; settles in ~450 ms.
+    /// `alpha_remaining` falls by `1/e` in 150 ms; visually settled
+    /// in roughly 3·τ.
     pub const DEFAULT_TAU: f64 = 0.15;
-    /// Offset is treated as zero once below ~1 µAU — sub-pixel at
-    /// any reasonable view distance.
-    pub const SETTLED_EPS_SQ: f64 = 1e-12;
+    /// Below this remaining alpha the transition is considered done
+    /// and the caller hands off to steady-state feedforward.
+    pub const SETTLED_EPS: f64 = 1e-3;
 
-    pub fn capture(body_idx: usize, current_pivot: DVec3, body_pos: DVec3) -> Self {
-        Self { body_idx, pivot_offset: current_pivot - body_pos, transition_tau: Self::DEFAULT_TAU }
+    pub fn capture(
+        body_idx: usize,
+        initial: CameraPose,
+        target_azimuth: f64,
+        target_elevation: f64,
+        target_distance: f64,
+    ) -> Self {
+        Self {
+            body_idx,
+            initial,
+            target_azimuth,
+            target_elevation,
+            target_distance,
+            alpha_remaining: 1.0,
+            tau: Self::DEFAULT_TAU,
+        }
     }
 
-    /// Returns `true` once the offset hits the settled epsilon.
-    pub fn decay(&mut self, dt: f64) -> bool {
-        self.pivot_offset *= (-dt / self.transition_tau).exp();
-        let settled = self.pivot_offset.length_squared() < Self::SETTLED_EPS_SQ;
-        if settled {
-            self.pivot_offset = DVec3::ZERO;
+    /// Advance the phase by `dt`. Returns `true` once `alpha_remaining`
+    /// drops below [`SETTLED_EPS`].
+    pub fn step(&mut self, dt: f64) -> bool {
+        self.alpha_remaining *= (-dt / self.tau).exp();
+        if self.alpha_remaining < Self::SETTLED_EPS {
+            self.alpha_remaining = 0.0;
+            true
+        } else {
+            false
         }
-        settled
+    }
+
+    /// Lerp fraction `t = 1 - alpha_remaining` ∈ [0, 1].
+    pub fn t(&self) -> f64 {
+        1.0 - self.alpha_remaining
     }
 }
 
@@ -122,6 +159,21 @@ impl CameraPose {
     /// Right-handed look-at matrix from eye toward pivot.
     pub fn view_matrix(&self) -> DMat4 {
         DMat4::look_at_rh(self.eye(), self.pivot, DVec3::Y)
+    }
+
+    /// Phase-locked interpolation between two poses by fraction `t`.
+    /// Distance lerps in log space; angles take the shortest arc;
+    /// pivot lerps linearly. `t = 0` returns `self`, `t = 1` returns
+    /// `other`.
+    pub fn lerp_to(&self, other: &CameraPose, t: f64) -> CameraPose {
+        let log_a = self.distance.max(MIN_DISTANCE).ln();
+        let log_b = other.distance.max(MIN_DISTANCE).ln();
+        CameraPose::new(
+            self.pivot.lerp(other.pivot, t),
+            lerp_angle(self.azimuth, other.azimuth, t),
+            self.elevation + t * (other.elevation - self.elevation),
+            (log_a + t * (log_b - log_a)).exp(),
+        )
     }
 }
 
@@ -504,40 +556,67 @@ mod tests {
         );
     }
 
-    // ── FollowTransition ─────────────────────────────────────────────────────
+    // ── FollowTransition (phase-locked) ──────────────────────────────────────
+
+    fn pose_at(distance: f64) -> CameraPose {
+        CameraPose::new(DVec3::ZERO, 0.0, 0.0, distance)
+    }
 
     #[test]
-    fn follow_transition_shrinks_at_expected_rate() {
-        // After one τ (≈ 9 frames at 60 fps) the offset should drop
-        // to ~e⁻¹ ≈ 37 % of its initial length.
-        let mut t = FollowTransition::capture(0, DVec3::new(10.0, 0.0, 0.0), DVec3::ZERO);
+    fn follow_transition_alpha_decays_at_expected_rate() {
+        // After one τ ≈ 9 frames at 60 fps, alpha_remaining ≈ e⁻¹.
+        let mut t = FollowTransition::capture(0, pose_at(10.0), 0.0, 0.0, 1.0);
         let dt = 1.0 / 60.0;
         let frames = (FollowTransition::DEFAULT_TAU / dt).round() as u32;
         for _ in 0..frames {
-            t.decay(dt);
+            t.step(dt);
         }
-        let ratio = t.pivot_offset.length() / 10.0;
-        assert!((ratio - (-1.0_f64).exp()).abs() < 0.02, "ratio = {ratio}");
+        assert!(
+            (t.alpha_remaining - (-1.0_f64).exp()).abs() < 0.02,
+            "alpha_remaining = {}",
+            t.alpha_remaining,
+        );
     }
 
     #[test]
-    fn follow_transition_settles_within_a_few_seconds() {
-        let mut t = FollowTransition::capture(0, DVec3::new(10.0, 0.0, 0.0), DVec3::ZERO);
+    fn follow_transition_settles_within_two_seconds() {
+        let mut t = FollowTransition::capture(0, pose_at(10.0), 0.0, 0.0, 1.0);
         let dt = 1.0 / 60.0;
         let mut steps = 0;
-        while !t.decay(dt) {
+        while !t.step(dt) {
             steps += 1;
-            assert!(steps < 600, "transition failed to settle in 10 s");
+            assert!(steps < 120, "transition failed to settle in 2 s");
         }
-        assert_eq!(t.pivot_offset, DVec3::ZERO);
+        assert_eq!(t.alpha_remaining, 0.0);
     }
 
     #[test]
-    fn follow_transition_capture_records_relative_offset() {
-        let cur = DVec3::new(5.0, 6.0, 7.0);
-        let body = DVec3::new(2.0, 4.0, 1.0);
-        let t = FollowTransition::capture(42, cur, body);
-        assert_eq!(t.body_idx, 42);
-        assert!(vec_approx_eq(t.pivot_offset, DVec3::new(3.0, 2.0, 6.0), 1e-12));
+    fn follow_transition_t_is_zero_at_capture_one_at_settle() {
+        let mut t = FollowTransition::capture(0, pose_at(10.0), 0.0, 0.0, 1.0);
+        assert!((t.t() - 0.0).abs() < 1e-12);
+        while !t.step(1.0 / 60.0) {}
+        assert!((t.t() - 1.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn pose_lerp_distance_midpoint_is_geometric_mean() {
+        // 100 → 0.01 in log space gives a midpoint of 1.0
+        // (geometric mean), not 50.005 (arithmetic).
+        let initial = CameraPose::new(DVec3::new(10.0, 0.0, 0.0), 0.0, 0.0, 100.0);
+        let target = CameraPose::new(DVec3::new(0.0, 5.0, 0.0), 1.0, 0.5, 0.01);
+        let mid = initial.lerp_to(&target, 0.5);
+        assert!((mid.distance - 1.0).abs() < 1e-12, "midpoint distance = {}", mid.distance);
+    }
+
+    #[test]
+    fn pose_lerp_endpoints_match_inputs() {
+        let a = CameraPose::new(DVec3::new(1.0, 2.0, 3.0), 0.4, -0.2, 5.0);
+        let b = CameraPose::new(DVec3::new(7.0, 8.0, 9.0), -0.6, 1.0, 50.0);
+        let at0 = a.lerp_to(&b, 0.0);
+        let at1 = a.lerp_to(&b, 1.0);
+        assert!(vec_approx_eq(at0.pivot, a.pivot, 1e-9));
+        assert!((at0.distance - a.distance).abs() < 1e-9);
+        assert!(vec_approx_eq(at1.pivot, b.pivot, 1e-9));
+        assert!((at1.distance - b.distance).abs() < 1e-9);
     }
 }
