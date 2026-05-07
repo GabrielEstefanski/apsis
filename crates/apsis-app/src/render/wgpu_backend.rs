@@ -65,6 +65,11 @@ struct CircleInstance {
 /// `is_luminous` is `1.0` for self-luminous bodies (stars, brown dwarfs)
 /// and `0.0` for reflective ones (planets, asteroids). The fragment
 /// shader routes the lit colour to the matching colour attachment.
+///
+/// `bond_albedo` is the spectrum-integrated reflectance fraction
+/// (`Body::albedo`); the reflective branch of the fragment shader
+/// multiplies the lit term by it so disc rendering stays consistent
+/// with the bolometric flux pipeline that drives sub-pixel sprites.
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct BodyInstance {
@@ -73,7 +78,8 @@ struct BodyInstance {
     albedo: [f32; 4],
     emissive: [f32; 4],
     is_luminous: f32,
-    _pad: [f32; 3],
+    bond_albedo: f32,
+    _pad: [f32; 2],
 }
 
 #[repr(C)]
@@ -295,8 +301,12 @@ pub struct WgpuBackend {
     trail: Option<TrailRenderer>,
     grid: Option<GridRenderer>,
     point: Option<PointRenderer>,
-    /// Sub-pixel reflective body sprites accumulated this frame.
+    point_luminous: Option<PointRenderer>,
+    /// Reflective body sprites accumulated this frame (drawn into HDR_R).
     points: Vec<PointInstance>,
+    /// Luminous body sprites accumulated this frame (drawn additively
+    /// into HDR_L, no depth test — emission always wins).
+    points_luminous: Vec<PointInstance>,
 
     /// HDR scene colour target. Scene passes render into this linear-space
     /// texture; the tonemap pass composites it onto the swapchain.
@@ -337,7 +347,9 @@ impl WgpuBackend {
             trail: None,
             grid: None,
             point: None,
+            point_luminous: None,
             points: Vec::new(),
+            points_luminous: Vec::new(),
             hdr: None,
             tonemap: None,
             bloom: None,
@@ -358,6 +370,7 @@ impl WgpuBackend {
         self.circles.clear();
         self.lines.clear();
         self.points.clear();
+        self.points_luminous.clear();
         // Reset lighting to the empty-scene default. The canvas layer
         // overwrites it later via `set_scene_lighting` if the frame has any
         // luminous bodies; otherwise the body shader falls back to pure
@@ -392,6 +405,9 @@ impl WgpuBackend {
     /// physical radius. `albedo` is the diffuse base colour (stars near
     /// zero); `emissive` is the self-lit term. `is_luminous` routes the
     /// fragment to the luminous HDR plane instead of the reflective one.
+    /// `bond_albedo` is the spectrum-integrated reflectance fraction
+    /// applied by the reflective branch of the fragment shader; pass
+    /// `1.0` for luminous bodies (the value is ignored on that branch).
     pub fn draw_body(
         &mut self,
         world_pos: [f32; 3],
@@ -399,6 +415,7 @@ impl WgpuBackend {
         albedo: [f32; 4],
         emissive: [f32; 4],
         is_luminous: bool,
+        bond_albedo: f32,
     ) {
         self.bodies.push(BodyInstance {
             center_world: world_pos,
@@ -406,19 +423,34 @@ impl WgpuBackend {
             albedo,
             emissive,
             is_luminous: if is_luminous { 1.0 } else { 0.0 },
-            _pad: [0.0; 3],
+            bond_albedo,
+            _pad: [0.0; 2],
         });
     }
 
-    /// Submits a sub-pixel reflective body as a Gaussian point sprite.
-    /// `intensity_linear` is the body's full HDR contribution; the
-    /// renderer's normalised kernel sums to 1.0. Energy-matched against
-    /// the disc path for bodies in the cross-fade band.
+    /// Submits a reflective body as a Gaussian point sprite into
+    /// HDR_R. `intensity_linear` is the body's full HDR contribution;
+    /// the renderer's normalised kernel sums to 1.0.
     pub fn draw_point(&mut self, screen_pos: [f32; 2], intensity_linear: f32, color: [f32; 3]) {
         if intensity_linear <= 0.0 {
             return;
         }
         self.points.push(PointInstance::new(screen_pos, intensity_linear, color));
+    }
+
+    /// Submits a luminous body as a Gaussian point sprite into HDR_L.
+    /// Same kernel as [`draw_point`]; rendered with no depth test
+    /// (emission always wins) and additive blending.
+    pub fn draw_point_luminous(
+        &mut self,
+        screen_pos: [f32; 2],
+        intensity_linear: f32,
+        color: [f32; 3],
+    ) {
+        if intensity_linear <= 0.0 {
+            return;
+        }
+        self.points_luminous.push(PointInstance::new(screen_pos, intensity_linear, color));
     }
 
     /// Submits an annular ring (stroke) — flat, unlit. Used for annotations
@@ -477,6 +509,11 @@ impl WgpuBackend {
         if self.point.is_none() {
             let gpu = self.gpu.as_ref().unwrap();
             self.point =
+                Some(PointRenderer::new(device, &gpu.bind_group_layout_screen, HDR_FORMAT));
+        }
+        if self.point_luminous.is_none() {
+            let gpu = self.gpu.as_ref().unwrap();
+            self.point_luminous =
                 Some(PointRenderer::new(device, &gpu.bind_group_layout_screen, HDR_FORMAT));
         }
         if self.tonemap.is_none() {
@@ -605,6 +642,11 @@ impl WgpuBackend {
 
         let point_count =
             self.point.as_mut().map(|p| p.upload(device, queue, &self.points)).unwrap_or(0);
+        let point_luminous_count = self
+            .point_luminous
+            .as_mut()
+            .map(|p| p.upload(device, queue, &self.points_luminous))
+            .unwrap_or(0);
 
         // ── Pass 1: flat 2D layers (grid, trails, lines, circles) ───────────
         // Writes to the reflective plane. Luminous plane is cleared at
@@ -701,6 +743,31 @@ impl WgpuBackend {
                 multiview_mask: None,
             });
             self.gpu.as_ref().unwrap().draw_bodies(&mut pass, body_count);
+        }
+
+        // ── Pass 3: luminous point sprites (HDR_L, additive, no depth) ──────
+        // Sub-pixel stars never produce a body fragment, so the sprite
+        // path is the only thing that puts emission on HDR_L for them.
+        // Always runs alongside the disc path through the canvas
+        // cross-fade so the resolved → sub-pixel transition is smooth.
+        if point_luminous_count > 0 {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("scene::point_luminous_pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: hdr.view_l(),
+                    resolve_target: None,
+                    depth_slice: None,
+                    ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            if let Some(point_renderer) = self.point_luminous.as_ref() {
+                let gpu = self.gpu.as_ref().unwrap();
+                point_renderer.draw(&mut pass, &gpu.bind_group_screen, point_luminous_count);
+            }
         }
 
         // ── Bloom: threshold + blur over the luminous plane ─────────────────
@@ -893,7 +960,8 @@ fn build_body_pipeline(
         1 => Float32,     // radius_world
         2 => Float32x4,   // albedo
         3 => Float32x4,   // emissive
-        4 => Float32      // is_luminous (1.0 = luminous, 0.0 = reflective)
+        4 => Float32,     // is_luminous (1.0 = luminous, 0.0 = reflective)
+        5 => Float32      // bond_albedo
     ];
 
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -1124,6 +1192,8 @@ struct BodyVarying {
     /// Constant per instance; carried as `@interpolate(flat)` so the
     /// rasteriser passes the value through unchanged.
     @location(6) @interpolate(flat) is_luminous: f32,
+    /// Bond albedo. Multiplied into the reflective branch only.
+    @location(7) @interpolate(flat) bond_albedo: f32,
 };
 
 struct BodyOutput {
@@ -1140,6 +1210,7 @@ fn vs_body(
     @location(2)           albedo:       vec4<f32>,
     @location(3)           emissive:     vec4<f32>,
     @location(4)           is_luminous:  f32,
+    @location(5)           bond_albedo:  f32,
 ) -> BodyVarying {
     var quad = array<vec2<f32>, 6>(
         vec2<f32>(-1.0, -1.0),
@@ -1191,6 +1262,7 @@ fn vs_body(
     out.vert_world    = vert_world;
     out.radius_screen = r_screen;
     out.is_luminous   = is_luminous;
+    out.bond_albedo   = bond_albedo;
     return out;
 }
 
@@ -1243,7 +1315,11 @@ fn fs_body(in: BodyVarying) -> BodyOutput {
     let flat_weight = 1.0 - smoothstep(2.5, 6.0, in.radius_screen);
     let effective   = mix(lit_factor, 1.0, flat_weight);
 
-    let rgb   = in.albedo.rgb * effective + in.emissive.rgb;
+    // Reflective branch carries Bond into the disc shader so a Venus
+    // (A=0.76) returns ~7× the radiance of a Mercury (A=0.088) at the
+    // same incident flux. Luminous branch sets albedo=(0,0,0), so the
+    // multiply is a no-op for stars regardless of bond_albedo.
+    let rgb   = in.albedo.rgb * (effective * in.bond_albedo) + in.emissive.rgb;
     let alpha = max(in.albedo.a, in.emissive.a);
 
     // Reverse-Z depth from the actual hit point, not the quad surface, so
