@@ -1,24 +1,26 @@
-//! HDR offscreen target — intermediate buffer for linear-space rendering.
+//! HDR offscreen targets — intermediate buffers for linear-space rendering.
 //!
-//! The simulation's scene passes (grid, trails, bodies, orbit overlays) draw
-//! into an `Rgba16Float` texture sized to the canvas in physical pixels. A
-//! separate tonemap pass (see [`crate::render::tonemap`]) samples this
-//! texture, applies exposure + ACES, and outputs to the sRGB swapchain.
+//! Two `Rgba16Float` colour textures share a single `Depth32Float`
+//! attachment. The **reflective** plane (`view_r`) carries grid, trails,
+//! lines, circles, point sprites, and the lit hemisphere of every body;
+//! the auto-exposure metering reads it. The **luminous** plane (`view_l`)
+//! carries the emissive contribution of self-luminous bodies and feeds
+//! the bloom pass.
 //!
-//! # Why `Rgba16Float`
+//! The composite pass samples both, multiplies the reflective half by the
+//! exposure scalar, sums into one HDR signal, and runs a single ACES
+//! curve.
 //!
-//! Linear-space lighting math accumulates values that legitimately exceed 1.0
-//! (multi-star scenes, emissive bodies). A `Unorm8` surface clips them and
-//! loses all highlight detail. `Rgba16Float` keeps roughly 11 bits of mantissa
-//! across a vast dynamic range — enough headroom for additive light
-//! accumulation without artefacts.
+//! # Format
+//!
+//! `Rgba16Float` keeps ~11 bits of mantissa across a wide dynamic range —
+//! enough headroom for additive light accumulation without clipping.
 //!
 //! # Ownership
 //!
-//! The target is owned by [`crate::render::WgpuBackend`] and grows/shrinks
-//! with the canvas via [`HdrTarget::ensure_size`]. A generation counter
-//! increments on every resize so the tonemap pipeline knows when to rebuild
-//! its sampled-texture bind group.
+//! The targets are owned by [`crate::render::WgpuBackend`] and grow/shrink
+//! together via [`HdrTarget::ensure_size`]. A single generation counter
+//! covers both colour views and the depth view.
 
 /// Intermediate HDR format for scene rendering.
 ///
@@ -32,13 +34,16 @@ pub const HDR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 /// scales.
 pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
-/// Offscreen colour target for linear-space scene rendering.
+/// Offscreen render targets for linear-space scene rendering.
 ///
-/// Owns a depth view alongside the colour view so both stay sized together
-/// and a single generation counter signals reallocation to consumers.
+/// Holds the reflective and luminous colour planes plus the shared depth
+/// attachment. Reallocation is atomic across all three textures and bumps
+/// `generation` so downstream consumers know to rebuild their bind groups.
 pub struct HdrTarget {
-    color_texture: wgpu::Texture,
-    color_view: wgpu::TextureView,
+    color_r_texture: wgpu::Texture,
+    color_r_view: wgpu::TextureView,
+    color_l_texture: wgpu::Texture,
+    color_l_view: wgpu::TextureView,
     depth_texture: wgpu::Texture,
     depth_view: wgpu::TextureView,
     size: [u32; 2],
@@ -47,9 +52,19 @@ pub struct HdrTarget {
 
 impl HdrTarget {
     pub fn new(device: &wgpu::Device, size: [u32; 2]) -> Self {
-        let (color_texture, color_view) = create_color(device, size);
+        let (color_r_texture, color_r_view) = create_color(device, size, "hdr::scene_color_r");
+        let (color_l_texture, color_l_view) = create_color(device, size, "hdr::scene_color_l");
         let (depth_texture, depth_view) = create_depth(device, size);
-        Self { color_texture, color_view, depth_texture, depth_view, size, generation: 1 }
+        Self {
+            color_r_texture,
+            color_r_view,
+            color_l_texture,
+            color_l_view,
+            depth_texture,
+            depth_view,
+            size,
+            generation: 1,
+        }
     }
 
     /// Reallocates the underlying textures when `size` differs from the
@@ -59,19 +74,30 @@ impl HdrTarget {
         if clamped == self.size {
             return;
         }
-        let (color_texture, color_view) = create_color(device, clamped);
+        let (color_r_texture, color_r_view) = create_color(device, clamped, "hdr::scene_color_r");
+        let (color_l_texture, color_l_view) = create_color(device, clamped, "hdr::scene_color_l");
         let (depth_texture, depth_view) = create_depth(device, clamped);
-        self.color_texture = color_texture;
-        self.color_view = color_view;
+        self.color_r_texture = color_r_texture;
+        self.color_r_view = color_r_view;
+        self.color_l_texture = color_l_texture;
+        self.color_l_view = color_l_view;
         self.depth_texture = depth_texture;
         self.depth_view = depth_view;
         self.size = clamped;
         self.generation = self.generation.wrapping_add(1);
     }
 
+    /// Reflective colour plane. Sampled by the metering reducer and the
+    /// composite pass.
     #[inline]
-    pub fn view(&self) -> &wgpu::TextureView {
-        &self.color_view
+    pub fn view_r(&self) -> &wgpu::TextureView {
+        &self.color_r_view
+    }
+
+    /// Luminous colour plane. Sampled by the bloom and composite passes.
+    #[inline]
+    pub fn view_l(&self) -> &wgpu::TextureView {
+        &self.color_l_view
     }
 
     #[inline]
@@ -90,9 +116,13 @@ impl HdrTarget {
     }
 }
 
-fn create_color(device: &wgpu::Device, size: [u32; 2]) -> (wgpu::Texture, wgpu::TextureView) {
+fn create_color(
+    device: &wgpu::Device,
+    size: [u32; 2],
+    label: &str,
+) -> (wgpu::Texture, wgpu::TextureView) {
     let texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("hdr::scene_color"),
+        label: Some(label),
         size: wgpu::Extent3d { width: size[0], height: size[1], depth_or_array_layers: 1 },
         mip_level_count: 1,
         sample_count: 1,
