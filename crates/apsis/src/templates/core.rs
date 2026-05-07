@@ -61,8 +61,9 @@ pub struct TemplateBody {
     /// Mass [simulation mass units, e.g. M_☉].
     pub mass: f64,
 
-    /// Construction preset — determines density, colour, q_pr, and
-    /// (optionally) luminosity at instantiation. Reference is held by
+    /// Construction preset — determines colour, q_pr, and (optionally)
+    /// luminosity at instantiation. The preset's density model is also
+    /// consulted unless `density` overrides it. Reference is held by
     /// `&'static` so the built-in catalogue is zero-cost; user-defined
     /// presets can be `Box::leak`'d into the same shape.
     pub preset: &'static BodyPreset,
@@ -87,6 +88,19 @@ pub struct TemplateBody {
     /// Moon is a `ROCKY` body that should render as
     /// [`BodyClass::Moon`].
     pub class_override: Option<crate::domain::body_preset::BodyClass>,
+
+    /// Optional explicit density [simulation units].
+    ///
+    /// When `Some(ρ)`, the instantiator overrides whatever the
+    /// preset's density model would have produced for this `mass`.
+    /// The point: templates that quote real bodies (Earth, Jupiter,
+    /// Sun, …) supply published densities directly so the rendered
+    /// `physical_radius` tracks the NASA fact sheet to within a few
+    /// percent rather than being clamped to the preset's
+    /// power-law-EOS bounds. Templates whose bodies are heuristic
+    /// (asteroid swarms, ad-hoc test particles) leave this `None` and
+    /// inherit the preset model.
+    pub density: Option<f64>,
 }
 
 impl TemplateBody {
@@ -102,6 +116,7 @@ impl TemplateBody {
             position: None,
             velocity: [0.0, 0.0, 0.0],
             class_override: None,
+            density: None,
         }
     }
 
@@ -112,7 +127,15 @@ impl TemplateBody {
         position: [f64; 3],
         velocity: [f64; 3],
     ) -> Self {
-        Self { name: None, mass, preset, position: Some(position), velocity, class_override: None }
+        Self {
+            name: None,
+            mass,
+            preset,
+            position: Some(position),
+            velocity,
+            class_override: None,
+            density: None,
+        }
     }
 }
 
