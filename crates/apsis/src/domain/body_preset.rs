@@ -198,6 +198,87 @@ impl LuminosityModel {
     }
 }
 
+// ── BodyClass ─────────────────────────────────────────────────────────────────
+
+/// Visual / UX taxonomy for a [`Body`].
+///
+/// Distinct from [`BodyPreset`] — class is a coarse label the renderer
+/// and inspector use to group bodies (filter trails by category, label
+/// inspector sections), not a physics input. A single preset can be
+/// instantiated under different classes: ICY anchors Europa
+/// ([`Moon`](Self::Moon)) and Pluto ([`Asteroid`](Self::Asteroid))
+/// equally well, and Earth's Moon is a ROCKY body classed as
+/// [`Moon`](Self::Moon).
+///
+/// The class a [`BodyPreset`] suggests via its
+/// [`default_class`](BodyPreset::default_class) field is just a
+/// starting point; templates and user code can override it through
+/// [`Body::with_class`](crate::domain::body::Body::with_class).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum BodyClass {
+    /// Stellar object: main-sequence star, brown dwarf, white dwarf,
+    /// neutron star, black hole. Default for STAR / BROWN_DWARF /
+    /// WHITE_DWARF presets.
+    Star,
+    /// Major planetary body (terrestrial, gas, ice giant). Default for
+    /// ROCKY / GAS / ICE_GIANT presets.
+    Planet,
+    /// Natural satellite (icy or rocky). Templates set this on bodies
+    /// orbiting a planet regardless of the underlying preset.
+    Moon,
+    /// Minor planetary body in a heliocentric (or stellar-centric)
+    /// orbit. Default for ASTEROID; also covers KBOs and TNOs when
+    /// instantiated from ICY.
+    Asteroid,
+    /// Volatile-rich body on a typically eccentric orbit. Default for
+    /// COMET.
+    Comet,
+    /// Catch-all for hand-built bodies, test particles, and bodies
+    /// loaded from snapshots that predate class persistence.
+    Unknown,
+}
+
+impl BodyClass {
+    /// Stable label suitable for UI controls and snapshot debugging.
+    pub const fn display_name(self) -> &'static str {
+        match self {
+            Self::Star => "Star",
+            Self::Planet => "Planet",
+            Self::Moon => "Moon",
+            Self::Asteroid => "Asteroid",
+            Self::Comet => "Comet",
+            Self::Unknown => "Unknown",
+        }
+    }
+
+    /// One-byte codec for snapshot persistence. Stable across schema
+    /// versions; new variants append.
+    pub const fn to_u8(self) -> u8 {
+        match self {
+            Self::Star => 0,
+            Self::Planet => 1,
+            Self::Moon => 2,
+            Self::Asteroid => 3,
+            Self::Comet => 4,
+            Self::Unknown => 5,
+        }
+    }
+
+    /// Inverse of [`to_u8`](Self::to_u8). Unknown bytes round-trip to
+    /// [`Self::Unknown`] so a forward-incompatible save never injects
+    /// a wrong category.
+    pub const fn from_u8(v: u8) -> Self {
+        match v {
+            0 => Self::Star,
+            1 => Self::Planet,
+            2 => Self::Moon,
+            3 => Self::Asteroid,
+            4 => Self::Comet,
+            _ => Self::Unknown,
+        }
+    }
+}
+
 // ── BodyPreset ────────────────────────────────────────────────────────────────
 
 /// Construction preset: the bundle of defaults
@@ -226,6 +307,12 @@ pub struct BodyPreset {
     pub density: DensitySource,
     /// Optional luminosity model; `None` for non-luminous classes.
     pub luminosity: Option<LuminositySource>,
+    /// Default UX taxonomy applied when a [`Body`] is constructed from
+    /// this preset. Templates can override on a per-body basis when
+    /// the preset's natural class does not match the role (Earth's
+    /// Moon is a [`ROCKY`] preset classed as
+    /// [`Moon`](BodyClass::Moon)).
+    pub default_class: BodyClass,
 }
 
 impl BodyPreset {
@@ -271,6 +358,7 @@ pub const COMET: BodyPreset = BodyPreset {
         rho_max: 900.0,
     }),
     luminosity: None,
+    default_class: BodyClass::Comet,
 };
 
 /// Rubble-pile or monolithic rock (C/S/M-type asteroids).
@@ -287,6 +375,7 @@ pub const ASTEROID: BodyPreset = BodyPreset {
         rho_max: 5500.0,
     }),
     luminosity: None,
+    default_class: BodyClass::Asteroid,
 };
 
 /// Silicate / iron body (terrestrial planets). ρ₀ = 5514 kg/m³
@@ -304,6 +393,7 @@ pub const ROCKY: BodyPreset = BodyPreset {
         rho_max: 13_000.0,
     }),
     luminosity: None,
+    default_class: BodyClass::Planet,
 };
 
 /// Volatile-rich body (icy moons, ocean worlds, KBOs). Calibrated to
@@ -320,6 +410,7 @@ pub const ICY: BodyPreset = BodyPreset {
         rho_max: 3500.0,
     }),
     luminosity: None,
+    default_class: BodyClass::Moon,
 };
 
 /// Ice-dominated giant with small rocky core (Uranus/Neptune).
@@ -336,6 +427,7 @@ pub const ICE_GIANT: BodyPreset = BodyPreset {
         rho_max: 3000.0,
     }),
     luminosity: None,
+    default_class: BodyClass::Planet,
 };
 
 /// Gas-dominated giant (Jupiter/Saturn/hot Jupiters). Calibrated to
@@ -352,6 +444,7 @@ pub const GAS: BodyPreset = BodyPreset {
         rho_max: 8_000.0,
     }),
     luminosity: None,
+    default_class: BodyClass::Planet,
 };
 
 /// Sub-stellar object below the hydrogen-burning limit (~13–80 M_Jup).
@@ -369,6 +462,7 @@ pub const BROWN_DWARF: BodyPreset = BodyPreset {
         rho_max: 2.0e5,
     }),
     luminosity: Some(LuminositySource::Model(LuminosityModel::BrownDwarfBurrows)),
+    default_class: BodyClass::Star,
 };
 
 /// Main-sequence star (F/G/K/M). Density falls with mass on the
@@ -386,6 +480,7 @@ pub const STAR: BodyPreset = BodyPreset {
         rho_max: 1.0e5,
     }),
     luminosity: Some(LuminositySource::Model(LuminosityModel::MainSequence)),
+    default_class: BodyClass::Star,
 };
 
 /// Degenerate stellar remnant supported by electron degeneracy.
@@ -407,6 +502,7 @@ pub const WHITE_DWARF: BodyPreset = BodyPreset {
         rho_max: 1.0e9,
     }),
     luminosity: Some(LuminositySource::Model(LuminosityModel::WhiteDwarfRadius)),
+    default_class: BodyClass::Star,
 };
 
 /// Catalogue of built-in presets. Used by the spawn UI to populate
