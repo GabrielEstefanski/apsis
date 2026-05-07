@@ -399,9 +399,13 @@ pub struct SimulationApp {
     pub(super) trail: Option<TrailRenderer>,
 
     // Camera inertia + animation
-    pub(super) zoom_vel: f32,
     pub(super) pan_vel: egui::Vec2,
     pub(super) follow_selected_body: bool,
+    /// Active follow handover. Captured on click-to-focus; decays to
+    /// `None` once the camera lands on the body. Layered on top of
+    /// `follow_selected_body` so toggle-style call sites elsewhere
+    /// (inspector button, Esc) keep their current shape.
+    pub(super) follow_transition: Option<crate::app::camera::FollowTransition>,
     /// Smooth-pan target offset; `None` when idle.
     pub(super) camera_anim_target: Option<egui::Vec2>,
     /// When `true`, `draw_frame` will call `fit_to_view` on the next frame
@@ -637,9 +641,9 @@ impl SimulationApp {
             place_preset: &body_preset::ROCKY,
             trail: None,
 
-            zoom_vel: 0.0,
             pan_vel: egui::Vec2::ZERO,
             follow_selected_body: false,
+            follow_transition: None,
             camera_anim_target: None,
             pending_fit: false,
             hovered_body: None,
