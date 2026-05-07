@@ -1,6 +1,18 @@
+//! HD 80606 — single-star system with the most eccentric known
+//! transiting hot Jupiter.
+//!
+//! HD 80606 b is a 4 M_Jup gas giant on an `e = 0.93` orbit. Periapsis
+//! takes the planet to 0.03 AU from the star (closer than Mercury);
+//! apoapsis sits past 0.88 AU. Surface temperature swings ~800 K in
+//! six hours during the periastron passage — the canonical example
+//! of an unrelaxed, dynamically heated giant.
+//!
+//! Reference: Naef et al. (2001) discovery; Laughlin et al. (2009)
+//! Spitzer thermal observations of the periastron passage.
+
 use crate::{
     domain::body_preset,
-    templates::{Template, TemplateBody, UnitSystem},
+    templates::{Template, TemplateBody, UnitSystem, builders::KG_M3_TO_SOLAR_AU3},
 };
 use rand::rngs::SmallRng;
 use rand::{RngExt, SeedableRng};
@@ -8,8 +20,10 @@ use rand::{RngExt, SeedableRng};
 pub fn hd_80606(seed: u64) -> Template {
     let mut bodies = Vec::with_capacity(2);
 
-    let m_star = 1.0;
-    let m_planet = 4.0e-3;
+    // HD 80606: G6V, M = 0.97 M_☉ (Pepe et al. 2002).
+    let m_star = 0.97;
+    // HD 80606 b: 4.115 M_Jup ≈ 3.93e-3 M_☉ (Hébrard et al. 2010).
+    let m_planet = 3.93e-3;
 
     let a = 0.455;
     let e = 0.93;
@@ -19,7 +33,7 @@ pub fn hd_80606(seed: u64) -> Template {
         name: Some("HD 80606"),
         mass: m_star,
         preset: &body_preset::STAR,
-        density: None,
+        density: Some(1500.0 * KG_M3_TO_SOLAR_AU3),
         position: Some([0.0, 0.0, 0.0]),
         velocity: [0.0, 0.0, 0.0],
     });
@@ -40,14 +54,20 @@ pub fn hd_80606(seed: u64) -> Template {
         name: Some("HD 80606 b"),
         mass: m_planet,
         preset: &body_preset::GAS,
-        density: None,
+        // Bulk density 980 kg/m³ from transit + RV (Hébrard et al.
+        // 2010). Slightly less dense than Saturn — typical for an
+        // inflated tidally heated giant.
+        density: Some(980.0 * KG_M3_TO_SOLAR_AU3),
         position: Some(pos),
         velocity: vel,
     });
 
     Template {
         name: "HD 80606",
-        description: "Extreme eccentric exoplanet orbit.",
+        description: "G6V star with the most eccentric known transiting hot Jupiter \
+                      (HD 80606 b, e = 0.93). The planet swings from 0.03 AU at periapsis \
+                      to 0.88 AU at apoapsis on a 111-day orbit, undergoing extreme tidal \
+                      heating during the periastron passage.",
         bodies,
         display_scale: 1.0,
         suggested_dt: Some(0.0001),
