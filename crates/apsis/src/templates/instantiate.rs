@@ -47,6 +47,14 @@ pub fn instantiate_at(template: &Template, cx: f64, cy: f64) -> Vec<NamedBody> {
                 b = b.with_class(class);
             }
 
+            // Per-body density override: templates that quote real
+            // bodies (Earth, Sun, Jupiter, …) supply published values
+            // here, replacing the preset's heuristic EOS so
+            // `physical_radius` matches NASA fact-sheet values.
+            if let Some(rho) = t.density {
+                b = b.with_density(rho);
+            }
+
             // Fall back to the preset's display name when the
             // template author didn't pick one explicitly. The
             // system-level numerator turns repeated prefixes into

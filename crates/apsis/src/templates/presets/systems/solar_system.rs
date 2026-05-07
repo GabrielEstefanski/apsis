@@ -43,6 +43,7 @@ use rand::rngs::SmallRng;
 use rand::{RngExt, SeedableRng};
 
 use crate::domain::body_preset::{self, BodyPreset};
+use crate::templates::builders::KG_M3_TO_SOLAR_AU3;
 use crate::templates::keplerian::{
     parent_equator_basis, state_from_elements, state_from_elements_in_basis,
 };
@@ -63,6 +64,7 @@ const M_MOON: f64 = M_EARTH / 81.3005;
 
 struct PlanetData {
     name: &'static str,
+    /// Mass in solar masses (M_☉).
     mass: f64,
     a: f64,
     e: f64,
@@ -70,6 +72,12 @@ struct PlanetData {
     raan_deg: f64,
     argp_deg: f64,
     preset: &'static BodyPreset,
+    /// Bulk density in kg/m³ (NASA fact sheet value). Converted to
+    /// `M_☉/AU³` at template build via `KG_M3_TO_SOLAR_AU3`. Stored
+    /// in SI here so the source reads as the published number; the
+    /// instantiator applies the conversion before handing the value
+    /// to `Body::with_density`.
+    density_kg_m3: f64,
 }
 
 /// J2000 ecliptic mean orbital elements (NASA JPL `approx_pos.html`,
@@ -85,6 +93,7 @@ const PLANETS: &[PlanetData] = &[
         raan_deg: 48.331,
         argp_deg: 29.130,
         preset: &body_preset::ROCKY,
+        density_kg_m3: 5429.0,
     },
     PlanetData {
         name: "Venus",
@@ -95,6 +104,7 @@ const PLANETS: &[PlanetData] = &[
         raan_deg: 76.680,
         argp_deg: 54.852,
         preset: &body_preset::ROCKY,
+        density_kg_m3: 5243.0,
     },
     PlanetData {
         name: "Earth",
@@ -105,6 +115,7 @@ const PLANETS: &[PlanetData] = &[
         raan_deg: 0.000,
         argp_deg: 102.938,
         preset: &body_preset::ROCKY,
+        density_kg_m3: 5514.0,
     },
     PlanetData {
         name: "Mars",
@@ -115,6 +126,7 @@ const PLANETS: &[PlanetData] = &[
         raan_deg: 49.558,
         argp_deg: 286.502,
         preset: &body_preset::ROCKY,
+        density_kg_m3: 3934.0,
     },
     PlanetData {
         name: "Jupiter",
@@ -125,6 +137,7 @@ const PLANETS: &[PlanetData] = &[
         raan_deg: 100.464,
         argp_deg: 274.255,
         preset: &body_preset::GAS,
+        density_kg_m3: 1326.0,
     },
     PlanetData {
         name: "Saturn",
@@ -135,6 +148,10 @@ const PLANETS: &[PlanetData] = &[
         raan_deg: 113.665,
         argp_deg: 338.766,
         preset: &body_preset::GAS,
+        // Saturn's bulk density is anomalously low for a gas giant
+        // (less than water) — Voyager / Cassini gravity moments fix
+        // it firmly at 687 kg/m³.
+        density_kg_m3: 687.0,
     },
     PlanetData {
         name: "Uranus",
@@ -145,6 +162,7 @@ const PLANETS: &[PlanetData] = &[
         raan_deg: 74.006,
         argp_deg: 96.999,
         preset: &body_preset::ICE_GIANT,
+        density_kg_m3: 1270.0,
     },
     PlanetData {
         name: "Neptune",
@@ -155,6 +173,7 @@ const PLANETS: &[PlanetData] = &[
         raan_deg: 131.784,
         argp_deg: 273.187,
         preset: &body_preset::ICE_GIANT,
+        density_kg_m3: 1638.0,
     },
 ];
 
@@ -172,6 +191,7 @@ const DWARFS: &[PlanetData] = &[
         raan_deg: 80.305,
         argp_deg: 73.598,
         preset: &body_preset::ASTEROID,
+        density_kg_m3: 2161.0,
     },
     PlanetData {
         name: "Pluto",
@@ -182,6 +202,7 @@ const DWARFS: &[PlanetData] = &[
         raan_deg: 110.299,
         argp_deg: 113.834,
         preset: &body_preset::ICY,
+        density_kg_m3: 1854.0,
     },
     PlanetData {
         name: "Haumea",
@@ -192,6 +213,7 @@ const DWARFS: &[PlanetData] = &[
         raan_deg: 121.79,
         argp_deg: 240.20,
         preset: &body_preset::ICY,
+        density_kg_m3: 2018.0,
     },
     PlanetData {
         name: "Makemake",
@@ -202,6 +224,7 @@ const DWARFS: &[PlanetData] = &[
         raan_deg: 79.382,
         argp_deg: 294.834,
         preset: &body_preset::ICY,
+        density_kg_m3: 1700.0,
     },
     PlanetData {
         name: "Eris",
@@ -212,6 +235,7 @@ const DWARFS: &[PlanetData] = &[
         raan_deg: 35.951,
         argp_deg: 151.639,
         preset: &body_preset::ICY,
+        density_kg_m3: 2430.0,
     },
     PlanetData {
         // Mass uncertain (~1×10²¹ kg); JPL lists no determined value.
@@ -226,6 +250,9 @@ const DWARFS: &[PlanetData] = &[
         raan_deg: 144.248,
         argp_deg: 311.352,
         preset: &body_preset::ICY,
+        // No measured value; estimated from spectroscopy assuming icy
+        // composition similar to Pluto / Sedna-class TNOs.
+        density_kg_m3: 2000.0,
     },
     PlanetData {
         name: "Quaoar",
@@ -236,6 +263,7 @@ const DWARFS: &[PlanetData] = &[
         raan_deg: 188.83,
         argp_deg: 147.479,
         preset: &body_preset::ICY,
+        density_kg_m3: 1700.0,
     },
     PlanetData {
         name: "Orcus",
@@ -246,6 +274,7 @@ const DWARFS: &[PlanetData] = &[
         raan_deg: 268.799,
         argp_deg: 72.310,
         preset: &body_preset::ICY,
+        density_kg_m3: 1530.0,
     },
     PlanetData {
         name: "Gonggong",
@@ -256,6 +285,7 @@ const DWARFS: &[PlanetData] = &[
         raan_deg: 336.866,
         argp_deg: 207.628,
         preset: &body_preset::ICY,
+        density_kg_m3: 1740.0,
     },
 ];
 
@@ -272,6 +302,7 @@ enum Parent {
 
 struct MoonData {
     name: &'static str,
+    /// Mass in solar masses (M_☉).
     mass: f64,
     parent: Parent,
     a: f64,
@@ -282,6 +313,8 @@ struct MoonData {
     raan_deg: f64,
     argp_deg: f64,
     preset: &'static BodyPreset,
+    /// Bulk density in kg/m³ (NASA SSD body page).
+    density_kg_m3: f64,
 }
 
 const MOONS: &[MoonData] = &[
@@ -296,6 +329,7 @@ const MOONS: &[MoonData] = &[
         raan_deg: 125.08,
         argp_deg: 318.15,
         preset: &body_preset::ROCKY,
+        density_kg_m3: 3344.0,
     },
     // Jupiter — Galilean moons (Jupiter equatorial frame)
     MoonData {
@@ -308,6 +342,7 @@ const MOONS: &[MoonData] = &[
         raan_deg: 43.977,
         argp_deg: 84.129,
         preset: &body_preset::ROCKY,
+        density_kg_m3: 3528.0,
     },
     MoonData {
         name: "Europa",
@@ -319,6 +354,7 @@ const MOONS: &[MoonData] = &[
         raan_deg: 219.106,
         argp_deg: 88.970,
         preset: &body_preset::ICY,
+        density_kg_m3: 3013.0,
     },
     MoonData {
         name: "Ganymede",
@@ -330,6 +366,7 @@ const MOONS: &[MoonData] = &[
         raan_deg: 63.552,
         argp_deg: 192.417,
         preset: &body_preset::ICY,
+        density_kg_m3: 1942.0,
     },
     MoonData {
         name: "Callisto",
@@ -341,6 +378,7 @@ const MOONS: &[MoonData] = &[
         raan_deg: 298.848,
         argp_deg: 52.643,
         preset: &body_preset::ICY,
+        density_kg_m3: 1834.0,
     },
     // Saturn (Saturn equatorial frame)
     MoonData {
@@ -353,6 +391,7 @@ const MOONS: &[MoonData] = &[
         raan_deg: 173.027,
         argp_deg: 332.499,
         preset: &body_preset::ICY,
+        density_kg_m3: 1148.0,
     },
     MoonData {
         name: "Enceladus",
@@ -364,6 +403,7 @@ const MOONS: &[MoonData] = &[
         raan_deg: 169.506,
         argp_deg: 0.000,
         preset: &body_preset::ICY,
+        density_kg_m3: 1609.0,
     },
     MoonData {
         name: "Dione",
@@ -375,6 +415,7 @@ const MOONS: &[MoonData] = &[
         raan_deg: 290.415,
         argp_deg: 168.820,
         preset: &body_preset::ICY,
+        density_kg_m3: 1478.0,
     },
     MoonData {
         name: "Rhea",
@@ -386,6 +427,7 @@ const MOONS: &[MoonData] = &[
         raan_deg: 351.042,
         argp_deg: 256.609,
         preset: &body_preset::ICY,
+        density_kg_m3: 1236.0,
     },
     MoonData {
         name: "Titan",
@@ -397,6 +439,7 @@ const MOONS: &[MoonData] = &[
         raan_deg: 28.058,
         argp_deg: 78.371,
         preset: &body_preset::ICY,
+        density_kg_m3: 1880.0,
     },
     MoonData {
         name: "Iapetus",
@@ -408,6 +451,7 @@ const MOONS: &[MoonData] = &[
         raan_deg: 75.831,
         argp_deg: 271.606,
         preset: &body_preset::ICY,
+        density_kg_m3: 1088.0,
     },
     // Uranus (Uranus equatorial frame — pole tilted 97.77° from
     // ecliptic, so satellites orbit ~perpendicular to it).
@@ -421,6 +465,7 @@ const MOONS: &[MoonData] = &[
         raan_deg: 99.771,
         argp_deg: 165.522,
         preset: &body_preset::ICY,
+        density_kg_m3: 1711.0,
     },
     // Neptune — Triton orbits retrograde (i > 90° relative to parent
     // equator), the only large moon known to do so. The result in
@@ -435,6 +480,7 @@ const MOONS: &[MoonData] = &[
         raan_deg: 177.608,
         argp_deg: 234.412,
         preset: &body_preset::ICY,
+        density_kg_m3: 2061.0,
     },
 ];
 
@@ -486,10 +532,15 @@ pub fn solar_system(seed: u64) -> Template {
     let mut bodies = Vec::with_capacity(1 + PLANETS.len() + DWARFS.len() + MOONS.len() + 630);
 
     // ── Sun ───────────────────────────────────────────────────────────────── //
+    // Bulk density 1408 kg/m³ (Allen's Astrophysical Quantities); the
+    // explicit override sidesteps the preset's mass-anchored EOS, which
+    // is calibrated for Earth-scale masses and clamps the Sun against
+    // its `rho_max` floor.
     bodies.push(TemplateBody {
         name: Some("Sun"),
         mass: M_SUN,
         preset: &body_preset::STAR,
+        density: Some(1408.0 * KG_M3_TO_SOLAR_AU3),
         position: Some([0.0, 0.0, 0.0]),
         velocity: [0.0, 0.0, 0.0],
         class_override: None,
@@ -542,6 +593,7 @@ pub fn solar_system(seed: u64) -> Template {
             position: Some(pos),
             velocity: vel,
             class_override: None,
+            density: Some(data.density_kg_m3 * KG_M3_TO_SOLAR_AU3),
         });
     };
 
@@ -606,6 +658,7 @@ pub fn solar_system(seed: u64) -> Template {
             // density. The class filter groups them all under Moon so the
             // user can hide moons en masse without touching planets.
             class_override: Some(crate::domain::body_preset::BodyClass::Moon),
+            density: Some(m.density_kg_m3 * KG_M3_TO_SOLAR_AU3),
         });
     }
 
@@ -636,6 +689,7 @@ pub fn solar_system(seed: u64) -> Template {
             name: None,
             mass: 1e-10,
             preset: &body_preset::ASTEROID,
+            density: None,
             position: Some(pos),
             velocity: vel,
             class_override: None,
@@ -685,6 +739,7 @@ pub fn solar_system(seed: u64) -> Template {
             name: None,
             mass: 1e-12,
             preset: &body_preset::COMET,
+            density: None,
             position: Some(pos),
             velocity: vel,
             class_override: None,
@@ -706,5 +761,153 @@ pub fn solar_system(seed: u64) -> Template {
         // period to one year for Earth.
         suggested_dt: Some(0.001),
         units: UnitSystem::solar_au(),
+    }
+}
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::templates::instantiate::instantiate;
+
+    /// Astronomical unit in metres (IAU 2012 nominal).
+    const AU_M: f64 = 1.495_978_707e11;
+
+    /// Look up a named body's `physical_radius` in simulation units (AU
+    /// for the solar-au unit system) after instantiating the template.
+    fn radius_au(name: &str) -> f64 {
+        let template = solar_system(42);
+        let bodies = instantiate(&template);
+        bodies
+            .iter()
+            .find(|b| b.name.as_deref() == Some(name))
+            .map(|b| b.body.physical_radius)
+            .unwrap_or_else(|| panic!("{name} not found in solar system template"))
+    }
+
+    /// Convert NASA-published equatorial radius (km) to AU.
+    fn km_to_au(km: f64) -> f64 {
+        km * 1000.0 / AU_M
+    }
+
+    /// Assert relative error between computed and reference radius.
+    /// Tolerance applies to `|r_computed − r_ref| / r_ref`.
+    fn assert_radius(name: &str, ref_km: f64, tol: f64) {
+        let computed = radius_au(name);
+        let reference = km_to_au(ref_km);
+        let err = (computed - reference).abs() / reference;
+        assert!(
+            err < tol,
+            "{name}: r = {:.4e} AU, expected {:.4e} AU (= {ref_km} km), err = {:.2}%",
+            computed,
+            reference,
+            err * 100.0,
+        );
+    }
+
+    // ── Sun + planets — published values from NASA fact sheets ──────────────
+    // Tolerance 3% absorbs rounding in `KG_M3_TO_SOLAR_AU3` plus ~1%
+    // density precision in the source values.
+
+    #[test]
+    fn sun_radius_matches_iau() {
+        assert_radius("Sun", 695_700.0, 0.03);
+    }
+
+    #[test]
+    fn mercury_radius_matches_nasa() {
+        assert_radius("Mercury", 2439.7, 0.03);
+    }
+
+    #[test]
+    fn venus_radius_matches_nasa() {
+        assert_radius("Venus", 6051.8, 0.03);
+    }
+
+    #[test]
+    fn earth_radius_matches_nasa() {
+        assert_radius("Earth", 6378.1, 0.03);
+    }
+
+    #[test]
+    fn mars_radius_matches_nasa() {
+        assert_radius("Mars", 3389.5, 0.03);
+    }
+
+    #[test]
+    fn jupiter_radius_matches_nasa() {
+        assert_radius("Jupiter", 69_911.0, 0.03);
+    }
+
+    #[test]
+    fn saturn_radius_matches_nasa() {
+        assert_radius("Saturn", 58_232.0, 0.03);
+    }
+
+    #[test]
+    fn uranus_radius_matches_nasa() {
+        assert_radius("Uranus", 25_362.0, 0.03);
+    }
+
+    #[test]
+    fn neptune_radius_matches_nasa() {
+        assert_radius("Neptune", 24_622.0, 0.03);
+    }
+
+    // ── Moons (Earth Moon + Galilean spot-checks) ──────────────────────────
+
+    #[test]
+    fn moon_radius_matches_nasa() {
+        assert_radius("Moon", 1737.4, 0.03);
+    }
+
+    #[test]
+    fn io_radius_matches_nasa() {
+        assert_radius("Io", 1821.5, 0.03);
+    }
+
+    #[test]
+    fn ganymede_radius_matches_nasa() {
+        assert_radius("Ganymede", 2634.1, 0.03);
+    }
+
+    #[test]
+    fn titan_radius_matches_nasa() {
+        assert_radius("Titan", 2574.7, 0.03);
+    }
+
+    // ── Dwarf planets (sanity on the most precisely measured) ──────────────
+
+    #[test]
+    fn pluto_radius_matches_new_horizons() {
+        assert_radius("Pluto", 1188.3, 0.03);
+    }
+
+    #[test]
+    fn ceres_radius_matches_dawn() {
+        assert_radius("Ceres", 469.7, 0.03);
+    }
+
+    // ── Inter-body sanity: Sun is much bigger than Earth ──────────────────
+
+    #[test]
+    fn sun_is_about_109x_earth_radius() {
+        // Real ratio: 696 000 / 6 378 ≈ 109.1. Within 3%.
+        let ratio = radius_au("Sun") / radius_au("Earth");
+        assert!(
+            (ratio - 109.1).abs() / 109.1 < 0.03,
+            "Sun/Earth radius ratio = {ratio:.2}, expected ≈ 109.1",
+        );
+    }
+
+    #[test]
+    fn jupiter_is_about_11x_earth_radius() {
+        // Real ratio: 69 911 / 6 378 ≈ 10.96.
+        let ratio = radius_au("Jupiter") / radius_au("Earth");
+        assert!(
+            (ratio - 10.96).abs() / 10.96 < 0.03,
+            "Jupiter/Earth radius ratio = {ratio:.3}, expected ≈ 10.96",
+        );
     }
 }

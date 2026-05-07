@@ -31,6 +31,7 @@ pub fn hot_jupiter(_seed: u64) -> Template {
                 velocity: [0.0, 0.0, 0.0],
                 class_override: None,
                 preset: &body_preset::STAR,
+                density: None,
             },
             TemplateBody {
                 name: Some("Hot Jupiter"),
@@ -39,6 +40,7 @@ pub fn hot_jupiter(_seed: u64) -> Template {
                 velocity: jupiter_vel,
                 class_override: None,
                 preset: &body_preset::GAS,
+                density: None,
             },
         ],
         display_scale: 50.0,

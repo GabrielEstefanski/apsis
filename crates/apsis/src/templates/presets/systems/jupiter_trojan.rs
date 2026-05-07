@@ -1,6 +1,9 @@
 use crate::{
     domain::body_preset,
-    templates::{Template, TemplateBody, UnitSystem, builders::circular_orbit},
+    templates::{
+        Template, TemplateBody, UnitSystem,
+        builders::{KG_M3_TO_SOLAR_AU3, circular_orbit},
+    },
 };
 
 pub fn jupiter_trojans(seed: u64) -> Template {
@@ -30,6 +33,7 @@ pub fn jupiter_trojans(seed: u64) -> Template {
             velocity: [0.0, 0.0, 0.0],
             class_override: None,
             preset: &body_preset::STAR,
+            density: Some(1408.0 * KG_M3_TO_SOLAR_AU3),
         },
         // Jupiter
         TemplateBody {
@@ -39,6 +43,7 @@ pub fn jupiter_trojans(seed: u64) -> Template {
             velocity: j_vel,
             class_override: None,
             preset: &body_preset::GAS,
+            density: Some(1326.0 * KG_M3_TO_SOLAR_AU3),
         },
     ];
 
@@ -65,6 +70,7 @@ pub fn jupiter_trojans(seed: u64) -> Template {
                 velocity: vel,
                 class_override: None,
                 preset: &body_preset::ASTEROID,
+                density: None,
             });
         }
     }

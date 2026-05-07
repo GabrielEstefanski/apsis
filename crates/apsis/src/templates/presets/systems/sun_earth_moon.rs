@@ -16,7 +16,10 @@ use std::f64::consts::TAU;
 
 use crate::{
     domain::body_preset,
-    templates::{Template, TemplateBody, UnitSystem, builders::circular_orbit},
+    templates::{
+        Template, TemplateBody, UnitSystem,
+        builders::{KG_M3_TO_SOLAR_AU3, circular_orbit},
+    },
 };
 
 pub fn sun_earth_moon(seed: u64) -> Template {
@@ -58,6 +61,7 @@ pub fn sun_earth_moon(seed: u64) -> Template {
                 velocity: [0.0, 0.0, 0.0],
                 class_override: None,
                 preset: &body_preset::STAR,
+                density: Some(1408.0 * KG_M3_TO_SOLAR_AU3),
             },
             TemplateBody {
                 name: Some("Earth"),
@@ -66,6 +70,7 @@ pub fn sun_earth_moon(seed: u64) -> Template {
                 velocity: earth_vel,
                 class_override: None,
                 preset: &body_preset::ROCKY,
+                density: Some(5514.0 * KG_M3_TO_SOLAR_AU3),
             },
             TemplateBody {
                 name: Some("Moon"),
@@ -74,6 +79,7 @@ pub fn sun_earth_moon(seed: u64) -> Template {
                 velocity: moon_vel,
                 class_override: None,
                 preset: &body_preset::ICY,
+                density: Some(3344.0 * KG_M3_TO_SOLAR_AU3),
             },
         ],
         display_scale: 1.0,
