@@ -184,6 +184,7 @@ mod energy {
 
 mod wh_guard {
     use super::*;
+    use crate::math::Vec3;
 
     #[test]
     fn hierarchical_system_is_suitable() {
@@ -345,6 +346,103 @@ mod wh_guard {
             assert!(b.x.is_finite() && b.y.is_finite(), "body left finite domain");
             assert!(b.vx.is_finite() && b.vy.is_finite(), "velocity left finite domain");
         }
+    }
+
+    /// `scratch_acc` after a WH step is sized N (one entry per body),
+    /// not N-1 (planets only). This is the contract the dense-output
+    /// snapshot path in `System::step` reads, and it is also the
+    /// contract every consumer of `Metrics::last_accelerations` reads
+    /// (camera feedforward, |a| field, CSV export). Pre-fix the buffer
+    /// stayed at N-1 because WH's force evaluation skips the central
+    /// body, breaking all three consumers silently — no snapshot for
+    /// the renderer, off-by-one indexing for the rest.
+    #[test]
+    fn wh_step_leaves_scratch_acc_sized_n() {
+        let bodies = vec![
+            Body::star(1000.0).at(0.0, 0.0).with_velocity(0.0, 0.0),
+            Body::rocky(1.0).at(10.0, 0.0).with_velocity(0.0, 10.0),
+            Body::rocky(1e-3).at(15.0, 0.0).with_velocity(0.0, 8.0),
+        ];
+        let mut sys = System::new(bodies, UnitSystem::canonical())
+            .with_theta(0.5)
+            .with_dt(0.01)
+            .with_max_depth(10);
+        sys.set_integrator(IntegratorKind::WisdomHolman);
+        sys.step();
+        assert_eq!(
+            sys.last_accelerations().len(),
+            sys.bodies().len(),
+            "WH must leave scratch_acc body-aligned (N), not planet-only (N-1)"
+        );
+    }
+
+    /// With `scratch_acc` body-aligned, the next step's pre-step
+    /// kinematics capture in `System::step` synthesises an Order-2
+    /// dense snapshot for WH (the producer condition was
+    /// `scratch_acc.len() == bodies.len()`). The renderer needs this
+    /// snapshot to interpolate body positions within a step; without
+    /// it bodies update only at sparse publish ticks and appear to
+    /// freeze at slow achieved sim rates.
+    #[test]
+    fn wh_step_publishes_dense_snapshot() {
+        let bodies = vec![
+            Body::star(1000.0).at(0.0, 0.0).with_velocity(0.0, 0.0),
+            Body::rocky(1.0).at(10.0, 0.0).with_velocity(0.0, 10.0),
+            Body::rocky(1e-3).at(15.0, 0.0).with_velocity(0.0, 8.0),
+        ];
+        let mut sys = System::new(bodies, UnitSystem::canonical())
+            .with_theta(0.5)
+            .with_dt(0.01)
+            .with_max_depth(10);
+        sys.set_integrator(IntegratorKind::WisdomHolman);
+        // First step populates scratch_acc; second step is the first
+        // whose pre-step capture sees a non-empty, body-aligned buffer.
+        sys.step();
+        sys.step();
+        let snap = sys
+            .last_dense_snapshot
+            .as_ref()
+            .expect("WH must publish a dense snapshot once scratch_acc is populated");
+        assert!(snap.is_shape_consistent(), "WH dense snapshot must be shape-consistent");
+        assert_eq!(snap.n_bodies(), sys.bodies().len(), "snapshot body count must match system");
+    }
+
+    /// Newton's third law in inertial coordinates: the total force on
+    /// the system is zero, so `Σ m_i · a_i = 0` for the inertial
+    /// accelerations published by the integrator. WH's central-body
+    /// acceleration was synthesised from per-planet gravitational
+    /// reactions (`a_0 = G Σ m_i q_i / r_i³`); this test confirms the
+    /// synthesis is consistent with the reaction every planet feels
+    /// from the central body's pull (`-μ q_i / r_i³`).
+    ///
+    /// Tolerance accounts for f64 round-off accumulating in the per-
+    /// planet sum at this body count; tightens automatically as the
+    /// implementation maintains higher precision.
+    #[test]
+    fn wh_acc_satisfies_newton_third_law() {
+        let bodies = vec![
+            Body::star(1000.0).at(0.0, 0.0).with_velocity(0.0, 0.0),
+            Body::rocky(1.0).at(10.0, 0.0).with_velocity(0.0, 10.0),
+            Body::rocky(0.5).at(-7.0, 4.0).with_velocity(-2.0, -6.0),
+            Body::rocky(0.2).at(3.0, -12.0).with_velocity(5.0, 1.5),
+        ];
+        let mut sys = System::new(bodies, UnitSystem::canonical())
+            .with_theta(0.5)
+            .with_dt(0.01)
+            .with_max_depth(10);
+        sys.set_integrator(IntegratorKind::WisdomHolman);
+        sys.step();
+
+        let total: Vec3 = sys
+            .bodies()
+            .iter()
+            .zip(sys.last_accelerations().iter())
+            .fold(Vec3::ZERO, |s, (b, a)| s + b.mass * *a);
+        assert!(
+            total.length() < 1e-10,
+            "WH must publish accelerations that satisfy Σ m_i a_i = 0; observed |Σ m a| = {}",
+            total.length(),
+        );
     }
 }
 
