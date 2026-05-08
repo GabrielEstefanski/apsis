@@ -220,3 +220,11 @@ fn fs_point(in: VSOut) -> @location(0) vec4<f32> {
     return vec4<f32>(in.color * amount, amount);
 }
 "#;
+
+#[cfg(test)]
+mod shader_tests {
+    #[test]
+    fn point_shader_validates() {
+        crate::render::validate_wgsl("point", super::POINT_SHADER);
+    }
+}

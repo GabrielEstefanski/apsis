@@ -4,10 +4,11 @@
 //!
 //! 1. **High-level state** — [`LightSpec`] and [`SceneLighting`] describe
 //!    what the *scene* currently looks like: which bodies are luminous,
-//!    where they sit in world space, how the shading should behave
-//!    (ambient floor, terminator softening, distance falloff). These are
-//!    the types the app layer deals with; they know nothing about bytes,
-//!    binding slots, or alignment.
+//!    where they sit in the render frame (camera-relative under
+//!    Floating Origin), how the shading should behave (ambient floor,
+//!    terminator softening, distance falloff). These are the types the
+//!    app layer deals with; they know nothing about bytes, binding
+//!    slots, or alignment.
 //!
 //! 2. **GPU-packed state** — [`LightingUniform`] is the exact byte layout
 //!    the WGSL shader expects. It's produced from a [`SceneLighting`] via
@@ -20,11 +21,14 @@
 //! backend plumbing, and the GPU packing can change (16-byte stride
 //! adjustments, field reordering) without rippling into callers.
 //!
-//! # 3D readiness
+//! # Position frame
 //!
-//! All positions are [`[f32; 3]`]. 2D callers set `z = 0`; a future 3D
-//! camera populates the full vector. Nothing in the shader cares which
-//! it is.
+//! All positions live in the render frame: produced on the CPU side
+//! by [`crate::render::render_relative::RenderRelativeVec3::from_world`]
+//! against the current `render_origin`. The shader reads them in the
+//! same frame as the body's `center_relative`, so the shading vector
+//! `to_l = light.pos_relative - body.center_relative` is well-defined
+//! and `f32`-precise even at AU-scale absolute distances.
 
 use bytemuck::{Pod, Zeroable};
 
@@ -39,11 +43,13 @@ pub const MAX_LIGHTS: usize = 4;
 
 // ── High-level domain ────────────────────────────────────────────────────────
 
-/// A single active light source in world coordinates.
+/// A single active light source in the render frame.
 #[derive(Clone, Copy, Debug)]
 pub struct LightSpec {
-    /// World-space position. 2D callers use `z = 0`.
-    pub world_pos: [f32; 3],
+    /// Camera-relative position (`world - render_origin`, `f64 → f32`
+    /// cast on a small magnitude). Built via
+    /// [`crate::render::render_relative::RenderRelativeVec3::from_world`].
+    pub pos_relative: [f32; 3],
     /// Relative luminosity — weights this source's contribution against
     /// its siblings. A reference star sets `intensity = 1.0`; a binary
     /// companion at 30% of the primary's output sets `0.3`. The absolute
@@ -125,7 +131,7 @@ impl Default for SceneLighting {
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct PackedLight {
-    world_pos: [f32; 3],
+    pos_relative: [f32; 3],
     intensity: f32,
 }
 
@@ -153,7 +159,7 @@ pub struct LightingUniform {
 impl Default for LightingUniform {
     fn default() -> Self {
         Self {
-            lights: [PackedLight { world_pos: [0.0; 3], intensity: 0.0 }; MAX_LIGHTS],
+            lights: [PackedLight { pos_relative: [0.0; 3], intensity: 0.0 }; MAX_LIGHTS],
             num_lights: 0,
             ambient_floor: 0.0,
             r_ref_sq: 1.0,
@@ -190,7 +196,7 @@ impl LightingUniform {
         let n = sorted.len().min(MAX_LIGHTS);
         for (i, src) in sorted.iter().take(n).enumerate() {
             out.lights[i] =
-                PackedLight { world_pos: src.world_pos, intensity: src.intensity.max(0.0) };
+                PackedLight { pos_relative: src.pos_relative, intensity: src.intensity.max(0.0) };
         }
         out.num_lights = n as u32;
         out
@@ -214,18 +220,18 @@ mod tests {
     fn pack_sorts_lights_by_intensity_descending() {
         let scene = SceneLighting {
             lights: vec![
-                LightSpec { world_pos: [1.0, 0.0, 0.0], intensity: 0.3 },
-                LightSpec { world_pos: [2.0, 0.0, 0.0], intensity: 1.0 },
-                LightSpec { world_pos: [3.0, 0.0, 0.0], intensity: 0.6 },
+                LightSpec { pos_relative: [1.0, 0.0, 0.0], intensity: 0.3 },
+                LightSpec { pos_relative: [2.0, 0.0, 0.0], intensity: 1.0 },
+                LightSpec { pos_relative: [3.0, 0.0, 0.0], intensity: 0.6 },
             ],
             ..Default::default()
         };
         let u = LightingUniform::pack(&scene);
         assert_eq!(u.num_lights, 3);
         // Brightest (intensity 1.0, pos x=2) must occupy slot 0.
-        assert_eq!(u.lights[0].world_pos[0], 2.0);
-        assert_eq!(u.lights[1].world_pos[0], 3.0);
-        assert_eq!(u.lights[2].world_pos[0], 1.0);
+        assert_eq!(u.lights[0].pos_relative[0], 2.0);
+        assert_eq!(u.lights[1].pos_relative[0], 3.0);
+        assert_eq!(u.lights[2].pos_relative[0], 1.0);
     }
 
     #[test]
@@ -233,7 +239,7 @@ mod tests {
         let mut lights = Vec::new();
         for i in 0..(MAX_LIGHTS + 3) {
             lights.push(LightSpec {
-                world_pos: [i as f32, 0.0, 0.0],
+                pos_relative: [i as f32, 0.0, 0.0],
                 intensity: (i + 1) as f32, // increasing → last wins ordering
             });
         }

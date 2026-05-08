@@ -553,3 +553,11 @@ fn fs_blur(in: VSOut) -> @location(0) vec4<f32> {
     return vec4<f32>(acc, 1.0);
 }
 "#;
+
+#[cfg(test)]
+mod shader_tests {
+    #[test]
+    fn bloom_shader_validates() {
+        crate::render::validate_wgsl("bloom", super::BLOOM_SHADER);
+    }
+}

@@ -704,3 +704,11 @@ fn fs_reduce(in: VSOut) -> @location(0) vec4<f32> {
     return vec4<f32>(v, 0.0, 0.0, 1.0);
 }
 "#;
+
+#[cfg(test)]
+mod shader_tests {
+    #[test]
+    fn reducer_shader_validates() {
+        crate::render::validate_wgsl("luminance_reducer", super::REDUCER_SHADER);
+    }
+}

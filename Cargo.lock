@@ -262,6 +262,7 @@ dependencies = [
  "egui_kittest",
  "glam",
  "insta",
+ "naga",
  "pollster",
  "pretty_assertions",
  "rand 0.10.1",

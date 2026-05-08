@@ -11,14 +11,26 @@ pub struct TrailState {
     pub trail_len: u32,
     pub n_bodies: u32,
     pub cap: u32,
-    pub view_proj: [[f32; 4]; 4],
+    /// Render-frame projection — `projection × rotation_only_view`.
+    /// Trail vertices are stored in absolute world coordinates and
+    /// shifted by `render_origin` per-vertex in the shader before this
+    /// matrix is applied.
+    pub view_proj_relative: [[f32; 4]; 4],
+    /// Floating-Origin anchor for the frame, in absolute world units.
+    /// Subtracted from each trail vertex on the GPU side. The WGSL
+    /// `vec3<f32>` forces the struct alignment to 16, so Rust has to
+    /// match the same total size — see `_pad` below.
+    pub render_origin: [f32; 3],
     pub trail_width: f32,
     pub decay_k: f32,
     pub tail_desaturate: f32,
     pub base_alpha: f32,
     pub feather: f32,
     pub core_boost: f32,
-    pub _pad: [f32; 2],
+    /// Tail padding to round the struct up to the WGSL alignment of 16
+    /// bytes. Without it the buffer comes out 120 B and the bind-group
+    /// validator rejects it against the shader's expected 128 B.
+    pub _pad: [f32; 3],
 }
 
 pub struct TrailRenderer {
@@ -172,7 +184,8 @@ impl TrailRenderer {
         queue: &wgpu::Queue,
         trail: &TrailBuffer,
         visibility: Option<&[bool]>,
-        view_proj: [[f32; 4]; 4],
+        view_proj_relative: [[f32; 4]; 4],
+        render_origin: glam::DVec3,
         style: &TrailStyle,
     ) {
         let n_bodies = trail.n_bodies();
@@ -260,14 +273,15 @@ impl TrailRenderer {
             trail_len: trail.len(),
             n_bodies,
             cap,
-            view_proj,
+            view_proj_relative,
+            render_origin: [render_origin.x as f32, render_origin.y as f32, render_origin.z as f32],
             trail_width: style.width,
             decay_k: style.decay_k,
             tail_desaturate: style.tail_desaturate,
             base_alpha: style.base_alpha,
             feather: style.feather,
             core_boost: style.core_boost,
-            _pad: [0.0; 2],
+            _pad: [0.0; 3],
         };
 
         queue.write_buffer(&self.state_buf, 0, bytemuck::bytes_of(&state));
@@ -303,19 +317,19 @@ struct ScreenUniform {
 var<uniform> screen: ScreenUniform;
 
 struct TrailState {
-    head: u32,
-    trail_len: u32,
-    n_bodies: u32,
-    cap: u32,
-    view_proj: mat4x4<f32>,
-    trail_width: f32,
-    decay_k: f32,
-    tail_desaturate: f32,
-    base_alpha: f32,
-    feather: f32,
-    core_boost: f32,
-    _pad0: f32,
-    _pad1: f32,
+    head:               u32,
+    trail_len:          u32,
+    n_bodies:           u32,
+    cap:                u32,
+    view_proj_relative: mat4x4<f32>,
+    render_origin:      vec3<f32>,
+    trail_width:        f32,
+    decay_k:            f32,
+    tail_desaturate:    f32,
+    base_alpha:         f32,
+    feather:            f32,
+    core_boost:         f32,
+    _pad0:              f32,
 };
 
 @group(1) @binding(0) var<storage, read> positions: array<vec4<f32>>;
@@ -403,8 +417,16 @@ fn vs_trail(
         return out;
     }
 
-    let clip0 = state.view_proj * vec4<f32>(p0, 1.0);
-    let clip1 = state.view_proj * vec4<f32>(p1, 1.0);
+    // Trail buffer stores positions in absolute world coords; shift by
+    // `render_origin` here so the relative view-proj sees the same
+    // frame as everything else. The subtraction keeps the f32 noise
+    // the trail buffer already had — a future TrailBuffer rewrite to
+    // f64 storage with CPU-side shift would tighten this further.
+    let p0_rel = p0 - state.render_origin;
+    let p1_rel = p1 - state.render_origin;
+
+    let clip0 = state.view_proj_relative * vec4<f32>(p0_rel, 1.0);
+    let clip1 = state.view_proj_relative * vec4<f32>(p1_rel, 1.0);
 
     // Drop segments with either endpoint behind the camera near plane
     // rather than risk a wrap-around projection. A future pass can
@@ -497,3 +519,19 @@ fn fs_trail(in: VSOut) -> @location(0) vec4<f32> {
     return vec4<f32>(in.color.rgb * shape, alpha);
 }
 "#;
+
+#[cfg(test)]
+mod shader_tests {
+    #[test]
+    fn trail_shader_validates() {
+        crate::render::validate_wgsl("trail", super::TRAIL_SHADER);
+    }
+
+    /// `4 × u32 (16) + mat4x4 (64) + vec3 (12, align 16) + 6 × f32 (24) +
+    /// 3 × f32 tail-pad (12) = 128 B`. The vec3 forces struct alignment to
+    /// 16; Rust packs tighter without an explicit pad.
+    #[test]
+    fn trail_state_layout() {
+        crate::render::assert_uniform_layout::<super::TrailState>("TrailState", 128);
+    }
+}
