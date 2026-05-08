@@ -358,6 +358,15 @@ impl SimulationApp {
                         .map(|a| glam::DVec3::new(a.x, a.y, a.z))
                         .unwrap_or(glam::DVec3::ZERO);
 
+                    // Hand the camera the followed body's physical
+                    // radius (with a 5 % safety margin) so a wheel
+                    // tick that would otherwise pull the eye through
+                    // the body lands at its surface instead. Also
+                    // means the camera can't sit *inside* the body
+                    // and render an inverted shell. Cleared in the
+                    // `else` branches below when follow drops.
+                    self.camera.min_distance_floor = Some((body.physical_radius * 1.05).max(1e-9));
+
                     let sim_rate = self.system.sim_rate().max(0.0);
                     let wall_vel = body_vel * sim_rate;
                     let wall_acc = body_acc * sim_rate * sim_rate;
@@ -422,13 +431,20 @@ impl SimulationApp {
                     self.follow_transition = None;
                     self.selection = BodySelection::default();
                     self.selection_form = None;
+                    self.camera.min_distance_floor = None;
                 }
             } else {
                 self.follow_selected_body = false;
                 self.follow_transition = None;
+                self.camera.min_distance_floor = None;
             }
         } else if self.follow_transition.is_some() {
             self.follow_transition = None;
+            self.camera.min_distance_floor = None;
+        } else {
+            // Not following: drop any stale floor so manual zoom on
+            // an unfollowed scene isn't artificially limited.
+            self.camera.min_distance_floor = None;
         }
 
         // Spring chase against this frame's `target`. Runs after the
