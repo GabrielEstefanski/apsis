@@ -208,6 +208,12 @@ impl PhysicsHandle {
     /// self-consistent state inside the step rather than position from `h`
     /// paired with velocity / acceleration from the start-of-step boundary.
     ///
+    /// Render time advances at the *achieved* sim rate when physics has fallen
+    /// behind the target — see [`effective_render_rate`] — so bodies degrade
+    /// gracefully (visible time slows) instead of freezing on a snapshot edge
+    /// and then jumping when the next snapshot arrives. Physics state stays
+    /// authoritative; only the visual clock adapts.
+    ///
     /// Call this once per render frame, after [`sync`](Self::sync), while the
     /// simulation is running (skip when paused to freeze the display).
     pub fn advance_render_time(&mut self, wall_delta: f64, sim_rate_target: f64) {
@@ -225,8 +231,14 @@ impl PhysicsHandle {
             _ => return,
         };
 
-        self.t_render += sim_rate_target * wall_delta;
-        // Clamp to the valid window — don't extrapolate beyond the accepted step.
+        let effective = effective_render_rate(sim_rate_target, self.sim_rate);
+        self.t_render += effective * wall_delta;
+        // Safety net for the achieved-rate measurement transient: `sim_rate`
+        // is a 500 ms rolling average, so when physics decelerates abruptly
+        // the measured value lags the new reality for ~1 window. The clamp
+        // catches that gap. In steady state (achieved ≈ target, or achieved
+        // < target stably), the effective-rate cap above keeps `t_render`
+        // inside the snapshot window naturally and the clamp doesn't bind.
         let t0 = snap.t0;
         let t1 = t0 + snap.dt;
         self.t_render = self.t_render.clamp(t0, t1);
@@ -1249,5 +1261,66 @@ fn step_precision_run_tick(system: &mut System, precision: &Arc<Mutex<PrecisionR
     ctrl.update_telemetry(telemetry);
     if reached_target && matches!(ctrl.state(), RunState::Running { .. }) {
         ctrl.mark_completed();
+    }
+}
+
+// ── Render-rate adaptation ────────────────────────────────────────────────────
+
+/// Effective sim-time rate for advancing the render clock.
+///
+/// Physics state is authoritative — when the integrator can't deliver
+/// `target` sim units per wall second (heavy N, tight tolerance,
+/// aggressive sim_rate request), the render time advances at the
+/// *achieved* rate instead. Bodies degrade gracefully: visible time
+/// slows to match the solver, never lying about state by extrapolating
+/// past the latest snapshot or freezing on its edge.
+///
+/// `achieved == 0.0` is the pre-measurement state (first ~500 ms after
+/// start or unpause, before the rolling-average window has produced a
+/// sample). Falling back to `target` then keeps the first frame from
+/// stalling at zero.
+///
+/// Industry analogue: Universe Sandbox's "actual time multiplier"
+/// (target requested vs. achieved). The opposite of game-engine
+/// network-prediction extrapolation, which trades physical accuracy
+/// for visual smoothness — appropriate there, not here.
+fn effective_render_rate(target: f64, achieved: f64) -> f64 {
+    if achieved > 0.0 { target.min(achieved) } else { target }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::effective_render_rate;
+
+    #[test]
+    fn render_rate_uses_target_when_physics_keeps_up() {
+        // Achieved equal to target: no slowdown.
+        assert_eq!(effective_render_rate(10.0, 10.0), 10.0);
+        // Achieved exceeds target (e.g., physics finished its batch quota
+        // early and is sleeping): cap at target so the user gets the rate
+        // they asked for, not faster.
+        assert_eq!(effective_render_rate(10.0, 12.0), 10.0);
+    }
+
+    #[test]
+    fn render_rate_drops_to_achieved_when_physics_behind() {
+        // Heavy scene, physics achieving 40 % of target: render time
+        // advances at 40 % so bodies stay continuous.
+        assert_eq!(effective_render_rate(10.0, 4.0), 4.0);
+    }
+
+    #[test]
+    fn render_rate_falls_back_to_target_before_first_measurement() {
+        // First frame after spawn / unpause: achieved is still 0.0
+        // because the rolling-average window hasn't produced a sample.
+        // Use target so the render clock isn't stuck at zero.
+        assert_eq!(effective_render_rate(10.0, 0.0), 10.0);
+    }
+
+    #[test]
+    fn render_rate_zero_target_freezes_render_regardless_of_achieved() {
+        // User paused (target = 0): render clock stops even if the
+        // last achieved-rate sample is still non-zero.
+        assert_eq!(effective_render_rate(0.0, 5.0), 0.0);
     }
 }
