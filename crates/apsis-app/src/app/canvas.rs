@@ -381,7 +381,7 @@ impl SimulationApp {
                                 state.target_elevation,
                                 state.target_distance,
                             );
-                            let lerped = state.initial.lerp_to(&body_target, state.t());
+                            let lerped = state.initial.vanwijk_to(&body_target, state.t());
                             self.camera.current = lerped;
                             self.camera.target = body_target;
                             ctx.request_repaint();

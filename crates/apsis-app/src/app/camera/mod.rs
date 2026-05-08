@@ -35,12 +35,13 @@ const MIN_DISTANCE: f64 = 1e-6;
 /// Phase-locked transition between two camera viewpoints.
 ///
 /// Captured on click-to-focus. Each frame the follow loop derives a
-/// single fraction `t = 1 - alpha_remaining` and applies it to all
-/// four pose dimensions (pivot, azimuth, elevation, distance) in
-/// lockstep, so distance and pivot reach the same perceptual
-/// progress at the same wall time. The eye trajectory is the
-/// geometric interpolation between the two viewpoints — no separate
-/// "zoom" then "walk" phases.
+/// single fraction `t = 1 - alpha_remaining` and feeds it to
+/// [`CameraPose::vanwijk_to`], which evaluates the
+/// (pivot, distance, azimuth, elevation) pose along the
+/// van Wijk & Nuij (2003) smooth zoom-and-pan path — so the body
+/// stays monotonically on its way to centre on screen rather than
+/// drifting off-frame mid-zoom (the artefact a separable
+/// `linear pivot, log distance` lerp produces).
 ///
 /// The pivot endpoint tracks the body's current position each frame
 /// (instead of being pinned to where the body was at click time), so
@@ -180,6 +181,95 @@ impl CameraPose {
             (log_a + t * (log_b - log_a)).exp(),
         )
     }
+
+    /// van Wijk & Nuij (2003) smooth zoom-and-pan interpolation.
+    ///
+    /// A separable `(linear pivot, log distance)` lerp produces the
+    /// "screen-space bowing" artefact during click-to-focus reframes:
+    /// the body's apparent on-screen offset is proportional to
+    /// `|pivot - body| / distance`, and the log-distance term collapses
+    /// faster than the linear pivot term at intermediate `t`. The body
+    /// visibly drifts off-centre by an order of magnitude before
+    /// snapping back at `t = 1`.
+    ///
+    /// The van Wijk path parameterises `(pivot, distance)` jointly so
+    /// that the perceived velocity (combined screen-space pan + zoom)
+    /// stays constant. With `ρ = √2` (the paper's perception-tuned
+    /// default) the artefact disappears entirely. Orientation
+    /// (azimuth, elevation) still lerps linearly — angles don't
+    /// participate in the bowing.
+    ///
+    /// Reference: van Wijk & Nuij, "Smooth and Efficient Zooming and
+    /// Panning", IEEE InfoVis 2003.
+    pub fn vanwijk_to(&self, other: &CameraPose, t: f64) -> CameraPose {
+        let azimuth = lerp_angle(self.azimuth, other.azimuth, t);
+        let elevation = self.elevation + t * (other.elevation - self.elevation);
+        let (pivot, distance) =
+            vanwijk_pivot_distance(self.pivot, self.distance, other.pivot, other.distance, t);
+        CameraPose::new(pivot, azimuth, elevation, distance)
+    }
+}
+
+/// `ρ²` for van Wijk's smooth zoom-and-pan path. The paper derives
+/// `ρ = √2` from a perception study minimising "perceived
+/// instantaneous velocity" along the path.
+const VANWIJK_RHO_SQ: f64 = 2.0;
+
+/// van Wijk & Nuij 2003 closed-form path between two viewpoints.
+///
+/// Returns `(pivot, distance)` at progress `t ∈ [0, 1]` such that
+/// `t = 0 → (p0, w0)` and `t = 1 → (p1, w1)`. The path is a
+/// hyperbolic curve in the `(u, ln w)` plane that keeps the perceived
+/// screen-space velocity constant, eliminating the bowing artefact of
+/// the separable lerp.
+///
+/// Degenerate cases:
+/// - `|p1 - p0| → 0` (pure zoom, no pan): falls back to log-lerp on
+///   distance, holds pivot. Necessary because `b_i` has `|u_d|` in the
+///   denominator.
+/// - Path length `S` non-finite or near zero (initial and target
+///   numerically coincident): falls back to separable lerp.
+fn vanwijk_pivot_distance(p0: DVec3, w0: f64, p1: DVec3, w1: f64, t: f64) -> (DVec3, f64) {
+    let u_vec = p1 - p0;
+    let u_d = u_vec.length();
+
+    let log_lerp_dist = |t: f64| -> f64 {
+        let log_w0 = w0.max(MIN_DISTANCE).ln();
+        let log_w1 = w1.max(MIN_DISTANCE).ln();
+        (log_w0 + t * (log_w1 - log_w0)).exp()
+    };
+
+    if u_d < 1e-9 {
+        return (p0, log_lerp_dist(t));
+    }
+
+    let rho_sq = VANWIJK_RHO_SQ;
+    let rho_4 = rho_sq * rho_sq;
+
+    let b0 = (w1 * w1 - w0 * w0 + rho_4 * u_d * u_d) / (2.0 * w0 * rho_sq * u_d);
+    let b1 = (w1 * w1 - w0 * w0 - rho_4 * u_d * u_d) / (2.0 * w1 * rho_sq * u_d);
+
+    let r0 = (-b0 + (b0 * b0 + 1.0).sqrt()).ln();
+    let r1 = (-b1 + (b1 * b1 + 1.0).sqrt()).ln();
+
+    let s_total = (r1 - r0) / rho_sq;
+    if !s_total.is_finite() || s_total.abs() < 1e-12 {
+        return (p0.lerp(p1, t), log_lerp_dist(t));
+    }
+
+    let s = t * s_total;
+    let arg = rho_sq * s + r0;
+
+    let cosh_r0 = r0.cosh();
+    let sinh_r0 = r0.sinh();
+    let cosh_arg = arg.cosh();
+    let tanh_arg = arg.tanh();
+
+    let w = w0 * cosh_r0 / cosh_arg;
+    let u_progress = (w0 / rho_sq) * (cosh_r0 * tanh_arg - sinh_r0);
+
+    let pivot = p0 + u_vec * (u_progress / u_d);
+    (pivot, w)
 }
 
 impl Default for CameraPose {
@@ -623,5 +713,88 @@ mod tests {
         assert!((at0.distance - a.distance).abs() < 1e-9);
         assert!(vec_approx_eq(at1.pivot, b.pivot, 1e-9));
         assert!((at1.distance - b.distance).abs() < 1e-9);
+    }
+
+    // ── van Wijk smooth zoom-and-pan ─────────────────────────────────────────
+
+    #[test]
+    fn vanwijk_endpoints_match_inputs() {
+        let a = CameraPose::new(DVec3::new(10.0, 0.0, 0.0), 0.3, -0.1, 100.0);
+        let b = CameraPose::new(DVec3::new(0.0, 0.0, 0.0), 0.3, -0.1, 1.0);
+        let at0 = a.vanwijk_to(&b, 0.0);
+        let at1 = a.vanwijk_to(&b, 1.0);
+        assert!(vec_approx_eq(at0.pivot, a.pivot, 1e-9), "t=0 pivot");
+        assert!((at0.distance - a.distance).abs() < 1e-9, "t=0 distance");
+        assert!(vec_approx_eq(at1.pivot, b.pivot, 1e-9), "t=1 pivot");
+        assert!((at1.distance - b.distance).abs() < 1e-9, "t=1 distance");
+    }
+
+    #[test]
+    fn vanwijk_pure_zoom_falls_back_to_log_lerp() {
+        // No pan: pivot identical at endpoints. Path collapses to log
+        // distance lerp (geometric mean at midpoint).
+        let p = DVec3::new(1.0, 2.0, 3.0);
+        let a = CameraPose::new(p, 0.0, 0.0, 100.0);
+        let b = CameraPose::new(p, 0.0, 0.0, 0.01);
+        let mid = a.vanwijk_to(&b, 0.5);
+        assert!(vec_approx_eq(mid.pivot, p, 1e-9), "pivot held");
+        assert!((mid.distance - 1.0).abs() < 1e-9, "geometric mean = {}", mid.distance);
+    }
+
+    #[test]
+    fn vanwijk_screen_offset_is_monotonic_under_aggressive_zoom() {
+        // The exact scenario the separable lerp mishandles: 100 AU →
+        // 1 AU zoom while panning by 1 unit. Screen offset is
+        // proportional to `|pivot - body| / distance`. With the
+        // separable lerp this peaks ~5–6× the initial value at
+        // intermediate `t`. The van Wijk path keeps it monotonically
+        // decreasing.
+        let body = DVec3::new(0.0, 0.0, 0.0);
+        let initial = CameraPose::new(DVec3::new(1.0, 0.0, 0.0), 0.0, 0.0, 100.0);
+        let target = CameraPose::new(body, 0.0, 0.0, 1.0);
+
+        let screen_offset = |pose: &CameraPose| (pose.pivot - body).length() / pose.distance;
+
+        let initial_offset = screen_offset(&initial);
+        let mut prev = initial_offset;
+        for k in 1..=100 {
+            let t = k as f64 / 100.0;
+            let pose = initial.vanwijk_to(&target, t);
+            let off = screen_offset(&pose);
+            assert!(off <= prev + 1e-9, "screen offset grew at t={t}: {prev} → {off}");
+            assert!(
+                off <= initial_offset + 1e-9,
+                "screen offset exceeded initial at t={t}: {off} > {initial_offset}",
+            );
+            prev = off;
+        }
+    }
+
+    #[test]
+    fn vanwijk_separable_lerp_does_bow_for_comparison() {
+        // Documents the artefact `vanwijk_to` exists to fix.
+        // Same scenario as the monotonicity test above, evaluated
+        // under the separable `lerp_to`. Screen offset peaks well
+        // above the initial value — that peak is what the user sees
+        // as the body "fugindo do centro" mid-zoom.
+        let body = DVec3::new(0.0, 0.0, 0.0);
+        let initial = CameraPose::new(DVec3::new(1.0, 0.0, 0.0), 0.0, 0.0, 100.0);
+        let target = CameraPose::new(body, 0.0, 0.0, 1.0);
+
+        let screen_offset = |pose: &CameraPose| (pose.pivot - body).length() / pose.distance;
+        let initial_offset = screen_offset(&initial);
+
+        let mut peak = 0.0_f64;
+        for k in 1..=100 {
+            let t = k as f64 / 100.0;
+            let pose = initial.lerp_to(&target, t);
+            peak = peak.max(screen_offset(&pose));
+        }
+        // Sanity: the separable lerp peak is at least 3× the initial
+        // offset for this scenario (analytic ≈ 5–6×).
+        assert!(
+            peak > initial_offset * 3.0,
+            "expected separable-lerp bow > 3× initial; peak = {peak}, initial = {initial_offset}",
+        );
     }
 }
