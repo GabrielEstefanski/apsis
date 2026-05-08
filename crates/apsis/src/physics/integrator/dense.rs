@@ -1,16 +1,17 @@
-//! Dense output — sub-step position and velocity interpolation for smooth rendering.
+//! Dense output — sub-step position, velocity, and acceleration interpolation
+//! for smooth rendering.
 //!
 //! Each completed integration step (or sub-step for IAS15) records a
 //! [`DenseSnapshot`] that captures the state needed to evaluate body
-//! positions and velocities at any time `t ∈ [t₀, t₀ + dt]` without
-//! re-running physics.
+//! positions, velocities, and accelerations at any time
+//! `t ∈ [t₀, t₀ + dt]` without re-running physics.
 //!
 //! # Interpolation formulas
 //!
-//! | Integrator | Position | Velocity |
-//! |------------|----------|----------|
-//! | IAS15      | Rein & Spiegel (2015) polynomial via b-coefficients (eq. 9) | derivative of position polynomial (eq. 11) |
-//! | VV / Y4 / WH | 2nd-order Taylor: `x₀ + v₀·h·dt + ½·a₀·(h·dt)²` | analytical derivative: `v₀ + a₀·h·dt` |
+//! | Integrator | Position | Velocity | Acceleration |
+//! |------------|----------|----------|--------------|
+//! | IAS15      | Rein & Spiegel (2015) polynomial via b-coefficients (eq. 9) | derivative of position polynomial (eq. 11) | second derivative — the b-coefficients ARE the higher-order acceleration terms |
+//! | VV / Y4 / WH | 2nd-order Taylor: `x₀ + v₀·h·dt + ½·a₀·(h·dt)²` | analytical derivative: `v₀ + a₀·h·dt` | constant within step: `a₀` |
 //!
 //! The IAS15 polynomial is exact to the precision of the accepted b-coefficients.
 //! The Order-2 fallback is sufficient for smooth visual rendering between steps —
@@ -22,6 +23,7 @@
 //! let h = (t_render - snap.t0) / snap.dt;   // ∈ [0, 1]
 //! let p = snap.interpolate(body_idx, h.clamp(0.0, 1.0));
 //! let v = snap.velocity_at(body_idx, h.clamp(0.0, 1.0));
+//! let a = snap.acceleration_at(body_idx, h.clamp(0.0, 1.0));
 //! ```
 
 use crate::math::Vec3;
@@ -107,6 +109,30 @@ impl DenseSnapshot {
         } else {
             predict_v_order2(v0, a0, h, dt)
         }
+    }
+
+    /// Interpolated acceleration for body `i` at normalised time `h ∈ [0, 1]`.
+    ///
+    /// Companion to [`interpolate`](Self::interpolate) and
+    /// [`velocity_at`](Self::velocity_at) — render consumers that
+    /// combine the kinematic triple (camera follow's feedforward
+    /// predictor; field queries that paint by `|a|`) need it sampled
+    /// at the same point inside the step rather than pinned to the
+    /// step boundary.
+    ///
+    /// For VV / Y4 / WH the order-2 Taylor model treats acceleration
+    /// as constant within a step, so this returns `a0` directly. For
+    /// IAS15 it evaluates the polynomial second derivative — the
+    /// b-coefficients ARE the higher-order acceleration terms in
+    /// Gauss–Radau form, so this is the lightest of the three IAS15
+    /// kernels.
+    ///
+    /// Panics in debug mode if `i >= self.x0.len()`.
+    #[inline]
+    pub fn acceleration_at(&self, i: usize, h: f64) -> Vec3 {
+        debug_assert!(i < self.x0.len(), "body index out of range");
+
+        if self.b.is_empty() { self.a0[i] } else { predict_a_ias15(self.a0[i], &self.b[i], h) }
     }
 
     /// Number of bodies in this snapshot.
@@ -275,11 +301,61 @@ pub fn predict_v_ias15(v0: Vec3, a0: Vec3, b: &DenseCoeffs, h: f64, dt: f64) -> 
     Vec3::new(v0.x + h * dt * inner_x, v0.y + h * dt * inner_y, v0.z + h * dt * inner_z)
 }
 
+/// IAS15 degree-15 acceleration at substep fraction `h ∈ [0, 1]`.
+///
+/// Differentiating the velocity polynomial in [`predict_v_ias15`]
+/// once more with respect to physical time `t = h · dt` collapses
+/// the divisors and gives:
+///
+/// `a(h) = a₀ + b₀·h + b₁·h² + b₂·h³ + b₃·h⁴ + b₄·h⁵ + b₅·h⁶ + b₆·h⁷`
+///
+/// The Gauss–Radau b-coefficients are precisely the higher-order
+/// acceleration terms, so `predict_a_ias15` is the lightest of the
+/// three IAS15 kernels (no `dt` factor, no division).
+#[inline]
+pub fn predict_a_ias15(a0: Vec3, b: &DenseCoeffs, h: f64) -> Vec3 {
+    let h2 = h * h;
+    let h3 = h2 * h;
+    let h4 = h3 * h;
+    let h5 = h4 * h;
+    let h6 = h5 * h;
+    let h7 = h6 * h;
+
+    let ax = a0.x
+        + b[0].x * h
+        + b[1].x * h2
+        + b[2].x * h3
+        + b[3].x * h4
+        + b[4].x * h5
+        + b[5].x * h6
+        + b[6].x * h7;
+
+    let ay = a0.y
+        + b[0].y * h
+        + b[1].y * h2
+        + b[2].y * h3
+        + b[3].y * h4
+        + b[4].y * h5
+        + b[5].y * h6
+        + b[6].y * h7;
+
+    let az = a0.z
+        + b[0].z * h
+        + b[1].z * h2
+        + b[2].z * h3
+        + b[3].z * h4
+        + b[4].z * h5
+        + b[5].z * h6
+        + b[6].z * h7;
+
+    Vec3::new(ax, ay, az)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        DenseCoeffs, DenseSnapshot, predict_ias15, predict_order2, predict_v_ias15,
-        predict_v_order2,
+        DenseCoeffs, DenseSnapshot, predict_a_ias15, predict_ias15, predict_order2,
+        predict_v_ias15, predict_v_order2,
     };
     use crate::math::Vec3;
     use crate::physics::integrator::IntegratorKind;
@@ -440,5 +516,73 @@ mod tests {
         let v = snap.velocity_at(0, 0.5);
         let expected = predict_v_ias15(snap.v0[0], snap.a0[0], &snap.b[0], 0.5, snap.dt);
         assert_eq!(v, expected);
+    }
+
+    // ── Acceleration interpolation ───────────────────────────────────────────
+
+    #[test]
+    fn predict_a_ias15_at_h_zero_returns_a0() {
+        let a0 = Vec3::new(0.3, 0.2, -0.1);
+        let b = sample_b();
+        assert_eq!(predict_a_ias15(a0, &b, 0.0), a0);
+    }
+
+    #[test]
+    fn predict_a_ias15_is_derivative_of_predict_v_ias15() {
+        // Central difference of velocity polynomial against analytical
+        // acceleration. Same tolerance class as the velocity-derivative
+        // test in this module.
+        let v0 = Vec3::new(1.5, -0.7, 0.4);
+        let a0 = Vec3::new(0.3, 0.2, -0.1);
+        let b = sample_b();
+        let dt = 1e-3;
+        let eps = 1e-5;
+        for h in [0.1, 0.3, 0.5, 0.7, 0.9] {
+            let vp = predict_v_ias15(v0, a0, &b, h + eps, dt);
+            let vm = predict_v_ias15(v0, a0, &b, h - eps, dt);
+            let a_num = Vec3::new(
+                (vp.x - vm.x) / (2.0 * eps * dt),
+                (vp.y - vm.y) / (2.0 * eps * dt),
+                (vp.z - vm.z) / (2.0 * eps * dt),
+            );
+            let a = predict_a_ias15(a0, &b, h);
+            assert!((a.x - a_num.x).abs() < 1e-6, "ax at h={h}: {} vs {}", a.x, a_num.x);
+            assert!((a.y - a_num.y).abs() < 1e-6, "ay at h={h}: {} vs {}", a.y, a_num.y);
+            assert!((a.z - a_num.z).abs() < 1e-6, "az at h={h}: {} vs {}", a.z, a_num.z);
+        }
+    }
+
+    #[test]
+    fn snapshot_acceleration_at_returns_a0_when_b_empty() {
+        // VV / Y4 / WH: order-2 model has constant acceleration within
+        // a step.
+        let snap = DenseSnapshot {
+            t0: 0.0,
+            dt: 1e-3,
+            x0: vec![Vec3::new(0.0, 0.0, 0.0)],
+            v0: vec![Vec3::new(2.0, -1.0, 0.5)],
+            a0: vec![Vec3::new(0.4, 0.0, -0.1)],
+            b: Vec::new(),
+            kind: IntegratorKind::Yoshida4,
+        };
+        for h in [0.0, 0.25, 0.5, 0.75, 1.0] {
+            assert_eq!(snap.acceleration_at(0, h), snap.a0[0]);
+        }
+    }
+
+    #[test]
+    fn snapshot_acceleration_at_uses_ias15_when_b_present() {
+        let snap = DenseSnapshot {
+            t0: 0.0,
+            dt: 1e-3,
+            x0: vec![Vec3::new(0.0, 0.0, 0.0)],
+            v0: vec![Vec3::new(2.0, -1.0, 0.5)],
+            a0: vec![Vec3::new(0.4, 0.0, -0.1)],
+            b: vec![sample_b()],
+            kind: IntegratorKind::Ias15,
+        };
+        let a = snap.acceleration_at(0, 0.5);
+        let expected = predict_a_ias15(snap.a0[0], &snap.b[0], 0.5);
+        assert_eq!(a, expected);
     }
 }
