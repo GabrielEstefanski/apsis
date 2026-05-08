@@ -325,19 +325,29 @@ impl OrbitCamera {
         c.distance = c.distance.max(MIN_DISTANCE);
     }
 
-    /// Apply gesture deltas to `target`. Caller is responsible for
-    /// scaling these by their own sensitivity factors before calling.
+    /// Apply rotation gesture deltas. Direct manipulation: `current`
+    /// snaps to `target` for the rotated axes so the cursor doesn't
+    /// lead the camera. The spring still owns `pivot` (shared with
+    /// the follow loop, which needs damped pivot motion to stay
+    /// centred under feedforward).
+    ///
+    /// Industry convention: KSP map-view, Universe Sandbox, Cinemachine
+    /// "Damping = 0" on direct gesture axes.
     pub fn rotate(&mut self, d_azimuth: f64, d_elevation: f64) {
         self.target.azimuth += d_azimuth;
         self.target.elevation =
             (self.target.elevation + d_elevation).clamp(-ELEVATION_LIMIT, ELEVATION_LIMIT);
+        self.current.azimuth = self.target.azimuth;
+        self.current.elevation = self.target.elevation;
     }
 
     /// Multiplicative zoom. `factor > 1` zooms out. Distance is
     /// updated geometrically so wheel ticks feel uniform across
-    /// scales.
+    /// scales. Direct manipulation: `current.distance` snaps to
+    /// `target.distance` (see [`rotate`](Self::rotate) for rationale).
     pub fn zoom(&mut self, factor: f64) {
         self.target.distance = (self.target.distance * factor).max(MIN_DISTANCE);
+        self.current.distance = self.target.distance;
     }
 
     /// Translate the pivot in the camera's screen plane. `dx` is
@@ -558,6 +568,38 @@ mod tests {
         // At identity pose: right = +X, up = +Y, forward = −Z.
         cam.pan_screen(3.0, 4.0);
         assert!(vec_approx_eq(cam.target.pivot, DVec3::new(3.0, 4.0, 0.0), 1e-12));
+    }
+
+    // ── Direct gesture snap ──────────────────────────────────────────────────
+
+    #[test]
+    fn rotate_snaps_current_to_target_for_azimuth_and_elevation() {
+        let mut cam = OrbitCamera::new(CameraPose::new(DVec3::ZERO, 0.0, 0.0, 10.0));
+        cam.rotate(0.4, -0.2);
+        assert!(approx_eq(cam.current.azimuth, cam.target.azimuth, 1e-12));
+        assert!(approx_eq(cam.current.elevation, cam.target.elevation, 1e-12));
+        assert!(approx_eq(cam.current.azimuth, 0.4, 1e-12));
+        assert!(approx_eq(cam.current.elevation, -0.2, 1e-12));
+    }
+
+    #[test]
+    fn zoom_snaps_current_to_target_distance() {
+        let mut cam = OrbitCamera::new(CameraPose::new(DVec3::ZERO, 0.0, 0.0, 10.0));
+        cam.zoom(0.5);
+        assert!(approx_eq(cam.current.distance, cam.target.distance, 1e-12));
+        assert!(approx_eq(cam.current.distance, 5.0, 1e-12));
+    }
+
+    #[test]
+    fn pan_screen_does_not_snap_pivot() {
+        // Pan keeps the spring on pivot — the follow loop needs damped
+        // pivot motion to stay centred under feedforward, and pan
+        // already drops follow on first frame so the user gets the
+        // gesture they expect without snap-fighting.
+        let mut cam = OrbitCamera::new(CameraPose::new(DVec3::ZERO, 0.0, 0.0, 10.0));
+        cam.pan_screen(3.0, 4.0);
+        assert_eq!(cam.current.pivot, DVec3::ZERO, "current pivot stayed");
+        assert_eq!(cam.target.pivot, DVec3::new(3.0, 4.0, 0.0), "target pivot moved");
     }
 
     // ── Log-space distance lerp ──────────────────────────────────────────────
