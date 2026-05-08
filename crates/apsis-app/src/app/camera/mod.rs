@@ -431,9 +431,9 @@ impl OrbitCamera {
         self.current.distance = self.target.distance;
     }
 
-    /// Translate the pivot in the camera's screen plane. `dx` is
-    /// along `right`, `dy` is along `up`. Magnitudes are world units.
-    pub fn pan_screen(&mut self, dx: f64, dy: f64) {
+    /// Translate the pivot along the camera's right/up axes by world-
+    /// unit deltas.
+    pub fn pan_pivot(&mut self, dx: f64, dy: f64) {
         let r = self.target.right();
         let u = self.target.up();
         self.target.pivot += r * dx + u * dy;
@@ -643,10 +643,9 @@ mod tests {
     }
 
     #[test]
-    fn pan_screen_translates_pivot_in_camera_frame() {
+    fn pan_pivot_translates_along_camera_right_and_up() {
         let mut cam = OrbitCamera::new(CameraPose::new(DVec3::ZERO, 0.0, 0.0, 10.0));
-        // At identity pose: right = +X, up = +Y, forward = −Z.
-        cam.pan_screen(3.0, 4.0);
+        cam.pan_pivot(3.0, 4.0);
         assert!(vec_approx_eq(cam.target.pivot, DVec3::new(3.0, 4.0, 0.0), 1e-12));
     }
 
@@ -671,15 +670,11 @@ mod tests {
     }
 
     #[test]
-    fn pan_screen_does_not_snap_pivot() {
-        // Pan keeps the spring on pivot — the follow loop needs damped
-        // pivot motion to stay centred under feedforward, and pan
-        // already drops follow on first frame so the user gets the
-        // gesture they expect without snap-fighting.
+    fn pan_pivot_does_not_snap_current() {
         let mut cam = OrbitCamera::new(CameraPose::new(DVec3::ZERO, 0.0, 0.0, 10.0));
-        cam.pan_screen(3.0, 4.0);
-        assert_eq!(cam.current.pivot, DVec3::ZERO, "current pivot stayed");
-        assert_eq!(cam.target.pivot, DVec3::new(3.0, 4.0, 0.0), "target pivot moved");
+        cam.pan_pivot(3.0, 4.0);
+        assert_eq!(cam.current.pivot, DVec3::ZERO);
+        assert_eq!(cam.target.pivot, DVec3::new(3.0, 4.0, 0.0));
     }
 
     // ── Log-space distance lerp ──────────────────────────────────────────────
