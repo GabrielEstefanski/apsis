@@ -1298,6 +1298,7 @@ impl Integrator for Ias15 {
                             a0: a0.clone(),
                             b: self.b.clone(),
                             kind: IntegratorKind::Ias15,
+                            wh_data: None,
                         }
                     });
 

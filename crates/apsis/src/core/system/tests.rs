@@ -444,6 +444,182 @@ mod wh_guard {
             total.length(),
         );
     }
+
+    /// The WH dense snapshot now carries a Kepler-analytical kernel
+    /// (`wh_data`), used by the renderer's bulk interpolation path to
+    /// evaluate planet trajectories within a step instead of via the
+    /// order-2 Taylor fallback. Without this field the renderer can
+    /// still interpolate (Taylor falls back) but fast-orbit bodies
+    /// (Galilean moons, Phobos) wobble at step boundaries because the
+    /// quadratic doesn't track the orbit curvature.
+    #[test]
+    fn wh_step_snapshot_carries_kepler_kernel() {
+        let bodies = vec![
+            Body::star(1000.0).at(0.0, 0.0).with_velocity(0.0, 0.0),
+            Body::rocky(1.0).at(10.0, 0.0).with_velocity(0.0, 10.0),
+            Body::rocky(1e-3).at(15.0, 0.0).with_velocity(0.0, 8.0),
+        ];
+        let mut sys = System::new(bodies, UnitSystem::canonical())
+            .with_theta(0.5)
+            .with_dt(0.01)
+            .with_max_depth(10);
+        sys.set_integrator(IntegratorKind::WisdomHolman);
+        sys.step();
+        let snap = sys.last_dense_snapshot.as_ref().expect("WH must publish a snapshot");
+        let wh = snap.wh_data.as_ref().expect("WH snapshot must carry the Kepler kernel");
+        assert_eq!(wh.q0_helio_rest.len(), sys.bodies().len() - 1);
+        assert_eq!(wh.v0_inertial_rest.len(), sys.bodies().len() - 1);
+        assert_eq!(wh.planet_masses.len(), sys.bodies().len() - 1);
+    }
+
+    /// Round-trip: at `h = 0` the Kepler kernel reproduces the
+    /// integrator's pre-step inertial state for every body. The
+    /// `dt_sub = 0` Kepler call returns the input state unchanged, so
+    /// the only operations are the barycenter reconstruction (which
+    /// must give back the original Sun position) and the Galilean
+    /// shift (zero at `h = 0`). Drift above f64 round-off would
+    /// indicate a sign error in the rest-frame transformations.
+    #[test]
+    fn wh_kepler_interp_at_h_zero_returns_pre_step_state() {
+        let bodies_initial = vec![
+            Body::star(1000.0).at(2.0, -1.0).with_velocity(0.1, 0.0),
+            Body::rocky(1.0).at(10.0, 0.0).with_velocity(0.0, 10.0),
+            Body::rocky(0.5).at(-5.0, 7.0).with_velocity(-3.0, -2.0),
+        ];
+        let mut sys = System::new(bodies_initial.clone(), UnitSystem::canonical())
+            .with_theta(0.5)
+            .with_dt(0.01)
+            .with_max_depth(10);
+        sys.set_integrator(IntegratorKind::WisdomHolman);
+        sys.step();
+        let snap = sys.last_dense_snapshot.as_ref().unwrap();
+        let wh = snap.wh_data.as_ref().unwrap();
+        let kin = wh.interpolate_kinematics(0.0, snap.dt);
+
+        for (i, b) in bodies_initial.iter().enumerate() {
+            let dr = (kin.positions[i] - Vec3::new(b.x, b.y, b.z)).length();
+            let dv = (kin.velocities[i] - Vec3::new(b.vx, b.vy, b.vz)).length();
+            assert!(dr < 1e-12, "body {i} position drift at h=0: {dr}");
+            assert!(dv < 1e-12, "body {i} velocity drift at h=0: {dv}");
+        }
+    }
+
+    /// Two-body Kepler is exactly closed under the WH split: with no
+    /// planet-planet interaction there is no kick contribution and no
+    /// indirect drift, so the Kepler-analytical interpolation at
+    /// `h = 1` must match the integrator's post-step state to round-
+    /// off. Any deviation would expose a frame-transformation error
+    /// in the dense kernel (e.g. forgetting the Galilean shift, mixing
+    /// rest-frame and inertial-frame velocities).
+    #[test]
+    fn wh_kepler_interp_at_h_one_matches_post_step_in_two_body() {
+        let bodies_initial = vec![
+            Body::star(1000.0).at(0.0, 0.0).with_velocity(0.0, 0.0),
+            Body::rocky(1e-6).at(1.0, 0.0).with_velocity(0.0, 31.62),
+        ];
+        let mut sys = System::new(bodies_initial.clone(), UnitSystem::canonical())
+            .with_theta(0.5)
+            .with_dt(1e-3)
+            .with_max_depth(10);
+        sys.set_integrator(IntegratorKind::WisdomHolman);
+        sys.step();
+        let post_step: Vec<(Vec3, Vec3)> = sys
+            .bodies()
+            .iter()
+            .map(|b| (Vec3::new(b.x, b.y, b.z), Vec3::new(b.vx, b.vy, b.vz)))
+            .collect();
+        let snap = sys.last_dense_snapshot.as_ref().unwrap();
+        let wh = snap.wh_data.as_ref().unwrap();
+        let kin = wh.interpolate_kinematics(1.0, snap.dt);
+
+        for i in 0..post_step.len() {
+            let dr = (kin.positions[i] - post_step[i].0).length();
+            let dv = (kin.velocities[i] - post_step[i].1).length();
+            // Two-body has no kick or indirect contribution; bound is
+            // round-off scale. Tolerance accounts for accumulated f64
+            // error through Newton iteration in `kepler_step`.
+            assert!(dr < 1e-10, "body {i} position deviation at h=1: {dr}");
+            assert!(dv < 1e-10, "body {i} velocity deviation at h=1: {dv}");
+        }
+    }
+
+    /// Total inertial linear momentum is conserved by the integrator
+    /// step (WH 1991 §III; verified by the Bug #1 regression test).
+    /// The dense interpolation must preserve the same conservation:
+    /// at every sub-step `h`, `Σ m_i v_i(h)` equals the step-entry
+    /// total. Drift above round-off would indicate that the Galilean
+    /// shift on velocities is being applied inconsistently across
+    /// bodies (e.g. forgotten on the central body's reconstruction).
+    #[test]
+    fn wh_kepler_interp_conserves_linear_momentum_across_step() {
+        let bodies_initial = vec![
+            Body::star(1000.0).at(0.0, 0.0).with_velocity(0.05, -0.03),
+            Body::rocky(1.0).at(10.0, 0.0).with_velocity(0.05, 9.97),
+            Body::rocky(0.5).at(-5.0, 7.0).with_velocity(-2.95, -2.03),
+        ];
+        let mut sys = System::new(bodies_initial.clone(), UnitSystem::canonical())
+            .with_theta(0.5)
+            .with_dt(0.01)
+            .with_max_depth(10);
+        sys.set_integrator(IntegratorKind::WisdomHolman);
+        sys.step();
+        let p_initial: Vec3 =
+            bodies_initial.iter().fold(Vec3::ZERO, |s, b| s + b.mass * Vec3::new(b.vx, b.vy, b.vz));
+        let snap = sys.last_dense_snapshot.as_ref().unwrap();
+        let wh = snap.wh_data.as_ref().unwrap();
+
+        for h in [0.0, 0.25, 0.5, 0.75, 1.0] {
+            let kin = wh.interpolate_kinematics(h, snap.dt);
+            let p_h: Vec3 = kin
+                .velocities
+                .iter()
+                .zip(sys.bodies().iter())
+                .fold(Vec3::ZERO, |s, (v, b)| s + b.mass * *v);
+            let drift = (p_h - p_initial).length();
+            assert!(
+                drift < 1e-10,
+                "linear momentum drifted at h={h}: |Δp| = {drift}, |p_0| = {}",
+                p_initial.length(),
+            );
+        }
+    }
+
+    /// At every sub-step `h`, the synthesised central-body acceleration
+    /// satisfies Newton's third law against the planet-Sun pulls
+    /// (`Σ m_i a_i = 0`). This is the same invariant the post-step
+    /// scratch_acc test checks, evaluated through the dense-kernel
+    /// path to confirm the kinematics computation is internally
+    /// consistent at sub-step times, not only at the step boundary.
+    #[test]
+    fn wh_kepler_interp_acc_satisfies_newton_third_law_at_sub_step() {
+        let bodies_initial = vec![
+            Body::star(1000.0).at(0.0, 0.0).with_velocity(0.0, 0.0),
+            Body::rocky(1.0).at(10.0, 0.0).with_velocity(0.0, 10.0),
+            Body::rocky(0.5).at(-7.0, 4.0).with_velocity(-2.0, -6.0),
+        ];
+        let mut sys = System::new(bodies_initial, UnitSystem::canonical())
+            .with_theta(0.5)
+            .with_dt(0.01)
+            .with_max_depth(10);
+        sys.set_integrator(IntegratorKind::WisdomHolman);
+        sys.step();
+        let snap = sys.last_dense_snapshot.as_ref().unwrap();
+        let wh = snap.wh_data.as_ref().unwrap();
+
+        for h in [0.0, 0.3, 0.7, 1.0] {
+            let kin = wh.interpolate_kinematics(h, snap.dt);
+            let total: Vec3 = kin
+                .accelerations
+                .iter()
+                .zip(sys.bodies().iter())
+                .fold(Vec3::ZERO, |s, (a, b)| s + b.mass * *a);
+            assert!(
+                total.length() < 1e-10,
+                "Σ m_i a_i drifted at h={h}: |Σ m a| = {}",
+                total.length(),
+            );
+        }
+    }
 }
 
 // ── WH refactor: per-bug regression tests + smoke tests ──────────────────────
