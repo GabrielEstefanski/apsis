@@ -803,6 +803,10 @@ pub fn solar_system(seed: u64) -> Template {
                       frame; orbital elements from NASA JPL; mean anomaly randomised per seed.",
         bodies,
         display_scale: 1.0,
+        orbital_up: Some([0.0, 0.0, 1.0]),
+        // Inner planets (Mercury–Mars at 0.4–1.5 AU). Outer planets
+        // and Pluto reachable via F (fit-to-view) or scroll-zoom.
+        default_view_distance: Some(5.0),
         // Inner planets need ~Mercury-period / 1000 ≈ 0.001 yr per step
         // for stable Velocity Verlet. The 2π factor sets the implicit
         // period to one year for Earth.

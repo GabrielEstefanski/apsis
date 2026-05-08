@@ -56,6 +56,8 @@ pub fn pluto_charon(_seed: u64) -> Template {
             },
         ],
         display_scale: 1.0,
+        orbital_up: None,
+        default_view_distance: None,
         suggested_dt: Some(0.001),
         units: UnitSystem::dimensionless(),
     }
