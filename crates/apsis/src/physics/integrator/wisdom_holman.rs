@@ -228,6 +228,56 @@ impl Integrator for WisdomHolman {
             b.vz += v_com.z;
         }
 
+        // Populate `acc` with the total inertial acceleration of every
+        // body (size N) so consumers downstream of the integrator see a
+        // body-aligned acceleration vector. Three of them depend on this
+        // contract:
+        //
+        //   * The dense-output snapshot path in `System::step` requires
+        //     `scratch_acc.len() == bodies.len()`; without it, no Order-2
+        //     snapshot is built for WH and the renderer cannot
+        //     interpolate body positions within a step (visible as
+        //     bodies "freezing" between sparse publish ticks at slow
+        //     achieved sim rates).
+        //   * `RenderState::accelerations` is indexed by body in the UI;
+        //     a size-(N-1) buffer published from WH would silently
+        //     off-by-one every consumer (camera feedforward, |a| field).
+        //   * `Metrics::last_accelerations` exposes the buffer to
+        //     external readers (CSV export, hooks); a misaligned shape
+        //     is a contract leak.
+        //
+        // At this point `acc` holds planet-planet + perturbation
+        // accelerations on planets (size N-1) from the second half-kick.
+        // The Sun's gravitational pull on each planet was applied
+        // analytically by `kepler_step` and is not in the buffer; the
+        // Sun's own inertial acceleration was never computed (its state
+        // was reconstructed from barycenter conservation, not
+        // integrated). The total inertial acceleration of body `i` is:
+        //
+        //   planet i (i ≥ 1):  a_i = acc[i−1]  −  μ q_i / |q_i|³
+        //   central body 0:    a_0 = G Σ_{i≥1} m_i q_i / |q_i|³
+        //
+        // where `q_i = bodies[i].pos − bodies[0].pos`. Both expressions
+        // are evaluated in the original inertial frame the bodies are
+        // now in (post Galilean inverse shift above).
+        let n = bodies.len();
+        let r0_inertial = Vec3::new(bodies[0].x, bodies[0].y, bodies[0].z);
+        let mut planet_total_acc = Vec::with_capacity(n - 1);
+        let mut sun_acc = Vec3::ZERO;
+        for (i, b) in bodies[1..].iter().enumerate() {
+            let q = Vec3::new(b.x, b.y, b.z) - r0_inertial;
+            let r2 = q.length_squared().max(1e-60);
+            let inv_r3 = 1.0 / (r2 * r2.sqrt());
+            let kepler_pull_on_planet = -mu * q * inv_r3;
+            planet_total_acc.push(acc[i] + kepler_pull_on_planet);
+            sun_acc += ctx.g_factor * b.mass * q * inv_r3;
+        }
+        acc.resize(n, Vec3::ZERO);
+        acc[0] = sun_acc;
+        for (i, &a) in planet_total_acc.iter().enumerate() {
+            acc[i + 1] = a;
+        }
+
         // Classify the system's current mass distribution against the WH
         // dominance criterion and surface it through `hierarchy_signal`.
         // Observability only — the integrator has already run; downstream
