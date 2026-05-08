@@ -758,11 +758,8 @@ impl SimulationApp {
             should_advance || self.camera_anim_target.is_some() || self.dragging_body.is_some();
         self.diagnostics.tick(animating);
 
-        let cam_dt = ctx.input(|i| i.stable_dt as f64).min(0.1);
-        self.camera.integrate(cam_dt);
-        if !self.camera.is_at_rest() {
-            ctx.request_repaint();
-        }
+        // Camera spring integration lives in `draw_canvas`, after the
+        // follow loop has set this frame's `target`.
 
         // ── Single-step: re-pause after one frame of physics ─────────────────
         if self.step_pending {

@@ -408,6 +408,14 @@ impl SimulationApp {
             self.follow_transition = None;
         }
 
+        // Spring chase against this frame's `target`. Runs after the
+        // gesture and follow blocks write `target`, before matrices
+        // and `render_origin` are read below.
+        self.camera.integrate(dt as f64);
+        if !self.camera.is_at_rest() {
+            ctx.request_repaint();
+        }
+
         // World → screen transform for the 3D body pass. Built once per
         // frame and threaded through hit-test, hover, label drawing and
         // the render callback so a single source of truth governs where
