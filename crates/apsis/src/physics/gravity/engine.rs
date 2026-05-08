@@ -556,4 +556,250 @@ mod tests {
             assert!(rel_err(bh.y, ex.y) < 1e-2);
         }
     }
+
+    // ── Octree validation (lab notebook 2026-05-08-octree-port) ────────── //
+    //
+    // Bounds declared a priori in
+    // `docs/experiments/2026-05-08-octree-port.md`. Failure here means the
+    // implementation is wrong, not the bound.
+
+    /// Tier 1 — Barnes-Hut force accuracy on a general 3D distribution.
+    ///
+    /// 100 bodies sampled in the unit sphere with log-normal masses, fixed
+    /// seed for reproducibility. Per-body max relative force error against
+    /// exact O(N²) must stay under the Salmon-Warren 5% bound at θ = 0.5.
+    #[test]
+    fn tier1_octree_bh_force_error_under_5pct_at_theta_0_5() {
+        let bodies = sphere_distribution_lognormal(100, 0x6F637472);
+
+        let mut exact = BarnesHutEngine::new(16);
+        exact.set_exact_threshold(usize::MAX);
+        exact.build(&bodies);
+        let mut acc_exact = vec![Vec3::ZERO; bodies.len()];
+        exact.evaluate(&bodies, 0.5, &mut acc_exact);
+
+        let mut bh = BarnesHutEngine::new(16);
+        bh.set_exact_threshold(1);
+        bh.build(&bodies);
+        let mut acc_bh = vec![Vec3::ZERO; bodies.len()];
+        bh.evaluate(&bodies, 0.5, &mut acc_bh);
+
+        let max_rel = body_max_rel_error(&acc_bh, &acc_exact);
+        eprintln!("[octree-tier1] θ=0.5 max rel-err = {max_rel:.4e}");
+        assert!(
+            max_rel <= 5e-2,
+            "max per-body rel-err = {max_rel:.4e} exceeds 5e-2 (Salmon-Warren) at θ = 0.5"
+        );
+    }
+
+    /// Tier 1 (exact-mode sanity) — Newton's third law at the round-off
+    /// floor. Exact pairwise evaluation IS symmetric by construction, so
+    /// `Σ m_i a_i` accumulates only floating-point summation noise. BH
+    /// mode is not gated on this — the monopole approximation breaks
+    /// pairwise symmetry by design (body A sees a far node at its COM,
+    /// the bodies inside that node see A individually; the action and
+    /// reaction sums are not algebraically equal). Failure of this test
+    /// would indicate a defect in the exact pairwise kernel, not in the
+    /// BH traversal.
+    #[test]
+    fn tier1_exact_mode_preserves_newton_third_law_at_roundoff() {
+        let bodies = sphere_distribution_lognormal(100, 0x6F637472);
+
+        let mut exact = BarnesHutEngine::new(16);
+        exact.set_exact_threshold(usize::MAX);
+        exact.build(&bodies);
+        let mut acc = vec![Vec3::ZERO; bodies.len()];
+        exact.evaluate(&bodies, 0.5, &mut acc);
+
+        let net: Vec3 = acc.iter().zip(&bodies).fold(Vec3::ZERO, |s, (a, b)| s + b.mass * *a);
+        eprintln!("[octree-tier1] exact mode |Σ m a| = {:.4e}", net.length());
+        assert!(
+            net.length() < 1e-12,
+            "exact-mode Σ m_i a_i = {} exceeds round-off floor 1e-12",
+            net.length(),
+        );
+    }
+
+    /// Tier 1 — Loose-θ regime. Same bodies, θ = 0.9 widens the bound to 10 %.
+    #[test]
+    fn tier1_octree_bh_force_error_under_10pct_at_theta_0_9() {
+        let bodies = sphere_distribution_lognormal(100, 0x6F637472);
+
+        let mut exact = BarnesHutEngine::new(16);
+        exact.set_exact_threshold(usize::MAX);
+        exact.build(&bodies);
+        let mut acc_exact = vec![Vec3::ZERO; bodies.len()];
+        exact.evaluate(&bodies, 0.9, &mut acc_exact);
+
+        let mut bh = BarnesHutEngine::new(16);
+        bh.set_exact_threshold(1);
+        bh.build(&bodies);
+        let mut acc_bh = vec![Vec3::ZERO; bodies.len()];
+        bh.evaluate(&bodies, 0.9, &mut acc_bh);
+
+        let max_rel = body_max_rel_error(&acc_bh, &acc_exact);
+        eprintln!("[octree-tier1] θ=0.9 max rel-err = {max_rel:.4e}");
+        assert!(max_rel <= 1e-1, "max per-body rel-err = {max_rel:.4e} exceeds 1e-1 at θ = 0.9");
+    }
+
+    /// Tier 2 — Inclined Kepler. Two-body at i = 30° padded to N > EXACT_THRESHOLD
+    /// so the BH branch is exercised. Integrate 100 orbital periods with
+    /// Velocity Verlet at `dt = T/200`. Specific angular momentum `|L|/|L₀|`
+    /// must drift no more than 1 × 10⁻³ — the Bug #4 bound from the WH
+    /// refactor (`docs/experiments/2026-05-03-wh-refactor.md`), reused here
+    /// because Lz was the diagnostic that originally caught 2D-only defects.
+    #[test]
+    fn tier2_octree_inclined_kepler_lz_below_1e_minus_3() {
+        // 2-body Kepler, mass ratio 1:1e-3, e = 0.3, i = 30°.
+        let m_central = 1.0_f64;
+        let m_planet = 1.0e-3_f64;
+        let a = 1.0_f64;
+        let e = 0.3_f64;
+        let inc = 30.0_f64.to_radians();
+        let mu = m_central + m_planet;
+        let period = 2.0 * std::f64::consts::PI * (a.powi(3) / mu).sqrt();
+
+        // Periapsis state in orbital plane, then rotated by i around x-axis.
+        let r_peri = a * (1.0 - e);
+        let v_peri = ((1.0 + e) * mu / (a * (1.0 - e))).sqrt();
+        let (sin_i, cos_i) = inc.sin_cos();
+
+        let mut bodies = vec![
+            // Central body at origin
+            Body::rocky(m_central).at(0.0, 0.0).with_velocity(0.0, 0.0),
+            // Planet at periapsis with inclined velocity
+            {
+                let mut b = Body::rocky(m_planet).at(r_peri, 0.0).with_velocity(0.0, 0.0);
+                b.vy = v_peri * cos_i;
+                b.vz = v_peri * sin_i;
+                b
+            },
+        ];
+
+        // Pad to N > EXACT_THRESHOLD with massless test particles far from
+        // the binary so they don't perturb the Kepler orbit. Using mass 1e-30
+        // keeps Newton's law evaluating but the contribution to Lz drift is
+        // negligible.
+        let n_pad = 100;
+        for i in 0..n_pad {
+            let phi = 2.0 * std::f64::consts::PI * (i as f64) / (n_pad as f64);
+            let r_far = 1.0e6;
+            bodies.push(
+                Body::rocky(1.0e-30)
+                    .at(r_far * phi.cos(), r_far * phi.sin())
+                    .with_velocity(0.0, 0.0),
+            );
+        }
+
+        // Initial angular momentum |L_0| over the binary only.
+        let l0 = orbital_angular_momentum(&bodies[0], &bodies[1]);
+        let l0_mag = l0.length();
+
+        let dt = period / 200.0;
+        let n_steps = (100.0 * period / dt).ceil() as usize;
+
+        let mut engine = BarnesHutEngine::new(16);
+        let mut acc = vec![Vec3::ZERO; bodies.len()];
+
+        // Velocity Verlet driver — minimal in-test loop, avoids pulling
+        // in System orchestration just for this measurement.
+        engine.build(&bodies);
+        engine.evaluate(&bodies, 0.5, &mut acc);
+
+        let mut peak_rel_drift = 0.0_f64;
+
+        for _ in 0..n_steps {
+            // kick (½dt)
+            for (b, a) in bodies.iter_mut().zip(&acc) {
+                b.vx += 0.5 * dt * a.x;
+                b.vy += 0.5 * dt * a.y;
+                b.vz += 0.5 * dt * a.z;
+            }
+            // drift (dt)
+            for b in bodies.iter_mut() {
+                b.x += dt * b.vx;
+                b.y += dt * b.vy;
+                b.z += dt * b.vz;
+            }
+            // recompute forces
+            engine.build(&bodies);
+            engine.evaluate(&bodies, 0.5, &mut acc);
+            // kick (½dt)
+            for (b, a) in bodies.iter_mut().zip(&acc) {
+                b.vx += 0.5 * dt * a.x;
+                b.vy += 0.5 * dt * a.y;
+                b.vz += 0.5 * dt * a.z;
+            }
+
+            let l = orbital_angular_momentum(&bodies[0], &bodies[1]);
+            let drift = (l - l0).length() / l0_mag;
+            if drift > peak_rel_drift {
+                peak_rel_drift = drift;
+            }
+        }
+
+        eprintln!("[octree-tier2] inclined-kepler peak |ΔL|/|L₀| = {peak_rel_drift:.4e}");
+        assert!(
+            peak_rel_drift <= 1.0e-3,
+            "peak |ΔL|/|L₀| = {peak_rel_drift:.4e} exceeds 1e-3 over 100 inclined Kepler periods"
+        );
+    }
+
+    // ── Helpers for the validation tests ─────────────────────────────────── //
+
+    /// Sample N bodies uniformly inside the unit sphere with log-normal
+    /// masses (μ = 0, σ = 1). Deterministic for a given `seed`.
+    fn sphere_distribution_lognormal(n: usize, seed: u64) -> Vec<Body> {
+        // Linear congruential generator — sufficient for reproducible test
+        // initial conditions; not cryptographic.
+        let mut state = seed.wrapping_add(0x9E3779B97F4A7C15);
+        let mut next_u64 = || {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            state
+        };
+        let mut next_unit = || (next_u64() >> 11) as f64 / (1u64 << 53) as f64;
+
+        let mut bodies = Vec::with_capacity(n);
+        while bodies.len() < n {
+            // Rejection sampling for uniform-in-ball.
+            let x = 2.0 * next_unit() - 1.0;
+            let y = 2.0 * next_unit() - 1.0;
+            let z = 2.0 * next_unit() - 1.0;
+            if x * x + y * y + z * z > 1.0 {
+                continue;
+            }
+            // Log-normal mass via Box-Muller standard normal then exp.
+            let u1 = next_unit().max(1e-12);
+            let u2 = next_unit();
+            let normal = (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos();
+            let mass = normal.exp();
+
+            let mut b = Body::rocky(mass).at(x, y).with_velocity(0.0, 0.0);
+            b.z = z;
+            bodies.push(b);
+        }
+        bodies
+    }
+
+    /// Per-body maximum relative force error: `max_i |a_i − a_ref_i| / |a_ref_i|`,
+    /// with a small absolute-magnitude floor so bodies with near-zero
+    /// reference acceleration don't blow up the relative metric.
+    fn body_max_rel_error(acc: &[Vec3], reference: &[Vec3]) -> f64 {
+        acc.iter().zip(reference).fold(0.0_f64, |peak, (a, r)| {
+            let r_mag = r.length().max(1e-30);
+            let err = (*a - *r).length() / r_mag;
+            peak.max(err)
+        })
+    }
+
+    /// Specific angular momentum `r × v` of the relative orbit between
+    /// two bodies. Returns `m_planet · (r_planet − r_central) ×
+    /// (v_planet − v_central)` so the magnitude is dimensionally
+    /// `mass · length² / time`.
+    fn orbital_angular_momentum(central: &Body, planet: &Body) -> Vec3 {
+        let r = Vec3::new(planet.x - central.x, planet.y - central.y, planet.z - central.z);
+        let v = Vec3::new(planet.vx - central.vx, planet.vy - central.vy, planet.vz - central.vz);
+        let cross = Vec3::new(r.y * v.z - r.z * v.y, r.z * v.x - r.x * v.z, r.x * v.y - r.y * v.x);
+        planet.mass * cross
+    }
 }
