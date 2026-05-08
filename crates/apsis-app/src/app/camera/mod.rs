@@ -285,14 +285,15 @@ pub struct OrbitCamera {
     pub current: CameraPose,
     pub target: CameraPose,
     /// Natural angular frequency of the spring (rad/s). Higher =
-    /// snappier follow. Default tuned to settle visually in roughly
-    /// 200 ms (ω_n = 12, ζ = 1, settles in ~4/ω_n).
+    /// snappier follow. Default settles visually in ~170 ms
+    /// (ω_n = 24, ζ = 1, ~4/ω_n) — KSP / Universe Sandbox feel.
+    /// Per-frame progress at 60 fps: 33 %.
     pub omega_n: f64,
 }
 
 impl OrbitCamera {
     pub fn new(initial: CameraPose) -> Self {
-        Self { current: initial, target: initial, omega_n: 12.0 }
+        Self { current: initial, target: initial, omega_n: 24.0 }
     }
 
     /// Replace the pose immediately, snapping both `current` and
@@ -517,9 +518,8 @@ mod tests {
         let target = CameraPose::new(DVec3::new(1.0, 2.0, 3.0), 0.6, -0.4, 25.0);
         let mut cam = OrbitCamera::new(initial);
         cam.target = target;
-        // At ω_n = 12 rad/s, 1 second of integration is e^-12 ≈ 6e-6 of
-        // the way out — close enough for sub-mm tolerance on 25-unit
-        // distances.
+        // 10 s of integration at ω_n = 24 leaves `exp(-240)` of the
+        // initial gap — well below any sensible tolerance.
         for _ in 0..600 {
             cam.integrate(1.0 / 60.0);
         }
@@ -614,7 +614,7 @@ mod tests {
         for _ in 0..60 {
             cam.integrate(1.0 / 60.0);
         }
-        // After 1 s at ω_n = 12 the spring covers 1 - exp(-12) ≈ 1.
+        // After 1 s at ω_n = 24 the spring covers 1 - exp(-24) ≈ 1.
         // In log space that means 4 decades of progress.
         let progress_decades = (10.0_f64.log10() - cam.current.distance.log10())
             / (10.0_f64.log10() - 0.001_f64.log10());
