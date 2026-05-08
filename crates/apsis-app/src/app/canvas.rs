@@ -256,10 +256,11 @@ impl SimulationApp {
             use glam::DVec2;
 
             let pointer_in_canvas = hover_pos.is_some_and(|p| rect.contains(p));
-            let (rmb, mmb, ptr_delta, mods) = ctx.input(|i| {
+            let (rmb, mmb, lmb, ptr_delta, mods) = ctx.input(|i| {
                 (
                     i.pointer.button_down(egui::PointerButton::Secondary),
                     i.pointer.button_down(egui::PointerButton::Middle),
+                    i.pointer.button_down(egui::PointerButton::Primary),
                     i.pointer.delta(),
                     CamMods {
                         shift: i.modifiers.shift,
@@ -268,6 +269,12 @@ impl SimulationApp {
                     },
                 )
             });
+
+            // Alt+LMB orbit alias for trackpad / 1-button setups (Maya
+            // idiom). Routed through the orbit branch below by treating
+            // it as RMB.
+            let alt_lmb_orbit = lmb && mods.alt && !rmb && !mmb;
+            let rmb = rmb || alt_lmb_orbit;
 
             if pointer_in_canvas && (rmb || mmb) && ptr_delta != egui::Vec2::ZERO {
                 if mmb {
