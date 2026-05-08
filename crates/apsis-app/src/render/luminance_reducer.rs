@@ -395,7 +395,8 @@ impl LuminanceReducer {
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: wgpu::BindingResource::TextureView(hdr.view()),
+                    // Reflective plane only — luminous bypasses metering.
+                    resource: wgpu::BindingResource::TextureView(hdr.view_r()),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
