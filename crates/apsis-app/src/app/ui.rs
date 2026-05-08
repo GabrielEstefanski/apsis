@@ -276,7 +276,6 @@ impl BodyForm {
 pub struct SimulationApp {
     pub(super) system: PhysicsHandle,
     pub(super) paused: bool,
-    pub(super) scale: f32,
     pub(super) semantic_scale_mode: SemanticScaleMode,
     pub(super) form: BodyForm,
     pub(super) form_error: Option<String>,
@@ -580,7 +579,6 @@ impl SimulationApp {
         Self {
             system: physics,
             paused: true,
-            scale: 10.0,
             semantic_scale_mode: SemanticScaleMode::Comparative,
             form: BodyForm::default(),
             form_error: None,
