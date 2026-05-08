@@ -1,4 +1,4 @@
-use crate::app::camera::{FOV_Y_RAD, NEAR_PLANE};
+use crate::app::camera::{FOV_Y_RAD, NEAR_PLANE, adaptive_near_plane};
 use crate::app::ui::{BodySelection, SelectionForm, SemanticScaleMode, SimulationApp, UndoRecord};
 use crate::render::CallbackFn;
 use crate::render::lighting::{LightSpec, SceneLighting};
@@ -67,7 +67,13 @@ fn camera_view_proj_relative(
     rect: egui::Rect,
 ) -> glam::Mat4 {
     let aspect = (rect.width() / rect.height().max(1.0)).max(0.001);
-    let proj = glam::Mat4::perspective_infinite_reverse_rh(FOV_Y_RAD, aspect, NEAR_PLANE);
+    // Near plane scales with the current eye-to-pivot distance so a
+    // close-up view of a small body doesn't clip the body itself
+    // before the camera reaches it. Bounded above by the legacy
+    // `NEAR_PLANE` so distant solar-system overviews keep the depth
+    // precision they had before.
+    let near = adaptive_near_plane(camera.current.distance as f32);
+    let proj = glam::Mat4::perspective_infinite_reverse_rh(FOV_Y_RAD, aspect, near);
     let view = camera.current.view_rotation_only().as_mat4();
     proj * view
 }

@@ -19,10 +19,40 @@ use glam::{DMat4, DVec3};
 /// Shared so canvas projection and any framing helper that has to
 /// reason about on-screen pixel sizes cannot drift apart.
 pub const FOV_Y_RAD: f32 = 0.698_131_7; // 40°.to_radians()
-/// Near plane of the reverse-Z perspective. 0.001 AU ≈ 150 000 km —
-/// past the surface of any planet, well inside the camera's typical
-/// orbit; framing helpers floor distances at a small multiple of this.
+
+/// Default near-plane ceiling. 0.001 AU ≈ 150 000 km — past the surface
+/// of any planet, well inside the typical solar-system orbit. The
+/// runtime [`adaptive_near_plane`] caps at this value when the camera
+/// is far from its pivot, and steps down for close-up work; framing
+/// helpers floor distances at a small multiple of it.
 pub const NEAR_PLANE: f32 = 0.001;
+
+/// Smallest near-plane the depth buffer can carry without losing
+/// per-body resolution at solar-system far distances. Reverse-Z with
+/// `perspective_infinite_reverse_rh` resolves depths to roughly
+/// `near × 2^23` (f32 mantissa); 1e-7 AU near with bodies out to
+/// ~10⁴ AU keeps the ratio inside what float depth can distinguish.
+const NEAR_PLANE_FLOOR: f32 = 1e-7;
+
+/// Compute the perspective near plane to use for a given camera-to-
+/// pivot distance.
+///
+/// Fixed at [`NEAR_PLANE`] (0.001 AU) every projection clipped bodies
+/// at ~150 000 km from the camera. For solar-system overview that is
+/// fine, but for close-up work on small bodies the body itself is
+/// well inside the clip — Earth's radius is 4.3·10⁻⁵ AU, so any
+/// camera distance < 0.005 AU (Earth radius × ~100) shows the body
+/// disappearing before the camera even arrives.
+///
+/// The adaptive plane scales as `distance / 1000`, so the body always
+/// sits at least 1000× the near plane away — well inside the clip
+/// on every frame regardless of zoom level. Capped above by the
+/// original [`NEAR_PLANE`] so distant views keep the depth precision
+/// they had before; floored at [`NEAR_PLANE_FLOOR`] so extreme zoom
+/// can't collapse the depth buffer.
+pub fn adaptive_near_plane(camera_distance: f32) -> f32 {
+    (camera_distance * 1e-3).clamp(NEAR_PLANE_FLOOR, NEAR_PLANE)
+}
 
 /// Singularity guard for elevation: at exactly ±π/2 the up-vector
 /// degenerates and azimuth becomes ill-defined. Clamping at this
@@ -838,5 +868,37 @@ mod tests {
             peak > initial_offset * 3.0,
             "expected separable-lerp bow > 3× initial; peak = {peak}, initial = {initial_offset}",
         );
+    }
+
+    // ── Adaptive near plane ──────────────────────────────────────────────────
+
+    #[test]
+    fn adaptive_near_plane_caps_at_legacy_value_for_far_views() {
+        // Distant overview (camera 30 AU from pivot): retain the
+        // original 0.001 AU near plane so the depth buffer keeps
+        // the precision distant-orbit body rendering relies on.
+        for distance in [10.0, 30.0, 100.0, 1000.0] {
+            assert_eq!(adaptive_near_plane(distance), NEAR_PLANE);
+        }
+    }
+
+    #[test]
+    fn adaptive_near_plane_scales_down_for_close_views() {
+        // Close-up on a small body (camera ~1 Earth radius from
+        // pivot): near plane shrinks proportionally so the body
+        // doesn't get clipped before the camera arrives.
+        let earth_radius_au = 4.3e-5_f32;
+        let near = adaptive_near_plane(earth_radius_au * 100.0);
+        assert!(near < NEAR_PLANE, "should be below the legacy near at {earth_radius_au}*100 AU");
+        assert!(near >= NEAR_PLANE_FLOOR, "should clamp at the depth-precision floor");
+    }
+
+    #[test]
+    fn adaptive_near_plane_clamps_at_floor_for_pathologically_close_views() {
+        // Below the floor the depth buffer collapses — clamp to
+        // preserve usable f32 depth precision.
+        for distance in [1e-12, 1e-10, NEAR_PLANE_FLOOR / 2.0] {
+            assert_eq!(adaptive_near_plane(distance), NEAR_PLANE_FLOOR);
+        }
     }
 }
