@@ -319,11 +319,30 @@ pub struct OrbitCamera {
     /// (ω_n = 24, ζ = 1, ~4/ω_n) — KSP / Universe Sandbox feel.
     /// Per-frame progress at 60 fps: 33 %.
     pub omega_n: f64,
+    /// Lower bound on `target.distance`, in world units. The
+    /// canvas writes the selected body's physical radius (with a
+    /// small safety margin) so the camera can't scroll into / past
+    /// the body it's following. `None` falls back to the global
+    /// [`MIN_DISTANCE`] floor — appropriate when no body is
+    /// selected, since the global floor exists only to keep
+    /// `view_matrix` numerically well-defined.
+    pub min_distance_floor: Option<f64>,
 }
 
 impl OrbitCamera {
     pub fn new(initial: CameraPose) -> Self {
-        Self { current: initial, target: initial, omega_n: 24.0 }
+        Self { current: initial, target: initial, omega_n: 24.0, min_distance_floor: None }
+    }
+
+    /// Effective minimum distance for the current frame. Combines
+    /// the global numeric floor with the optional context-aware
+    /// floor (selected body radius) supplied by the canvas.
+    #[inline]
+    pub fn effective_min_distance(&self) -> f64 {
+        match self.min_distance_floor {
+            Some(floor) => floor.max(MIN_DISTANCE),
+            None => MIN_DISTANCE,
+        }
     }
 
     /// Replace the pose immediately, snapping both `current` and
@@ -341,6 +360,7 @@ impl OrbitCamera {
         if alpha == 0.0 {
             return;
         }
+        let min_dist = self.effective_min_distance();
         let c = &mut self.current;
         let t = &self.target;
 
@@ -348,12 +368,12 @@ impl OrbitCamera {
         c.azimuth = lerp_angle(c.azimuth, t.azimuth, alpha);
         c.elevation += alpha * (t.elevation - c.elevation);
 
-        let log_c = c.distance.max(MIN_DISTANCE).ln();
-        let log_t = t.distance.max(MIN_DISTANCE).ln();
+        let log_c = c.distance.max(min_dist).ln();
+        let log_t = t.distance.max(min_dist).ln();
         c.distance = (log_c + alpha * (log_t - log_c)).exp();
 
         c.elevation = c.elevation.clamp(-ELEVATION_LIMIT, ELEVATION_LIMIT);
-        c.distance = c.distance.max(MIN_DISTANCE);
+        c.distance = c.distance.max(min_dist);
     }
 
     /// Apply rotation gesture deltas. Direct manipulation: `current`
@@ -376,8 +396,16 @@ impl OrbitCamera {
     /// updated geometrically so wheel ticks feel uniform across
     /// scales. Direct manipulation: `current.distance` snaps to
     /// `target.distance` (see [`rotate`](Self::rotate) for rationale).
+    ///
+    /// Floors at [`effective_min_distance`](Self::effective_min_distance)
+    /// so the camera can't scroll into / past the body it's
+    /// following — the canvas writes the selected body's physical
+    /// radius into [`min_distance_floor`](Self::min_distance_floor)
+    /// so a wheel tick that would land inside the body lands at its
+    /// surface instead.
     pub fn zoom(&mut self, factor: f64) {
-        self.target.distance = (self.target.distance * factor).max(MIN_DISTANCE);
+        let min_dist = self.effective_min_distance();
+        self.target.distance = (self.target.distance * factor).max(min_dist);
         self.current.distance = self.target.distance;
     }
 
@@ -900,5 +928,53 @@ mod tests {
         for distance in [1e-12, 1e-10, NEAR_PLANE_FLOOR / 2.0] {
             assert_eq!(adaptive_near_plane(distance), NEAR_PLANE_FLOOR);
         }
+    }
+
+    // ── Min-distance floor (selected-body radius) ────────────────────────────
+
+    #[test]
+    fn effective_min_distance_falls_back_to_global_when_unset() {
+        let cam = OrbitCamera::new(CameraPose::new(DVec3::ZERO, 0.0, 0.0, 10.0));
+        assert_eq!(cam.effective_min_distance(), MIN_DISTANCE);
+    }
+
+    #[test]
+    fn effective_min_distance_uses_floor_when_set() {
+        let mut cam = OrbitCamera::new(CameraPose::new(DVec3::ZERO, 0.0, 0.0, 10.0));
+        cam.min_distance_floor = Some(0.5);
+        assert_eq!(cam.effective_min_distance(), 0.5);
+    }
+
+    #[test]
+    fn effective_min_distance_never_below_global_floor() {
+        // A floor smaller than `MIN_DISTANCE` would let the eye
+        // collapse past the numerical guard. Guard wins.
+        let mut cam = OrbitCamera::new(CameraPose::new(DVec3::ZERO, 0.0, 0.0, 10.0));
+        cam.min_distance_floor = Some(1e-12);
+        assert_eq!(cam.effective_min_distance(), MIN_DISTANCE);
+    }
+
+    #[test]
+    fn zoom_clamps_at_min_distance_floor() {
+        // Wheel-zoom that would otherwise pull the eye into the body
+        // lands at the body's surface (5 % beyond the radius).
+        let mut cam = OrbitCamera::new(CameraPose::new(DVec3::ZERO, 0.0, 0.0, 10.0));
+        cam.min_distance_floor = Some(2.0);
+        cam.zoom(0.001); // would naively go to 0.01
+        assert_eq!(cam.target.distance, 2.0, "zoom should clamp at floor");
+        assert_eq!(cam.current.distance, 2.0, "current should match target post-snap");
+    }
+
+    #[test]
+    fn integrate_keeps_distance_above_floor() {
+        // Spring chase from a low-distance starting point: floor
+        // must hold even when the log-lerp would land below it
+        // (e.g., target was already clamped by an earlier zoom).
+        let mut cam = OrbitCamera::new(CameraPose::new(DVec3::ZERO, 0.0, 0.0, 5.0));
+        cam.target.distance = 1.0;
+        cam.min_distance_floor = Some(2.0);
+        // Big dt so the spring covers most of the gap.
+        cam.integrate(1.0);
+        assert!(cam.current.distance >= 2.0, "spring landed at {}", cam.current.distance);
     }
 }
