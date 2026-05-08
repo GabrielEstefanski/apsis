@@ -156,9 +156,14 @@ impl CameraPose {
         self.right().cross(self.forward()).normalize()
     }
 
-    /// Right-handed look-at matrix from eye toward pivot.
-    pub fn view_matrix(&self) -> DMat4 {
-        DMat4::look_at_rh(self.eye(), self.pivot, DVec3::Y)
+    /// Rotation-only view matrix — `look_at_rh` rebuilt as if the eye
+    /// sat at the world origin. The render path runs under Floating
+    /// Origin (geometry shifted by `render_origin = eye()` on the CPU
+    /// side), so the camera is effectively at the origin and only the
+    /// orientation transforms matter.
+    pub fn view_rotation_only(&self) -> DMat4 {
+        let look_dir = self.pivot - self.eye();
+        DMat4::look_at_rh(DVec3::ZERO, look_dir, DVec3::Y)
     }
 
     /// Phase-locked interpolation between two poses by fraction `t`.
