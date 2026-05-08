@@ -381,7 +381,7 @@ impl SimulationApp {
                                 state.target_elevation,
                                 state.target_distance,
                             );
-                            let lerped = state.initial.lerp_to(&body_target, state.t());
+                            let lerped = state.initial.vanwijk_to(&body_target, state.t());
                             self.camera.current = lerped;
                             self.camera.target = body_target;
                             ctx.request_repaint();
@@ -406,6 +406,14 @@ impl SimulationApp {
             }
         } else if self.follow_transition.is_some() {
             self.follow_transition = None;
+        }
+
+        // Spring chase against this frame's `target`. Runs after the
+        // gesture and follow blocks write `target`, before matrices
+        // and `render_origin` are read below.
+        self.camera.integrate(dt as f64);
+        if !self.camera.is_at_rest() {
+            ctx.request_repaint();
         }
 
         // World → screen transform for the 3D body pass. Built once per
