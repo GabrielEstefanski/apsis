@@ -129,25 +129,26 @@ impl SimulationApp {
                         sim_rate > 0.0 && shortfall_with_hysteresis(self.shortfall_active, ratio);
                     self.shortfall_active = shortfall;
                     let speed_col = if shortfall { TEXT_DIM } else { ACCENT };
-                    // Make the divergence first-class on shortfall: the
-                    // user has to see what they asked for AND what the
-                    // solver actually delivered without cross-referencing
-                    // the throughput readout downstream. Steady state stays
-                    // single-value to avoid information clutter.
+                    // Shortfall surfaces the gap as a single percentage of
+                    // delivered work, not as a second rate value: target
+                    // and achieved cross unit boundaries (300 yr/s vs.
+                    // 0.7 d/s) and reading them as the same thing requires
+                    // mental conversion. Percentage is unit-free and
+                    // tells the user directly how much of what they asked
+                    // for the solver is keeping up with.
                     let speed_text = if shortfall {
-                        format!("{} → {}", fmt_speed(speed_yr), fmt_speed(actual_yr))
+                        format!("{} · {}", fmt_speed(speed_yr), fmt_percent(ratio))
                     } else {
                         fmt_speed(speed_yr)
                     };
                     let speed_tooltip = if shortfall {
                         format!(
-                            "Target {} yr/s · achieved {} yr/s ({:.0}%).\n\
-                             Physics can't keep up — render slows to match.\n\
+                            "Target {} yr/s — solver delivering {}.\n\
+                             Physics can't keep up; render slows to match.\n\
                              Lower the slider, switch to a faster integrator, or\n\
                              reduce body count to close the gap.",
                             fmt_speed(speed_yr),
-                            fmt_speed(actual_yr),
-                            (actual_yr / speed_yr) * 100.0,
+                            fmt_rate(actual_yr),
                         )
                     } else {
                         "Target simulation speed (yr/s).\n\
@@ -191,21 +192,6 @@ impl SimulationApp {
                                 }
                             }
                         });
-
-                    vsep(ui);
-
-                    // ── Sim throughput ────────────────────────────────────────
-                    let sim_rate = self.system.sim_rate();
-                    if sim_rate > 0.0 {
-                        let yr_per_s = sim_rate / (2.0 * PI);
-                        ui.label(
-                            RichText::new(fmt_rate(yr_per_s)).monospace().size(9.5).color(TEXT_DIM),
-                        )
-                        .on_hover_text(format!(
-                            "Simulation throughput\n{:.3e} sim·units/s · {:.3e} yr/s",
-                            sim_rate, yr_per_s
-                        ));
-                    }
 
                     // ── Right: stability badge ────────────────────────────────
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -361,6 +347,28 @@ fn fmt_rate(yr_per_s: f64) -> String {
     }
 }
 
+/// Format `ratio ∈ [0, 1]` as a percentage with adaptive precision.
+///
+/// The shortfall display can land anywhere from 79 % (just inside the
+/// hysteresis band) to 0.0006 % (the WH-class collapse the user
+/// reported in #63 review). Fixed `{:.0}%` reads "0%" for everything
+/// below half a percent, hiding two orders of magnitude of severity.
+/// Adaptive precision keeps the readout informative across the band.
+fn fmt_percent(ratio: f64) -> String {
+    let pct = ratio * 100.0;
+    if pct >= 10.0 {
+        format!("{:.0}%", pct)
+    } else if pct >= 1.0 {
+        format!("{:.1}%", pct)
+    } else if pct >= 0.01 {
+        format!("{:.2}%", pct)
+    } else {
+        // Below 0.01 % the integrator is essentially stalled; just
+        // show that it's negligible without trailing zero noise.
+        "<0.01%".to_string()
+    }
+}
+
 fn fmt_sci(v: f64, sig: usize) -> String {
     if v == 0.0 || v.abs() < f64::MIN_POSITIVE {
         return "+0".into();
@@ -400,7 +408,38 @@ pub(super) fn shortfall_with_hysteresis(currently_active: bool, ratio: f64) -> b
 
 #[cfg(test)]
 mod tests {
-    use super::shortfall_with_hysteresis;
+    use super::{fmt_percent, shortfall_with_hysteresis};
+
+    // ── Percentage formatting ───────────────────────────────────────────────
+
+    #[test]
+    fn fmt_percent_uses_integer_above_ten() {
+        assert_eq!(fmt_percent(0.50), "50%");
+        assert_eq!(fmt_percent(0.123), "12%");
+    }
+
+    #[test]
+    fn fmt_percent_keeps_one_decimal_in_single_digits() {
+        assert_eq!(fmt_percent(0.05), "5.0%");
+        assert_eq!(fmt_percent(0.087), "8.7%");
+    }
+
+    #[test]
+    fn fmt_percent_keeps_two_decimals_below_one_percent() {
+        // The WH-collapse case from #63 review (~0.06 %): a fixed
+        // {:.0}% would read "0%" and erase the severity. Two
+        // decimals show the actual order of magnitude.
+        assert_eq!(fmt_percent(0.0006), "0.06%");
+        assert_eq!(fmt_percent(0.001), "0.10%");
+    }
+
+    #[test]
+    fn fmt_percent_collapses_negligible_to_threshold_marker() {
+        // Below 0.01 % every digit is noise — physics is essentially
+        // stalled. Show the qualitative state, not a tail of zeros.
+        assert_eq!(fmt_percent(1e-5), "<0.01%");
+        assert_eq!(fmt_percent(0.0), "<0.01%");
+    }
 
     #[test]
     fn shortfall_activates_below_enter_threshold() {
