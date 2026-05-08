@@ -126,14 +126,33 @@ impl SimulationApp {
                     let actual_yr = sim_rate / tau;
                     let shortfall = sim_rate > 0.0 && actual_yr < speed_yr * 0.8;
                     let speed_col = if shortfall { TEXT_DIM } else { ACCENT };
-                    ui.label(
-                        RichText::new(fmt_speed(speed_yr)).monospace().size(10.0).color(speed_col),
-                    )
-                    .on_hover_text(
+                    // Make the divergence first-class on shortfall: the
+                    // user has to see what they asked for AND what the
+                    // solver actually delivered without cross-referencing
+                    // the throughput readout downstream. Steady state stays
+                    // single-value to avoid information clutter.
+                    let speed_text = if shortfall {
+                        format!("{} → {}", fmt_speed(speed_yr), fmt_speed(actual_yr))
+                    } else {
+                        fmt_speed(speed_yr)
+                    };
+                    let speed_tooltip = if shortfall {
+                        format!(
+                            "Target {} yr/s · achieved {} yr/s ({:.0}%).\n\
+                             Physics can't keep up — render slows to match.\n\
+                             Lower the slider, switch to a faster integrator, or\n\
+                             reduce body count to close the gap.",
+                            fmt_speed(speed_yr),
+                            fmt_speed(actual_yr),
+                            (actual_yr / speed_yr) * 100.0,
+                        )
+                    } else {
                         "Target simulation speed (yr/s).\n\
-                         The physics thread advances this many simulated years per real second.\n\
-                         If the sim can't keep up, the label dims and actual speed is shown below.",
-                    );
+                         The physics thread advances this many simulated years per real second."
+                            .to_string()
+                    };
+                    ui.label(RichText::new(speed_text).monospace().size(10.0).color(speed_col))
+                        .on_hover_text(speed_tooltip);
 
                     vsep(ui);
 
