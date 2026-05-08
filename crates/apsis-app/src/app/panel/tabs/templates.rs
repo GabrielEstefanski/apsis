@@ -228,6 +228,10 @@ impl SimulationApp {
             self.selection = crate::app::ui::BodySelection::default();
             self.selection_form = None;
             self.pending_fit = true;
+            self.pending_camera_hints = Some(crate::app::ui::TemplateCameraHints {
+                up: preview.orbital_up,
+                distance: preview.default_view_distance,
+            });
             self.reset_drift_peaks();
             self.sim_name = entry.name.to_owned();
         }

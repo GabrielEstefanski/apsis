@@ -301,6 +301,21 @@ pub struct Template {
     /// first loaded.  Users can zoom freely after that.
     pub display_scale: f64,
 
+    /// Orbital plane normal in world coordinates, normalised. The
+    /// canvas uses this to orient the default camera so the scenario
+    /// loads with the orbital plane visible. `None` falls back to
+    /// `[0.0, 0.0, 1.0]` — the convention `state_from_elements` writes
+    /// heliocentric ecliptic templates into.
+    pub orbital_up: Option<[f64; 3]>,
+
+    /// Suggested camera-to-pivot distance for the initial view, in
+    /// world units. Set to frame the bodies the author considers
+    /// "primary" (e.g. inner planets for solar_system) instead of the
+    /// bounding sphere of all bodies, which collapses the interesting
+    /// part to a dot when scales span orders of magnitude. `None`
+    /// falls back to bounding-sphere fit.
+    pub default_view_distance: Option<f64>,
+
     /// Suggested simulation time-step [simulation time units].
     ///
     /// `None` lets the integrator choose an adaptive step.  Set this for

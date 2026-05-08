@@ -39,6 +39,8 @@ pub fn binary_star(_seed: u64) -> Template {
             },
         ],
         display_scale: 1.0,
+        orbital_up: None,
+        default_view_distance: None,
         suggested_dt: Some(0.001),
         units: UnitSystem::solar_au(),
     }
@@ -95,6 +97,8 @@ pub fn star_companion(_seed: u64) -> Template {
             },
         ],
         display_scale: 1.0,
+        orbital_up: None,
+        default_view_distance: None,
         suggested_dt: Some(0.001),
         units: UnitSystem::solar_au(),
     }

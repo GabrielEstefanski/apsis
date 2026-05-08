@@ -15,18 +15,6 @@ impl SimulationApp {
         ui.label(RichText::new("Camera").size(13.0).color(TEXT_PRI).strong());
         ui.label(RichText::new("Framing & scale. Purely visual.").size(10.0).color(TEXT_DIM));
 
-        section(ui, "ZOOM");
-        ui.horizontal(|ui| {
-            ui.label(RichText::new("pixels/unit").size(10.0).color(TEXT_SEC));
-            let speed = self.scale * 0.01;
-            ui.add(
-                egui::DragValue::new(&mut self.scale)
-                    .speed(speed)
-                    .range(0.001..=50_000.0_f32)
-                    .max_decimals(3),
-            );
-        });
-
         section(ui, "SCALE MODE");
         for (mode, blurb) in [
             (SemanticScaleMode::Physical, "True physical sizes (often invisible)"),
