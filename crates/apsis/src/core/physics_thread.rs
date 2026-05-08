@@ -197,8 +197,16 @@ impl PhysicsHandle {
     }
 
     /// Advance the render time by `wall_delta` seconds (real wall clock) at the
-    /// given sim-rate target, then overwrite the cached body positions with
-    /// interpolated values from the latest [`DenseSnapshot`].
+    /// given sim-rate target, then overwrite the cached body positions,
+    /// velocities, and accelerations with interpolated values from the latest
+    /// [`DenseSnapshot`].
+    ///
+    /// The triple `(position, velocity, acceleration)` is evaluated at the
+    /// same `h` so consumers that read more than one of them (camera follow's
+    /// feedforward predictor reads all three; field queries that paint by
+    /// `|a|` combine position with the published acceleration) see a
+    /// self-consistent state inside the step rather than position from `h`
+    /// paired with velocity / acceleration from the start-of-step boundary.
     ///
     /// Call this once per render frame, after [`sync`](Self::sync), while the
     /// simulation is running (skip when paused to freeze the display).
@@ -228,9 +236,24 @@ impl PhysicsHandle {
         let snap = snap.clone();
         for (i, body) in self.bodies.iter_mut().enumerate() {
             let p = snap.interpolate(i, h);
+            let v = snap.velocity_at(i, h);
             body.x = p.x;
             body.y = p.y;
             body.z = p.z;
+            body.vx = v.x;
+            body.vy = v.y;
+            body.vz = v.z;
+        }
+        // Acceleration consumers (camera feedforward, |a| field) read
+        // through `accelerations()` — overwrite with the interpolated
+        // value at the same `h` to keep the kinematic triple coherent.
+        // Snapshot shape was already validated above; skip the loop if
+        // the cached vector is shorter (defence against torn state
+        // between sync and advance).
+        if self.accelerations.len() == self.bodies.len() {
+            for (i, acc) in self.accelerations.iter_mut().enumerate() {
+                *acc = snap.acceleration_at(i, h);
+            }
         }
     }
 
