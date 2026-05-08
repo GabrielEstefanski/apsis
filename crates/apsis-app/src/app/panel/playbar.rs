@@ -124,7 +124,10 @@ impl SimulationApp {
                     }
                     let sim_rate = self.system.sim_rate();
                     let actual_yr = sim_rate / tau;
-                    let shortfall = sim_rate > 0.0 && actual_yr < speed_yr * 0.8;
+                    let ratio = if speed_yr > 0.0 { actual_yr / speed_yr } else { 1.0 };
+                    let shortfall =
+                        sim_rate > 0.0 && shortfall_with_hysteresis(self.shortfall_active, ratio);
+                    self.shortfall_active = shortfall;
                     let speed_col = if shortfall { TEXT_DIM } else { ACCENT };
                     // Make the divergence first-class on shortfall: the
                     // user has to see what they asked for AND what the
@@ -377,5 +380,108 @@ fn fmt_years(yr: f64) -> String {
         format!("{:.2} yr", yr)
     } else {
         format!("{:.2e} yr", yr)
+    }
+}
+
+/// Hysteretic threshold for the playbar's "physics behind target" cue.
+///
+/// `ratio` is `achieved / target`. The cue activates at 80 % achieved
+/// and only deactivates once achieved climbs back above 90 % — the
+/// 10 pp gap kills the binary flicker that a single threshold
+/// produces when the achieved rate hovers around the boundary.
+///
+/// Stateless (pass the previous value in, get the next one out) so
+/// the policy is unit-testable without an `egui::Ui`.
+pub(super) fn shortfall_with_hysteresis(currently_active: bool, ratio: f64) -> bool {
+    const ENTER: f64 = 0.80;
+    const EXIT: f64 = 0.90;
+    if currently_active { ratio < EXIT } else { ratio < ENTER }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::shortfall_with_hysteresis;
+
+    #[test]
+    fn shortfall_activates_below_enter_threshold() {
+        // Cold start: cue is off and achieved drops below 80 %.
+        assert!(shortfall_with_hysteresis(false, 0.79));
+        assert!(shortfall_with_hysteresis(false, 0.50));
+        assert!(shortfall_with_hysteresis(false, 0.0));
+    }
+
+    #[test]
+    fn shortfall_stays_off_in_hysteresis_band_when_starting_off() {
+        // Off and ratio in [0.80, 0.90): doesn't trigger yet — needs
+        // to drop below ENTER first.
+        assert!(!shortfall_with_hysteresis(false, 0.80));
+        assert!(!shortfall_with_hysteresis(false, 0.85));
+        assert!(!shortfall_with_hysteresis(false, 0.89));
+    }
+
+    #[test]
+    fn shortfall_stays_on_in_hysteresis_band_when_starting_on() {
+        // On and ratio in [0.80, 0.90): stays on — needs to climb
+        // above EXIT to clear.
+        assert!(shortfall_with_hysteresis(true, 0.80));
+        assert!(shortfall_with_hysteresis(true, 0.85));
+        assert!(shortfall_with_hysteresis(true, 0.89));
+    }
+
+    #[test]
+    fn shortfall_deactivates_above_exit_threshold() {
+        // On and achieved climbs above 90 %: cue clears.
+        assert!(!shortfall_with_hysteresis(true, 0.90));
+        assert!(!shortfall_with_hysteresis(true, 0.95));
+        assert!(!shortfall_with_hysteresis(true, 1.05));
+    }
+
+    #[test]
+    fn oscillation_around_enter_threshold_latches_active() {
+        // The single-threshold flicker scenario: achieved hovers
+        // around 80 % of target. With one threshold, every tick that
+        // crosses 0.80 flips the state. With hysteresis, the first
+        // dip below 0.80 latches active, and any subsequent values
+        // inside the [0.80, 0.90) band keep the state.
+        let mut active = false;
+        for ratio in [0.78, 0.82, 0.79, 0.83, 0.78, 0.85, 0.88] {
+            active = shortfall_with_hysteresis(active, ratio);
+        }
+        assert!(active, "should latch active after dipping below ENTER and never reaching EXIT");
+    }
+
+    #[test]
+    fn oscillation_inside_band_does_not_flip_state() {
+        // Pure hysteresis-band test: ratio stays inside [0.80, 0.90)
+        // the whole time. State must be preserved (whatever it was
+        // when entering the band) across the entire sequence.
+        let band = [0.80, 0.85, 0.82, 0.89, 0.81, 0.87];
+
+        let mut active = true;
+        for ratio in band {
+            active = shortfall_with_hysteresis(active, ratio);
+        }
+        assert!(active, "starting active, band oscillation must not deactivate");
+
+        let mut active = false;
+        for ratio in band {
+            active = shortfall_with_hysteresis(active, ratio);
+        }
+        assert!(!active, "starting inactive, band oscillation must not activate");
+    }
+
+    #[test]
+    fn full_recovery_above_exit_clears_state() {
+        // Sanity: hysteresis is not a permanent latch. Once achieved
+        // climbs above EXIT, the state clears; a subsequent dip into
+        // the band stays clear (consistent with the band-test above).
+        let mut active = true;
+        for ratio in [0.85, 0.92, 0.85] {
+            active = shortfall_with_hysteresis(active, ratio);
+        }
+        assert!(
+            !active,
+            "single excursion above EXIT must clear state, even if next sample re-enters band"
+        );
     }
 }
