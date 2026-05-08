@@ -53,7 +53,25 @@ pub struct RenderState {
     pub seed: u64,
     /// Simulation time units advanced per wall-second (rolling 500 ms window).
     /// Zero until the first measurement completes.
+    ///
+    /// Stable enough for steady human-readable display (HUD throughput
+    /// indicator). Lags by up to one window during physics-rate
+    /// transients — see [`sim_rate_responsive`](Self::sim_rate_responsive)
+    /// for the low-lag variant used by render-time adaptation.
     pub sim_rate: f64,
+    /// Simulation time units advanced per wall-second, sampled per
+    /// integration batch and EMA-smoothed at τ ≈ 50 ms.
+    ///
+    /// Where [`sim_rate`](Self::sim_rate) trades responsiveness for HUD
+    /// stability, this trades stability for response: the 500 ms hard
+    /// window in `sim_rate` lags abrupt physics-rate changes for up to
+    /// one window, which translates into ~30 frames of stairstep when
+    /// `advance_render_time` uses it directly. The responsive variant
+    /// catches a deceleration within ~1–3 frames so render-time
+    /// adaptation stays continuous through the transient.
+    ///
+    /// Zero until the first batch completes.
+    pub sim_rate_responsive: f64,
     /// Accumulated world-space COM translation (render units) since the last
     /// frame. The render-side [`TrailRecorder`](crate::core::trail::TrailRecorder)
     /// reads and clears this each tick to keep trail positions aligned with
@@ -141,6 +159,7 @@ pub struct PhysicsHandle {
     orbital_elements: Vec<Option<OrbitalElements>>,
     softening_scale: f64,
     sim_rate: f64,
+    sim_rate_responsive: f64,
     accelerations: Vec<Vec3>,
     /// Pending COM shift published by the physics thread this frame.
     /// Consumed by TrailRecorder on the UI thread.
@@ -182,6 +201,7 @@ impl PhysicsHandle {
             self.orbital_elements = rs.orbital_elements.clone();
             self.softening_scale = rs.softening_scale;
             self.sim_rate = rs.sim_rate;
+            self.sim_rate_responsive = rs.sim_rate_responsive;
             self.accelerations.clone_from(&rs.accelerations);
             // Drain the COM shift so the physics thread can start fresh.
             let shift = rs.pending_com_shift;
@@ -231,14 +251,16 @@ impl PhysicsHandle {
             _ => return,
         };
 
-        let effective = effective_render_rate(sim_rate_target, self.sim_rate);
+        let effective = effective_render_rate(sim_rate_target, self.sim_rate_responsive);
         self.t_render += effective * wall_delta;
-        // Safety net for the achieved-rate measurement transient: `sim_rate`
-        // is a 500 ms rolling average, so when physics decelerates abruptly
-        // the measured value lags the new reality for ~1 window. The clamp
-        // catches that gap. In steady state (achieved ≈ target, or achieved
-        // < target stably), the effective-rate cap above keeps `t_render`
-        // inside the snapshot window naturally and the clamp doesn't bind.
+        // Safety net for the achieved-rate measurement transient: even
+        // the per-batch responsive measurement (~1–3 frames of lag from
+        // its EMA smoothing) can be outpaced by an abrupt physics-rate
+        // change between batches. The clamp pins t_render to t1 of the
+        // most recent accepted snapshot until the next one lands —
+        // never extrapolating past it. In steady state the effective-
+        // rate cap above keeps t_render inside the snapshot window
+        // naturally and the clamp doesn't bind.
         let t0 = snap.t0;
         let t1 = t0 + snap.dt;
         self.t_render = self.t_render.clamp(t0, t1);
@@ -287,6 +309,17 @@ impl PhysicsHandle {
 
     pub fn sim_rate(&self) -> f64 {
         self.sim_rate
+    }
+
+    /// Per-batch achieved sim rate, EMA-smoothed at τ ≈ 50 ms.
+    ///
+    /// HUD consumers should prefer [`sim_rate`](Self::sim_rate) (smooth
+    /// 500 ms window). This variant exists for callers that need
+    /// low-lag response to physics-rate changes — render-time adaptation
+    /// uses it internally; UI code that wants to surface "physics
+    /// behind" cues without ~500 ms of staleness can read it too.
+    pub fn sim_rate_responsive(&self) -> f64 {
+        self.sim_rate_responsive
     }
 
     /// Tell the physics thread whether it should compute orbital elements at
@@ -529,6 +562,7 @@ pub fn spawn(mut system: System, paused: bool) -> PhysicsHandle {
         softening_scale: system.softening_scale(),
         seed: system.seed(),
         sim_rate: 0.0,
+        sim_rate_responsive: 0.0,
         pending_com_shift: (0.0, 0.0),
         trail_samples: Vec::new(),
         accelerations: system.last_accelerations().to_vec(),
@@ -567,6 +601,7 @@ pub fn spawn(mut system: System, paused: bool) -> PhysicsHandle {
         orbital_elements: initial.orbital_elements,
         softening_scale: initial.softening_scale,
         sim_rate: 0.0,
+        sim_rate_responsive: 0.0,
         accelerations: initial.accelerations.clone(),
         pending_com_shift: (0.0, 0.0),
         pending_trail_samples: Vec::new(),
@@ -832,10 +867,18 @@ fn physics_loop(
     let pos_interval = Duration::from_millis(8);
     let mut last_pos = Instant::now();
 
-    // Sim-rate measurement (rolling 500 ms window).
+    // Sim-rate measurement (rolling 500 ms window) — drives the HUD
+    // throughput readout. Stable enough for human-readable display.
     let mut rate_wall = Instant::now();
     let mut rate_sim_acc = 0.0_f64;
     let mut current_sim_rate = 0.0_f64;
+
+    // Responsive sim-rate measurement (per-batch sample, EMA τ ≈ 50 ms)
+    // — drives `advance_render_time` adaptation. Catches abrupt
+    // physics-rate changes within ~1–3 frames so render-time stays
+    // continuous through the transient. See [`responsive_rate_tau`]
+    // and [`ema_update`].
+    let mut current_sim_rate_responsive = 0.0_f64;
 
     // Precision Run baseline — the `SimSnapshot` captured at the
     // moment a run enters `Running` for the first time. Held entirely
@@ -954,6 +997,7 @@ fn physics_loop(
             if let Ok(mut rs) = render.try_lock() {
                 publish_full(&mut system, &mut rs, com_shift_acc, &mut trail_samples_pending);
                 rs.sim_rate = current_sim_rate;
+                rs.sim_rate_responsive = current_sim_rate_responsive;
             }
             com_shift_acc = (0.0, 0.0);
             // Short sleep so the UI render thread has a chance to
@@ -974,6 +1018,10 @@ fn physics_loop(
             let hard_deadline = batch_start + Duration::from_millis(MAX_BATCH_WALL_MS);
             let mut steps_since_check = 0u32;
             let mut shutdown = false;
+            // Per-batch dt accumulator for the responsive rate measurement.
+            // Reset each batch so the EMA samples the rate of work this
+            // batch alone, not a smeared cross-batch window.
+            let mut batch_sim_dt = 0.0_f64;
 
             // Hand the batch deadline to adaptive integrators so their
             // retry loop can cooperate with the batch budget rather than
@@ -995,6 +1043,7 @@ fn physics_loop(
 
                 let dt = system.metrics().dt;
                 rate_sim_acc += dt;
+                batch_sim_dt += dt;
 
                 // Drain any COM shift the integrator applied this step.
                 let (sx, sy) = system.take_com_shift();
@@ -1039,6 +1088,7 @@ fn physics_loop(
                                 &mut trail_samples_pending,
                             );
                             rs.sim_rate = current_sim_rate;
+                            rs.sim_rate_responsive = current_sim_rate_responsive;
                         }
                         com_shift_acc = (0.0, 0.0);
 
@@ -1098,6 +1148,21 @@ fn physics_loop(
                 rate_sim_acc = 0.0;
                 rate_wall = Instant::now();
             }
+
+            // Per-batch responsive rate: instantaneous batch rate, EMA-
+            // smoothed. Only fold in batches whose wall span is long
+            // enough to give a meaningful divisor — sub-millisecond
+            // batches divide near zero and explode the sample.
+            let batch_wall = batch_start.elapsed().as_secs_f64();
+            if batch_wall >= 1e-3 {
+                let batch_rate = batch_sim_dt / batch_wall;
+                current_sim_rate_responsive = ema_update(
+                    current_sim_rate_responsive,
+                    batch_rate,
+                    batch_wall,
+                    responsive_rate_tau(),
+                );
+            }
         }
 
         // ── Post-batch full publish ────────────────────────────────
@@ -1114,6 +1179,7 @@ fn physics_loop(
             if let Ok(mut rs) = render.try_lock() {
                 publish_full(&mut system, &mut rs, com_shift_acc, &mut trail_samples_pending);
                 rs.sim_rate = current_sim_rate;
+                rs.sim_rate_responsive = current_sim_rate_responsive;
             }
             com_shift_acc = (0.0, 0.0);
 
@@ -1288,9 +1354,39 @@ fn effective_render_rate(target: f64, achieved: f64) -> f64 {
     if achieved > 0.0 { target.min(achieved) } else { target }
 }
 
+/// Time constant for the responsive sim-rate EMA, in seconds.
+///
+/// 50 ms is a perceptual sweet spot for camera follow under physics
+/// transients: short enough to converge in 1–3 render frames at 60 fps
+/// (well below the ~100 ms motion-tracking threshold a viewer notices),
+/// long enough to absorb single-batch outliers (one slow IAS15 retry,
+/// one queued command drain) without ping-ponging the render rate.
+fn responsive_rate_tau() -> f64 {
+    0.050
+}
+
+/// Single-step exponential moving average update.
+///
+/// Implements `(1 - α) · prev + α · sample` with `α = dt / (dt + τ)`,
+/// the closed-form discretisation of `τ · dy/dt + y = sample(t)`.
+/// Adapts naturally to irregular sample cadence — a longer `dt`
+/// between samples shifts more weight onto the new value rather than
+/// requiring a fixed-rate update loop.
+///
+/// `dt <= 0.0` is a no-op so a degenerate timer reading (clock skew,
+/// suspended thread waking up, sub-microsecond batch) cannot poison
+/// the smoothed state.
+fn ema_update(prev: f64, sample: f64, dt: f64, tau: f64) -> f64 {
+    if dt <= 0.0 {
+        return prev;
+    }
+    let alpha = dt / (dt + tau);
+    prev + alpha * (sample - prev)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::effective_render_rate;
+    use super::{effective_render_rate, ema_update, responsive_rate_tau};
 
     #[test]
     fn render_rate_uses_target_when_physics_keeps_up() {
@@ -1322,5 +1418,56 @@ mod tests {
         // User paused (target = 0): render clock stops even if the
         // last achieved-rate sample is still non-zero.
         assert_eq!(effective_render_rate(0.0, 5.0), 0.0);
+    }
+
+    // ── EMA smoothing ────────────────────────────────────────────────────────
+
+    #[test]
+    fn ema_update_passes_through_first_sample_when_prev_is_zero_and_dt_dominates() {
+        // dt = τ ⇒ α = 0.5; with prev = 0, output = 0.5 · sample.
+        let tau = 0.05;
+        let out = ema_update(0.0, 10.0, tau, tau);
+        assert!((out - 5.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn ema_update_holds_steady_when_sample_matches_prev() {
+        // Steady-state: sample = prev for any dt ⇒ output unchanged.
+        for dt in [1e-4, 1e-3, 0.05, 0.5] {
+            assert_eq!(ema_update(7.0, 7.0, dt, 0.05), 7.0, "dt={dt}");
+        }
+    }
+
+    #[test]
+    fn ema_update_converges_within_three_tau_for_step_change() {
+        // Standard EMA result: 1 - exp(-3) ≈ 95 % response after 3·τ.
+        // Discretise into ten dt = 0.3·τ steps (total = 3·τ).
+        let tau = 0.05;
+        let dt = 0.3 * tau;
+        let mut y = 0.0;
+        for _ in 0..10 {
+            y = ema_update(y, 1.0, dt, tau);
+        }
+        // Closed-form: with constant sample = 1, repeated EMA at
+        // α = dt/(dt+τ) = 0.3/1.3 ≈ 0.231 gives
+        // y_n = 1 - (1 - α)^n. For n = 10: 1 - 0.769^10 ≈ 0.927.
+        assert!(y > 0.90 && y < 0.95, "expected ~0.93 after 3τ; got {y}");
+    }
+
+    #[test]
+    fn ema_update_zero_dt_is_no_op() {
+        // Defensive: zero or negative dt (clock skew, suspended thread)
+        // returns prev unchanged so the smoothed state stays sane.
+        assert_eq!(ema_update(3.0, 99.0, 0.0, 0.05), 3.0);
+        assert_eq!(ema_update(3.0, 99.0, -0.001, 0.05), 3.0);
+    }
+
+    #[test]
+    fn responsive_rate_tau_is_in_perceptual_band() {
+        // 30–80 ms covers the documented "indistinguishable from
+        // immediate" UI response window. Anything outside that should
+        // be a deliberate change with a comment, not a typo.
+        let tau = responsive_rate_tau();
+        assert!((0.030..=0.080).contains(&tau), "tau out of perceptual band: {tau}");
     }
 }
