@@ -159,8 +159,13 @@ impl SimulationApp {
         if bodies.is_empty() {
             return;
         }
-        let centroid = body_centroid(bodies);
-        let distance = hints.distance.unwrap_or_else(|| bounding_sphere_distance(bodies, centroid));
+        // Templates with hints are implicitly heliocentric / barycentric
+        // — their author wants the system framed around world origin.
+        // AABB centroid would drag the pivot toward outlier bodies (e.g.
+        // long-period comets at ~10³ AU in solar_system) and miss the
+        // inner content the hint is meant to frame.
+        let pivot = glam::DVec3::ZERO;
+        let distance = hints.distance.unwrap_or_else(|| bounding_sphere_distance(bodies, pivot));
         let up = hints
             .up
             .map(|[x, y, z]| glam::DVec3::new(x, y, z))
@@ -168,7 +173,7 @@ impl SimulationApp {
             .map(|v| v.normalize())
             .unwrap_or(glam::DVec3::Z);
 
-        let pose = camera_pose_from_orbital_up(centroid, distance, up);
+        let pose = camera_pose_from_orbital_up(pivot, distance, up);
         self.camera.target = pose;
         self.camera.current = pose;
         self.orbital_plane_up = up;
