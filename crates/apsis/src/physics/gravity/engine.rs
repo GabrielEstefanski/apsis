@@ -1,4 +1,4 @@
-//! Barnes-Hut force engine — orchestrates the quadtree and the Plummer kernel.
+//! Barnes-Hut force engine — orchestrates the octree and the Plummer kernel.
 //!
 //! ## Two evaluation strategies
 //!
@@ -35,13 +35,13 @@ use crate::math::Vec3;
 use rayon::prelude::*;
 
 use super::kernel::{G, Kernel, PlummerKernel, pair_eps2};
-use super::tree::{DIRECT_MODE_THRESHOLD, EXACT_THRESHOLD, NO_CHILD, Node, QuadTree};
+use super::tree::{DIRECT_MODE_THRESHOLD, EXACT_THRESHOLD, NO_CHILD, Node, Octree};
 
 // ── BarnesHutEngine ───────────────────────────────────────────────────────── //
 
-/// N-body force engine using a Barnes-Hut quadtree.
+/// N-body force engine using a Barnes-Hut octree.
 ///
-/// Each call to [`build`](Self::build) reconstructs the quadtree from the
+/// Each call to [`build`](Self::build) reconstructs the octree from the
 /// current body positions.  [`evaluate`](Self::evaluate) then computes
 /// gravitational accelerations and total potential energy using that tree.
 ///
@@ -52,7 +52,7 @@ use super::tree::{DIRECT_MODE_THRESHOLD, EXACT_THRESHOLD, NO_CHILD, Node, QuadTr
 /// default (from [`BarnesHutEngine::new`]) is [`PlummerKernel`], which
 /// reproduces the Plummer-softened force law used throughout the library.
 pub struct BarnesHutEngine {
-    tree: QuadTree,
+    tree: Octree,
     /// N ≤ this → exact O(N²); N > this → Barnes-Hut traversal.
     exact_threshold: usize,
     kernel: Arc<dyn Kernel>,
@@ -61,7 +61,7 @@ pub struct BarnesHutEngine {
 impl BarnesHutEngine {
     /// Create a new engine with the default [`PlummerKernel`].
     ///
-    /// `max_depth` bounds the quadtree depth; 16 is sufficient for all
+    /// `max_depth` bounds the octree depth; 16 is sufficient for all
     /// practical particle counts.
     pub fn new(max_depth: usize) -> Self {
         Self::with_kernel(max_depth, Arc::new(PlummerKernel::new()))
@@ -73,7 +73,7 @@ impl BarnesHutEngine {
     /// example, a kernel that demonstrates or tests a different Exactness
     /// or Continuity class.
     pub fn with_kernel(max_depth: usize, kernel: Arc<dyn Kernel>) -> Self {
-        Self { tree: QuadTree::new(max_depth), exact_threshold: EXACT_THRESHOLD, kernel }
+        Self { tree: Octree::new(max_depth), exact_threshold: EXACT_THRESHOLD, kernel }
     }
 
     /// Handle to the kernel this engine dispatches through.
@@ -125,7 +125,7 @@ impl BarnesHutEngine {
         self.exact_threshold >= DIRECT_MODE_THRESHOLD
     }
 
-    /// Rebuild the quadtree from the current body positions.
+    /// Rebuild the octree from the current body positions.
     ///
     /// Must be called before [`evaluate`](Self::evaluate) whenever bodies have moved.
     pub fn build(&mut self, bodies: &[Body]) {
@@ -140,11 +140,8 @@ impl BarnesHutEngine {
     /// - N ≤ `exact_threshold`: uses exact O(N²) pairwise sum.
     /// - N > `exact_threshold`: uses parallel BH traversal.
     ///
-    /// The kernel arithmetic is fully 3D (`r² = Δx² + Δy² + Δz²`); the
-    /// Barnes–Hut spatial index is still a quadtree (xy-only partition).
-    /// For systems with `z = 0` on every body the quadtree partition is
-    /// the correct 3D partition restricted to the orbital plane; non-zero
-    /// `z` requires an octree, which is staged separately.
+    /// Spatial partition is the 3D octree (`Octree`) and the kernel
+    /// arithmetic is fully 3D — `r² = Δx² + Δy² + Δz²` at every site.
     pub fn evaluate(&self, bodies: &[Body], theta: f64, acc: &mut [Vec3]) -> f64 {
         let n = bodies.len();
         acc.fill(Vec3::ZERO);
@@ -207,7 +204,8 @@ impl BarnesHutEngine {
 
             let dx = node.com_x - body.x;
             let dy = node.com_y - body.y;
-            let d = (dx * dx + dy * dy + eps2).sqrt();
+            let dz = node.com_z - body.z;
+            let d = (dx * dx + dy * dy + dz * dz + eps2).sqrt();
             let ratio = node.size() / d;
 
             if ratio < theta {
@@ -225,10 +223,11 @@ impl BarnesHutEngine {
         if weight_sum > 0.0 { (violation_sum / weight_sum).sqrt() } else { 0.0 }
     }
 
-    fn node_density(&self, node: &Node, x: f64, y: f64, theta: f64) -> f64 {
+    fn node_density(&self, node: &Node, x: f64, y: f64, z: f64, theta: f64) -> f64 {
         let dx = node.com_x - x;
         let dy = node.com_y - y;
-        let dist2 = dx * dx + dy * dy + 1e-6;
+        let dz = node.com_z - z;
+        let dist2 = dx * dx + dy * dy + dz * dz + 1e-6;
 
         let size = node.size();
 
@@ -242,23 +241,23 @@ impl BarnesHutEngine {
         for &c in &node.children {
             if c != NO_CHILD {
                 let child = &self.tree.nodes()[c as usize];
-                sum += self.node_density(child, x, y, theta);
+                sum += self.node_density(child, x, y, z, theta);
             }
         }
 
         sum
     }
 
-    pub fn estimate_local_density(&self, x: f64, y: f64, theta: f64) -> f64 {
+    pub fn estimate_local_density(&self, x: f64, y: f64, z: f64, theta: f64) -> f64 {
         if self.tree.nodes().is_empty() {
             return 0.0;
         }
 
         let root = &self.tree.nodes()[0];
-        self.node_density(root, x, y, theta)
+        self.node_density(root, x, y, z, theta)
     }
 
-    pub fn query_neighbors(&self, x: f64, y: f64, radius: f64, out: &mut Vec<usize>) {
+    pub fn query_neighbors(&self, x: f64, y: f64, z: f64, radius: f64, out: &mut Vec<usize>) {
         out.clear();
 
         let nodes = self.tree.nodes();
@@ -266,7 +265,7 @@ impl BarnesHutEngine {
             return;
         }
 
-        self.query_node(nodes, 0, x, y, radius * radius, out);
+        self.query_node(nodes, 0, x, y, z, radius * radius, out);
 
         out.sort_unstable();
         out.dedup();
@@ -278,6 +277,7 @@ impl BarnesHutEngine {
         node_idx: u32,
         x: f64,
         y: f64,
+        z: f64,
         radius2: f64,
         out: &mut Vec<usize>,
     ) {
@@ -287,7 +287,7 @@ impl BarnesHutEngine {
             return;
         }
 
-        if !self.node_intersects(node, x, y, radius2) {
+        if !self.node_intersects(node, x, y, z, radius2) {
             return;
         }
 
@@ -300,21 +300,19 @@ impl BarnesHutEngine {
 
         for &c in &node.children {
             if c != NO_CHILD {
-                self.query_node(nodes, c, x, y, radius2, out);
+                self.query_node(nodes, c, x, y, z, radius2, out);
             }
         }
     }
 
-    fn node_intersects(&self, node: &Node, x: f64, y: f64, radius2: f64) -> bool {
+    fn node_intersects(&self, node: &Node, x: f64, y: f64, z: f64, radius2: f64) -> bool {
         let half = node.half;
 
-        let dx = (x - node.cx).abs() - half;
-        let dy = (y - node.cy).abs() - half;
+        let dx = ((x - node.cx).abs() - half).max(0.0);
+        let dy = ((y - node.cy).abs() - half).max(0.0);
+        let dz = ((z - node.cz).abs() - half).max(0.0);
 
-        let dx = dx.max(0.0);
-        let dy = dy.max(0.0);
-
-        dx * dx + dy * dy <= radius2
+        dx * dx + dy * dy + dz * dz <= radius2
     }
 }
 
@@ -373,11 +371,8 @@ fn exact_eval(bodies: &[Body], kernel: &dyn Kernel, acc: &mut [Vec3]) -> f64 {
 /// specific gravitational potential (potential per unit mass) at the body's
 /// position.  Multiply by `body.mass` to get the contribution to total PE.
 ///
-/// Node interactions use the target body's own ε² (the tree stores only
-/// aggregated mass/COM, not per-body softening in internal nodes). The
-/// quadtree exposes only `(com_x, com_y)` — the BH branch therefore treats
-/// every node's `z` as zero. This matches the tree's xy-partition exactly
-/// when all bodies satisfy `z = 0`; non-zero `z` inputs require an octree.
+/// Node interactions use the target body's own ε² — the tree stores only
+/// aggregated mass and 3D COM, not per-body softening in internal nodes.
 fn bh_eval_body(
     nodes: &[Node],
     body_idx: usize,
@@ -425,11 +420,9 @@ fn bh_eval_body(
         }
 
         // BH criterion: accept this node as a pseudo-body when s/d < θ.
-        // Tree nodes carry only (com_x, com_y); the z-component of the
-        // node-to-body separation is implicitly the body's own z.
         let dx = node.com_x - body.x;
         let dy = node.com_y - body.y;
-        let dz = -body.z;
+        let dz = node.com_z - body.z;
         let eps2 = body.softening * body.softening;
         let d = (dx * dx + dy * dy + dz * dz + eps2).sqrt();
 

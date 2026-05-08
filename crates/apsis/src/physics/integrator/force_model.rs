@@ -18,7 +18,7 @@ use crate::physics::gravity::{BarnesHutEngine, Kernel, PlummerKernel};
 
 /// A force model that can compute accelerations for a set of bodies.
 ///
-/// Implementations own whatever internal state they need (quadtrees, GPU
+/// Implementations own whatever internal state they need (octrees, GPU
 /// buffers, neighbour lists, …).  The only contract is:
 ///
 /// 1. After `compute()` returns, `acc[i]` holds the acceleration of body `i`.
@@ -127,7 +127,7 @@ impl GravityForceModel {
     /// Create a new gravity force model.
     ///
     /// - `theta`:     Barnes-Hut opening angle (controls accuracy vs speed).
-    /// - `max_depth`: Maximum quadtree depth (16 is sufficient for all
+    /// - `max_depth`: Maximum octree depth (16 is sufficient for all
     ///   practical particle counts).
     pub fn new(theta: f64, max_depth: usize) -> Self {
         Self { engine: BarnesHutEngine::new(max_depth), theta }

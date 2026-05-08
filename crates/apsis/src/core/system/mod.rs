@@ -63,7 +63,7 @@ const DEFAULT_THETA: f64 = 0.6;
 /// adaptive dt via [`System::set_dt_mode`].
 const DEFAULT_DT: f64 = 1e-4;
 
-/// Default maximum quadtree depth. Covers scenes up to ~10⁹ spatial extent
+/// Default maximum octree depth. Covers scenes up to ~10⁹ spatial extent
 /// before degrading to leaf splits; rarely touched.
 const DEFAULT_MAX_DEPTH: usize = 32;
 
@@ -218,7 +218,7 @@ impl System {
     /// the `System`.
     ///
     /// Defaults for everything else (integrator, `dt`, θ, softening
-    /// scale, max quadtree depth) match the conventions of small-N
+    /// scale, max octree depth) match the conventions of small-N
     /// research scripts:
     ///
     /// | Parameter              | Default                     |
@@ -226,7 +226,7 @@ impl System {
     /// | Integrator             | Yoshida 4th order (symplectic) |
     /// | dt                     | `1e-4` simulation time units |
     /// | Barnes-Hut θ           | `0.6`                        |
-    /// | Max quadtree depth     | `32`                         |
+    /// | Max octree depth     | `32`                         |
     /// | Softening scale        | `1.0`                        |
     ///
     /// Override any of these with the fluent [`with_*`](Self::with_dt)
@@ -413,7 +413,7 @@ impl System {
         self
     }
 
-    /// Maximum Barnes-Hut quadtree depth.
+    /// Maximum Barnes-Hut octree depth.
     ///
     /// Most scenes do not need to touch this; the default (32) covers a
     /// spatial extent of ~10⁹ before degrading to forced leaf splits.
