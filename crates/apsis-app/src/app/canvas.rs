@@ -275,32 +275,59 @@ impl SimulationApp {
             });
 
             if pointer_in_canvas && (rmb || mmb) && ptr_delta != egui::Vec2::ZERO {
-                // Pan moves the pivot in world space — incompatible with the
-                // body-follow loop, which clobbers the pivot each frame. Drop
-                // follow on pan so the user's manual drag is what they see.
-                // Orbit (RMB) and zoom keep follow alive, matching the
-                // Universe Sandbox / KSP map-view idiom.
                 if mmb {
+                    // Pan moves the pivot in world space — incompatible
+                    // with the body-follow loop, which clobbers the pivot
+                    // each frame. Drop follow on pan, and cancel any
+                    // in-flight transition: the user is leaving follow
+                    // mode entirely. Universe Sandbox / KSP map-view
+                    // idiom.
                     self.follow_selected_body = false;
+                    self.follow_transition = None;
+                    apply_drag(
+                        &mut self.camera,
+                        DragInput {
+                            delta_px: DVec2::new(ptr_delta.x as f64, ptr_delta.y as f64),
+                            button: CamBtn::Middle,
+                            modifiers: mods,
+                        },
+                        &self.camera_input_config,
+                    );
+                } else {
+                    // RMB orbit. If a click-to-focus transition is in
+                    // flight, re-target it instead of cancelling: the
+                    // camera lerps the rest of the way to the new
+                    // orientation rather than snapping mid-flight and
+                    // jumping into the steady-state pivot lock.
+                    let rad_per_px = self.camera_input_config.rotate_rad_per_px;
+                    let d_az = ptr_delta.x as f64 * rad_per_px;
+                    let d_el = ptr_delta.y as f64 * rad_per_px;
+                    if let Some(t) = self.follow_transition.as_mut() {
+                        t.rotate_target(d_az, d_el);
+                    } else {
+                        apply_drag(
+                            &mut self.camera,
+                            DragInput {
+                                delta_px: DVec2::new(ptr_delta.x as f64, ptr_delta.y as f64),
+                                button: CamBtn::Secondary,
+                                modifiers: mods,
+                            },
+                            &self.camera_input_config,
+                        );
+                    }
                 }
-                // Any user drag overrides an in-flight cinematic
-                // transition — gesture intent wins immediately.
-                self.follow_transition = None;
-                apply_drag(
-                    &mut self.camera,
-                    DragInput {
-                        delta_px: DVec2::new(ptr_delta.x as f64, ptr_delta.y as f64),
-                        button: if mmb { CamBtn::Middle } else { CamBtn::Secondary },
-                        modifiers: mods,
-                    },
-                    &self.camera_input_config,
-                );
             }
 
             if pointer_in_canvas && scroll_y.abs() > 0.0 {
-                self.follow_transition = None;
-                // smooth_scroll_delta is in pixels; normalise to wheel ticks.
-                apply_scroll(&mut self.camera, scroll_y as f64 / 60.0, &self.camera_input_config);
+                let amount = scroll_y as f64 / 60.0;
+                if let Some(t) = self.follow_transition.as_mut() {
+                    // Live re-target distance during transition (same
+                    // rationale as the orbit branch above).
+                    let factor = (-amount * self.camera_input_config.zoom_rate).exp();
+                    t.zoom_target(factor, self.camera.effective_min_distance());
+                } else {
+                    apply_scroll(&mut self.camera, amount, &self.camera_input_config);
+                }
             }
         }
 
