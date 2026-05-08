@@ -171,6 +171,7 @@ impl SimulationApp {
         let pose = camera_pose_from_orbital_up(centroid, distance, up);
         self.camera.target = pose;
         self.camera.current = pose;
+        self.orbital_plane_up = up;
         self.follow_selected_body = false;
     }
 
