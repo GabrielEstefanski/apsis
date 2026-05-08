@@ -130,6 +130,28 @@ impl FollowTransition {
     pub fn t(&self) -> f64 {
         1.0 - self.alpha_remaining
     }
+
+    /// Live re-target: shift the orientation endpoint by gesture deltas
+    /// without cancelling the in-flight transition. The remaining
+    /// portion of the van Wijk path lerps toward the new endpoint, so
+    /// a user starting to orbit mid-transition gets the camera
+    /// arriving smoothly at the new orientation rather than the
+    /// transition snapping to None and the steady-state pivot-snap
+    /// jumping into place.
+    pub fn rotate_target(&mut self, d_azimuth: f64, d_elevation: f64) {
+        self.target_azimuth += d_azimuth;
+        self.target_elevation =
+            (self.target_elevation + d_elevation).clamp(-ELEVATION_LIMIT, ELEVATION_LIMIT);
+    }
+
+    /// Live re-target: scale the distance endpoint by `factor` while
+    /// preserving the configured min-distance floor. Same intent as
+    /// [`rotate_target`](Self::rotate_target) — scroll-zoom mid-
+    /// transition smoothly modifies where the camera lands instead
+    /// of cancelling the transition.
+    pub fn zoom_target(&mut self, factor: f64, min_distance: f64) {
+        self.target_distance = (self.target_distance * factor).max(min_distance);
+    }
 }
 
 /// One camera pose: pivot, spherical-coordinate orientation, and
@@ -963,6 +985,67 @@ mod tests {
         cam.zoom(0.001); // would naively go to 0.01
         assert_eq!(cam.target.distance, 2.0, "zoom should clamp at floor");
         assert_eq!(cam.current.distance, 2.0, "current should match target post-snap");
+    }
+
+    // ── FollowTransition live re-target ──────────────────────────────────────
+
+    fn sample_transition() -> FollowTransition {
+        FollowTransition::capture(
+            0,
+            CameraPose::new(DVec3::new(5.0, 0.0, 0.0), 0.1, 0.0, 100.0),
+            0.5,
+            0.3,
+            10.0,
+        )
+    }
+
+    #[test]
+    fn rotate_target_shifts_endpoint_and_clamps_elevation() {
+        let mut t = sample_transition();
+        t.rotate_target(0.2, 0.1);
+        assert!(approx_eq(t.target_azimuth, 0.7, 1e-12));
+        assert!(approx_eq(t.target_elevation, 0.4, 1e-12));
+
+        // Push elevation past the singularity guard; clamp must hold.
+        let mut t = sample_transition();
+        t.rotate_target(0.0, 100.0);
+        assert!(t.target_elevation <= ELEVATION_LIMIT);
+        let mut t = sample_transition();
+        t.rotate_target(0.0, -100.0);
+        assert!(t.target_elevation >= -ELEVATION_LIMIT);
+    }
+
+    #[test]
+    fn rotate_target_does_not_modify_alpha_remaining() {
+        // Live re-target must keep the transition's progress fraction
+        // intact — only the endpoint moves. Otherwise the camera
+        // would either snap forward (alpha drops) or restart (alpha
+        // climbs back to 1) on every gesture frame.
+        let mut t = sample_transition();
+        let alpha_before = t.alpha_remaining;
+        t.rotate_target(0.5, 0.2);
+        assert_eq!(t.alpha_remaining, alpha_before);
+    }
+
+    #[test]
+    fn zoom_target_scales_distance_with_floor() {
+        let mut t = sample_transition();
+        t.zoom_target(0.5, 1e-6);
+        assert!(approx_eq(t.target_distance, 5.0, 1e-12));
+
+        // Floor binds: factor that would land below the floor is
+        // clamped at floor.
+        let mut t = sample_transition();
+        t.zoom_target(0.001, 0.5);
+        assert_eq!(t.target_distance, 0.5);
+    }
+
+    #[test]
+    fn zoom_target_does_not_modify_alpha_remaining() {
+        let mut t = sample_transition();
+        let alpha_before = t.alpha_remaining;
+        t.zoom_target(0.5, 0.0);
+        assert_eq!(t.alpha_remaining, alpha_before);
     }
 
     #[test]
