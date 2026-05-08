@@ -389,9 +389,26 @@ impl SimulationApp {
                     }
 
                     if self.follow_transition.is_none() {
-                        // Steady state: spring + feedforward pins the
-                        // body centred without lag.
-                        self.camera.target.pivot = ff;
+                        // Steady state: snap the pivot directly onto the
+                        // body. The feedforward Taylor predictor cancels
+                        // the spring's one-frame lag for at-most-quadratic
+                        // motion, but a body in orbit has rotating
+                        // acceleration (jerk = ω·a) that the constant-acc
+                        // assumption doesn't capture — residual ≈ ω·a·dt²
+                        // per frame, ~4e-6 AU for Earth-class orbits at
+                        // 1 yr/s wall rate. Invisible at distant zoom,
+                        // ~6 px of orbital-frequency wobble at extreme
+                        // zoom-in.
+                        //
+                        // The pivot spring exists to smooth click-to-
+                        // focus transitions (now handled by the van Wijk
+                        // path above) and one-frame perturbations like
+                        // floating-origin recenters. In steady follow
+                        // there is no lag to compensate for — direct
+                        // assignment matches the body exactly.
+                        let _ = ff; // feedforward kept for tests / non-follow callers
+                        self.camera.target.pivot = body_pos;
+                        self.camera.current.pivot = body_pos;
                         ctx.request_repaint();
                     }
                 } else {
