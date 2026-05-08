@@ -712,8 +712,18 @@ impl SimulationApp {
 
             camera: crate::app::camera::OrbitCamera::new(crate::app::camera::CameraPose::new(
                 glam::DVec3::ZERO,
+                // azimuth = 0: eye in the world-XZ plane (no horizontal
+                // rotation around the world-up axis). Combined with the
+                // elevation below, the camera lands on the +Z half-space
+                // — perpendicular to the XY orbital plane that
+                // `state_from_elements` writes solar-system bodies into.
+                0.0,
+                // elevation ≈ 28°: dead-perpendicular (el = 0) gives a
+                // pure top-down ecliptic projection; a small positive
+                // tilt reads as "3D" without losing the orbital-plane
+                // overview. Matches the default scene-load view of
+                // NASA Eyes / Universe Sandbox / Solar System Scope.
                 0.5,
-                0.3,
                 50.0,
             )),
             camera_input_config: crate::app::camera::input::CameraInputConfig::default(),
