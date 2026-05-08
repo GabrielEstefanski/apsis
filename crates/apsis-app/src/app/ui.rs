@@ -278,7 +278,6 @@ pub struct SimulationApp {
     pub(super) paused: bool,
     pub(super) scale: f32,
     pub(super) semantic_scale_mode: SemanticScaleMode,
-    pub(super) offset: egui::Vec2,
     pub(super) form: BodyForm,
     pub(super) form_error: Option<String>,
     pub(super) show_trails: bool,
@@ -409,16 +408,12 @@ pub struct SimulationApp {
 
     pub(super) trail: Option<TrailRenderer>,
 
-    // Camera inertia + animation
-    pub(super) pan_vel: egui::Vec2,
     pub(super) follow_selected_body: bool,
     /// Active follow handover. Captured on click-to-focus; decays to
     /// `None` once the camera lands on the body. Layered on top of
     /// `follow_selected_body` so toggle-style call sites elsewhere
     /// (inspector button, Esc) keep their current shape.
     pub(super) follow_transition: Option<crate::app::camera::FollowTransition>,
-    /// Smooth-pan target offset; `None` when idle.
-    pub(super) camera_anim_target: Option<egui::Vec2>,
     /// When `true`, `draw_frame` will call `fit_to_view` on the next frame
     /// that has a non-empty body list. Used after template/snapshot loads
     /// where bodies arrive asynchronously from the physics thread.
@@ -587,7 +582,6 @@ impl SimulationApp {
             paused: true,
             scale: 10.0,
             semantic_scale_mode: SemanticScaleMode::Comparative,
-            offset: egui::Vec2::ZERO,
             form: BodyForm::default(),
             form_error: None,
             show_trails: true,
@@ -654,10 +648,8 @@ impl SimulationApp {
             place_preset: &body_preset::ROCKY,
             trail: None,
 
-            pan_vel: egui::Vec2::ZERO,
             follow_selected_body: false,
             follow_transition: None,
-            camera_anim_target: None,
             pending_fit: false,
             hovered_body: None,
 
@@ -762,8 +754,7 @@ impl SimulationApp {
             self.system.advance_render_time(wall_delta, rate);
         }
 
-        let animating =
-            should_advance || self.camera_anim_target.is_some() || self.dragging_body.is_some();
+        let animating = should_advance || self.dragging_body.is_some();
         self.diagnostics.tick(animating);
 
         // Camera spring integration lives in `draw_canvas`, after the

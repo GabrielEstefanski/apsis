@@ -27,9 +27,6 @@ const LABEL_FONT_SIZE: f32 = 10.5;
 /// Selection ring: base gap outside the body disc.
 const RING_GAP: f32 = 5.0;
 
-/// Camera pan animation: fraction of remaining distance applied each frame.
-const CAM_LERP: f32 = 0.16;
-
 /// Body framing: target on-screen pixel size for a body when click-to-focus
 /// reframes the camera. The chosen distance puts `physical_radius` at
 /// roughly this many pixels; mode-specific min-px floors take over when the
@@ -250,20 +247,11 @@ impl SimulationApp {
             )
         });
 
-        // ── Camera pan animation (spring toward target) ───────────────────────
-        if let Some(target) = self.camera_anim_target {
-            let delta = target - self.offset;
-            if delta.length_sq() < 0.1 {
-                self.offset = target;
-                self.camera_anim_target = None;
-            } else {
-                self.offset += delta * CAM_LERP;
-                ctx.request_repaint();
-            }
-        }
-
-        // centre is derived AFTER any animation update
-        let center = rect.center() + self.offset;
+        // (Legacy 2D screen-space pan animation lived here; removed
+        // along with `self.offset` / `self.pan_vel` / `self.camera_anim_target`
+        // when the canvas migrated fully to the 3D OrbitCamera. The
+        // `let center = rect.center() + self.offset;` value it produced
+        // was not consumed by any downstream rendering.)
 
         // ── 3D camera gestures ────────────────────────────────────────────────
         {
@@ -316,27 +304,14 @@ impl SimulationApp {
             }
         }
 
-        // ── Pan with inertia ──────────────────────────────────────────────────
-        if response.dragged() {
-            let delta = response.drag_delta();
-            self.offset += delta;
-            // Cancel smooth-pan if the user takes manual control
-            self.camera_anim_target = None;
-            self.follow_selected_body = false;
-            self.follow_transition = None;
-            let frame_vel = delta / dt.max(1.0 / 120.0);
-            self.pan_vel = self.pan_vel * 0.4 + frame_vel * 0.6;
-            ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
-        } else {
-            if self.pan_vel.length_sq() > 1.0 {
-                self.offset += self.pan_vel * dt;
-                self.pan_vel *= (-dt * 2.8_f32).exp();
-                if self.pan_vel.length_sq() < 1.0 {
-                    self.pan_vel = egui::Vec2::ZERO;
-                }
-                ctx.request_repaint();
-            }
-        }
+        // (Legacy LMB → 2D screen pan + inertia decay lived here. The
+        // 2D offset was never consumed downstream, but the path was
+        // dropping `follow_selected_body` as a side-effect on every
+        // LMB drag — including the LMB drag the canvas's `response`
+        // senses for click-to-focus selection. Removed so LMB stays a
+        // click-only gesture: select via release, no camera mutation.
+        // RMB drag (orbit) and MMB drag (pan, intentional follow drop)
+        // handle camera motion in the block above.)
 
         // ── Body-follow tracking (PD + feedforward) ──────────────────────────
         // Pivot target = body.pos + v/ω + a/ω², so the spring settles
