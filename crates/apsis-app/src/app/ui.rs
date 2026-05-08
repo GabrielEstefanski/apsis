@@ -320,6 +320,13 @@ pub struct SimulationApp {
     /// Maps directly to `PhysicsCmd::SetSimRateTarget`.
     /// Default: 2π ≈ 1 yr/s in internal units (G=1, AU, solar masses).
     pub(super) sim_rate_target: f64,
+    /// Latched state of the playbar's "physics behind target" cue.
+    /// Driven by [`crate::app::panel::playbar::shortfall_with_hysteresis`]
+    /// — enters at 80 % achieved, exits at 90 %, so the inline
+    /// `target → achieved` text doesn't flicker when the achieved
+    /// rate hovers around the threshold. Initialised to `false`;
+    /// updated each frame by the playbar.
+    pub(super) shortfall_active: bool,
 
     /// IAS15 error tolerance. Forwarded to the physics thread every frame.
     /// Ignored when a different integrator is active.
@@ -596,6 +603,7 @@ impl SimulationApp {
             show_vectors: false,
             exposure_ev: 0.0,
             sim_rate_target: std::f64::consts::TAU,
+            shortfall_active: false,
             ias15_epsilon: 1e-9,
             // Default: roughly one "internal year" at the default
             // unit system (G = 1 gives orbital period = 2π). Users can
