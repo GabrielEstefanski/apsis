@@ -19,10 +19,40 @@ use glam::{DMat4, DVec3};
 /// Shared so canvas projection and any framing helper that has to
 /// reason about on-screen pixel sizes cannot drift apart.
 pub const FOV_Y_RAD: f32 = 0.698_131_7; // 40°.to_radians()
-/// Near plane of the reverse-Z perspective. 0.001 AU ≈ 150 000 km —
-/// past the surface of any planet, well inside the camera's typical
-/// orbit; framing helpers floor distances at a small multiple of this.
+
+/// Default near-plane ceiling. 0.001 AU ≈ 150 000 km — past the surface
+/// of any planet, well inside the typical solar-system orbit. The
+/// runtime [`adaptive_near_plane`] caps at this value when the camera
+/// is far from its pivot, and steps down for close-up work; framing
+/// helpers floor distances at a small multiple of it.
 pub const NEAR_PLANE: f32 = 0.001;
+
+/// Smallest near-plane the depth buffer can carry without losing
+/// per-body resolution at solar-system far distances. Reverse-Z with
+/// `perspective_infinite_reverse_rh` resolves depths to roughly
+/// `near × 2^23` (f32 mantissa); 1e-7 AU near with bodies out to
+/// ~10⁴ AU keeps the ratio inside what float depth can distinguish.
+const NEAR_PLANE_FLOOR: f32 = 1e-7;
+
+/// Compute the perspective near plane to use for a given camera-to-
+/// pivot distance.
+///
+/// Fixed at [`NEAR_PLANE`] (0.001 AU) every projection clipped bodies
+/// at ~150 000 km from the camera. For solar-system overview that is
+/// fine, but for close-up work on small bodies the body itself is
+/// well inside the clip — Earth's radius is 4.3·10⁻⁵ AU, so any
+/// camera distance < 0.005 AU (Earth radius × ~100) shows the body
+/// disappearing before the camera even arrives.
+///
+/// The adaptive plane scales as `distance / 1000`, so the body always
+/// sits at least 1000× the near plane away — well inside the clip
+/// on every frame regardless of zoom level. Capped above by the
+/// original [`NEAR_PLANE`] so distant views keep the depth precision
+/// they had before; floored at [`NEAR_PLANE_FLOOR`] so extreme zoom
+/// can't collapse the depth buffer.
+pub fn adaptive_near_plane(camera_distance: f32) -> f32 {
+    (camera_distance * 1e-3).clamp(NEAR_PLANE_FLOOR, NEAR_PLANE)
+}
 
 /// Singularity guard for elevation: at exactly ±π/2 the up-vector
 /// degenerates and azimuth becomes ill-defined. Clamping at this
@@ -289,11 +319,30 @@ pub struct OrbitCamera {
     /// (ω_n = 24, ζ = 1, ~4/ω_n) — KSP / Universe Sandbox feel.
     /// Per-frame progress at 60 fps: 33 %.
     pub omega_n: f64,
+    /// Lower bound on `target.distance`, in world units. The
+    /// canvas writes the selected body's physical radius (with a
+    /// small safety margin) so the camera can't scroll into / past
+    /// the body it's following. `None` falls back to the global
+    /// [`MIN_DISTANCE`] floor — appropriate when no body is
+    /// selected, since the global floor exists only to keep
+    /// `view_matrix` numerically well-defined.
+    pub min_distance_floor: Option<f64>,
 }
 
 impl OrbitCamera {
     pub fn new(initial: CameraPose) -> Self {
-        Self { current: initial, target: initial, omega_n: 24.0 }
+        Self { current: initial, target: initial, omega_n: 24.0, min_distance_floor: None }
+    }
+
+    /// Effective minimum distance for the current frame. Combines
+    /// the global numeric floor with the optional context-aware
+    /// floor (selected body radius) supplied by the canvas.
+    #[inline]
+    pub fn effective_min_distance(&self) -> f64 {
+        match self.min_distance_floor {
+            Some(floor) => floor.max(MIN_DISTANCE),
+            None => MIN_DISTANCE,
+        }
     }
 
     /// Replace the pose immediately, snapping both `current` and
@@ -311,6 +360,7 @@ impl OrbitCamera {
         if alpha == 0.0 {
             return;
         }
+        let min_dist = self.effective_min_distance();
         let c = &mut self.current;
         let t = &self.target;
 
@@ -318,12 +368,12 @@ impl OrbitCamera {
         c.azimuth = lerp_angle(c.azimuth, t.azimuth, alpha);
         c.elevation += alpha * (t.elevation - c.elevation);
 
-        let log_c = c.distance.max(MIN_DISTANCE).ln();
-        let log_t = t.distance.max(MIN_DISTANCE).ln();
+        let log_c = c.distance.max(min_dist).ln();
+        let log_t = t.distance.max(min_dist).ln();
         c.distance = (log_c + alpha * (log_t - log_c)).exp();
 
         c.elevation = c.elevation.clamp(-ELEVATION_LIMIT, ELEVATION_LIMIT);
-        c.distance = c.distance.max(MIN_DISTANCE);
+        c.distance = c.distance.max(min_dist);
     }
 
     /// Apply rotation gesture deltas. Direct manipulation: `current`
@@ -346,8 +396,16 @@ impl OrbitCamera {
     /// updated geometrically so wheel ticks feel uniform across
     /// scales. Direct manipulation: `current.distance` snaps to
     /// `target.distance` (see [`rotate`](Self::rotate) for rationale).
+    ///
+    /// Floors at [`effective_min_distance`](Self::effective_min_distance)
+    /// so the camera can't scroll into / past the body it's
+    /// following — the canvas writes the selected body's physical
+    /// radius into [`min_distance_floor`](Self::min_distance_floor)
+    /// so a wheel tick that would land inside the body lands at its
+    /// surface instead.
     pub fn zoom(&mut self, factor: f64) {
-        self.target.distance = (self.target.distance * factor).max(MIN_DISTANCE);
+        let min_dist = self.effective_min_distance();
+        self.target.distance = (self.target.distance * factor).max(min_dist);
         self.current.distance = self.target.distance;
     }
 
@@ -838,5 +896,85 @@ mod tests {
             peak > initial_offset * 3.0,
             "expected separable-lerp bow > 3× initial; peak = {peak}, initial = {initial_offset}",
         );
+    }
+
+    // ── Adaptive near plane ──────────────────────────────────────────────────
+
+    #[test]
+    fn adaptive_near_plane_caps_at_legacy_value_for_far_views() {
+        // Distant overview (camera 30 AU from pivot): retain the
+        // original 0.001 AU near plane so the depth buffer keeps
+        // the precision distant-orbit body rendering relies on.
+        for distance in [10.0, 30.0, 100.0, 1000.0] {
+            assert_eq!(adaptive_near_plane(distance), NEAR_PLANE);
+        }
+    }
+
+    #[test]
+    fn adaptive_near_plane_scales_down_for_close_views() {
+        // Close-up on a small body (camera ~1 Earth radius from
+        // pivot): near plane shrinks proportionally so the body
+        // doesn't get clipped before the camera arrives.
+        let earth_radius_au = 4.3e-5_f32;
+        let near = adaptive_near_plane(earth_radius_au * 100.0);
+        assert!(near < NEAR_PLANE, "should be below the legacy near at {earth_radius_au}*100 AU");
+        assert!(near >= NEAR_PLANE_FLOOR, "should clamp at the depth-precision floor");
+    }
+
+    #[test]
+    fn adaptive_near_plane_clamps_at_floor_for_pathologically_close_views() {
+        // Below the floor the depth buffer collapses — clamp to
+        // preserve usable f32 depth precision.
+        for distance in [1e-12, 1e-10, NEAR_PLANE_FLOOR / 2.0] {
+            assert_eq!(adaptive_near_plane(distance), NEAR_PLANE_FLOOR);
+        }
+    }
+
+    // ── Min-distance floor (selected-body radius) ────────────────────────────
+
+    #[test]
+    fn effective_min_distance_falls_back_to_global_when_unset() {
+        let cam = OrbitCamera::new(CameraPose::new(DVec3::ZERO, 0.0, 0.0, 10.0));
+        assert_eq!(cam.effective_min_distance(), MIN_DISTANCE);
+    }
+
+    #[test]
+    fn effective_min_distance_uses_floor_when_set() {
+        let mut cam = OrbitCamera::new(CameraPose::new(DVec3::ZERO, 0.0, 0.0, 10.0));
+        cam.min_distance_floor = Some(0.5);
+        assert_eq!(cam.effective_min_distance(), 0.5);
+    }
+
+    #[test]
+    fn effective_min_distance_never_below_global_floor() {
+        // A floor smaller than `MIN_DISTANCE` would let the eye
+        // collapse past the numerical guard. Guard wins.
+        let mut cam = OrbitCamera::new(CameraPose::new(DVec3::ZERO, 0.0, 0.0, 10.0));
+        cam.min_distance_floor = Some(1e-12);
+        assert_eq!(cam.effective_min_distance(), MIN_DISTANCE);
+    }
+
+    #[test]
+    fn zoom_clamps_at_min_distance_floor() {
+        // Wheel-zoom that would otherwise pull the eye into the body
+        // lands at the body's surface (5 % beyond the radius).
+        let mut cam = OrbitCamera::new(CameraPose::new(DVec3::ZERO, 0.0, 0.0, 10.0));
+        cam.min_distance_floor = Some(2.0);
+        cam.zoom(0.001); // would naively go to 0.01
+        assert_eq!(cam.target.distance, 2.0, "zoom should clamp at floor");
+        assert_eq!(cam.current.distance, 2.0, "current should match target post-snap");
+    }
+
+    #[test]
+    fn integrate_keeps_distance_above_floor() {
+        // Spring chase from a low-distance starting point: floor
+        // must hold even when the log-lerp would land below it
+        // (e.g., target was already clamped by an earlier zoom).
+        let mut cam = OrbitCamera::new(CameraPose::new(DVec3::ZERO, 0.0, 0.0, 5.0));
+        cam.target.distance = 1.0;
+        cam.min_distance_floor = Some(2.0);
+        // Big dt so the spring covers most of the gap.
+        cam.integrate(1.0);
+        assert!(cam.current.distance >= 2.0, "spring landed at {}", cam.current.distance);
     }
 }

@@ -1,4 +1,4 @@
-use crate::app::camera::{FOV_Y_RAD, NEAR_PLANE};
+use crate::app::camera::{FOV_Y_RAD, NEAR_PLANE, adaptive_near_plane};
 use crate::app::ui::{BodySelection, SelectionForm, SemanticScaleMode, SimulationApp, UndoRecord};
 use crate::render::CallbackFn;
 use crate::render::lighting::{LightSpec, SceneLighting};
@@ -67,7 +67,13 @@ fn camera_view_proj_relative(
     rect: egui::Rect,
 ) -> glam::Mat4 {
     let aspect = (rect.width() / rect.height().max(1.0)).max(0.001);
-    let proj = glam::Mat4::perspective_infinite_reverse_rh(FOV_Y_RAD, aspect, NEAR_PLANE);
+    // Near plane scales with the current eye-to-pivot distance so a
+    // close-up view of a small body doesn't clip the body itself
+    // before the camera reaches it. Bounded above by the legacy
+    // `NEAR_PLANE` so distant solar-system overviews keep the depth
+    // precision they had before.
+    let near = adaptive_near_plane(camera.current.distance as f32);
+    let proj = glam::Mat4::perspective_infinite_reverse_rh(FOV_Y_RAD, aspect, near);
     let view = camera.current.view_rotation_only().as_mat4();
     proj * view
 }
@@ -352,6 +358,15 @@ impl SimulationApp {
                         .map(|a| glam::DVec3::new(a.x, a.y, a.z))
                         .unwrap_or(glam::DVec3::ZERO);
 
+                    // Hand the camera the followed body's physical
+                    // radius (with a 5 % safety margin) so a wheel
+                    // tick that would otherwise pull the eye through
+                    // the body lands at its surface instead. Also
+                    // means the camera can't sit *inside* the body
+                    // and render an inverted shell. Cleared in the
+                    // `else` branches below when follow drops.
+                    self.camera.min_distance_floor = Some((body.physical_radius * 1.05).max(1e-9));
+
                     let sim_rate = self.system.sim_rate().max(0.0);
                     let wall_vel = body_vel * sim_rate;
                     let wall_acc = body_acc * sim_rate * sim_rate;
@@ -389,9 +404,26 @@ impl SimulationApp {
                     }
 
                     if self.follow_transition.is_none() {
-                        // Steady state: spring + feedforward pins the
-                        // body centred without lag.
-                        self.camera.target.pivot = ff;
+                        // Steady state: snap the pivot directly onto the
+                        // body. The feedforward Taylor predictor cancels
+                        // the spring's one-frame lag for at-most-quadratic
+                        // motion, but a body in orbit has rotating
+                        // acceleration (jerk = ω·a) that the constant-acc
+                        // assumption doesn't capture — residual ≈ ω·a·dt²
+                        // per frame, ~4e-6 AU for Earth-class orbits at
+                        // 1 yr/s wall rate. Invisible at distant zoom,
+                        // ~6 px of orbital-frequency wobble at extreme
+                        // zoom-in.
+                        //
+                        // The pivot spring exists to smooth click-to-
+                        // focus transitions (now handled by the van Wijk
+                        // path above) and one-frame perturbations like
+                        // floating-origin recenters. In steady follow
+                        // there is no lag to compensate for — direct
+                        // assignment matches the body exactly.
+                        let _ = ff; // feedforward kept for tests / non-follow callers
+                        self.camera.target.pivot = body_pos;
+                        self.camera.current.pivot = body_pos;
                         ctx.request_repaint();
                     }
                 } else {
@@ -399,13 +431,20 @@ impl SimulationApp {
                     self.follow_transition = None;
                     self.selection = BodySelection::default();
                     self.selection_form = None;
+                    self.camera.min_distance_floor = None;
                 }
             } else {
                 self.follow_selected_body = false;
                 self.follow_transition = None;
+                self.camera.min_distance_floor = None;
             }
         } else if self.follow_transition.is_some() {
             self.follow_transition = None;
+            self.camera.min_distance_floor = None;
+        } else {
+            // Not following: drop any stale floor so manual zoom on
+            // an unfollowed scene isn't artificially limited.
+            self.camera.min_distance_floor = None;
         }
 
         // Spring chase against this frame's `target`. Runs after the
