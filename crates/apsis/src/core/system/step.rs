@@ -99,6 +99,7 @@ impl System {
                 a0: pre_a0,
                 b: Vec::new(),
                 kind: self.integrator.kind(),
+                wh_data: None,
             })
         } else {
             None
