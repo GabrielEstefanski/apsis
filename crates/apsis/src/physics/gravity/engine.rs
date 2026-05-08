@@ -745,6 +745,103 @@ mod tests {
         );
     }
 
+    /// Tier 1 — Larger-N variant that genuinely exercises the BH approximation.
+    ///
+    /// At N = 100 the tree is shallow enough that θ = 0.5 opens most internal
+    /// nodes down to leaves — the traversal effectively does exact pairwise
+    /// work and the per-body error sits at the round-off floor (which meets
+    /// the bound but doesn't probe the algorithm). At N = 1000 the tree
+    /// reaches depth ≈ log₈(1000) ≈ 3-4 and the BH criterion accepts a
+    /// meaningful number of distant nodes as monopoles. The 5 % bound is
+    /// the same Salmon-Warren value; if it holds here, the algorithm
+    /// approximates correctly under the load it was designed for.
+    #[test]
+    fn tier1_octree_bh_force_error_under_5pct_at_theta_0_5_n_1000() {
+        let bodies = sphere_distribution_lognormal(1000, 0x6F637472);
+
+        let mut exact = BarnesHutEngine::new(16);
+        exact.set_exact_threshold(usize::MAX);
+        exact.build(&bodies);
+        let mut acc_exact = vec![Vec3::ZERO; bodies.len()];
+        exact.evaluate(&bodies, 0.5, &mut acc_exact);
+
+        let mut bh = BarnesHutEngine::new(16);
+        bh.set_exact_threshold(1);
+        bh.build(&bodies);
+        let mut acc_bh = vec![Vec3::ZERO; bodies.len()];
+        bh.evaluate(&bodies, 0.5, &mut acc_bh);
+
+        let max_rel = body_max_rel_error(&acc_bh, &acc_exact);
+        eprintln!("[octree-tier1] N=1000 θ=0.5 max rel-err = {max_rel:.4e}");
+        assert!(
+            max_rel <= 5e-2,
+            "max per-body rel-err = {max_rel:.4e} exceeds 5e-2 (Salmon-Warren) at N=1000, θ=0.5"
+        );
+    }
+
+    /// Tier 3 — Empirical wall-time scaling. Builds + evaluates the octree at
+    /// a range of body counts in BH mode (θ = 0.5), reports the mean wall
+    /// time per `evaluate` call after a warm-up iteration. Output goes to
+    /// stderr (visible with `cargo test ... -- --nocapture`).
+    ///
+    /// The gate here is weak by design — absolute numbers vary by hardware
+    /// and Rayon thread count — but the **growth ratio** between consecutive
+    /// N values is intrinsic to the algorithm. O(N²) gives a 4× ratio when
+    /// N doubles; O(N log N) gives ~2.1-2.3×. The assert at the end checks
+    /// the worst observed ratio stays under 4× (i.e. better than O(N²)),
+    /// which is the bare minimum for "BH is doing its job".
+    #[test]
+    fn tier3_octree_evaluate_scaling_better_than_n_squared() {
+        let ns = [100, 250, 500, 1000, 2500];
+        let theta = 0.5;
+        let warmup = 1;
+        let measured = 5;
+
+        let mut times_ms = Vec::with_capacity(ns.len());
+        for &n in &ns {
+            let bodies = sphere_distribution_lognormal(n, 0x6F637472);
+            let mut bh = BarnesHutEngine::new(16);
+            bh.set_exact_threshold(1);
+            bh.build(&bodies);
+            let mut acc = vec![Vec3::ZERO; bodies.len()];
+
+            for _ in 0..warmup {
+                bh.evaluate(&bodies, theta, &mut acc);
+            }
+            let start = std::time::Instant::now();
+            for _ in 0..measured {
+                bh.evaluate(&bodies, theta, &mut acc);
+            }
+            let mean_ms = start.elapsed().as_secs_f64() * 1000.0 / (measured as f64);
+            times_ms.push(mean_ms);
+            eprintln!("[octree-tier3] N={n:5} θ={theta} mean evaluate = {mean_ms:.3} ms");
+        }
+
+        // Worst growth ratio across consecutive N pairs whose N ratio is
+        // approximately 2× (used to compare against the O(N²) reference of
+        // 4×). Pairs in `ns` with N ratios: 250/100=2.5, 500/250=2,
+        // 1000/500=2, 2500/1000=2.5 — all ~2-2.5×, consistent with each
+        // other for the ratio test.
+        let worst_ratio = times_ms
+            .windows(2)
+            .zip(ns.windows(2))
+            .map(|(t, n)| {
+                let n_ratio = n[1] as f64 / n[0] as f64;
+                // Normalise the time ratio to a 2× N-doubling so all pairs
+                // are compared on the same scale.
+                let t_ratio = t[1] / t[0];
+                t_ratio.powf((2.0_f64.ln()) / n_ratio.ln())
+            })
+            .fold(0.0_f64, f64::max);
+        eprintln!("[octree-tier3] worst N-doubling time ratio = {worst_ratio:.2}× (O(N²) = 4×)");
+
+        assert!(
+            worst_ratio < 4.0,
+            "worst N-doubling time ratio {worst_ratio:.2}× ≥ 4× — BH not pruning effectively, \
+             traversal degraded to O(N²)-class behaviour"
+        );
+    }
+
     // ── Helpers for the validation tests ─────────────────────────────────── //
 
     /// Sample N bodies uniformly inside the unit sphere with log-normal

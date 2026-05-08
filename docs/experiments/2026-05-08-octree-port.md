@@ -156,15 +156,17 @@ Measured on the octree branch (`feat/octree-port`) after the port commit (`cb3e3
 
 | Metric | Bound | Observed | Verdict |
 | --- | ---: | ---: | --- |
-| `max_i \|Δa\| / \|a_exact\|` at θ = 0.5 (BH mode) | `≤ 5 × 10⁻²` | `1.76 × 10⁻¹⁵` | pass (round-off floor) |
-| `max_i \|Δa\| / \|a_exact\|` at θ = 0.9 (BH mode) | `≤ 1 × 10⁻¹` | `6.30 × 10⁻²` | pass |
-| `\|Σ m_i a_i\|` in exact mode | `≤ 1 × 10⁻¹²` | `7.70 × 10⁻¹³` | pass |
+| `max_i \|Δa\| / \|a_exact\|` at θ = 0.5, N = 100 | `≤ 5 × 10⁻²` | `1.76 × 10⁻¹⁵` | pass (round-off floor) |
+| `max_i \|Δa\| / \|a_exact\|` at θ = 0.9, N = 100 | `≤ 1 × 10⁻¹` | `6.30 × 10⁻²` | pass |
+| `\|Σ m_i a_i\|` in exact mode, N = 100 | `≤ 1 × 10⁻¹²` | `7.70 × 10⁻¹³` | pass |
+| `max_i \|Δa\| / \|a_exact\|` at θ = 0.5, N = 1000 | `≤ 5 × 10⁻²` | `2.51 × 10⁻²` | pass |
 
-The θ = 0.5 result sitting at the f64 round-off floor (rather than at a few percent) is consistent with
-the test configuration: N = 100 in the unit sphere keeps tree depth shallow, so the BH branch opens
-most internal nodes down to their leaves — the traversal evaluates almost as many pairwise interactions
-as the exact path. The θ = 0.9 measurement at 6.3 % confirms the BH approximation IS exercised when
-the opening criterion gets relaxed enough to matter at this body count.
+The θ = 0.5 / N = 100 result at the f64 round-off floor is a configuration artefact: the tree is too
+shallow at N = 100 for θ = 0.5 to accept any internal nodes as monopoles, so BH effectively does
+exact pairwise work. The θ = 0.9 / N = 100 at 6.3 % confirms BH is exercised when the opening
+criterion gets loose enough to matter at this body count. The N = 1000 measurement at 2.5 % is the
+load-bearing Tier 1 evidence — the tree reaches depth ≈ 4 and the BH approximation dominates the
+cost; the per-body force error stays inside the Salmon-Warren bound at the canonical θ = 0.5.
 
 ### Tier 2 — Conservation and regression
 
@@ -190,16 +192,34 @@ judged insufficient.
 
 ### Tier 3 — Wall-time scaling
 
-Not measured in this PR. The pre-octree baseline would require running the same test on the develop
-branch (where the validation tests do not exist), and the comparison's hardware sensitivity makes it
-weak evidence absent a controlled benchmark harness. Reserved for a benchmark-focused follow-up if
-scaling becomes a contended claim.
+Measured on Windows 11 (Rayon-default thread pool). Mean of 5 evaluate calls after a warm-up.
 
-The algorithmic complexity of BH traversal (`O(N log N)`) is preserved by the port — the change is
-from 4-children to 8-children per internal node and the addition of one f64 per node, neither of
-which alters the asymptotic. The 8-children iteration adds a small constant factor at every internal-
-node descent; on planar (`z = 0`) configurations, half the octants stay empty and the short-circuit
-on `mass <= 0` skips them without recursion.
+| N | Mean evaluate (ms) | Time ratio | N ratio | Normalised to 2× |
+| ---: | ---: | ---: | ---: | ---: |
+| 100 | 0.047 | — | — | — |
+| 250 | 0.094 | 2.00× | 2.5× | 1.69× |
+| 500 | 0.236 | 2.51× | 2.0× | 2.51× |
+| 1000 | 0.809 | 3.43× | 2.0× | 3.43× |
+| 2500 | 2.026 | 2.50× | 2.5× | 2.00× |
+
+Worst N-doubling time ratio: **3.43×** (gate < 4.00× to confirm the traversal stays better than
+O(N²)). Pure O(N log N) would give ≈ 2.2-2.4×; observed worst case (3.43× at the 500 → 1000 jump)
+sits between O(N log N) and O(N²), consistent with parallel overhead and cache-locality effects at
+the boundary where the working set crosses L2 / L3 thresholds.
+
+Practical extrapolation (single-machine baseline, useful for sizing the next-step decisions, not a
+performance claim):
+
+| N | Extrapolated evaluate (ms) | Steps/s achievable | Sim/s at dt = 1e-3 |
+| ---: | ---: | ---: | ---: |
+| 10 000 | ~10 | ~100 | ~0.1 |
+| 100 000 | ~150 | ~7 | ~0.007 |
+| 1 000 000 | ~2 000 | ~0.5 | ~0.0005 |
+
+For N up to ~10 000 the basic octree is interactively viable. Beyond that, top-tier optimisations
+(SIMD inner loops, quadrupole expansion to allow larger θ, Dehnen-style cell-cell interactions for
+genuine O(N) scaling) become the realistic path. Those optimisations are out of scope for this PR;
+their selection would be guided by measurement against the actual scenes that demand the scale.
 
 ---
 
