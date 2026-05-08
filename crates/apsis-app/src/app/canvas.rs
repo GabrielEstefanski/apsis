@@ -1309,6 +1309,9 @@ impl SimulationApp {
             self.draw_camera_triad(ui, rect);
         }
 
+        // ── Gesture cheatsheet (bottom-right) ─────────────────────────────────
+        self.draw_gesture_cheatsheet(ui, rect);
+
         // ── Loading overlay ───────────────────────────────────────────────────
         if self.system.is_loading() {
             self.draw_loading_overlay(ui, rect, time);
@@ -1370,6 +1373,18 @@ impl SimulationApp {
             );
         }
         painter.circle_filled(center, 1.5, bg);
+    }
+
+    fn draw_gesture_cheatsheet(&self, ui: &egui::Ui, rect: egui::Rect) {
+        let text = "LMB select · RMB orbit · scroll zoom · MMB pan";
+        let pos = egui::pos2(rect.right() - 10.0, rect.bottom() - 10.0);
+        ui.painter().text(
+            pos,
+            egui::Align2::RIGHT_BOTTOM,
+            text,
+            FontId::monospace(9.5),
+            crate::app::theme::TEXT_DIM,
+        );
     }
 
     // ── Overlay ───────────────────────────────────────────────────────────────
