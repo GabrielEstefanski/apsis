@@ -86,6 +86,8 @@ pub fn kepler_36(seed: u64) -> Template {
         // in T_AU units to resolve the close encounters cleanly.
         suggested_dt: Some(0.0001),
         display_scale: 1.0,
+        orbital_up: None,
+        default_view_distance: None,
         units: UnitSystem::solar_au(),
     }
 }

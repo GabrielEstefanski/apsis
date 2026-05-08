@@ -46,6 +46,8 @@ pub fn hot_jupiter(_seed: u64) -> Template {
             },
         ],
         display_scale: 50.0,
+        orbital_up: None,
+        default_view_distance: None,
         suggested_dt: Some(0.0001),
         units: UnitSystem::solar_au(),
     }

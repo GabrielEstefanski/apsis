@@ -106,7 +106,7 @@ pub fn apply_drag(camera: &mut OrbitCamera, input: DragInput, config: &CameraInp
             // y-axis sign also inverts because egui screen-y is down
             // while our `up` is world up.
             let world_per_px = camera.target.distance * config.pan_per_px_per_distance;
-            camera.pan_screen(-input.delta_px.x * world_per_px, -input.delta_px.y * world_per_px);
+            camera.pan_pivot(-input.delta_px.x * world_per_px, -input.delta_px.y * world_per_px);
         },
     }
 }
