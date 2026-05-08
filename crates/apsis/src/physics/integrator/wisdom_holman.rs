@@ -47,6 +47,7 @@
 
 use crate::domain::body::Body;
 use crate::math::Vec3;
+use crate::physics::integrator::dense::{DenseSnapshot, WhDenseData};
 use crate::physics::integrator::helpers::{
     apply_perturbations_planets, evaluate, scale_acc_and_pe,
 };
@@ -114,6 +115,24 @@ impl Integrator for WisdomHolman {
         let m_total: f64 = bodies.iter().map(|b| b.mass).sum();
         let mu = ctx.g_factor * m0;
 
+        // Capture pre-step inertial state for the dense-output snapshot.
+        // Done before any frame transformation so the snapshot's `x0`,
+        // `v0`, `a0` fields carry the body-aligned, original-frame
+        // kinematics every consumer of `DenseSnapshot` expects (the
+        // wh_data path uses its own rest-frame state separately).
+        let pre_x0_inertial: Vec<Vec3> = bodies.iter().map(|b| Vec3::new(b.x, b.y, b.z)).collect();
+        let pre_v0_inertial: Vec<Vec3> =
+            bodies.iter().map(|b| Vec3::new(b.vx, b.vy, b.vz)).collect();
+        let pre_a0_inertial: Vec<Vec3> = if acc.len() == bodies.len() {
+            acc.clone()
+        } else {
+            // First step (no scratch_acc populated yet) or post-resize
+            // mismatch: ZERO is a safe placeholder — `wh_data` is the
+            // primary interpolation path and does not read `a0`. The
+            // fallback only triggers if `wh_data` itself is None.
+            vec![Vec3::ZERO; bodies.len()]
+        };
+
         // The Wisdom-Holman canonical formulation uses heliocentric positions
         // and inertial momenta in the rest frame. To extend to arbitrary
         // initial frames without altering the algorithm, this implementation
@@ -147,6 +166,17 @@ impl Integrator for WisdomHolman {
             b.y -= r0_in.y;
             b.z -= r0_in.z;
         }
+
+        // Capture the rest-frame (q_helio, v_inertial) pair for every
+        // non-central body. Done after the heliocentric translation
+        // (so `q` is what `kepler_step` expects) and before the first
+        // half-kick mutates velocities. This is the input the dense-
+        // output Kepler interpolator replays at sub-step times.
+        let q0_helio_rest: Vec<Vec3> =
+            bodies[1..].iter().map(|b| Vec3::new(b.x, b.y, b.z)).collect();
+        let v0_inertial_rest: Vec<Vec3> =
+            bodies[1..].iter().map(|b| Vec3::new(b.vx, b.vy, b.vz)).collect();
+        let planet_masses: Vec<f64> = bodies[1..].iter().map(|b| b.mass).collect();
 
         // ── First half-kick ───────────────────────────────────────────────
         let pe = wh_kick(bodies, ctx, 0.5 * dt, acc, mu);
@@ -286,11 +316,41 @@ impl Integrator for WisdomHolman {
         let masses: Vec<f64> = bodies.iter().map(|b| b.mass).collect();
         let signal = HierarchySignal::classify(&masses);
 
+        // Build the dense-output snapshot. The Kepler-analytical kernel
+        // in `WhDenseData::interpolate_kinematics` replays each
+        // non-central body's drift at sub-step times via the same
+        // universal-variable solver the integrator's drift step used,
+        // so the renderer sees curved orbital trajectories within a
+        // step instead of order-2 Taylor straight-line approximations.
+        // The standard `x0 / v0 / a0` fields are populated as a
+        // defensive fallback path if `wh_data` ever fails to dispatch.
+        let wh_data = WhDenseData {
+            mu,
+            m_sun: m0,
+            m_total,
+            v_com,
+            r0_sun_rest: r0_in,
+            m_q_in,
+            q0_helio_rest,
+            v0_inertial_rest,
+            planet_masses,
+        };
+        let step_snapshot = DenseSnapshot {
+            t0: 0.0,
+            dt,
+            x0: pre_x0_inertial,
+            v0: pre_v0_inertial,
+            a0: pre_a0_inertial,
+            b: Vec::new(),
+            kind: IntegratorKind::WisdomHolman,
+            wh_data: Some(wh_data),
+        };
+
         StepResult {
             consumed_dt: dt,
             potential_energy: pe,
             used_fallback: false,
-            step_snapshot: None,
+            step_snapshot: Some(step_snapshot),
             degraded: false,
             hierarchy_signal: Some(signal),
         }
