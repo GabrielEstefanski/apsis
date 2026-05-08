@@ -197,8 +197,14 @@ impl PhysicsHandle {
     }
 
     /// Advance the render time by `wall_delta` seconds (real wall clock) at the
-    /// given sim-rate target, then overwrite the cached body positions with
-    /// interpolated values from the latest [`DenseSnapshot`].
+    /// given sim-rate target, then overwrite the cached body positions and
+    /// velocities with interpolated values from the latest [`DenseSnapshot`].
+    ///
+    /// Both `(position, velocity)` are evaluated at the same `h` so consumers
+    /// that read the pair (camera follow's feedforward predictor; field
+    /// queries that combine `body.x` with `body.vx`) see a self-consistent
+    /// state inside the step rather than position from `h` paired with
+    /// velocity from the start-of-step boundary.
     ///
     /// Call this once per render frame, after [`sync`](Self::sync), while the
     /// simulation is running (skip when paused to freeze the display).
@@ -228,9 +234,13 @@ impl PhysicsHandle {
         let snap = snap.clone();
         for (i, body) in self.bodies.iter_mut().enumerate() {
             let p = snap.interpolate(i, h);
+            let v = snap.velocity_at(i, h);
             body.x = p.x;
             body.y = p.y;
             body.z = p.z;
+            body.vx = v.x;
+            body.vy = v.y;
+            body.vz = v.z;
         }
     }
 
