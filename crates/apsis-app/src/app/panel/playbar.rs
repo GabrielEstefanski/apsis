@@ -124,16 +124,39 @@ impl SimulationApp {
                     }
                     let sim_rate = self.system.sim_rate();
                     let actual_yr = sim_rate / tau;
-                    let shortfall = sim_rate > 0.0 && actual_yr < speed_yr * 0.8;
+                    let ratio = if speed_yr > 0.0 { actual_yr / speed_yr } else { 1.0 };
+                    let shortfall =
+                        sim_rate > 0.0 && shortfall_with_hysteresis(self.shortfall_active, ratio);
+                    self.shortfall_active = shortfall;
                     let speed_col = if shortfall { TEXT_DIM } else { ACCENT };
-                    ui.label(
-                        RichText::new(fmt_speed(speed_yr)).monospace().size(10.0).color(speed_col),
-                    )
-                    .on_hover_text(
+                    // Shortfall surfaces the gap as a single percentage of
+                    // delivered work, not as a second rate value: target
+                    // and achieved cross unit boundaries (300 yr/s vs.
+                    // 0.7 d/s) and reading them as the same thing requires
+                    // mental conversion. Percentage is unit-free and
+                    // tells the user directly how much of what they asked
+                    // for the solver is keeping up with.
+                    let speed_text = if shortfall {
+                        format!("{} · {}", fmt_speed(speed_yr), fmt_percent(ratio))
+                    } else {
+                        fmt_speed(speed_yr)
+                    };
+                    let speed_tooltip = if shortfall {
+                        format!(
+                            "Target {} yr/s — solver delivering {}.\n\
+                             Physics can't keep up; render slows to match.\n\
+                             Lower the slider, switch to a faster integrator, or\n\
+                             reduce body count to close the gap.",
+                            fmt_speed(speed_yr),
+                            fmt_rate(actual_yr),
+                        )
+                    } else {
                         "Target simulation speed (yr/s).\n\
-                         The physics thread advances this many simulated years per real second.\n\
-                         If the sim can't keep up, the label dims and actual speed is shown below.",
-                    );
+                         The physics thread advances this many simulated years per real second."
+                            .to_string()
+                    };
+                    ui.label(RichText::new(speed_text).monospace().size(10.0).color(speed_col))
+                        .on_hover_text(speed_tooltip);
 
                     vsep(ui);
 
@@ -169,21 +192,6 @@ impl SimulationApp {
                                 }
                             }
                         });
-
-                    vsep(ui);
-
-                    // ── Sim throughput ────────────────────────────────────────
-                    let sim_rate = self.system.sim_rate();
-                    if sim_rate > 0.0 {
-                        let yr_per_s = sim_rate / (2.0 * PI);
-                        ui.label(
-                            RichText::new(fmt_rate(yr_per_s)).monospace().size(9.5).color(TEXT_DIM),
-                        )
-                        .on_hover_text(format!(
-                            "Simulation throughput\n{:.3e} sim·units/s · {:.3e} yr/s",
-                            sim_rate, yr_per_s
-                        ));
-                    }
 
                     // ── Right: stability badge ────────────────────────────────
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -339,6 +347,28 @@ fn fmt_rate(yr_per_s: f64) -> String {
     }
 }
 
+/// Format `ratio ∈ [0, 1]` as a percentage with adaptive precision.
+///
+/// The shortfall display can land anywhere from 79 % (just inside the
+/// hysteresis band) to 0.0006 % (the WH-class collapse the user
+/// reported in #63 review). Fixed `{:.0}%` reads "0%" for everything
+/// below half a percent, hiding two orders of magnitude of severity.
+/// Adaptive precision keeps the readout informative across the band.
+fn fmt_percent(ratio: f64) -> String {
+    let pct = ratio * 100.0;
+    if pct >= 10.0 {
+        format!("{:.0}%", pct)
+    } else if pct >= 1.0 {
+        format!("{:.1}%", pct)
+    } else if pct >= 0.01 {
+        format!("{:.2}%", pct)
+    } else {
+        // Below 0.01 % the integrator is essentially stalled; just
+        // show that it's negligible without trailing zero noise.
+        "<0.01%".to_string()
+    }
+}
+
 fn fmt_sci(v: f64, sig: usize) -> String {
     if v == 0.0 || v.abs() < f64::MIN_POSITIVE {
         return "+0".into();
@@ -358,5 +388,139 @@ fn fmt_years(yr: f64) -> String {
         format!("{:.2} yr", yr)
     } else {
         format!("{:.2e} yr", yr)
+    }
+}
+
+/// Hysteretic threshold for the playbar's "physics behind target" cue.
+///
+/// `ratio` is `achieved / target`. The cue activates at 80 % achieved
+/// and only deactivates once achieved climbs back above 90 % — the
+/// 10 pp gap kills the binary flicker that a single threshold
+/// produces when the achieved rate hovers around the boundary.
+///
+/// Stateless (pass the previous value in, get the next one out) so
+/// the policy is unit-testable without an `egui::Ui`.
+pub(super) fn shortfall_with_hysteresis(currently_active: bool, ratio: f64) -> bool {
+    const ENTER: f64 = 0.80;
+    const EXIT: f64 = 0.90;
+    if currently_active { ratio < EXIT } else { ratio < ENTER }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{fmt_percent, shortfall_with_hysteresis};
+
+    // ── Percentage formatting ───────────────────────────────────────────────
+
+    #[test]
+    fn fmt_percent_uses_integer_above_ten() {
+        assert_eq!(fmt_percent(0.50), "50%");
+        assert_eq!(fmt_percent(0.123), "12%");
+    }
+
+    #[test]
+    fn fmt_percent_keeps_one_decimal_in_single_digits() {
+        assert_eq!(fmt_percent(0.05), "5.0%");
+        assert_eq!(fmt_percent(0.087), "8.7%");
+    }
+
+    #[test]
+    fn fmt_percent_keeps_two_decimals_below_one_percent() {
+        // The WH-collapse case from #63 review (~0.06 %): a fixed
+        // {:.0}% would read "0%" and erase the severity. Two
+        // decimals show the actual order of magnitude.
+        assert_eq!(fmt_percent(0.0006), "0.06%");
+        assert_eq!(fmt_percent(0.001), "0.10%");
+    }
+
+    #[test]
+    fn fmt_percent_collapses_negligible_to_threshold_marker() {
+        // Below 0.01 % every digit is noise — physics is essentially
+        // stalled. Show the qualitative state, not a tail of zeros.
+        assert_eq!(fmt_percent(1e-5), "<0.01%");
+        assert_eq!(fmt_percent(0.0), "<0.01%");
+    }
+
+    #[test]
+    fn shortfall_activates_below_enter_threshold() {
+        // Cold start: cue is off and achieved drops below 80 %.
+        assert!(shortfall_with_hysteresis(false, 0.79));
+        assert!(shortfall_with_hysteresis(false, 0.50));
+        assert!(shortfall_with_hysteresis(false, 0.0));
+    }
+
+    #[test]
+    fn shortfall_stays_off_in_hysteresis_band_when_starting_off() {
+        // Off and ratio in [0.80, 0.90): doesn't trigger yet — needs
+        // to drop below ENTER first.
+        assert!(!shortfall_with_hysteresis(false, 0.80));
+        assert!(!shortfall_with_hysteresis(false, 0.85));
+        assert!(!shortfall_with_hysteresis(false, 0.89));
+    }
+
+    #[test]
+    fn shortfall_stays_on_in_hysteresis_band_when_starting_on() {
+        // On and ratio in [0.80, 0.90): stays on — needs to climb
+        // above EXIT to clear.
+        assert!(shortfall_with_hysteresis(true, 0.80));
+        assert!(shortfall_with_hysteresis(true, 0.85));
+        assert!(shortfall_with_hysteresis(true, 0.89));
+    }
+
+    #[test]
+    fn shortfall_deactivates_above_exit_threshold() {
+        // On and achieved climbs above 90 %: cue clears.
+        assert!(!shortfall_with_hysteresis(true, 0.90));
+        assert!(!shortfall_with_hysteresis(true, 0.95));
+        assert!(!shortfall_with_hysteresis(true, 1.05));
+    }
+
+    #[test]
+    fn oscillation_around_enter_threshold_latches_active() {
+        // The single-threshold flicker scenario: achieved hovers
+        // around 80 % of target. With one threshold, every tick that
+        // crosses 0.80 flips the state. With hysteresis, the first
+        // dip below 0.80 latches active, and any subsequent values
+        // inside the [0.80, 0.90) band keep the state.
+        let mut active = false;
+        for ratio in [0.78, 0.82, 0.79, 0.83, 0.78, 0.85, 0.88] {
+            active = shortfall_with_hysteresis(active, ratio);
+        }
+        assert!(active, "should latch active after dipping below ENTER and never reaching EXIT");
+    }
+
+    #[test]
+    fn oscillation_inside_band_does_not_flip_state() {
+        // Pure hysteresis-band test: ratio stays inside [0.80, 0.90)
+        // the whole time. State must be preserved (whatever it was
+        // when entering the band) across the entire sequence.
+        let band = [0.80, 0.85, 0.82, 0.89, 0.81, 0.87];
+
+        let mut active = true;
+        for ratio in band {
+            active = shortfall_with_hysteresis(active, ratio);
+        }
+        assert!(active, "starting active, band oscillation must not deactivate");
+
+        let mut active = false;
+        for ratio in band {
+            active = shortfall_with_hysteresis(active, ratio);
+        }
+        assert!(!active, "starting inactive, band oscillation must not activate");
+    }
+
+    #[test]
+    fn full_recovery_above_exit_clears_state() {
+        // Sanity: hysteresis is not a permanent latch. Once achieved
+        // climbs above EXIT, the state clears; a subsequent dip into
+        // the band stays clear (consistent with the band-test above).
+        let mut active = true;
+        for ratio in [0.85, 0.92, 0.85] {
+            active = shortfall_with_hysteresis(active, ratio);
+        }
+        assert!(
+            !active,
+            "single excursion above EXIT must clear state, even if next sample re-enters band"
+        );
     }
 }
