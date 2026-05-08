@@ -426,6 +426,14 @@ pub struct SimulationApp {
     /// [`pending_fit`](Self::pending_fit) on the next tick where bodies
     /// are loaded; takes precedence over bounding-sphere fit.
     pub(super) pending_camera_hints: Option<TemplateCameraHints>,
+    /// Active scenario's orbital plane normal in world coords, unit
+    /// length. Drives place-mode's drop plane so bodies created via
+    /// click-to-place land on the same plane as the visible orbits
+    /// (and the future grid). Defaults to `+Z` — the convention
+    /// `state_from_elements` writes heliocentric ecliptic templates
+    /// into. Updated when a template loads via its
+    /// [`TemplateCameraHints::up`].
+    pub(super) orbital_plane_up: glam::DVec3,
     /// When `true`, `draw_frame` will call `fit_to_view` on the next frame
     /// that has a non-empty body list. Used after template/snapshot loads
     /// where bodies arrive asynchronously from the physics thread.
@@ -662,6 +670,7 @@ impl SimulationApp {
             follow_selected_body: false,
             follow_transition: None,
             pending_camera_hints: None,
+            orbital_plane_up: glam::DVec3::Z,
             pending_fit: false,
             hovered_body: None,
 

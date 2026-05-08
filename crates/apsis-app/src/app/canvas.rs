@@ -75,49 +75,44 @@ fn camera_view_proj_relative(
     proj * view
 }
 
-/// Ray-cast through the camera onto the absolute-world ecliptic plane
-/// (`z = 0`). Operates entirely in the render frame (camera at the
-/// origin, plane at `z = -render_origin.z`); the absolute hit point is
-/// recovered by adding `render_origin` back at `f64` precision.
+/// Ray-cast through the camera onto a plane defined by its world-frame
+/// `normal` and `point`. Operates in the render frame; the absolute hit
+/// is recovered by adding `render_origin` back at `f64` precision.
 ///
-/// Returns `None` when the camera ray doesn't hit that plane in front
-/// of the eye — looking up, grazing, or with the pivot above the
-/// horizon.
-fn screen_to_world_on_z_plane(
+/// Returns `None` when the ray is parallel to the plane or hits behind
+/// the eye.
+fn screen_to_world_on_plane(
     screen_pos: egui::Pos2,
     view_proj_relative: glam::Mat4,
     rect: egui::Rect,
     render_origin: glam::DVec3,
+    plane_normal: glam::DVec3,
+    plane_point: glam::DVec3,
 ) -> Option<glam::DVec3> {
     let inv = view_proj_relative.inverse();
     let ndc_x = ((screen_pos.x - rect.min.x) / rect.width()) * 2.0 - 1.0;
     let ndc_y = -(((screen_pos.y - rect.min.y) / rect.height()) * 2.0 - 1.0);
-    // Reverse-Z infinite-far: clip z = 0 lands on the far plane, so
-    // unprojecting that gives a stable far-ray endpoint in the render
-    // frame. Camera origin is `(0,0,0)` here, so the ray direction is
-    // just the normalised endpoint.
+    // Reverse-Z infinite-far: clip z = 0 unprojects to a stable
+    // far-ray endpoint. Camera at origin in render frame, so the ray
+    // direction is the normalised endpoint.
     let far_clip = glam::Vec4::new(ndc_x, ndc_y, 0.0, 1.0);
     let far_relative = inv * far_clip;
     if far_relative.w.abs() < 1e-12 {
         return None;
     }
-    let far_pos = far_relative.truncate() / far_relative.w;
-    let ray_dir = far_pos.normalize();
-    if ray_dir.z.abs() < 1e-6 {
+    let ray_dir = (far_relative.truncate() / far_relative.w).normalize();
+    let n = plane_normal.as_vec3();
+    let denom = n.dot(ray_dir);
+    if denom.abs() < 1e-6 {
         return None;
     }
-    // Absolute `z = 0` plane sits at `z_relative = -render_origin.z`
-    // in the render frame.
-    let target_z_relative = -render_origin.z as f32;
-    let t = target_z_relative / ray_dir.z;
+    let plane_point_relative = (plane_point - render_origin).as_vec3();
+    let t = n.dot(plane_point_relative) / denom;
     if t <= 0.0 {
         return None;
     }
     let hit_relative = ray_dir * t;
-    // Recover absolute world coordinates at `f64` precision.
-    let hit_x = render_origin.x + hit_relative.x as f64;
-    let hit_y = render_origin.y + hit_relative.y as f64;
-    Some(glam::DVec3::new(hit_x, hit_y, 0.0))
+    Some(render_origin + hit_relative.as_dvec3())
 }
 
 /// Project an absolute-world point onto canvas screen coordinates.
@@ -1045,17 +1040,21 @@ impl SimulationApp {
                         // difference is dimensional regardless of
                         // zoom or tilt.
                         let speed = match (
-                            screen_to_world_on_z_plane(
+                            screen_to_world_on_plane(
                                 start,
                                 view_proj_relative,
                                 rect,
                                 render_origin,
+                                self.orbital_plane_up,
+                                glam::DVec3::ZERO,
                             ),
-                            screen_to_world_on_z_plane(
+                            screen_to_world_on_plane(
                                 cur,
                                 view_proj_relative,
                                 rect,
                                 render_origin,
+                                self.orbital_plane_up,
+                                glam::DVec3::ZERO,
                             ),
                         ) {
                             (Some(s), Some(e)) => {
@@ -1082,11 +1081,13 @@ impl SimulationApp {
                     // Don't spawn if clicking an existing body
                     if self.find_body_at(cursor, view_proj_relative, rect).is_none() {
                         let spawn_pos = start.unwrap_or(cursor);
-                        let Some(spawn_world) = screen_to_world_on_z_plane(
+                        let Some(spawn_world) = screen_to_world_on_plane(
                             spawn_pos,
                             view_proj_relative,
                             rect,
                             render_origin,
+                            self.orbital_plane_up,
+                            glam::DVec3::ZERO,
                         ) else {
                             self.place_drag_start = None;
                             return;
@@ -1098,18 +1099,22 @@ impl SimulationApp {
                         // unproject as the preview above.
                         let (vx, vy) = match start
                             .and_then(|s| {
-                                screen_to_world_on_z_plane(
+                                screen_to_world_on_plane(
                                     s,
                                     view_proj_relative,
                                     rect,
                                     render_origin,
+                                    self.orbital_plane_up,
+                                    glam::DVec3::ZERO,
                                 )
                             })
-                            .zip(screen_to_world_on_z_plane(
+                            .zip(screen_to_world_on_plane(
                                 cursor,
                                 view_proj_relative,
                                 rect,
                                 render_origin,
+                                self.orbital_plane_up,
+                                glam::DVec3::ZERO,
                             )) {
                             Some((s, e)) => {
                                 let d = e - s;
@@ -1226,11 +1231,13 @@ impl SimulationApp {
                         // casting through the camera onto the
                         // ecliptic. Drop is rejected when the camera
                         // can't see that plane at the cursor.
-                        let Some(world) = screen_to_world_on_z_plane(
+                        let Some(world) = screen_to_world_on_plane(
                             screen_pos,
                             view_proj_relative,
                             rect,
                             render_origin,
+                            self.orbital_plane_up,
+                            glam::DVec3::ZERO,
                         ) else {
                             return;
                         };
