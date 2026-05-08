@@ -11,11 +11,18 @@
 //! | Integrator | Position | Velocity | Acceleration |
 //! |------------|----------|----------|--------------|
 //! | IAS15      | Rein & Spiegel (2015) polynomial via b-coefficients (eq. 9) | derivative of position polynomial (eq. 11) | second derivative — the b-coefficients ARE the higher-order acceleration terms |
-//! | VV / Y4 / WH | 2nd-order Taylor: `x₀ + v₀·h·dt + ½·a₀·(h·dt)²` | analytical derivative: `v₀ + a₀·h·dt` | constant within step: `a₀` |
+//! | WH         | Kepler-analytical: each non-central body propagated via `kepler_step(q₀, v₀, h·dt, μ)` in the rest frame; central body reconstructed from barycenter conservation; Galilean shift back | from the same Kepler propagation (returns the velocity at `h`) | inertial gravitational acceleration at the propagated configuration |
+//! | VV / Y4    | 2nd-order Taylor: `x₀ + v₀·h·dt + ½·a₀·(h·dt)²` | analytical derivative: `v₀ + a₀·h·dt` | constant within step: `a₀` |
 //!
 //! The IAS15 polynomial is exact to the precision of the accepted b-coefficients.
-//! The Order-2 fallback is sufficient for smooth visual rendering between steps —
-//! the physical error is O(dt²), below the pixel resolution for typical step sizes.
+//! The WH Kepler-analytical kernel is exact for the central-force motion;
+//! deviation from the integrator's post-step state at `h = 1` is bounded by
+//! the perturbation-kick magnitude (O(planet-planet acc · dt)), which is
+//! the same truncation order WH itself uses to apportion work between H_K
+//! and H_I, and visually invisible at solar-system-scale dt. The Order-2
+//! fallback for VV / Y4 is sufficient for smooth visual rendering — those
+//! integrators have no analytical drift kernel of their own and the
+//! quadratic prediction matches the leapfrog post-step exactly at `h = 1`.
 //!
 //! # Usage
 //!
@@ -28,12 +35,86 @@
 
 use crate::math::Vec3;
 use crate::physics::integrator::IntegratorKind;
+use crate::physics::integrator::kepler::kepler_step;
 
 // ── DenseSnapshot ─────────────────────────────────────────────────────────────
 
 /// Per-body IAS15 b-coefficients captured at the end of an accepted sub-step.
 /// Laid out as `[Vec3; 7]` matching the seven Gauss-Radau nodes.
 pub type DenseCoeffs = [Vec3; 7];
+
+/// Wisdom–Holman dense-output state carried alongside the standard
+/// snapshot fields. When present, sub-step interpolation evaluates each
+/// planet's heliocentric trajectory analytically via [`kepler_step`]
+/// rather than via the order-2 Taylor fallback that the [`v0`, `a0`]
+/// triple supports.
+///
+/// Order-2 Taylor on a Keplerian orbit is faithful when the per-step
+/// orbital fraction is `≪ 1` (Earth at solar dt). It bows visibly for
+/// bodies that cover an appreciable arc per step (Galilean moons,
+/// Phobos at default dt) — the curvature of the orbit is not in the
+/// model. Replacing the planet-position kernel with the same Kepler
+/// propagator the integrator's drift step uses removes that bow at
+/// the cost of one Newton-Raphson universal-variable iteration per
+/// planet per sample, which renders flat in practice.
+///
+/// The interpolation reproduces the Wisdom–Holman split structure
+/// minus the symmetric kicks and indirect drift — those are
+/// perturbation-scale and dominated by the Kepler motion at the dt
+/// range WH typically operates in. The error at `h = 1` against the
+/// post-step state is bounded by the same perturbation magnitude
+/// times `dt`, and visually invisible for hierarchical Solar-System-
+/// scale configurations.
+#[derive(Clone)]
+pub struct WhDenseData {
+    /// `G · m_central`. Read by `kepler_step`.
+    pub mu: f64,
+    /// Central body mass (rest frame); needed for total-momentum
+    /// reconstruction of the central-body velocity at sub-step time.
+    pub m_sun: f64,
+    /// `Σ m_i` over all bodies. Drives the barycenter constraint that
+    /// derives the central body's position from the planet
+    /// configuration at sub-step time.
+    pub m_total: f64,
+    /// Centre-of-mass velocity in the original (pre-WH) frame. Each
+    /// body's inertial state is the rest-frame Kepler propagation
+    /// shifted by `v_com · h · dt`.
+    pub v_com: Vec3,
+    /// Central body's position in the rest frame at step entry.
+    /// `r_0(h)` derives from this via the barycenter constraint
+    /// `r_0(h) = r_0(0) + (m_q_in − m_q_h) / m_total`.
+    pub r0_sun_rest: Vec3,
+    /// `Σ m_i q_i_helio` evaluated at step entry. Constant for the
+    /// life of the snapshot — frozen value enters the barycenter
+    /// reconstruction at every `h`.
+    pub m_q_in: Vec3,
+    /// Heliocentric positions of the non-central bodies at step entry,
+    /// in the rest frame. One entry per planet, indexed `0..N-1` to
+    /// match the `bodies[1..N]` slice WH operates on.
+    pub q0_helio_rest: Vec<Vec3>,
+    /// Inertial velocities of the non-central bodies at step entry,
+    /// in the rest frame. Same indexing convention as
+    /// [`q0_helio_rest`](Self::q0_helio_rest).
+    pub v0_inertial_rest: Vec<Vec3>,
+    /// Masses of the non-central bodies in declaration order. Carried
+    /// alongside the kinematic state so the barycenter reconstruction
+    /// can sum mass-weighted positions without an external lookup.
+    pub planet_masses: Vec<f64>,
+}
+
+/// Bulk interpolation result: every body's `(position, velocity,
+/// acceleration)` triple at one sub-step `h`, indexed `0..N` in the
+/// system's body order.
+///
+/// Returned by [`WhDenseData::interpolate_kinematics`] so the renderer
+/// can pay the O(N) Kepler-propagation cost once per render frame
+/// instead of repeating it inside per-body queries.
+#[derive(Debug, Clone)]
+pub struct WhKinematics {
+    pub positions: Vec<Vec3>,
+    pub velocities: Vec<Vec3>,
+    pub accelerations: Vec<Vec3>,
+}
 
 /// Snapshot of the state needed to interpolate body positions within one step.
 ///
@@ -64,6 +145,108 @@ pub struct DenseSnapshot {
 
     /// Identifies the integrator that produced this snapshot.
     pub kind: IntegratorKind,
+
+    /// Wisdom–Holman dense-output state. `Some` only when WH produced
+    /// the snapshot; the per-body interpolation methods route through
+    /// the analytical Kepler kernel when present, falling back to the
+    /// `(x0, v0, a0)` order-2 Taylor otherwise.
+    pub wh_data: Option<WhDenseData>,
+}
+
+impl WhDenseData {
+    /// Compute every body's `(position, velocity, acceleration)` triple
+    /// at normalised time `h ∈ [0, 1]` along the Wisdom–Holman step.
+    ///
+    /// Each non-central body is propagated by the same universal-
+    /// variable Kepler solver the integrator's drift step uses
+    /// (`kepler_step`), evaluated at `h · dt` from the rest-frame
+    /// step-entry state. The central body's position is reconstructed
+    /// from the barycenter constraint at the propagated planet
+    /// configuration; its velocity from total-momentum conservation in
+    /// the rest frame. A final Galilean shift carries the rest-frame
+    /// state back to the original (pre-WH) frame.
+    ///
+    /// Accelerations are evaluated as the inertial gravitational acc
+    /// at the propagated configuration:
+    ///   * non-central: `−μ q_i(h) / |q_i(h)|³` (Sun's pull only;
+    ///     planet-planet perturbation is the kick term and is omitted
+    ///     for sub-step interpolation, which mirrors the same
+    ///     truncation the position kernel makes by skipping the
+    ///     KDK kick + indirect drift).
+    ///   * central: `Σ G m_i q_i(h) / |q_i(h)|³`, satisfying
+    ///     `Σ m_i a_i = 0` by construction.
+    ///
+    /// O(N) total work per call. Renderers that need every body's
+    /// state at the same `h` should call this once per frame and
+    /// index the returned vectors, rather than dispatching through
+    /// the per-body methods on [`DenseSnapshot`] (which would each
+    /// repeat the full O(N) sweep).
+    pub fn interpolate_kinematics(&self, h: f64, dt: f64) -> WhKinematics {
+        let n_planets = self.q0_helio_rest.len();
+        let n = n_planets + 1;
+        let dt_sub = h * dt;
+
+        // Step 1: Kepler propagation per planet. q_h is heliocentric
+        // (rest frame); v_h is inertial (rest frame).
+        let mut q_helio = Vec::with_capacity(n_planets);
+        let mut v_inertial_rest = Vec::with_capacity(n_planets);
+        for (q0, v0) in self.q0_helio_rest.iter().zip(&self.v0_inertial_rest) {
+            let (q_h, v_h) = kepler_step(*q0, *v0, dt_sub, self.mu);
+            q_helio.push(q_h);
+            v_inertial_rest.push(v_h);
+        }
+
+        // Step 2: barycenter reconstruction for the central body's
+        // rest-frame position. In the rest frame Q_0 (mass-weighted
+        // total) is invariant, so r_0_rest(h) = r_0(0) + (m_q_in
+        // − m_q_h) / m_total.
+        let m_q_h: Vec3 =
+            q_helio.iter().zip(&self.planet_masses).fold(Vec3::ZERO, |s, (q, m)| s + *m * *q);
+        let r0_rest = self.r0_sun_rest + (self.m_q_in - m_q_h) / self.m_total;
+
+        // Step 3: total-momentum conservation in the rest frame
+        // (Σ m_i v_i = 0) ⇒ v_0_rest = −(1/m_sun) Σ m_i v_i.
+        let p_planets: Vec3 = v_inertial_rest
+            .iter()
+            .zip(&self.planet_masses)
+            .fold(Vec3::ZERO, |s, (v, m)| s + *m * *v);
+        let v0_rest = -p_planets / self.m_sun;
+
+        // Step 4: Galilean shift back to the original frame.
+        let dr_com = self.v_com * dt_sub;
+
+        let mut positions = Vec::with_capacity(n);
+        let mut velocities = Vec::with_capacity(n);
+        let mut accelerations = Vec::with_capacity(n);
+
+        // Central body first (index 0 by system convention).
+        positions.push(r0_rest + dr_com);
+        velocities.push(v0_rest + self.v_com);
+
+        // Sun's gravitational acceleration at the propagated config.
+        // a_0 = G Σ m_i q_i(h) / |q_i(h)|³ — placeholder, filled after
+        // the planet loop populates the inertial-frame helio vectors.
+        let mut sun_acc = Vec3::ZERO;
+        for (i, q) in q_helio.iter().enumerate() {
+            let r2 = q.length_squared().max(1e-60);
+            let inv_r3 = 1.0 / (r2 * r2.sqrt());
+            let g = self.mu / self.m_sun; // G = μ / m_central
+            sun_acc += g * self.planet_masses[i] * *q * inv_r3;
+
+            positions.push(*q + r0_rest + dr_com);
+            velocities.push(v_inertial_rest[i] + self.v_com);
+            // Planet's inertial gravitational acceleration: Sun's pull
+            // alone. Perturbation kicks are omitted (see method docs).
+            let kepler_pull = -self.mu * *q * inv_r3;
+            accelerations.push(kepler_pull);
+        }
+        // Sun's slot was reserved with a default; fill in.
+        if n > 0 {
+            accelerations.insert(0, sun_acc);
+        }
+
+        WhKinematics { positions, velocities, accelerations }
+    }
 }
 
 impl DenseSnapshot {
@@ -73,6 +256,10 @@ impl DenseSnapshot {
     #[inline]
     pub fn interpolate(&self, i: usize, h: f64) -> Vec3 {
         debug_assert!(i < self.x0.len(), "body index out of range");
+
+        if let Some(wh) = &self.wh_data {
+            return wh.interpolate_kinematics(h, self.dt).positions[i];
+        }
 
         let x0 = self.x0[i];
         let v0 = self.v0[i];
@@ -99,6 +286,10 @@ impl DenseSnapshot {
     #[inline]
     pub fn velocity_at(&self, i: usize, h: f64) -> Vec3 {
         debug_assert!(i < self.x0.len(), "body index out of range");
+
+        if let Some(wh) = &self.wh_data {
+            return wh.interpolate_kinematics(h, self.dt).velocities[i];
+        }
 
         let v0 = self.v0[i];
         let a0 = self.a0[i];
@@ -131,6 +322,10 @@ impl DenseSnapshot {
     #[inline]
     pub fn acceleration_at(&self, i: usize, h: f64) -> Vec3 {
         debug_assert!(i < self.x0.len(), "body index out of range");
+
+        if let Some(wh) = &self.wh_data {
+            return wh.interpolate_kinematics(h, self.dt).accelerations[i];
+        }
 
         if self.b.is_empty() { self.a0[i] } else { predict_a_ias15(self.a0[i], &self.b[i], h) }
     }
@@ -496,6 +691,7 @@ mod tests {
             a0: vec![Vec3::new(0.4, 0.0, -0.1)],
             b: Vec::new(),
             kind: IntegratorKind::Yoshida4,
+            wh_data: None,
         };
         let v = snap.velocity_at(0, 0.5);
         let expected = predict_v_order2(snap.v0[0], snap.a0[0], 0.5, snap.dt);
@@ -512,6 +708,7 @@ mod tests {
             a0: vec![Vec3::new(0.4, 0.0, -0.1)],
             b: vec![sample_b()],
             kind: IntegratorKind::Ias15,
+            wh_data: None,
         };
         let v = snap.velocity_at(0, 0.5);
         let expected = predict_v_ias15(snap.v0[0], snap.a0[0], &snap.b[0], 0.5, snap.dt);
@@ -564,6 +761,7 @@ mod tests {
             a0: vec![Vec3::new(0.4, 0.0, -0.1)],
             b: Vec::new(),
             kind: IntegratorKind::Yoshida4,
+            wh_data: None,
         };
         for h in [0.0, 0.25, 0.5, 0.75, 1.0] {
             assert_eq!(snap.acceleration_at(0, h), snap.a0[0]);
@@ -580,6 +778,7 @@ mod tests {
             a0: vec![Vec3::new(0.4, 0.0, -0.1)],
             b: vec![sample_b()],
             kind: IntegratorKind::Ias15,
+            wh_data: None,
         };
         let a = snap.acceleration_at(0, 0.5);
         let expected = predict_a_ias15(snap.a0[0], &snap.b[0], 0.5);

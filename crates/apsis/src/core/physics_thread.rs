@@ -246,9 +246,22 @@ impl PhysicsHandle {
         let h = (self.t_render - t0) / snap.dt;
         // Clone snap to release the borrow before mutating bodies.
         let snap = snap.clone();
+
+        // Wisdom–Holman snapshots carry a Kepler-analytical kernel
+        // that needs an O(N) sweep per query (each planet's position
+        // depends on every other planet's position via the barycenter
+        // constraint). Looping per body and dispatching through the
+        // per-body accessors would repeat the sweep N times, giving
+        // O(N²) per render frame. Compute the full kinematic triple
+        // once via the bulk method and read indexed values from there.
+        let wh_kinematics = snap.wh_data.as_ref().map(|w| w.interpolate_kinematics(h, snap.dt));
+
         for (i, body) in self.bodies.iter_mut().enumerate() {
-            let p = snap.interpolate(i, h);
-            let v = snap.velocity_at(i, h);
+            let (p, v) = if let Some(kin) = &wh_kinematics {
+                (kin.positions[i], kin.velocities[i])
+            } else {
+                (snap.interpolate(i, h), snap.velocity_at(i, h))
+            };
             body.x = p.x;
             body.y = p.y;
             body.z = p.z;
@@ -264,7 +277,11 @@ impl PhysicsHandle {
         // between sync and advance).
         if self.accelerations.len() == self.bodies.len() {
             for (i, acc) in self.accelerations.iter_mut().enumerate() {
-                *acc = snap.acceleration_at(i, h);
+                *acc = if let Some(kin) = &wh_kinematics {
+                    kin.accelerations[i]
+                } else {
+                    snap.acceleration_at(i, h)
+                };
             }
         }
     }
