@@ -54,6 +54,15 @@ impl TrailClassFilter {
     }
 }
 
+/// Camera defaults a template suggests for its first frame. Both
+/// fields are optional — `None` falls back to bounding-sphere fit and
+/// world-Y-up convention respectively.
+#[derive(Debug, Clone, Copy)]
+pub struct TemplateCameraHints {
+    pub up: Option<[f64; 3]>,
+    pub distance: Option<f64>,
+}
+
 // ── Body selection ────────────────────────────────────────────────────────────
 
 /// Selection state for bodies on the canvas.
@@ -413,6 +422,10 @@ pub struct SimulationApp {
     /// `follow_selected_body` so toggle-style call sites elsewhere
     /// (inspector button, Esc) keep their current shape.
     pub(super) follow_transition: Option<crate::app::camera::FollowTransition>,
+    /// Template-supplied default-view hints. Consumed alongside
+    /// [`pending_fit`](Self::pending_fit) on the next tick where bodies
+    /// are loaded; takes precedence over bounding-sphere fit.
+    pub(super) pending_camera_hints: Option<TemplateCameraHints>,
     /// When `true`, `draw_frame` will call `fit_to_view` on the next frame
     /// that has a non-empty body list. Used after template/snapshot loads
     /// where bodies arrive asynchronously from the physics thread.
@@ -648,6 +661,7 @@ impl SimulationApp {
 
             follow_selected_body: false,
             follow_transition: None,
+            pending_camera_hints: None,
             pending_fit: false,
             hovered_body: None,
 
@@ -774,9 +788,9 @@ impl SimulationApp {
             self.paused = true;
         }
 
-        // ── Pending fit-to-view (after async template/snapshot load) ──────────
+        // ── Pending view (template hints take precedence over fit) ────────────
         if self.pending_fit && !self.system.bodies().is_empty() && !self.system.is_loading() {
-            self.fit_to_view();
+            self.apply_pending_view();
             self.pending_fit = false;
         }
 

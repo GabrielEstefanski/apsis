@@ -16,6 +16,8 @@ pub fn star(_seed: u64) -> Template {
             albedo: None,
         }],
         display_scale: 1.0,
+        orbital_up: None,
+        default_view_distance: None,
         suggested_dt: None,
         units: UnitSystem::solar_au(),
     }
@@ -36,6 +38,8 @@ pub fn brown_dwarf(_seed: u64) -> Template {
             albedo: None,
         }],
         display_scale: 1.0,
+        orbital_up: None,
+        default_view_distance: None,
         suggested_dt: None,
         units: UnitSystem::solar_au(),
     }
@@ -56,6 +60,8 @@ pub fn gas_giant(_seed: u64) -> Template {
             albedo: None,
         }],
         display_scale: 1.0,
+        orbital_up: None,
+        default_view_distance: None,
         suggested_dt: None,
         units: UnitSystem::solar_au(),
     }
@@ -76,6 +82,8 @@ pub fn rocky_planet(_seed: u64) -> Template {
             albedo: None,
         }],
         display_scale: 1.0,
+        orbital_up: None,
+        default_view_distance: None,
         suggested_dt: None,
         units: UnitSystem::solar_au(),
     }

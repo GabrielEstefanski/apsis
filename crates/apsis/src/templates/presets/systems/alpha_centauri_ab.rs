@@ -112,6 +112,8 @@ pub fn alpha_centauri_ab(_seed: u64) -> Template {
             },
         ],
         display_scale: 1.0,
+        orbital_up: None,
+        default_view_distance: None,
         suggested_dt: Some(0.002),
         units: UnitSystem::solar_au(),
     }

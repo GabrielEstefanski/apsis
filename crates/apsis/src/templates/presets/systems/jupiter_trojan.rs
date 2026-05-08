@@ -83,6 +83,8 @@ pub fn jupiter_trojans(seed: u64) -> Template {
         description: "Sun–Jupiter system with Trojan asteroid clouds at L4 and L5.",
         bodies,
         display_scale: 1.0,
+        orbital_up: None,
+        default_view_distance: None,
         suggested_dt: Some(0.002),
         units: UnitSystem::solar_au(),
     }
