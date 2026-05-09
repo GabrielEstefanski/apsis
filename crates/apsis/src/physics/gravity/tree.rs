@@ -56,6 +56,28 @@ pub(crate) const DIRECT_MODE_THRESHOLD: usize = 10_000;
 /// exactly on a cell boundary (which would cause ambiguous octant assignment).
 const TREE_PAD: f64 = 1e-2;
 
+// ── MultipoleOrder ────────────────────────────────────────────────────────── //
+
+/// Multipole expansion order populated during [`Octree::build`].
+///
+/// `Monopole` aggregates only mass and centre of mass; `Quadrupole` adds
+/// the symmetric traceless second-moment tensor `Q` about each node's COM.
+/// Build cost rises with order; the engine's force evaluation reads back
+/// only the components the active mode populated.
+///
+/// **Toggle scope.** Part of the in-flight perf 2×2 experiment
+/// (`docs/experiments/2026-05-08-octree-perf-2x2.md`); removed in the
+/// experiment's final commit once §Decision selects the production order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MultipoleOrder {
+    Monopole,
+    /// `dead_code` allow removed in the next commit that lights up the
+    /// quadrupole branch in `bh_eval_body` (currently constructed only by
+    /// the `aggregate_quadrupole` test surface and the perf 2×2 harness).
+    #[allow(dead_code)]
+    Quadrupole,
+}
+
 // ── Node ──────────────────────────────────────────────────────────────────── //
 
 /// One node in the Barnes-Hut octree.
@@ -77,6 +99,17 @@ pub(crate) struct Node {
     pub com_x: f64,
     pub com_y: f64,
     pub com_z: f64,
+
+    /// Symmetric traceless quadrupole tensor about this node's COM. Five
+    /// independent components stored; `q_zz = -(q_xx + q_yy)` is reconstructed
+    /// at the evaluation site. Populated only when the tree was built with
+    /// [`MultipoleOrder::Quadrupole`]; zero otherwise.
+    pub q_xx: f64,
+    pub q_xy: f64,
+    pub q_xz: f64,
+    pub q_yy: f64,
+    pub q_yz: f64,
+
     /// Total body count in this subtree (leaf + all descendants).
     pub body_count: u32,
 
@@ -101,6 +134,11 @@ impl Node {
             com_x: 0.0,
             com_y: 0.0,
             com_z: 0.0,
+            q_xx: 0.0,
+            q_xy: 0.0,
+            q_xz: 0.0,
+            q_yy: 0.0,
+            q_yz: 0.0,
             body_count: 0,
             body_len: 0,
             bodies: [0u32; LEAF_CAPACITY],
@@ -131,11 +169,21 @@ impl Node {
 pub(crate) struct Octree {
     pub(crate) nodes: Vec<Node>,
     max_depth: usize,
+    /// Multipole order the most recent [`build`](Self::build) populated.
+    /// Read by the BH walk to decide whether the per-node quadrupole tensor
+    /// is meaningful or zero-by-construction.
+    built_order: MultipoleOrder,
 }
 
 impl Octree {
     pub(crate) fn new(max_depth: usize) -> Self {
-        Self { nodes: Vec::new(), max_depth }
+        Self { nodes: Vec::new(), max_depth, built_order: MultipoleOrder::Monopole }
+    }
+
+    /// Multipole order the tree currently carries.
+    #[inline]
+    pub(crate) fn built_order(&self) -> MultipoleOrder {
+        self.built_order
     }
 
     /// Rebuild the tree from scratch for the given body slice.
@@ -144,8 +192,14 @@ impl Octree {
     /// cubic cell that contains all bodies with a small pad. Every node's
     /// `mass` and `com_{x,y,z}` fields reflect the aggregated state of its
     /// subtree.
-    pub(crate) fn build(&mut self, bodies: &[Body]) {
+    ///
+    /// When `order == Quadrupole`, a second bottom-up pass populates each
+    /// node's traceless quadrupole tensor about its own COM (parallel-axis
+    /// theorem on internal nodes). Under `Monopole` the tensor fields stay
+    /// at their initial zero, and the second pass is skipped.
+    pub(crate) fn build(&mut self, bodies: &[Body], order: MultipoleOrder) {
         self.nodes.clear();
+        self.built_order = order;
 
         if bodies.is_empty() {
             return;
@@ -185,6 +239,10 @@ impl Octree {
 
         // ── Aggregate mass / COM bottom-up ──────────────────────────── //
         self.aggregate_mass(0, bodies);
+
+        if matches!(order, MultipoleOrder::Quadrupole) {
+            self.aggregate_quadrupole(0, bodies);
+        }
     }
 
     /// Read-only access to the flat node array.
@@ -333,6 +391,83 @@ impl Octree {
 
         (self.nodes[idx].mass, self.nodes[idx].com_x, self.nodes[idx].com_y, self.nodes[idx].com_z)
     }
+
+    /// Bottom-up second pass: populate the symmetric traceless quadrupole
+    /// tensor `Q` at every node, expressed about that node's COM.
+    ///
+    /// Leaves: `Q = Σ_b m_b · (3 d_b ⊗ d_b − I |d_b|²)` with `d_b = pos_b − COM`.
+    /// Internals: parallel-axis theorem on children — `Q = Σ_c [Q_c + M_c (3 D_c ⊗ D_c − I |D_c|²)]`
+    /// with `D_c = COM_c − COM_node`. Reference: Goldstein, Poole & Safko §11.3;
+    /// Hernquist & Katz 1989 eq. (2.7–2.10).
+    fn aggregate_quadrupole(&mut self, idx: usize, bodies: &[Body]) {
+        if self.nodes[idx].is_leaf() {
+            let cmx = self.nodes[idx].com_x;
+            let cmy = self.nodes[idx].com_y;
+            let cmz = self.nodes[idx].com_z;
+            let len = self.nodes[idx].body_len as usize;
+
+            let (mut q_xx, mut q_xy, mut q_xz, mut q_yy, mut q_yz) = (0.0, 0.0, 0.0, 0.0, 0.0);
+
+            for k in 0..len {
+                let b = bodies[self.nodes[idx].bodies[k] as usize];
+                let dx = b.x - cmx;
+                let dy = b.y - cmy;
+                let dz = b.z - cmz;
+                let d2 = dx * dx + dy * dy + dz * dz;
+                q_xx += b.mass * (3.0 * dx * dx - d2);
+                q_xy += b.mass * 3.0 * dx * dy;
+                q_xz += b.mass * 3.0 * dx * dz;
+                q_yy += b.mass * (3.0 * dy * dy - d2);
+                q_yz += b.mass * 3.0 * dy * dz;
+            }
+
+            let n = &mut self.nodes[idx];
+            n.q_xx = q_xx;
+            n.q_xy = q_xy;
+            n.q_xz = q_xz;
+            n.q_yy = q_yy;
+            n.q_yz = q_yz;
+            return;
+        }
+
+        let children = self.nodes[idx].children;
+        for &c in &children {
+            if c != NO_CHILD {
+                self.aggregate_quadrupole(c as usize, bodies);
+            }
+        }
+
+        let pcom_x = self.nodes[idx].com_x;
+        let pcom_y = self.nodes[idx].com_y;
+        let pcom_z = self.nodes[idx].com_z;
+
+        let (mut q_xx, mut q_xy, mut q_xz, mut q_yy, mut q_yz) = (0.0, 0.0, 0.0, 0.0, 0.0);
+
+        for &c in &children {
+            if c == NO_CHILD {
+                continue;
+            }
+            let child = &self.nodes[c as usize];
+            let dx = child.com_x - pcom_x;
+            let dy = child.com_y - pcom_y;
+            let dz = child.com_z - pcom_z;
+            let d2 = dx * dx + dy * dy + dz * dz;
+            let m = child.mass;
+
+            q_xx += child.q_xx + m * (3.0 * dx * dx - d2);
+            q_xy += child.q_xy + m * 3.0 * dx * dy;
+            q_xz += child.q_xz + m * 3.0 * dx * dz;
+            q_yy += child.q_yy + m * (3.0 * dy * dy - d2);
+            q_yz += child.q_yz + m * 3.0 * dy * dz;
+        }
+
+        let n = &mut self.nodes[idx];
+        n.q_xx = q_xx;
+        n.q_xy = q_xy;
+        n.q_xz = q_xz;
+        n.q_yy = q_yy;
+        n.q_yz = q_yz;
+    }
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────── //
@@ -366,7 +501,7 @@ mod tests {
         let bodies = vec![body_xy(0.0, 0.0, 1.0), body_xy(4.0, 0.0, 3.0)];
 
         let mut tree = make_tree();
-        tree.build(&bodies);
+        tree.build(&bodies, MultipoleOrder::Monopole);
 
         let root = &tree.nodes[0];
 
@@ -382,7 +517,7 @@ mod tests {
         let bodies = vec![body_xyz(0.0, 0.0, 0.0, 1.0), body_xyz(4.0, 2.0, -2.0, 3.0)];
 
         let mut tree = make_tree();
-        tree.build(&bodies);
+        tree.build(&bodies, MultipoleOrder::Monopole);
 
         let root = &tree.nodes[0];
 
@@ -398,7 +533,7 @@ mod tests {
         let bodies: Vec<Body> = (0..10).map(|i| body_xy(i as f64, 0.0, 1.0)).collect();
 
         let mut tree = make_tree();
-        tree.build(&bodies);
+        tree.build(&bodies, MultipoleOrder::Monopole);
 
         assert_eq!(tree.nodes[0].body_count, 10);
     }
@@ -409,7 +544,7 @@ mod tests {
         let bodies = vec![body_xy(1.0, 2.0, 5.0)];
 
         let mut tree = make_tree();
-        tree.build(&bodies);
+        tree.build(&bodies, MultipoleOrder::Monopole);
 
         let root = &tree.nodes[0];
 
@@ -424,7 +559,7 @@ mod tests {
         let bodies = vec![body_xy(0.0, 0.0, 1.0), body_xy(0.0, 0.0, 2.0)];
 
         let mut tree = make_tree();
-        tree.build(&bodies);
+        tree.build(&bodies, MultipoleOrder::Monopole);
 
         let root = &tree.nodes[0];
 
@@ -456,7 +591,7 @@ mod tests {
         }
 
         let mut tree = make_tree();
-        tree.build(&bodies);
+        tree.build(&bodies, MultipoleOrder::Monopole);
 
         let root = &tree.nodes[0];
         assert!(!root.is_leaf(), "root should subdivide after 16 inserts");
@@ -524,7 +659,7 @@ mod tests {
         let com_z_expected: f64 = bodies.iter().map(|b| b.mass * b.z).sum::<f64>() / m_total;
 
         let mut tree = make_tree();
-        tree.build(&bodies);
+        tree.build(&bodies, MultipoleOrder::Monopole);
 
         let root = &tree.nodes[0];
         assert_relative_eq!(root.mass, m_total, epsilon = 1e-12);
@@ -550,7 +685,7 @@ mod tests {
             let expected_mass: f64 = bodies.iter().map(|b| b.mass).sum();
 
             let mut tree = make_tree();
-            tree.build(&bodies);
+            tree.build(&bodies, MultipoleOrder::Monopole);
 
             let root = &tree.nodes[0];
 
@@ -558,5 +693,107 @@ mod tests {
                 (root.mass - expected_mass).abs() < 1e-6
             );
         }
+    }
+
+    // ── Quadrupole aggregation ─────────────────────────────────────────── //
+
+    /// Direct closed-form check on a 2-body leaf (no subdivision).
+    /// Two equal-mass bodies on the x-axis at ±1 give COM at the origin
+    /// and `Q_xx = 4`, `Q_yy = Q_zz = −2`, off-diagonal = 0.
+    #[test]
+    fn quadrupole_leaf_two_bodies_matches_closed_form() {
+        let bodies = vec![body_xyz(1.0, 0.0, 0.0, 1.0), body_xyz(-1.0, 0.0, 0.0, 1.0)];
+
+        let mut tree = make_tree();
+        tree.build(&bodies, MultipoleOrder::Quadrupole);
+
+        let root = &tree.nodes[0];
+        assert!(root.is_leaf(), "2 bodies must fit in the root leaf");
+        assert_relative_eq!(root.com_x, 0.0, epsilon = 1e-12);
+
+        assert_relative_eq!(root.q_xx, 4.0, epsilon = 1e-12);
+        assert_relative_eq!(root.q_yy, -2.0, epsilon = 1e-12);
+        // Q_zz reconstructed from traceless invariant.
+        let q_zz = -(root.q_xx + root.q_yy);
+        assert_relative_eq!(q_zz, -2.0, epsilon = 1e-12);
+        assert_relative_eq!(root.q_xy, 0.0, epsilon = 1e-12);
+        assert_relative_eq!(root.q_xz, 0.0, epsilon = 1e-12);
+        assert_relative_eq!(root.q_yz, 0.0, epsilon = 1e-12);
+    }
+
+    /// End-to-end invariant: regardless of how the tree subdivides, the
+    /// root's aggregated `Q` (computed bottom-up via the parallel-axis
+    /// theorem) must equal `Q` computed directly from all bodies relative
+    /// to the root COM. Validates the leaf path, the recursive
+    /// parallel-axis combination, and that the two paths agree byte-wise.
+    #[test]
+    fn quadrupole_root_matches_direct_sum_under_subdivision() {
+        // 16 bodies arranged so the root must subdivide (LEAF_CAPACITY = 8),
+        // log-normal masses, asymmetric positions to exercise every cross
+        // term (q_xy, q_xz, q_yz all nonzero).
+        let positions: Vec<(f64, f64, f64, f64)> = (0..16)
+            .map(|i| {
+                let t = i as f64;
+                let x = (t * 0.31).sin();
+                let y = (t * 0.47).cos();
+                let z = (t * 0.19).sin() * (t * 0.71).cos();
+                let m = (t * 0.13).sin().abs() + 0.5;
+                (x, y, z, m)
+            })
+            .collect();
+        let bodies: Vec<Body> =
+            positions.iter().map(|&(x, y, z, m)| body_xyz(x, y, z, m)).collect();
+
+        let mut tree = make_tree();
+        tree.build(&bodies, MultipoleOrder::Quadrupole);
+
+        let root = &tree.nodes[0];
+        assert!(!root.is_leaf(), "16 bodies must force the root to subdivide");
+
+        let cmx = root.com_x;
+        let cmy = root.com_y;
+        let cmz = root.com_z;
+
+        let (mut q_xx, mut q_xy, mut q_xz, mut q_yy, mut q_yz) = (0.0, 0.0, 0.0, 0.0, 0.0);
+        for b in &bodies {
+            let dx = b.x - cmx;
+            let dy = b.y - cmy;
+            let dz = b.z - cmz;
+            let d2 = dx * dx + dy * dy + dz * dz;
+            q_xx += b.mass * (3.0 * dx * dx - d2);
+            q_xy += b.mass * 3.0 * dx * dy;
+            q_xz += b.mass * 3.0 * dx * dz;
+            q_yy += b.mass * (3.0 * dy * dy - d2);
+            q_yz += b.mass * 3.0 * dy * dz;
+        }
+
+        // Bound covers the FP-reorder drift between the bottom-up
+        // recursion's accumulation order and the direct sum's order:
+        // ≈ 16 leaf accumulations + log₂(16) = 4 levels of internal
+        // combinations gives ~20 floating-point adds along each diagonal,
+        // bounded by 20 · ε ≈ 5 × 10⁻¹⁵; 1e-12 has 200× headroom.
+        assert_relative_eq!(root.q_xx, q_xx, epsilon = 1e-12);
+        assert_relative_eq!(root.q_xy, q_xy, epsilon = 1e-12);
+        assert_relative_eq!(root.q_xz, q_xz, epsilon = 1e-12);
+        assert_relative_eq!(root.q_yy, q_yy, epsilon = 1e-12);
+        assert_relative_eq!(root.q_yz, q_yz, epsilon = 1e-12);
+    }
+
+    /// Monopole build leaves the tensor untouched at zero. Confirms the
+    /// `aggregate_quadrupole` second pass is genuinely skipped under
+    /// `Monopole`, not silently still running.
+    #[test]
+    fn monopole_build_leaves_quadrupole_at_zero() {
+        let bodies = vec![body_xyz(1.0, 2.0, 3.0, 1.0), body_xyz(-2.0, 1.0, -1.0, 2.0)];
+
+        let mut tree = make_tree();
+        tree.build(&bodies, MultipoleOrder::Monopole);
+
+        let root = &tree.nodes[0];
+        assert_eq!(root.q_xx, 0.0);
+        assert_eq!(root.q_xy, 0.0);
+        assert_eq!(root.q_xz, 0.0);
+        assert_eq!(root.q_yy, 0.0);
+        assert_eq!(root.q_yz, 0.0);
     }
 }
