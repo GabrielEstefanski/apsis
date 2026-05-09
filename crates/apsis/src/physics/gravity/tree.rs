@@ -203,7 +203,6 @@ impl Octree {
 
     /// Morton permutation produced by the most recent [`build`](Self::build),
     /// or `None` if Morton was disabled.
-    #[allow(dead_code)] // wired up by the BH walk in the next commit
     #[inline]
     pub(crate) fn built_perm(&self) -> Option<&[u32]> {
         self.built_perm.as_deref()

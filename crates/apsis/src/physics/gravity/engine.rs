@@ -190,16 +190,26 @@ impl BarnesHutEngine {
         let nodes = self.tree.nodes();
         let order = self.tree.built_order();
 
-        let results: Vec<(Vec3, f64)> = (0..n)
-            .into_par_iter()
-            .map(|i| {
-                let mut stack = Vec::with_capacity(128);
-                bh_eval_body(nodes, i, &bodies[i], bodies, theta, kernel, order, &mut stack)
-            })
-            .collect();
+        // Per-body BH walk. When the tree was built with Morton ordering,
+        // iterating along the permutation hands consecutive Rayon work
+        // units to spatially adjacent bodies — the second body's walk
+        // finds the tree nodes warm in cache from the first body's. The
+        // (i, a, phi) tuple carries each result's original body index
+        // back so the writeback loop below targets the correct slot
+        // regardless of iteration order.
+        let eval_one = |i: usize| -> (usize, Vec3, f64) {
+            let mut stack = Vec::with_capacity(128);
+            let (a, phi) =
+                bh_eval_body(nodes, i, &bodies[i], bodies, theta, kernel, order, &mut stack);
+            (i, a, phi)
+        };
+        let results: Vec<(usize, Vec3, f64)> = match self.tree.built_perm() {
+            Some(perm) => perm.par_iter().map(|&i| eval_one(i as usize)).collect(),
+            None => (0..n).into_par_iter().map(eval_one).collect(),
+        };
 
         let mut potential = 0.0_f64;
-        for (i, (a, phi)) in results.into_iter().enumerate() {
+        for (i, a, phi) in results {
             acc[i] = a;
             // phi is the specific potential at body i; multiply by mass for energy
             potential += bodies[i].mass * phi;
