@@ -37,6 +37,47 @@ use rayon::prelude::*;
 use super::kernel::{G, Kernel, PlummerKernel, pair_eps2};
 use super::tree::{DIRECT_MODE_THRESHOLD, EXACT_THRESHOLD, NO_CHILD, Node, Octree};
 
+// ── MultipoleOrder ────────────────────────────────────────────────────────── //
+
+/// Multipole expansion order used in Barnes-Hut force evaluation.
+///
+/// Switches the per-node gravitational signature between point-mass at the
+/// centre of mass (`Monopole`) and a monopole + symmetric traceless
+/// quadrupole correction (`Quadrupole`). The latter halves the per-body
+/// force error at fixed θ at the cost of ~2.5–3× per-interaction work,
+/// which is amortised by the larger θ values it makes acceptable.
+///
+/// `Monopole` is the canonical Barnes-Hut tree-code default and the
+/// configuration validated by the octree-port lab notebook
+/// (`docs/experiments/2026-05-08-octree-port.md`).
+///
+/// **Toggle scope.** This enum and the [`set_multipole_order`] /
+/// [`multipole_order`] accessors are part of the in-flight perf 2×2
+/// experiment (`docs/experiments/2026-05-08-octree-perf-2x2.md`). They
+/// will be removed in the final commit of that experiment once §Decision
+/// is written and the chosen configuration is baked-in. Production code
+/// outside the experiment harness should not rely on this surface.
+///
+/// [`set_multipole_order`]: BarnesHutEngine::set_multipole_order
+/// [`multipole_order`]: BarnesHutEngine::multipole_order
+//
+// `dead_code` allowed for the scaffolding window: the `Quadrupole` variant
+// is read for the first time in the next commit that adds tensor
+// aggregation in `aggregate_mass`; the allow is removed there.
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MultipoleOrder {
+    /// Monopole only: each accepted node contributes `−G M / r² · r̂`.
+    /// Per-body error at θ = 0.5 sits at the Salmon-Warren ~5 % bound.
+    Monopole,
+    /// Monopole + quadrupole correction: each accepted node contributes the
+    /// monopole term plus `a_quad = −G/r⁵ · [Q · r̂ − (5/2) (r̂ᵀ Q r̂) r̂]`,
+    /// with `Q` the symmetric traceless second-moment tensor of the subtree
+    /// about its COM. Per-body error drops by ≈ 10× at fixed θ
+    /// (Hernquist & Katz 1989).
+    Quadrupole,
+}
+
 // ── BarnesHutEngine ───────────────────────────────────────────────────────── //
 
 /// N-body force engine using a Barnes-Hut octree.
@@ -56,6 +97,11 @@ pub struct BarnesHutEngine {
     /// N ≤ this → exact O(N²); N > this → Barnes-Hut traversal.
     exact_threshold: usize,
     kernel: Arc<dyn Kernel>,
+    /// Multipole expansion order. See [`MultipoleOrder`] for toggle scope.
+    /// `dead_code` allow removed in the next commit that branches on this
+    /// field in the BH walk.
+    #[allow(dead_code)]
+    multipole_order: MultipoleOrder,
 }
 
 impl BarnesHutEngine {
@@ -73,7 +119,12 @@ impl BarnesHutEngine {
     /// example, a kernel that demonstrates or tests a different Exactness
     /// or Continuity class.
     pub fn with_kernel(max_depth: usize, kernel: Arc<dyn Kernel>) -> Self {
-        Self { tree: Octree::new(max_depth), exact_threshold: EXACT_THRESHOLD, kernel }
+        Self {
+            tree: Octree::new(max_depth),
+            exact_threshold: EXACT_THRESHOLD,
+            kernel,
+            multipole_order: MultipoleOrder::Monopole,
+        }
     }
 
     /// Handle to the kernel this engine dispatches through.
@@ -123,6 +174,27 @@ impl BarnesHutEngine {
     /// go through this rather than hard-coding the clamp ceiling.
     pub fn is_direct_mode(&self) -> bool {
         self.exact_threshold >= DIRECT_MODE_THRESHOLD
+    }
+
+    // ── Multipole order — experiment toggle ────────────────────────────────
+    //
+    // Removed in the final commit of the perf 2×2 experiment
+    // (`docs/experiments/2026-05-08-octree-perf-2x2.md`) once §Decision
+    // is written and the chosen multipole order is baked-in.
+
+    /// Switch between [`MultipoleOrder::Monopole`] and
+    /// [`MultipoleOrder::Quadrupole`] for subsequent [`evaluate`] calls.
+    ///
+    /// [`evaluate`]: Self::evaluate
+    #[allow(dead_code)] // wired up by the BH walk in the next commit
+    pub(crate) fn set_multipole_order(&mut self, order: MultipoleOrder) {
+        self.multipole_order = order;
+    }
+
+    /// Currently active multipole expansion order.
+    #[allow(dead_code)] // wired up by the BH walk in the next commit
+    pub(crate) fn multipole_order(&self) -> MultipoleOrder {
+        self.multipole_order
     }
 
     /// Rebuild the octree from the current body positions.
@@ -907,5 +979,30 @@ mod tests {
         let v = Vec3::new(planet.vx - central.vx, planet.vy - central.vy, planet.vz - central.vz);
         let cross = Vec3::new(r.y * v.z - r.z * v.y, r.z * v.x - r.x * v.z, r.x * v.y - r.y * v.x);
         planet.mass * cross
+    }
+
+    // ── MultipoleOrder toggle scaffold ────────────────────────────────── //
+    //
+    // Wired up at the BarnesHutEngine surface in the perf 2×2 experiment
+    // (`docs/experiments/2026-05-08-octree-perf-2x2.md`). The Quadrupole
+    // branch becomes physically active in the subsequent commit that adds
+    // the tensor aggregation; until then both variants must produce
+    // identical forces because the evaluation path is multipole-agnostic.
+
+    #[test]
+    fn multipole_order_default_is_monopole() {
+        let engine = BarnesHutEngine::new(16);
+        assert_eq!(engine.multipole_order(), MultipoleOrder::Monopole);
+    }
+
+    #[test]
+    fn multipole_order_setter_round_trips() {
+        let mut engine = BarnesHutEngine::new(16);
+
+        engine.set_multipole_order(MultipoleOrder::Quadrupole);
+        assert_eq!(engine.multipole_order(), MultipoleOrder::Quadrupole);
+
+        engine.set_multipole_order(MultipoleOrder::Monopole);
+        assert_eq!(engine.multipole_order(), MultipoleOrder::Monopole);
     }
 }
