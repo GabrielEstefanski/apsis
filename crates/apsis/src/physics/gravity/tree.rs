@@ -31,6 +31,8 @@
 
 use crate::domain::body::Body;
 
+use super::morton::{Aabb, compute_aabb, compute_morton_permutation};
+
 // ── Constants ─────────────────────────────────────────────────────────────── //
 
 /// Maximum number of body indices stored directly in a leaf node before it
@@ -176,17 +178,35 @@ pub(crate) struct Octree {
     /// Read by the BH walk to decide whether the per-node quadrupole tensor
     /// is meaningful or zero-by-construction.
     built_order: MultipoleOrder,
+    /// Morton (Z-order) permutation populated when [`build`](Self::build)
+    /// was called with `morton = true`. `None` means the tree was built in
+    /// natural (input) order. Read by the BH walk to drive parallel iteration
+    /// in spatially-coherent order.
+    built_perm: Option<Vec<u32>>,
 }
 
 impl Octree {
     pub(crate) fn new(max_depth: usize) -> Self {
-        Self { nodes: Vec::new(), max_depth, built_order: MultipoleOrder::Monopole }
+        Self {
+            nodes: Vec::new(),
+            max_depth,
+            built_order: MultipoleOrder::Monopole,
+            built_perm: None,
+        }
     }
 
     /// Multipole order the tree currently carries.
     #[inline]
     pub(crate) fn built_order(&self) -> MultipoleOrder {
         self.built_order
+    }
+
+    /// Morton permutation produced by the most recent [`build`](Self::build),
+    /// or `None` if Morton was disabled.
+    #[allow(dead_code)] // wired up by the BH walk in the next commit
+    #[inline]
+    pub(crate) fn built_perm(&self) -> Option<&[u32]> {
+        self.built_perm.as_deref()
     }
 
     /// Rebuild the tree from scratch for the given body slice.
@@ -200,44 +220,36 @@ impl Octree {
     /// node's traceless quadrupole tensor about its own COM (parallel-axis
     /// theorem on internal nodes). Under `Monopole` the tensor fields stay
     /// at their initial zero, and the second pass is skipped.
-    pub(crate) fn build(&mut self, bodies: &[Body], order: MultipoleOrder) {
+    ///
+    /// When `morton == true`, bodies are inserted in Morton (Z-order)
+    /// permutation rather than input order. The permutation is retained on
+    /// the tree (see [`built_perm`](Self::built_perm)) so the BH walk can
+    /// iterate in the same spatially-coherent order. The final tree
+    /// structure is invariant under insertion permutation, so forces
+    /// match those of `morton == false` up to the FP-reorder floor.
+    pub(crate) fn build(&mut self, bodies: &[Body], order: MultipoleOrder, morton: bool) {
         self.nodes.clear();
         self.built_order = order;
+        self.built_perm = None;
 
         if bodies.is_empty() {
             return;
         }
 
-        // ── Compute 3D bounding box ──────────────────────────────────── //
-        let mut min_x = bodies[0].x;
-        let mut max_x = bodies[0].x;
-        let mut min_y = bodies[0].y;
-        let mut max_y = bodies[0].y;
-        let mut min_z = bodies[0].z;
-        let mut max_z = bodies[0].z;
-
-        for b in &bodies[1..] {
-            min_x = min_x.min(b.x);
-            max_x = max_x.max(b.x);
-            min_y = min_y.min(b.y);
-            max_y = max_y.max(b.y);
-            min_z = min_z.min(b.z);
-            max_z = max_z.max(b.z);
-        }
-
-        let cx = 0.5 * (min_x + max_x);
-        let cy = 0.5 * (min_y + max_y);
-        let cz = 0.5 * (min_z + max_z);
-        // Cubic root cell: side covers the longest extent across all three axes.
-        let extent = (max_x - min_x).max(max_y - min_y).max(max_z - min_z);
-        let mut half = 0.5 * extent;
-        half = if half <= 0.0 { TREE_PAD } else { half * 1.0001 + TREE_PAD };
-
-        self.nodes.push(Node::new(cx, cy, cz, half));
+        let aabb: Aabb = compute_aabb(bodies);
+        self.nodes.push(Node::new(aabb.center[0], aabb.center[1], aabb.center[2], aabb.half));
 
         // ── Insert all bodies ────────────────────────────────────────── //
-        for i in 0..bodies.len() {
-            self.insert(0, i, bodies, 0);
+        if morton {
+            let perm = compute_morton_permutation(bodies, &aabb);
+            for &i in &perm {
+                self.insert(0, i as usize, bodies, 0);
+            }
+            self.built_perm = Some(perm);
+        } else {
+            for i in 0..bodies.len() {
+                self.insert(0, i, bodies, 0);
+            }
         }
 
         // ── Aggregate mass / COM bottom-up ──────────────────────────── //
@@ -504,7 +516,7 @@ mod tests {
         let bodies = vec![body_xy(0.0, 0.0, 1.0), body_xy(4.0, 0.0, 3.0)];
 
         let mut tree = make_tree();
-        tree.build(&bodies, MultipoleOrder::Monopole);
+        tree.build(&bodies, MultipoleOrder::Monopole, false);
 
         let root = &tree.nodes[0];
 
@@ -520,7 +532,7 @@ mod tests {
         let bodies = vec![body_xyz(0.0, 0.0, 0.0, 1.0), body_xyz(4.0, 2.0, -2.0, 3.0)];
 
         let mut tree = make_tree();
-        tree.build(&bodies, MultipoleOrder::Monopole);
+        tree.build(&bodies, MultipoleOrder::Monopole, false);
 
         let root = &tree.nodes[0];
 
@@ -536,7 +548,7 @@ mod tests {
         let bodies: Vec<Body> = (0..10).map(|i| body_xy(i as f64, 0.0, 1.0)).collect();
 
         let mut tree = make_tree();
-        tree.build(&bodies, MultipoleOrder::Monopole);
+        tree.build(&bodies, MultipoleOrder::Monopole, false);
 
         assert_eq!(tree.nodes[0].body_count, 10);
     }
@@ -547,7 +559,7 @@ mod tests {
         let bodies = vec![body_xy(1.0, 2.0, 5.0)];
 
         let mut tree = make_tree();
-        tree.build(&bodies, MultipoleOrder::Monopole);
+        tree.build(&bodies, MultipoleOrder::Monopole, false);
 
         let root = &tree.nodes[0];
 
@@ -562,7 +574,7 @@ mod tests {
         let bodies = vec![body_xy(0.0, 0.0, 1.0), body_xy(0.0, 0.0, 2.0)];
 
         let mut tree = make_tree();
-        tree.build(&bodies, MultipoleOrder::Monopole);
+        tree.build(&bodies, MultipoleOrder::Monopole, false);
 
         let root = &tree.nodes[0];
 
@@ -594,7 +606,7 @@ mod tests {
         }
 
         let mut tree = make_tree();
-        tree.build(&bodies, MultipoleOrder::Monopole);
+        tree.build(&bodies, MultipoleOrder::Monopole, false);
 
         let root = &tree.nodes[0];
         assert!(!root.is_leaf(), "root should subdivide after 16 inserts");
@@ -662,7 +674,7 @@ mod tests {
         let com_z_expected: f64 = bodies.iter().map(|b| b.mass * b.z).sum::<f64>() / m_total;
 
         let mut tree = make_tree();
-        tree.build(&bodies, MultipoleOrder::Monopole);
+        tree.build(&bodies, MultipoleOrder::Monopole, false);
 
         let root = &tree.nodes[0];
         assert_relative_eq!(root.mass, m_total, epsilon = 1e-12);
@@ -688,7 +700,7 @@ mod tests {
             let expected_mass: f64 = bodies.iter().map(|b| b.mass).sum();
 
             let mut tree = make_tree();
-            tree.build(&bodies, MultipoleOrder::Monopole);
+            tree.build(&bodies, MultipoleOrder::Monopole, false);
 
             let root = &tree.nodes[0];
 
@@ -708,7 +720,7 @@ mod tests {
         let bodies = vec![body_xyz(1.0, 0.0, 0.0, 1.0), body_xyz(-1.0, 0.0, 0.0, 1.0)];
 
         let mut tree = make_tree();
-        tree.build(&bodies, MultipoleOrder::Quadrupole);
+        tree.build(&bodies, MultipoleOrder::Quadrupole, false);
 
         let root = &tree.nodes[0];
         assert!(root.is_leaf(), "2 bodies must fit in the root leaf");
@@ -748,7 +760,7 @@ mod tests {
             positions.iter().map(|&(x, y, z, m)| body_xyz(x, y, z, m)).collect();
 
         let mut tree = make_tree();
-        tree.build(&bodies, MultipoleOrder::Quadrupole);
+        tree.build(&bodies, MultipoleOrder::Quadrupole, false);
 
         let root = &tree.nodes[0];
         assert!(!root.is_leaf(), "16 bodies must force the root to subdivide");
@@ -790,7 +802,7 @@ mod tests {
         let bodies = vec![body_xyz(1.0, 2.0, 3.0, 1.0), body_xyz(-2.0, 1.0, -1.0, 2.0)];
 
         let mut tree = make_tree();
-        tree.build(&bodies, MultipoleOrder::Monopole);
+        tree.build(&bodies, MultipoleOrder::Monopole, false);
 
         let root = &tree.nodes[0];
         assert_eq!(root.q_xx, 0.0);
@@ -798,5 +810,63 @@ mod tests {
         assert_eq!(root.q_xz, 0.0);
         assert_eq!(root.q_yy, 0.0);
         assert_eq!(root.q_yz, 0.0);
+    }
+
+    // ── Morton-aware build ─────────────────────────────────────────────── //
+
+    /// Insertion order is a permutation invariant of the final tree:
+    /// regardless of whether bodies arrive in input order or in Morton order,
+    /// the same bodies end up in the same leaves (assuming no exact octant-
+    /// boundary ties, which `TREE_PAD` rules out). The aggregated root mass
+    /// and COM must therefore agree to the FP-reorder floor.
+    #[test]
+    fn morton_built_tree_matches_natural_order_at_root() {
+        let bodies: Vec<Body> = (0..32)
+            .map(|i| {
+                let t = i as f64 * 0.31;
+                body_xyz(t.sin(), t.cos(), (t * 0.7).sin(), 0.5 + (t * 0.13).sin().abs())
+            })
+            .collect();
+
+        let mut natural = make_tree();
+        natural.build(&bodies, MultipoleOrder::Monopole, false);
+
+        let mut morton = make_tree();
+        morton.build(&bodies, MultipoleOrder::Monopole, true);
+
+        let r_nat = &natural.nodes[0];
+        let r_mor = &morton.nodes[0];
+
+        // 32 bodies × 4-level accumulation depth ≈ 32 · ε ≈ 7e-15 drift bound.
+        assert_relative_eq!(r_nat.mass, r_mor.mass, epsilon = 1e-13);
+        assert_relative_eq!(r_nat.com_x, r_mor.com_x, epsilon = 1e-13);
+        assert_relative_eq!(r_nat.com_y, r_mor.com_y, epsilon = 1e-13);
+        assert_relative_eq!(r_nat.com_z, r_mor.com_z, epsilon = 1e-13);
+
+        assert!(natural.built_perm().is_none(), "natural-order build must not retain a perm");
+        let perm = morton.built_perm().expect("morton build must retain a perm");
+        assert_eq!(perm.len(), bodies.len());
+        // perm is a permutation of [0..N): every index appears exactly once.
+        let mut seen = vec![false; bodies.len()];
+        for &i in perm {
+            assert!(!seen[i as usize], "morton perm yields body {i} twice");
+            seen[i as usize] = true;
+        }
+        assert!(seen.iter().all(|&s| s));
+    }
+
+    #[test]
+    fn morton_built_tree_root_body_count_equals_n() {
+        let bodies: Vec<Body> = (0..50)
+            .map(|i| {
+                let t = i as f64;
+                body_xyz((t * 0.41).sin(), (t * 0.29).cos(), (t * 0.17).sin(), 1.0)
+            })
+            .collect();
+
+        let mut tree = make_tree();
+        tree.build(&bodies, MultipoleOrder::Monopole, true);
+
+        assert_eq!(tree.nodes[0].body_count as usize, bodies.len());
     }
 }
