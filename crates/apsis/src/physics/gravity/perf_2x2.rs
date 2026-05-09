@@ -2,14 +2,17 @@
 //!
 //! Lab notebook: `docs/experiments/2026-05-08-octree-perf-2x2.md`.
 //!
-//! Two opt-in tests live here:
+//! Three opt-in tests live here:
 //!
 //! ```text
-//! # Full Pareto sweep (3 seeds × 3 N × 4 θ × cells), writes CSVs:
+//! # Full Pareto sweep (3 seeds × 3 N × 4 θ × 4 cells), writes CSVs:
 //! cargo test --release -p apsis perf_2x2_pareto_frontier -- --ignored --nocapture
 //!
 //! # Force-accuracy gates per notebook §Tier 1 (asserts on p50 / p95):
 //! cargo test --release -p apsis tier1_perf_2x2_force_accuracy_gates -- --ignored --nocapture
+//!
+//! # Leaf-capacity sensitivity sweep (LEAF ∈ {4, 8, 16, 32} on cell A):
+//! cargo test --release -p apsis leaf_capacity_sensitivity -- --ignored --nocapture
 //! ```
 //!
 //! Per-body force error is measured against:
@@ -46,9 +49,9 @@ use rayon::prelude::*;
 use crate::domain::body::Body;
 use crate::math::Vec3;
 
-use super::engine::BarnesHutEngine;
+use super::engine::{BarnesHutEngine, bh_eval_body};
 use super::kernel::{G, Kernel, PlummerKernel, pair_eps2};
-use super::tree::MultipoleOrder;
+use super::tree::{MultipoleOrder, Octree};
 
 // ── Frozen-variable matrix (notebook §Methodology) ────────────────────────── //
 
@@ -202,6 +205,148 @@ fn tier1_perf_2x2_force_accuracy_gates() {
     }
 
     assert!(violations.is_empty(), "[tier1] bound violations:\n{}", violations.join("\n"),);
+}
+
+// ── Leaf-capacity sensitivity sweep ──────────────────────────────────────── //
+
+/// Sweep `LEAF` ∈ {4, 8, 16, 32} on cell A configuration (monopole, no
+/// Morton) at a single (N, θ, seed) operating point, exporting per-LEAF
+/// build / walk / accuracy stats to `target/perf-2x2/leaf_sensitivity.csv`.
+///
+/// Cell A is chosen as the cleanest baseline — both factorial axes
+/// disabled, so any change observed is attributable to LEAF alone. Single
+/// (seed, N, θ) keeps runtime under a minute and matches the way the
+/// notebook §Threats item documents the LEAF dependency: a one-shot
+/// characterisation, not a full grid.
+///
+/// Goes through the generic `bh_eval_body` directly rather than
+/// `BarnesHutEngine` because the engine is pinned to `LEAF = DEFAULT_LEAF`
+/// in production. The walk logic mirrors `BarnesHutEngine::evaluate`'s
+/// natural-order branch (no Morton perm).
+#[test]
+#[ignore = "perf characterisation; opt-in via cargo test --release leaf_capacity_sensitivity -- --ignored --nocapture"]
+fn leaf_capacity_sensitivity() {
+    let n = 10_000;
+    let theta = 0.5;
+    let seed = SEEDS[0];
+    let bodies = sphere_distribution_lognormal(n, seed);
+    let reference = build_reference(&bodies, seed);
+
+    let rows = [
+        measure_leaf::<4>(&bodies, &reference, theta),
+        measure_leaf::<8>(&bodies, &reference, theta),
+        measure_leaf::<16>(&bodies, &reference, theta),
+        measure_leaf::<32>(&bodies, &reference, theta),
+    ];
+
+    let out_dir = perf_output_dir();
+    fs::create_dir_all(&out_dir).expect("create perf-2x2 output dir");
+    let csv_path = out_dir.join("leaf_sensitivity.csv");
+    let mut writer = fs::File::create(&csv_path).expect("create csv");
+    writeln!(writer, "leaf,N,theta,seed,p50,p95,p99,max,t_build_ms,t_walk_ms").unwrap();
+
+    eprintln!("[leaf-sens] N={n} theta={theta} seed={seed:#x} cell=A (mono, no Morton)");
+    for row in &rows {
+        writeln!(
+            writer,
+            "{},{},{},{:#x},{:.6e},{:.6e},{:.6e},{:.6e},{:.6},{:.6}",
+            row.leaf,
+            n,
+            theta,
+            seed,
+            row.error.p50,
+            row.error.p95,
+            row.error.p99,
+            row.error.max,
+            row.t_build_ms,
+            row.t_walk_ms,
+        )
+        .unwrap();
+        eprintln!(
+            "[leaf-sens]   LEAF={:>2}  p50={:.2e}  p95={:.2e}  max={:.2e}  \
+             t_build={:>7.3}ms  t_walk={:>7.3}ms",
+            row.leaf, row.error.p50, row.error.p95, row.error.max, row.t_build_ms, row.t_walk_ms,
+        );
+    }
+    eprintln!("[leaf-sens]   wrote {}", csv_path.display());
+}
+
+#[derive(Debug)]
+struct LeafRow {
+    leaf: usize,
+    error: ErrorStats,
+    t_build_ms: f64,
+    t_walk_ms: f64,
+}
+
+fn measure_leaf<const LEAF: usize>(bodies: &[Body], reference: &Reference, theta: f64) -> LeafRow {
+    let kernel = PlummerKernel::new();
+    let mut tree: Octree<LEAF> = Octree::new(16);
+
+    // Build phase timing.
+    let mut t_build = Vec::with_capacity(MEASURED);
+    for _ in 0..WARMUP {
+        tree.build(bodies, MultipoleOrder::Monopole, false);
+    }
+    for _ in 0..MEASURED {
+        let t = Instant::now();
+        tree.build(bodies, MultipoleOrder::Monopole, false);
+        t_build.push(t.elapsed().as_secs_f64() * 1000.0);
+    }
+
+    // Final build for the walk + error measurement.
+    tree.build(bodies, MultipoleOrder::Monopole, false);
+    let nodes = tree.nodes();
+
+    let walk_once = |acc: &mut [Vec3]| {
+        let results: Vec<(usize, Vec3, f64)> = (0..bodies.len())
+            .into_par_iter()
+            .map(|i| {
+                let mut stack = Vec::with_capacity(128);
+                let (a, phi) = bh_eval_body(
+                    nodes,
+                    i,
+                    &bodies[i],
+                    bodies,
+                    theta,
+                    &kernel,
+                    MultipoleOrder::Monopole,
+                    &mut stack,
+                );
+                (i, a, phi)
+            })
+            .collect();
+        for (i, a, _) in results {
+            acc[i] = a;
+        }
+    };
+
+    let mut acc = vec![Vec3::ZERO; bodies.len()];
+    let mut t_walk = Vec::with_capacity(MEASURED);
+    for _ in 0..WARMUP {
+        walk_once(&mut acc);
+    }
+    for _ in 0..MEASURED {
+        let t = Instant::now();
+        walk_once(&mut acc);
+        t_walk.push(t.elapsed().as_secs_f64() * 1000.0);
+    }
+
+    let errors: Vec<f64> = match reference {
+        Reference::Full { forces } => {
+            acc.iter().zip(forces).map(|(a, r)| relative_force_error(*a, *r)).collect()
+        },
+        Reference::Sampled { indices, forces } => {
+            indices.iter().zip(forces).map(|(&idx, r)| relative_force_error(acc[idx], *r)).collect()
+        },
+    };
+
+    LeafRow {
+        leaf: LEAF,
+        error: distribution_stats(&errors),
+        t_build_ms: median(&mut t_build),
+        t_walk_ms: median(&mut t_walk),
+    }
 }
 
 // ── Reference computation ────────────────────────────────────────────────── //
