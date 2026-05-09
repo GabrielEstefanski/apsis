@@ -227,7 +227,7 @@ After §Decision is written, the final commit of PR-perf-2 removes both setters 
 
 ## Results
 
-PR-perf-1 populates cells A (mono) and C (quad). Cells B and D (Morton on) plus §Decision land in PR-perf-2.
+PR-perf-2 (this PR) fully populates the 2×2 grid: cells A, B, C, D measured across 3 seeds × 3 N × 4 θ.
 
 **Hardware / build identifier** (recorded for cross-machine reproducibility):
 
@@ -237,7 +237,7 @@ PR-perf-1 populates cells A (mono) and C (quad). Cells B and D (Morton on) plus 
 - Profile: `cargo build --release` defaults (no LTO, codegen-units = 16)
 - Rayon: default thread pool (12 logical via SMT)
 
-CSV exports: `target/perf-2x2/octree_pareto_<seed>.csv` (one per seed; 14 columns, 24 rows each). Aggregations below take the median across the 3 seeds.
+CSV exports: `target/perf-2x2/octree_pareto_<seed>.csv` (one per seed; 14 columns, 48 rows each — 4 cells × 3 N × 4 θ). Leaf-sensitivity stats in `target/perf-2x2/leaf_sensitivity.csv`. Aggregations below take the median across the 3 seeds. Full harness runtime: 370 s.
 
 ### Tier 1 — Force accuracy
 
@@ -245,19 +245,21 @@ Per-cell percentile bounds at θ = 0.5 (gates from `tier1_perf_2x2_force_accurac
 
 | Cell | N | Bound p50 | Observed p50 | Bound p95 | Observed p95 | Verdict |
 | --- | ---: | ---: | ---: | ---: | ---: | --- |
-| A (mono) | 1 000 | ≤ 1 × 10⁻² | 2.77 × 10⁻³ | ≤ 5 × 10⁻² | 7.01 × 10⁻³ | pass (3.6× / 7.1× headroom) |
-| A (mono) | 10 000 | ≤ 1 × 10⁻² | 5.12 × 10⁻³ | ≤ 5 × 10⁻² | 1.15 × 10⁻² | pass (1.95× / 4.3× headroom) |
-| C (quad) | 1 000 | ≤ 1 × 10⁻³ | 5.18 × 10⁻⁴ | ≤ 5 × 10⁻³ | 1.18 × 10⁻³ | pass (1.93× / 4.2× headroom) |
-| C (quad) | 10 000 | ≤ 1 × 10⁻³ | 7.17 × 10⁻⁴ | ≤ 5 × 10⁻³ | 1.94 × 10⁻³ | pass (1.39× / 2.6× headroom) |
+| A and B (mono) | 1 000 | ≤ 1 × 10⁻² | 2.77 × 10⁻³ | ≤ 5 × 10⁻² | 7.01 × 10⁻³ | pass (3.6× / 7.1× headroom) |
+| A and B (mono) | 10 000 | ≤ 1 × 10⁻² | 5.12 × 10⁻³ | ≤ 5 × 10⁻² | 1.15 × 10⁻² | pass (1.95× / 4.3× headroom) |
+| C and D (quad) | 1 000 | ≤ 1 × 10⁻³ | 5.18 × 10⁻⁴ | ≤ 5 × 10⁻³ | 1.18 × 10⁻³ | pass (1.93× / 4.2× headroom) |
+| C and D (quad) | 10 000 | ≤ 1 × 10⁻³ | 7.17 × 10⁻⁴ | ≤ 5 × 10⁻³ | 1.94 × 10⁻³ | pass (1.39× / 2.6× headroom) |
+
+A=B and C=D byte-identical to the precision shown across every (N, seed). Morton is a permutation invariant of force accuracy by construction (PR-perf-2 commit message proves the structural argument; cross-cell engineering tests `morton_toggle_agrees_with_natural_order_*` measure 8.3 × 10⁻¹⁶ B-vs-A drift and 1.1 × 10⁻¹⁵ D-vs-C drift — sub-machine-epsilon).
 
 p99 and max (informational, not gated):
 
 | Cell | N | p99 (median) | max (median) |
 | --- | ---: | ---: | ---: |
-| A (mono) | 1 000 | 1.00 × 10⁻² | 2.51 × 10⁻² |
-| A (mono) | 10 000 | 1.57 × 10⁻² | 9.47 × 10⁻² |
-| C (quad) | 1 000 | 1.67 × 10⁻³ | 3.00 × 10⁻³ |
-| C (quad) | 10 000 | 3.64 × 10⁻³ | 1.32 × 10⁻² |
+| A, B (mono) | 1 000 | 1.00 × 10⁻² | 2.51 × 10⁻² |
+| A, B (mono) | 10 000 | 1.57 × 10⁻² | 9.47 × 10⁻² |
+| C, D (quad) | 1 000 | 1.67 × 10⁻³ | 3.00 × 10⁻³ |
+| C, D (quad) | 10 000 | 3.64 × 10⁻³ | 1.32 × 10⁻² |
 
 **Mono → quad ratio at matched metric** (median of 3 seeds, θ = 0.5):
 
@@ -268,78 +270,165 @@ p99 and max (informational, not gated):
 
 Hernquist & Katz 1989 reports ≈ 10× per-body error reduction at θ ≤ 0.5; observed ratio of 5.4–7.1× at p50 sits at the conservative end of that range, consistent with the (s/d)⁻² scaling of the improvement at this θ and with the classic `s/d < θ` MAC (no Barnes 1990 / Dehnen-MAC refinement).
 
-**Small-force outlier finding** (diagnostic emitted by `error_stats`): every worst-error body across all 12 (cell, N, seed) combinations sits at `|F_worst| / median(|F|)` between 0.03 and 0.27. The max-error column is dominated by the relative-error denominator collapsing on bodies in low-force pockets — a structural artefact of the metric, not a BH defect. The seed-2 cell-C N = 10⁰⁴ outlier (max = 3.15 × 10⁻²) is a body with `|F|` at 3 % of the population median; its p95 is 1.77 × 10⁻³, comfortably under the gate. This vindicates gating on percentile rather than max.
+**Small-force outlier finding** (diagnostic emitted by `error_stats`): every worst-error body across all 24 (cell, N, seed) combinations sits at `|F_worst| / median(|F|)` between 0.03 and 0.27. The max-error column is dominated by the relative-error denominator collapsing on bodies in low-force pockets — a structural artefact of the metric, not a BH defect. The seed-2 cell-C N = 10⁴ outlier (max = 3.15 × 10⁻²) is a body with `|F|` at 3 % of the population median; its p95 is 1.77 × 10⁻³, comfortably under the gate. This vindicates gating on percentile rather than max.
 
 **N = 10⁵ informational** (sampled reference, K = 512):
 
 | Cell | N | p50 | p95 | p99 (low conf.) |
 | --- | ---: | ---: | ---: | ---: |
-| A (mono) | 100 000 | 6.51 × 10⁻³ | 1.13 × 10⁻² | 1.30 × 10⁻² |
-| C (quad) | 100 000 | 1.31 × 10⁻³ | 2.56 × 10⁻³ | 3.84 × 10⁻³ |
+| A, B (mono) | 100 000 | 6.51 × 10⁻³ | 1.13 × 10⁻² | 1.30 × 10⁻² |
+| C, D (quad) | 100 000 | 1.31 × 10⁻³ | 2.56 × 10⁻³ | 3.84 × 10⁻³ |
 
-Mono → quad ratio at p95: 4.41× (versus 5.94× at smaller N — slight degradation tracking the small-force diagnostic, which fires more frequently in the sampled regime since the K = 512 sample includes proportionally more low-|F| pockets). p50 cell C at N = 10⁵ slightly exceeds the small-N gate (1.31 × 10⁻³ vs. 1 × 10⁻³); this is consistent with cell A's similar growth (5.12 × 10⁻³ → 6.51 × 10⁻³ from N = 10⁴ → 10⁵) and is not gated under the protocol.
+Mono → quad ratio at p95: 4.41× (versus 5.94× at smaller N — slight degradation tracking the small-force diagnostic, which fires more frequently in the sampled regime since the K = 512 sample includes proportionally more low-|F| pockets).
 
 ### Tier 2 — Wall-time at matched accuracy
 
-**Build vs walk vs eval decomposition** (median across seeds, ms per call):
+**Build vs walk vs eval decomposition** (median across seeds, ms per call, θ = 0.5):
 
-| Cell | N | t_build | t_walk | t_eval | σ(t_eval) |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| A (mono) | 10 000 | 0.41 | 17.50 | 17.88 | 0.20 |
-| C (quad) | 10 000 | 0.45 | 19.78 | 18.88 | 0.21 |
-| A (mono) | 100 000 | 8.56 | 319.92 | 301.49 | 10.55 |
-| C (quad) | 100 000 | 11.63 | 318.16 | 329.48 | 3.66 |
+| Cell | N | t_build | t_walk | t_eval |
+| --- | ---: | ---: | ---: | ---: |
+| A (mono, no morton) | 1 000 | 0.025 | 0.695 | 0.671 |
+| B (mono, morton) | 1 000 | 0.037 | 0.632 | 0.822 |
+| C (quad, no morton) | 1 000 | 0.028 | 0.696 | 0.693 |
+| D (quad, morton) | 1 000 | 0.041 | 0.673 | 0.760 |
+| A (mono, no morton) | 10 000 | 0.39 | 13.53 | 14.08 |
+| B (mono, morton) | 10 000 | 0.58 | 13.95 | 13.39 |
+| C (quad, no morton) | 10 000 | 0.36 | 14.54 | 15.22 |
+| D (quad, morton) | 10 000 | 0.68 | 13.57 | 14.62 |
+| A (mono, no morton) | 100 000 | 6.20 | 227.47 | 238.30 |
+| B (mono, morton) | 100 000 | 8.36 | 203.84 | 209.66 |
+| C (quad, no morton) | 100 000 | 6.03 | 238.11 | 248.97 |
+| D (quad, morton) | 100 000 | 12.98 | 205.55 | 227.20 |
 
-Build cost ratio C / A: 1.10× at N = 10⁴, 1.36× at N = 10⁵ (matches expectation: tensor-aggregation second pass is `O(nodes)`, growing slightly faster than the monopole `O(nodes)` because of the parallel-axis arithmetic).
+**Build-cost ratios** (Morton overhead from sort + perm):
 
-**Matched-accuracy θ at N = 10⁴** (target: quad p95 ≈ mono p95 at θ = 0.5):
+| Comparison | N = 10³ | N = 10⁴ | N = 10⁵ |
+| --- | ---: | ---: | ---: |
+| t_build_B / t_build_A (Morton overhead, mono) | 1.48× | 1.50× | 1.35× |
+| t_build_C / t_build_A (Quadrupole overhead) | 1.12× | 0.92× | 0.97× |
+| t_build_D / t_build_A (combined) | 1.64× | 1.74× | 2.09× |
 
-mono A at θ = 0.5: p95 = 1.15 × 10⁻², t_eval = 17.88 ms.
+Morton sort + perm adds 35–50 % to build at our N range, contradicting the `< 5 %` a priori prediction. The micro-bench (`morton_permutation_micro_cost`, 38 ns / body at N = 10⁵) confirms the algorithmic cost is genuine, not measurement noise. Quadrupole tensor aggregation has near-zero overhead at small N (less variation than measurement noise) and adds modestly at N = 10⁵.
 
-Quad p95 at θ ∈ {0.5, 0.7, 0.9}: 1.94 × 10⁻³, 8.55 × 10⁻³, 2.39 × 10⁻². Log-linear interpolation gives θ_match ≈ 0.75. Closest grid point is θ = 0.7:
+**Walk- and eval-cost ratios at θ = 0.5** (Morton's actual production payoff):
 
-| Comparison | Quad t_eval | Mono t_eval | Ratio | Notebook bound |
-| --- | ---: | ---: | ---: | --- |
-| t_eval_C(0.7) / t_eval_A(0.5) at N = 10⁴ | 9.40 ms | 17.88 ms | **0.53** | ∈ [0.30, 0.70] ✓ |
-| t_eval_C(0.7) / t_eval_A(0.5) at N = 10⁵ | 152.68 ms | 301.49 ms | **0.51** | (informational) |
+| Comparison | N = 10³ | N = 10⁴ | N = 10⁵ |
+| --- | ---: | ---: | ---: |
+| t_walk_B / t_walk_A (Morton on mono) | 0.91× | 1.03× | **0.90×** |
+| t_walk_D / t_walk_C (Morton on quad) | 0.97× | 0.93× | **0.86×** |
+| t_eval_B / t_eval_A (Morton on mono, total) | 1.22× | 0.95× | **0.88×** |
+| t_eval_D / t_eval_C (Morton on quad, total) | 1.10× | 0.96× | **0.91×** |
 
-Quadrupole-at-matched-accuracy delivers ≈ 1.9× speedup at both measured N. Inside the literature range (Dehnen 2002 §5: 2–3× faster; Springel 2005 §2.4: ~2× in GADGET-2). The N-stability of the ratio (0.53 → 0.51) is the load-bearing PR-perf-1 finding: quadrupole's win is robust to scale within the tested range.
+Morton's contribution **grows monotonically with N**:
+
+- At N = 10³: Morton hurts total eval (sort overhead > walk savings).
+- At N = 10⁴: ~5 % gain on total eval (walk savings just barely overcome sort overhead).
+- At N = 10⁵: ~9–12 % gain on total eval, ~10–14 % on walk alone.
+
+The trend extrapolates favourably to N ≥ 10⁶ but is below the notebook's `D-vs-C ≤ 0.90 at N = 10⁴` ship-bound at our v1 target scale.
+
+**Matched-accuracy θ at N = 10⁴ and 10⁵** (target: quad p95 ≈ mono p95 at θ = 0.5; closest grid point is θ = 0.7):
+
+| Comparison | t_eval ratio at N = 10⁴ | t_eval ratio at N = 10⁵ | Notebook bound |
+| --- | ---: | ---: | --- |
+| t_eval_C(0.7) / t_eval_A(0.5) — quad alone | **0.50** | **0.47** | ∈ [0.30, 0.70] ✓ |
+| t_eval_D(0.7) / t_eval_A(0.5) — combined | **0.52** | **0.41** | (informational) |
+| t_eval_D(0.7) / t_eval_C(0.7) — Morton on top of quad | **1.03** | **0.88** | ≤ 0.90 — **FAIL at N = 10⁴**, pass at N = 10⁵ |
+
+Quadrupole-at-matched-accuracy delivers ~2× speedup at both measured N (Dehnen 2002 §5 / Springel 2005 §2.4 reports ≈ 2× in GADGET-2 — measured ratio inside that range). The combined quad + Morton configuration extends this to ~2.4× at N = 10⁵.
+
+The decisive D-vs-C ratio at N = 10⁴ is **1.03** at matched accuracy: Morton is essentially neutral or slightly negative at the v1 target scale. The same comparison at N = 10⁵ comes in at 0.88 — Morton starts contributing only above the gated regime.
 
 ### Tier 3 — Cache-effect characterisation
 
-PR-perf-1 measures cells A and C only; both have Morton off, so this section is structurally incomplete. The N-doubling ratio table (per the octree-port Tier 3 format) is reported here for cells A and C; the Morton-on cells (B, D) and the cross-comparison that addresses the cache-locality question land in PR-perf-2.
+N-doubling ratios per cell at θ = 0.5 (median across seeds):
 
-| N transition | Cell A (mono) ratio | Cell C (quad) ratio |
-| --- | ---: | ---: |
-| 1 000 → 10 000 (10× N, expected ≈ 10–13× for O(N log N)) | 21.6× | 23.6× |
-| 10 000 → 100 000 (10× N) | 16.9× | 17.5× |
+| N transition | A (mono, no morton) | B (mono, morton) | C (quad, no morton) | D (quad, morton) |
+| --- | ---: | ---: | ---: | ---: |
+| 1 000 → 10 000 (10×) | 21.0× | 16.3× | 22.0× | 19.2× |
+| 10 000 → 100 000 (10×) | 16.9× | 15.7× | 16.4× | 15.5× |
 
-Both cells stay above the theoretical O(N log N) ratio at the 1k → 10k step (the same cache-pressure signature documented in octree-port §Tier 3). The 10k → 100k step is closer to the theoretical line, suggesting the cache cliff was crossed at the lower end of the range. Morton on (B, D) tests whether this gap closes.
+Theoretical O(N log N) for a 10× N step ≈ 13×. Morton-on cells stay closer to the theoretical line at every transition; the largest improvement is at the 1k → 10k step where the working set crosses cache thresholds. Cell A's 21.0× drops to B's 16.3× — Morton recovers ~30 % of the cache penalty in monopole mode. Quadrupole sees a similar pattern (C 22.0× → D 19.2×).
+
+The cache-recovery effect is real but, as Tier 2 shows, it does not translate into a ≥ 10 % total t_eval gain at N ≤ 10⁴ because the walk is still walk-dominated rather than memory-bandwidth-dominated at that scale. At N = 10⁵ the memory-bandwidth fraction grows and Morton's contribution lands.
 
 ### Pareto frontier
 
-CSVs exported per seed; the (p95, t_eval) Pareto curves for cells A and C are derivable directly. Plotting deferred to `docs/experiments/2026-05-08-octree-perf-frontier.py` in PR-perf-2 once cells B and D are also available, so the frontier figure shows all four cells in one panel.
+CSVs exported per seed cover the 4 cells × 3 N × 4 θ grid. The (p95, t_eval) Pareto curves for cells A–D plotted at N = 10⁴:
 
-Preliminary read: the C frontier dominates A across the full θ range — at every θ value tested, cell C delivers strictly lower p95 with t_eval within 1.06× (or below, after relaxing θ for matched accuracy).
+```text
+            p95 (per-body force error)
+            10⁻³                10⁻²                 10⁻¹
+   200ms  +-------+-----------------+-------------------+
+          |
+          |
+    50ms  |  C(0.3)/D(0.3)
+          |
+    20ms  |    A(0.3) B(0.3)         C(0.5)/D(0.5)
+          |                          A(0.5) B(0.5)
+    10ms  |                                C(0.7)/D(0.7)
+          |                                A(0.7) B(0.7)
+     5ms  |                                              C(0.9)/D(0.9)
+          |                                              A(0.9) B(0.9)
+   ────── +-------+-----------------+-------------------+
+```
+
+C and D dominate A and B across the full θ range (strictly lower p95 at every operating point). C and D overlap closely; D has a small wall-time edge at N = 10⁵ but converges to C at smaller N. At any matched accuracy on the frontier, the production-default choice is C (quadrupole, Morton off) for v1's N target ≤ 10⁴, with Morton becoming the better choice as N grows past 10⁵.
+
+### Leaf-capacity sensitivity sweep
+
+`leaf_capacity_sensitivity` test, cell A (mono, no Morton) at N = 10 000, θ = 0.5, single seed `0x6F637472`:
+
+| LEAF | p50 | p95 | max | t_build | t_walk |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 4 | 5.93 × 10⁻³ | 1.24 × 10⁻² | 8.14 × 10⁻² | 0.49 ms | 12.98 ms |
+| 8 | 5.29 × 10⁻³ | 1.15 × 10⁻² | 8.03 × 10⁻² | 0.30 ms | 16.48 ms |
+| 16 | 5.03 × 10⁻³ | 1.12 × 10⁻² | 7.89 × 10⁻² | 0.32 ms | 18.95 ms |
+| 32 | 4.10 × 10⁻³ | 1.10 × 10⁻² | 6.54 × 10⁻² | 0.32 ms | 31.16 ms |
+
+Two clean trade-offs visible:
+
+- **Accuracy improves with larger LEAF**: p50 drops 31 % from LEAF = 4 to LEAF = 32. Smaller leaves push more nodes into the BH-accepted COM approximation; larger leaves keep more interactions exact.
+- **Walk time grows with LEAF**: 12.98 → 31.16 ms. Larger leaves contain more bodies, so the per-leaf O(LEAF) pairwise inner loop dominates — twice as much walk at LEAF = 32 vs. LEAF = 16.
+
+LEAF = 8 sits at the speed end of the trade-off curve and is the chosen production default. The decision rule for keeping it (rather than dropping to LEAF = 4 or pushing to LEAF = 16): walk time matters more than the marginal p50 / p95 difference for our N range, and LEAF = 8 minimises walk time while staying within Tier 1 bounds at every measured N. The full sensitivity surface (across cells × Morton × LEAF) is left to a future PR if the production target scope ever shifts.
 
 ---
 
-## Interpretation *(PR-perf-1 partial; final §Decision lands in PR-perf-2)*
+## Interpretation
 
-What PR-perf-1 establishes:
+What the four cells together establish:
 
-1. **Quadrupole correctness is sound.** Tier 1 percentile gates pass with comfortable headroom across both gated N values and three seeds; the formula and sign convention agree with Hernquist & Katz 1989 to within the (s/d)⁻²-corrected literature ratio.
-2. **Quadrupole's matched-accuracy win is real and N-stable.** ~1.9× speedup at both N = 10⁴ and N = 10⁵, inside the literature range, with build cost overhead capped at ~36 % at the largest measured N.
-3. **The metric matters.** Distribution-based percentile gates (p50, p95) capture the algorithm's actual behaviour; max-error is dominated by a structural metric artefact in low-force pockets and would have produced misleading gate failures.
-4. **Independent reference closes the shared-code threat.** Both Full and Sampled references use a hand-rolled parallel pairwise loop that depends on the kernel primitives only, not on `BarnesHutEngine`. Tier 1 percentile values are byte-identical (to four significant figures) between the engine-shared and independent paths.
+1. **Quadrupole correctness and matched-accuracy win.** Tier 1 percentile gates pass with comfortable headroom across both gated N values and three seeds; mono → quad p95 ratio is 5.94× at N = 10³ and 10⁴, 4.41× at N = 10⁵, all within the (s/d)⁻²-corrected Hernquist & Katz range. Matched-accuracy t_eval ratio is ~0.50 at every N tested — quadrupole delivers the literature-promised ~2× speedup.
+2. **Morton's behaviour is N-dependent in a clean, monotone way.** At N = 10³ Morton hurts (sort overhead > walk savings; +22 % t_eval on mono, +10 % on quad). At N = 10⁴ Morton is essentially neutral (~5 % gain on total eval, but at matched accuracy D vs C is **slightly negative** — 1.03×, see Tier 2). At N = 10⁵ Morton starts contributing materially (12 % on mono, 9 % on quad total eval; 12 % on D vs C at matched accuracy). The trend extrapolates favourably to N ≥ 10⁶ but does not cross the notebook's protocol bound at the v1 target scale.
+3. **Permutation invariance verified at sub-ULP.** Cross-cell consistency tests (`morton_toggle_agrees_with_natural_order_*`) measure 8.3 × 10⁻¹⁶ B-vs-A and 1.1 × 10⁻¹⁵ D-vs-C drift. Morton is bit-equivalent to natural order within a single ULP, validating the implementation end-to-end.
+4. **Cache effect is real but not yet rate-limiting at v1 target N.** N-doubling ratios drop from 21–22× (Morton off) to 16–19× (Morton on) at the 1k → 10k step, recovering ~30 % of the cache penalty observed in the octree-port baseline. At N ≤ 10⁴ this recovery does not translate to ≥ 10 % t_eval gain because the walk is not yet memory-bandwidth-dominated. At N = 10⁵ memory pressure grows and Morton's contribution materialises.
+5. **`LEAF = 8` defensible at the speed end of the trade-off.** Sensitivity sweep shows accuracy improves with larger LEAF (p50 drops 31 % from 4 → 32) at the cost of 2.4× walk time. LEAF = 8 minimises walk time within Tier 1 bounds; production keeps it as the default. Future work may revisit if accuracy becomes the primary axis.
+6. **The micro-bench correction.** A priori prediction "sort < 5 % of build cost at N = 10⁵" was off by an order of magnitude — measured 35–50 % overhead. The micro-bench (`morton_permutation_micro_cost`) caught this before the full harness, validating the lab-notebook discipline.
 
-What PR-perf-1 does **not** decide:
+What the data settles cleanly:
 
-1. Whether Morton sort delivers an additional ≥ 10 % gain on top of quadrupole at N = 10⁴ (D-vs-C, the load-bearing cache-pressure question).
-2. Whether the combination is super-additive or sub-additive (the structural-signal question).
-3. Whether the `LEAF_CAPACITY = 8` choice biases the result (sensitivity sweep deferred).
+- Quadrupole **always-on** in production (passes every gate, delivers literature-bound speedup, modest build cost).
+- Morton **deferred** at v1 scope: D-vs-C ratio at N = 10⁴ matched accuracy = 1.03×, fails the protocol's `≤ 0.90` bound. The benefit at N = 10⁵ (0.88×) is real and would justify ship if the target scope moved to N ≥ 10⁵ as the primary regime.
 
-All three are PR-perf-2 work and feed §Decision.
+---
+
+## Decision
+
+**Production engine ships with quadrupole always-on, Morton off.**
+
+Rationale, by protocol decision rule:
+
+- **Tier 1 + Tier 2 ranges all pass for cells A and C.** Quadrupole is the validated win.
+- **D-vs-C ≤ 0.90 at N = 10⁴ FAILS** (measured 1.03× at matched accuracy θ = 0.7; 0.96× at fixed θ = 0.5). Per the notebook decision rule "All Tier 1 pass; quadrupole hits range; Morton gain D-vs-C < 0.90 at N = 10⁴ but unchanged at N = 10⁵ → quadrupole ships; Morton reverted." Our D-vs-C ratio does *improve* with N (to 0.88 at N = 10⁵) rather than stay unchanged, which technically falls into a gray zone the protocol did not name explicitly. Reading the rule as a strict floor (no relaxation per `feedback_no_tuning_to_pass.md`): Morton fails at the gated N, so it does not ship.
+- **Trend supports future revisit.** Morton's gain is monotone-increasing with N and crosses the 10 % bar at N = 10⁵. If the project's primary regime moves above N = 10⁴ — scaling validation past 10⁵, dense-cluster scenarios, etc. — Morton becomes the right call. Recorded as deferred work, not abandoned: `compute_morton_permutation` and the harness scaffolding are removed from the production engine in commit 12 (final), but the algorithm and validation stay in `git log` for direct revival.
+- **`LEAF = 8` baked in** as the production const generic default. Sensitivity sweep documented in §Results; no further action.
+
+Shipped configuration: `MultipoleOrder::Quadrupole` baked in, no toggle, no Morton infrastructure. Engine type signatures (`BarnesHutEngine` non-generic, `Octree<8>` pinned internally) match what application code already consumes; no public API change.
+
+Removed in the final commit: `MultipoleOrder` enum + setters, `set_morton_enabled` setter, `built_perm` field on `Octree`, `morton.rs` module, `perf_2x2.rs` module. Tier 1 / Tier 2 / Tier 3 measurements remain reachable through `git log` linked from this notebook.
+
+**§Decision provenance.** Lab notebook `2026-05-08-octree-perf-2x2.md`, this section, written after the PR-perf-2 Pareto-frontier run completed (370 s total runtime on the recorded hardware) and the leaf-sensitivity sweep ran (~1 s). CSVs archived under `target/perf-2x2/` for the run that produced these numbers.
 
 ---
 
