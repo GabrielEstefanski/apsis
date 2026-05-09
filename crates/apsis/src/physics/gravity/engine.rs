@@ -447,8 +447,12 @@ fn exact_eval(bodies: &[Body], kernel: &dyn Kernel, acc: &mut [Vec3]) -> f64 {
 ///
 /// Node interactions use the target body's own ε² — the tree stores only
 /// aggregated mass and 3D COM, not per-body softening in internal nodes.
-fn bh_eval_body(
-    nodes: &[Node<DEFAULT_LEAF>],
+/// Generic over the tree's leaf-capacity parameter so the perf 2×2 leaf
+/// sensitivity sweep can call this directly on `Octree<4>`, `Octree<16>`,
+/// etc. without going through `BarnesHutEngine`. Production engine pins
+/// `LEAF = DEFAULT_LEAF` at every call site.
+pub(crate) fn bh_eval_body<const LEAF: usize>(
+    nodes: &[Node<LEAF>],
     body_idx: usize,
     body: &Body,
     bodies: &[Body],
