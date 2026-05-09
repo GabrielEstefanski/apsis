@@ -790,7 +790,16 @@ mod tests {
     /// N doubles; O(N log N) gives ~2.1-2.3×. The assert at the end checks
     /// the worst observed ratio stays under 4× (i.e. better than O(N²)),
     /// which is the bare minimum for "BH is doing its job".
+    ///
+    /// `#[ignore]`d from the default unit-test loop because per-evaluate
+    /// timings at N ∈ [100, 2500] sit in the sub-millisecond range, where
+    /// run-to-run variance from OS scheduling, allocator warm-up, and CPU
+    /// frequency scaling routinely pushes the worst observed ratio across
+    /// the 4× gate even when the algorithm is healthy. Opt-in with
+    /// `cargo test --release -p apsis tier3_octree_evaluate -- --ignored
+    /// --nocapture`.
     #[test]
+    #[ignore = "wall-time gate: opt-in via --ignored, run in --release on a quiet machine"]
     fn tier3_octree_evaluate_scaling_better_than_n_squared() {
         let ns = [100, 250, 500, 1000, 2500];
         let theta = 0.5;
