@@ -24,9 +24,14 @@
 //! body configurations is structural to the BH approximation, not an
 //! implementation defect.
 //!
-//! Scope: PR-perf-1 covers cells A (mono) and C (quad) with Morton off in
-//! both. PR-perf-2 adds cells B and D (Morton on) and writes §Decision from
-//! the combined CSVs.
+//! Scope: PR-perf-2 covers all four cells of the factorial:
+//!
+//! | | Morton off | Morton on |
+//! | --- | --- | --- |
+//! | **Monopole** | A | B |
+//! | **Quadrupole** | C | D |
+//!
+//! Each cell is measured at the full grid (3 seeds × 3 N × 4 θ).
 
 #![allow(dead_code)] // experiment-only harness; lifecycle bound to the perf 2x2 PRs
 
@@ -64,11 +69,14 @@ const MEASURED: usize = 10;
 struct Cell {
     name: &'static str,
     multipole: MultipoleOrder,
+    morton: bool,
 }
 
-const CELLS_PR1: [Cell; 2] = [
-    Cell { name: "A", multipole: MultipoleOrder::Monopole },
-    Cell { name: "C", multipole: MultipoleOrder::Quadrupole },
+const CELLS: [Cell; 4] = [
+    Cell { name: "A", multipole: MultipoleOrder::Monopole, morton: false },
+    Cell { name: "B", multipole: MultipoleOrder::Monopole, morton: true },
+    Cell { name: "C", multipole: MultipoleOrder::Quadrupole, morton: false },
+    Cell { name: "D", multipole: MultipoleOrder::Quadrupole, morton: true },
 ];
 
 // ── Pareto-frontier harness ──────────────────────────────────────────────── //
@@ -82,7 +90,7 @@ fn perf_2x2_pareto_frontier() {
     eprintln!("[perf_2x2] CSV output dir: {}", out_dir.display());
     eprintln!(
         "[perf_2x2] cells = {:?}, N = {:?}, theta = {:?}, seeds = {}, K_sample = {K_SAMPLE}",
-        CELLS_PR1.iter().map(|c| c.name).collect::<Vec<_>>(),
+        CELLS.iter().map(|c| c.name).collect::<Vec<_>>(),
         NS,
         THETAS,
         SEEDS.len(),
@@ -110,7 +118,7 @@ fn run_seed(seed: u64, out_dir: &Path) {
         let bodies = sphere_distribution_lognormal(n, seed);
         let reference = build_reference(&bodies, seed);
 
-        for &cell in &CELLS_PR1 {
+        for &cell in &CELLS {
             for &theta in &THETAS {
                 let row = measure_cell(&bodies, cell, theta, &reference, seed, n);
                 write_row(&mut writer, &row);
@@ -155,8 +163,10 @@ fn tier1_perf_2x2_force_accuracy_gates() {
     //   Cell C (quad): p50 ≤ 1e-3 (10× mono), p95 ≤ 5e-3 (10× mono)
     let theta = 0.5;
     let bounds = [
-        (Cell { name: "A", multipole: MultipoleOrder::Monopole }, 1.0e-2, 5.0e-2),
-        (Cell { name: "C", multipole: MultipoleOrder::Quadrupole }, 1.0e-3, 5.0e-3),
+        (Cell { name: "A", multipole: MultipoleOrder::Monopole, morton: false }, 1.0e-2, 5.0e-2),
+        (Cell { name: "B", multipole: MultipoleOrder::Monopole, morton: true }, 1.0e-2, 5.0e-2),
+        (Cell { name: "C", multipole: MultipoleOrder::Quadrupole, morton: false }, 1.0e-3, 5.0e-3),
+        (Cell { name: "D", multipole: MultipoleOrder::Quadrupole, morton: true }, 1.0e-3, 5.0e-3),
     ];
 
     let mut violations: Vec<String> = Vec::new();
@@ -313,6 +323,7 @@ fn measure_cell(
 ) -> CsvRow {
     let mut bh = BarnesHutEngine::new(16);
     bh.set_multipole_order(cell.multipole);
+    bh.set_morton_enabled(cell.morton);
 
     let error = error_stats(&mut bh, bodies, theta, reference);
 
@@ -371,6 +382,7 @@ fn measure_error_only(
 ) -> ErrorStats {
     let mut bh = BarnesHutEngine::new(16);
     bh.set_multipole_order(cell.multipole);
+    bh.set_morton_enabled(cell.morton);
     error_stats(&mut bh, bodies, theta, reference)
 }
 

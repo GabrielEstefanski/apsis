@@ -1048,42 +1048,61 @@ mod tests {
         assert!(!engine.morton_enabled());
     }
 
-    /// Cross-cell consistency for the Morton toggle: the same body
-    /// distribution evaluated with Morton on vs Morton off must produce
-    /// per-body accelerations that agree to the FP-reorder floor. Morton
-    /// is a permutation of insertion + walk order, not an algorithmic
-    /// change; any difference above ULP-class drift indicates a bug
-    /// (either in the permutation, the walk's perm-aware iteration, or
-    /// the writeback indexing).
+    /// Cross-cell consistency for the Morton toggle (cell B vs cell A): the
+    /// same body distribution evaluated with Morton on vs off in monopole
+    /// mode must produce per-body accelerations that agree to the
+    /// FP-reorder floor. Morton is a permutation of insertion + walk order,
+    /// not an algorithmic change; any difference above ULP-class drift
+    /// indicates a bug in the permutation, the walk's perm-aware iteration,
+    /// or the writeback indexing.
     #[test]
     fn morton_toggle_agrees_with_natural_order_at_fp_reorder_floor() {
+        cross_cell_consistency_check(MultipoleOrder::Monopole, "B-vs-A");
+    }
+
+    /// Cross-cell consistency for cell D vs cell C: Morton on vs off in
+    /// quadrupole mode. Same FP-reorder bound — quadrupole adds tensor
+    /// contractions to the walk but does not change the order-invariance
+    /// property of the BH algorithm under permutation of body indices.
+    #[test]
+    fn morton_toggle_agrees_with_natural_order_under_quadrupole() {
+        cross_cell_consistency_check(MultipoleOrder::Quadrupole, "D-vs-C");
+    }
+
+    /// Shared body of the Morton on/off cross-cell tests. Bound `1e-13`
+    /// derives from `≈ 100 · ε` where 100 ≈ BH-walk depth (8 · log₂(N))
+    /// at N = 1000 plus leaf accumulation; 5× headroom over the
+    /// `2 × 10⁻¹⁴` arithmetic floor.
+    fn cross_cell_consistency_check(order: MultipoleOrder, label: &str) {
         let bodies = sphere_distribution_lognormal(1000, 0x6F637472);
         let theta = 0.5;
 
         let mut bh_natural = BarnesHutEngine::new(16);
+        bh_natural.set_multipole_order(order);
         bh_natural.set_morton_enabled(false);
         bh_natural.build(&bodies);
         let mut acc_natural = vec![Vec3::ZERO; bodies.len()];
         bh_natural.evaluate(&bodies, theta, &mut acc_natural);
 
         let mut bh_morton = BarnesHutEngine::new(16);
+        bh_morton.set_multipole_order(order);
         bh_morton.set_morton_enabled(true);
         bh_morton.build(&bodies);
         let mut acc_morton = vec![Vec3::ZERO; bodies.len()];
         bh_morton.evaluate(&bodies, theta, &mut acc_morton);
 
-        // Per-body BH walk visits ~80 nodes at N = 1000 with leaf
-        // accumulation extending the depth: bound `≈ 100 · ε ≈ 2 × 10⁻¹⁴`
-        // gives 5× headroom at 1e-13.
         let max_diff = acc_natural.iter().zip(&acc_morton).fold(0.0_f64, |peak, (a, b)| {
             let mag = a.length().max(1e-30);
             let drift = (*a - *b).length() / mag;
             peak.max(drift)
         });
-        eprintln!("[morton-consistency] N=1000 theta={theta} max rel-drift = {max_diff:.4e}");
+        eprintln!(
+            "[morton-consistency {label}] N=1000 theta={theta} order={order:?} \
+             max rel-drift = {max_diff:.4e}"
+        );
         assert!(
             max_diff < 1.0e-13,
-            "Morton on/off forces drift {max_diff:.4e} above FP-reorder floor 1e-13",
+            "{label}: Morton on/off forces drift {max_diff:.4e} above FP-reorder floor 1e-13",
         );
     }
 
