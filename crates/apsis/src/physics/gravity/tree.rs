@@ -3,7 +3,7 @@
 //! ## Structure
 //!
 //! Flat `Vec<Node>`. Internal nodes subdivide their cubic cell into 8
-//! octants; leaf nodes store up to [`LEAF_CAPACITY`] body indices directly.
+//! octants; leaf nodes store up to [`LEAF`] body indices directly.
 //!
 //! ## Octant numbering
 //!
@@ -33,9 +33,12 @@ use crate::domain::body::Body;
 
 // ── Constants ─────────────────────────────────────────────────────────────── //
 
-/// Maximum number of body indices stored directly in a leaf node before it
-/// is split into eight children.
-pub(crate) const LEAF_CAPACITY: usize = 8;
+/// Production default for the [`Octree`] leaf-capacity generic parameter.
+/// Matches GADGET-2 / PKDGRAV3 defaults; chosen at the speed end of the
+/// `{4, 8, 16, 32}` Pareto trade-off characterised by the perf 2×2
+/// experiment (`docs/experiments/2026-05-08-octree-perf-2x2.md`, §Results
+/// leaf-sensitivity sweep).
+pub(crate) const DEFAULT_LEAF: usize = 8;
 
 /// Sentinel value for an absent child pointer.
 pub(crate) const NO_CHILD: u32 = u32::MAX;
@@ -56,36 +59,17 @@ pub(crate) const DIRECT_MODE_THRESHOLD: usize = 10_000;
 /// exactly on a cell boundary (which would cause ambiguous octant assignment).
 const TREE_PAD: f64 = 1e-2;
 
-// ── MultipoleOrder ────────────────────────────────────────────────────────── //
-
-/// Multipole expansion order populated during [`Octree::build`].
-///
-/// `Monopole` aggregates only mass and centre of mass; `Quadrupole` adds
-/// the symmetric traceless second-moment tensor `Q` about each node's COM.
-/// Build cost rises with order; the engine's force evaluation reads back
-/// only the components the active mode populated.
-///
-/// **Toggle scope.** Part of the in-flight perf 2×2 experiment
-/// (`docs/experiments/2026-05-08-octree-perf-2x2.md`); removed in the
-/// experiment's final commit once §Decision selects the production order.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum MultipoleOrder {
-    Monopole,
-    /// `dead_code` allow removed in the next commit that lights up the
-    /// quadrupole branch in `bh_eval_body` (currently constructed only by
-    /// the `aggregate_quadrupole` test surface and the perf 2×2 harness).
-    #[allow(dead_code)]
-    Quadrupole,
-}
-
 // ── Node ──────────────────────────────────────────────────────────────────── //
 
-/// One node in the Barnes-Hut octree.
+/// One node in the Barnes-Hut octree, generic over leaf capacity.
 ///
-/// Leaf nodes hold up to [`LEAF_CAPACITY`] body indices directly.
-/// Internal nodes store only aggregated mass / COM and eight child pointers.
+/// Leaf nodes hold up to `LEAF` body indices directly. Internal nodes store
+/// only aggregated mass / COM and eight child pointers. The `LEAF` generic
+/// is propagated through [`Octree`] and ultimately pinned by
+/// [`BarnesHutEngine`] to [`DEFAULT_LEAF`] in production; the perf 2×2
+/// harness instantiates other values for the sensitivity sweep.
 #[derive(Clone, Copy)]
-pub(crate) struct Node {
+pub(crate) struct Node<const LEAF: usize> {
     /// Cell centre, world coordinates.
     pub cx: f64,
     pub cy: f64,
@@ -102,8 +86,8 @@ pub(crate) struct Node {
 
     /// Symmetric traceless quadrupole tensor about this node's COM. Five
     /// independent components stored; `q_zz = -(q_xx + q_yy)` is reconstructed
-    /// at the evaluation site. Populated only when the tree was built with
-    /// [`MultipoleOrder::Quadrupole`]; zero otherwise.
+    /// at the evaluation site. Populated by [`Octree::build`]'s second-pass
+    /// `aggregate_quadrupole` traversal.
     pub q_xx: f64,
     pub q_xy: f64,
     pub q_xz: f64,
@@ -116,14 +100,14 @@ pub(crate) struct Node {
     /// Number of body indices stored in `bodies` (leaf nodes only).
     pub body_len: u8,
     /// Body index buffer for leaf nodes.  Valid range: `0..body_len`.
-    pub bodies: [u32; LEAF_CAPACITY],
+    pub bodies: [u32; LEAF],
 
     /// Child node indices in the flat node array. [`NO_CHILD`] means absent.
     /// Index follows the bit-pack `(z >= cz) << 2 | (y >= cy) << 1 | (x >= cx)`.
     pub children: [u32; 8],
 }
 
-impl Node {
+impl<const LEAF: usize> Node<LEAF> {
     fn new(cx: f64, cy: f64, cz: f64, half: f64) -> Self {
         Self {
             cx,
@@ -141,7 +125,7 @@ impl Node {
             q_yz: 0.0,
             body_count: 0,
             body_len: 0,
-            bodies: [0u32; LEAF_CAPACITY],
+            bodies: [0u32; LEAF],
             children: [NO_CHILD; 8],
         }
     }
@@ -161,58 +145,49 @@ impl Node {
 
 // ── Octree ────────────────────────────────────────────────────────────────── //
 
-/// Flat-array Barnes-Hut octree.
+/// Flat-array Barnes-Hut octree generic over leaf capacity.
 ///
 /// Call [`build`](Self::build) to (re)construct the tree from a body slice.
 /// The resulting [`Node`] array is accessed by the force engine for both the
 /// BH traversal and the `theta_error_proxy` heuristic.
-pub(crate) struct Octree {
-    pub(crate) nodes: Vec<Node>,
+///
+/// `LEAF` defaults to [`DEFAULT_LEAF`] = 8, which preserves the production
+/// callsite ergonomics (`Octree::new(max_depth)` continues to work unchanged
+/// from PR-perf-1). The perf 2×2 leaf-sensitivity sweep instantiates other
+/// values directly (`Octree::<4>::new(max_depth)` etc.) without going through
+/// `BarnesHutEngine`.
+pub(crate) struct Octree<const LEAF: usize = DEFAULT_LEAF> {
+    pub(crate) nodes: Vec<Node<LEAF>>,
     max_depth: usize,
-    /// Multipole order the most recent [`build`](Self::build) populated.
-    /// Read by the BH walk to decide whether the per-node quadrupole tensor
-    /// is meaningful or zero-by-construction.
-    built_order: MultipoleOrder,
 }
 
-impl Octree {
+impl<const LEAF: usize> Octree<LEAF> {
     pub(crate) fn new(max_depth: usize) -> Self {
-        Self { nodes: Vec::new(), max_depth, built_order: MultipoleOrder::Monopole }
-    }
-
-    /// Multipole order the tree currently carries.
-    #[inline]
-    pub(crate) fn built_order(&self) -> MultipoleOrder {
-        self.built_order
+        Self { nodes: Vec::new(), max_depth }
     }
 
     /// Rebuild the tree from scratch for the given body slice.
     ///
-    /// After this call `nodes[0]` is the root covering an axis-aligned
-    /// cubic cell that contains all bodies with a small pad. Every node's
-    /// `mass` and `com_{x,y,z}` fields reflect the aggregated state of its
-    /// subtree.
-    ///
-    /// When `order == Quadrupole`, a second bottom-up pass populates each
-    /// node's traceless quadrupole tensor about its own COM (parallel-axis
-    /// theorem on internal nodes). Under `Monopole` the tensor fields stay
-    /// at their initial zero, and the second pass is skipped.
-    pub(crate) fn build(&mut self, bodies: &[Body], order: MultipoleOrder) {
+    /// After this call `nodes[0]` is the root covering an axis-aligned cubic
+    /// cell that contains all bodies with a small pad. Every node's `mass`,
+    /// `com_{x,y,z}`, and traceless quadrupole tensor (`q_xx, q_xy, q_xz,
+    /// q_yy, q_yz`) fields reflect the aggregated state of its subtree.
+    /// Quadrupole aggregation is always performed — the perf 2×2 §Decision
+    /// settled it as the production multipole order.
+    pub(crate) fn build(&mut self, bodies: &[Body]) {
         self.nodes.clear();
-        self.built_order = order;
 
         if bodies.is_empty() {
             return;
         }
 
-        // ── Compute 3D bounding box ──────────────────────────────────── //
+        // ── Compute padded cubic AABB ────────────────────────────────── //
         let mut min_x = bodies[0].x;
         let mut max_x = bodies[0].x;
         let mut min_y = bodies[0].y;
         let mut max_y = bodies[0].y;
         let mut min_z = bodies[0].z;
         let mut max_z = bodies[0].z;
-
         for b in &bodies[1..] {
             min_x = min_x.min(b.x);
             max_x = max_x.max(b.x);
@@ -221,33 +196,28 @@ impl Octree {
             min_z = min_z.min(b.z);
             max_z = max_z.max(b.z);
         }
-
         let cx = 0.5 * (min_x + max_x);
         let cy = 0.5 * (min_y + max_y);
         let cz = 0.5 * (min_z + max_z);
-        // Cubic root cell: side covers the longest extent across all three axes.
         let extent = (max_x - min_x).max(max_y - min_y).max(max_z - min_z);
         let mut half = 0.5 * extent;
         half = if half <= 0.0 { TREE_PAD } else { half * 1.0001 + TREE_PAD };
 
         self.nodes.push(Node::new(cx, cy, cz, half));
 
-        // ── Insert all bodies ────────────────────────────────────────── //
+        // ── Insert all bodies in input order ─────────────────────────── //
         for i in 0..bodies.len() {
             self.insert(0, i, bodies, 0);
         }
 
-        // ── Aggregate mass / COM bottom-up ──────────────────────────── //
+        // ── Aggregate mass / COM bottom-up, then quadrupole tensor ──── //
         self.aggregate_mass(0, bodies);
-
-        if matches!(order, MultipoleOrder::Quadrupole) {
-            self.aggregate_quadrupole(0, bodies);
-        }
+        self.aggregate_quadrupole(0, bodies);
     }
 
     /// Read-only access to the flat node array.
     #[inline]
-    pub(crate) fn nodes(&self) -> &[Node] {
+    pub(crate) fn nodes(&self) -> &[Node<LEAF>] {
         &self.nodes
     }
 
@@ -258,7 +228,7 @@ impl Octree {
             // Hard depth cap: just store in current node and skip.
             if depth > self.max_depth {
                 let node = &mut self.nodes[node_idx];
-                if (node.body_len as usize) < LEAF_CAPACITY {
+                if (node.body_len as usize) < LEAF {
                     node.bodies[node.body_len as usize] = body_idx as u32;
                     node.body_len += 1;
                 }
@@ -269,8 +239,8 @@ impl Octree {
                 let len = self.nodes[node_idx].body_len as usize;
 
                 // Leaf has room, or we've hit the depth cap — store here.
-                if len < LEAF_CAPACITY || depth == self.max_depth {
-                    if (self.nodes[node_idx].body_len as usize) < LEAF_CAPACITY {
+                if len < LEAF || depth == self.max_depth {
+                    if (self.nodes[node_idx].body_len as usize) < LEAF {
                         self.nodes[node_idx].bodies[len] = body_idx as u32;
                         self.nodes[node_idx].body_len += 1;
                     }
@@ -501,7 +471,7 @@ mod tests {
         let bodies = vec![body_xy(0.0, 0.0, 1.0), body_xy(4.0, 0.0, 3.0)];
 
         let mut tree = make_tree();
-        tree.build(&bodies, MultipoleOrder::Monopole);
+        tree.build(&bodies);
 
         let root = &tree.nodes[0];
 
@@ -517,7 +487,7 @@ mod tests {
         let bodies = vec![body_xyz(0.0, 0.0, 0.0, 1.0), body_xyz(4.0, 2.0, -2.0, 3.0)];
 
         let mut tree = make_tree();
-        tree.build(&bodies, MultipoleOrder::Monopole);
+        tree.build(&bodies);
 
         let root = &tree.nodes[0];
 
@@ -533,7 +503,7 @@ mod tests {
         let bodies: Vec<Body> = (0..10).map(|i| body_xy(i as f64, 0.0, 1.0)).collect();
 
         let mut tree = make_tree();
-        tree.build(&bodies, MultipoleOrder::Monopole);
+        tree.build(&bodies);
 
         assert_eq!(tree.nodes[0].body_count, 10);
     }
@@ -544,7 +514,7 @@ mod tests {
         let bodies = vec![body_xy(1.0, 2.0, 5.0)];
 
         let mut tree = make_tree();
-        tree.build(&bodies, MultipoleOrder::Monopole);
+        tree.build(&bodies);
 
         let root = &tree.nodes[0];
 
@@ -559,7 +529,7 @@ mod tests {
         let bodies = vec![body_xy(0.0, 0.0, 1.0), body_xy(0.0, 0.0, 2.0)];
 
         let mut tree = make_tree();
-        tree.build(&bodies, MultipoleOrder::Monopole);
+        tree.build(&bodies);
 
         let root = &tree.nodes[0];
 
@@ -575,7 +545,7 @@ mod tests {
     /// poisons every BH force computation.
     #[test]
     fn octant_numbering_matches_bit_pack_contract() {
-        // 16 bodies: 2 distinct positions per octant. 16 > LEAF_CAPACITY = 8
+        // 16 bodies: 2 distinct positions per octant. 16 > LEAF = 8
         // forces the root to subdivide. After build, each child[octant]
         // should contain exactly the two bodies whose corner sign pattern
         // matches that octant's bit-pack index.
@@ -591,7 +561,7 @@ mod tests {
         }
 
         let mut tree = make_tree();
-        tree.build(&bodies, MultipoleOrder::Monopole);
+        tree.build(&bodies);
 
         let root = &tree.nodes[0];
         assert!(!root.is_leaf(), "root should subdivide after 16 inserts");
@@ -644,7 +614,7 @@ mod tests {
     #[test]
     fn aggregate_propagates_com_z_through_subtree() {
         // 16 bodies at random-ish 3D positions with non-zero z. Forces
-        // multi-level subdivision (16 > LEAF_CAPACITY) and exercises the
+        // multi-level subdivision (16 > LEAF) and exercises the
         // recursive aggregate path.
         let bodies: Vec<Body> = (0..16)
             .map(|i| {
@@ -659,7 +629,7 @@ mod tests {
         let com_z_expected: f64 = bodies.iter().map(|b| b.mass * b.z).sum::<f64>() / m_total;
 
         let mut tree = make_tree();
-        tree.build(&bodies, MultipoleOrder::Monopole);
+        tree.build(&bodies);
 
         let root = &tree.nodes[0];
         assert_relative_eq!(root.mass, m_total, epsilon = 1e-12);
@@ -685,7 +655,7 @@ mod tests {
             let expected_mass: f64 = bodies.iter().map(|b| b.mass).sum();
 
             let mut tree = make_tree();
-            tree.build(&bodies, MultipoleOrder::Monopole);
+            tree.build(&bodies);
 
             let root = &tree.nodes[0];
 
@@ -705,7 +675,7 @@ mod tests {
         let bodies = vec![body_xyz(1.0, 0.0, 0.0, 1.0), body_xyz(-1.0, 0.0, 0.0, 1.0)];
 
         let mut tree = make_tree();
-        tree.build(&bodies, MultipoleOrder::Quadrupole);
+        tree.build(&bodies);
 
         let root = &tree.nodes[0];
         assert!(root.is_leaf(), "2 bodies must fit in the root leaf");
@@ -728,7 +698,7 @@ mod tests {
     /// parallel-axis combination, and that the two paths agree byte-wise.
     #[test]
     fn quadrupole_root_matches_direct_sum_under_subdivision() {
-        // 16 bodies arranged so the root must subdivide (LEAF_CAPACITY = 8),
+        // 16 bodies arranged so the root must subdivide (LEAF = 8),
         // log-normal masses, asymmetric positions to exercise every cross
         // term (q_xy, q_xz, q_yz all nonzero).
         let positions: Vec<(f64, f64, f64, f64)> = (0..16)
@@ -745,7 +715,7 @@ mod tests {
             positions.iter().map(|&(x, y, z, m)| body_xyz(x, y, z, m)).collect();
 
         let mut tree = make_tree();
-        tree.build(&bodies, MultipoleOrder::Quadrupole);
+        tree.build(&bodies);
 
         let root = &tree.nodes[0];
         assert!(!root.is_leaf(), "16 bodies must force the root to subdivide");
@@ -779,21 +749,44 @@ mod tests {
         assert_relative_eq!(root.q_yz, q_yz, epsilon = 1e-12);
     }
 
-    /// Monopole build leaves the tensor untouched at zero. Confirms the
-    /// `aggregate_quadrupole` second pass is genuinely skipped under
-    /// `Monopole`, not silently still running.
+    // ── Generic LEAF parameter ─────────────────────────────────────────── //
+
+    /// Sanity check that the generic `Octree<const LEAF: usize>` parameter
+    /// actually changes leaf capacity. With LEAF = 4 a 5-body distribution
+    /// must subdivide the root; with LEAF = 16 the same distribution stays
+    /// in a single root leaf. Aggregated mass is independent of LEAF.
     #[test]
-    fn monopole_build_leaves_quadrupole_at_zero() {
-        let bodies = vec![body_xyz(1.0, 2.0, 3.0, 1.0), body_xyz(-2.0, 1.0, -1.0, 2.0)];
+    fn generic_leaf_parameter_changes_split_threshold() {
+        let bodies: Vec<Body> = (0..5)
+            .map(|i| {
+                let t = i as f64 * 0.31;
+                body_xyz(t.sin(), t.cos(), (t * 0.7).sin(), 1.0)
+            })
+            .collect();
 
-        let mut tree = make_tree();
-        tree.build(&bodies, MultipoleOrder::Monopole);
+        let mut tight: Octree<4> = Octree::new(16);
+        tight.build(&bodies);
+        assert!(!tight.nodes[0].is_leaf(), "5 > LEAF=4 must subdivide the root");
 
-        let root = &tree.nodes[0];
-        assert_eq!(root.q_xx, 0.0);
-        assert_eq!(root.q_xy, 0.0);
-        assert_eq!(root.q_xz, 0.0);
-        assert_eq!(root.q_yy, 0.0);
-        assert_eq!(root.q_yz, 0.0);
+        let mut loose: Octree<16> = Octree::new(16);
+        loose.build(&bodies);
+        assert!(loose.nodes[0].is_leaf(), "5 ≤ LEAF=16 keeps the root as a leaf");
+
+        let total_mass: f64 = bodies.iter().map(|b| b.mass).sum();
+        assert_relative_eq!(tight.nodes[0].mass, total_mass, epsilon = 1e-12);
+        assert_relative_eq!(loose.nodes[0].mass, total_mass, epsilon = 1e-12);
+    }
+
+    /// Default `Octree::new` instantiates `Octree<DEFAULT_LEAF>` so existing
+    /// callers (the engine, every test in this module) continue to compile
+    /// unchanged. Spot-checked via `make_tree()` which still resolves to
+    /// the default.
+    #[test]
+    fn default_octree_uses_default_leaf() {
+        // If this changes silently, the production tree-build path's
+        // measured costs in the lab notebook stop matching the deployed
+        // binary's behaviour.
+        assert_eq!(DEFAULT_LEAF, 8);
+        let _tree: Octree = Octree::new(16);
     }
 }
