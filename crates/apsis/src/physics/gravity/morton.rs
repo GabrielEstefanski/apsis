@@ -273,4 +273,77 @@ mod tests {
         let perm = compute_morton_permutation(&[], &aabb);
         assert!(perm.is_empty());
     }
+
+    /// Isolated micro-cost characterisation of the Morton encode + sort step.
+    ///
+    /// The notebook's a-priori claim that "sort < 5 % of build cost at
+    /// N = 10⁵" rests on this number. Recorded here as a one-shot
+    /// characterisation, not a gate against a tight bound: the sanity
+    /// ceiling of 100 ms at N = 10⁵ catches an algorithmic regression
+    /// (e.g. accidentally O(N²) sort) without locking the absolute number,
+    /// which is hardware-sensitive.
+    ///
+    /// Run via:
+    ///
+    /// ```text
+    /// cargo test --release -p apsis morton_permutation_micro_cost \
+    ///     -- --ignored --nocapture
+    /// ```
+    #[test]
+    #[ignore = "perf characterisation; opt-in via --ignored --release"]
+    fn morton_permutation_micro_cost() {
+        use std::time::Instant;
+
+        for &n in &[1_000usize, 10_000, 100_000] {
+            let bodies = sphere_lognormal(n, 0x6F637472);
+            let aabb = compute_aabb(&bodies);
+
+            // 1 warmup + 20 measured.
+            let _ = compute_morton_permutation(&bodies, &aabb);
+            let mut times_ms = Vec::with_capacity(20);
+            for _ in 0..20 {
+                let t = Instant::now();
+                let _perm = compute_morton_permutation(&bodies, &aabb);
+                times_ms.push(t.elapsed().as_secs_f64() * 1000.0);
+            }
+            times_ms.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            let median = times_ms[10];
+            eprintln!(
+                "[morton-perm-micro] N={n:>6} median={median:.4}ms ({:.1} ns/body)",
+                median * 1.0e6 / n as f64
+            );
+
+            assert!(
+                median < 100.0,
+                "sort+encode {median:.2}ms at N={n} -- algorithmic regression suspect",
+            );
+        }
+    }
+
+    fn sphere_lognormal(n: usize, seed: u64) -> Vec<Body> {
+        let mut state = seed.wrapping_add(0x9E3779B97F4A7C15);
+        let mut next_u64 = || {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            state
+        };
+        let mut next_unit = || (next_u64() >> 11) as f64 / (1u64 << 53) as f64;
+
+        let mut bodies = Vec::with_capacity(n);
+        while bodies.len() < n {
+            let x = 2.0 * next_unit() - 1.0;
+            let y = 2.0 * next_unit() - 1.0;
+            let z = 2.0 * next_unit() - 1.0;
+            if x * x + y * y + z * z > 1.0 {
+                continue;
+            }
+            let u1 = next_unit().max(1e-12);
+            let u2 = next_unit();
+            let normal = (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos();
+            let mass = normal.exp();
+            let mut b = Body::rocky(mass).at(x, y).with_velocity(0.0, 0.0);
+            b.z = z;
+            bodies.push(b);
+        }
+        bodies
+    }
 }
