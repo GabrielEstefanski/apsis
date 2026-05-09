@@ -19,7 +19,7 @@ Barnes-Hut force evaluation cost depends on three first-order knobs:
 
 This experiment treats (1) and (2) as two binary factors and (3) as the swept axis of the cost-vs-error frontier. The 2×2 factorial design separates the contribution of each factor from confounds:
 
-|  | Monopole only | Monopole + quadrupole |
+| | Monopole only | Monopole + quadrupole |
 | --- | --- | --- |
 | **Body-array order (no Morton)** | A — current production (PR #69 baseline) | C — quadrupole isolated |
 | **Morton-sorted insert + walk** | B — Morton isolated | D — combined production candidate |
@@ -210,6 +210,8 @@ After §Decision is written, the final commit of PR-perf-2 removes both setters 
 | Warm-up evaluations | 1 per cell per N per θ before timed runs | Excludes first-touch effects (CPU frequency scaling, allocator warm-up, page faults) |
 | Timed evaluations | 10 per cell per N per θ; report median + 1σ | Robust to outliers from OS scheduling jitter; σ feeds the variance-stability decision |
 | Seeds | 3: `0x6F637472`, `0x71756164`, `0x6D6F7274` | Multi-seed addresses the single-seed threat-to-validity from octree-port |
+| `LEAF_CAPACITY` | 8 (compile-time `const` in `tree.rs`) | Matches the GADGET-2 / PKDGRAV3 default for tree codes at this regime. Sensitivity sweep across `{4, 8, 16, 32}` requires a generic `Octree<const LEAF: usize>` refactor; deferred to PR-perf-2, where `tree.rs` is touched substantively for Morton anyway, allowing a single coherent leaf × Morton cross-product measurement. The ungated nature of this choice is recorded in §Threats |
+| `K_SAMPLE` | 512 (sampled-reference size for `N > 10⁴`) | Independent O(N²) reference is prohibitive at N = 10⁵; hand-rolled parallel pairwise force on K randomly-chosen targets is used instead. K = 512 puts ≈ 25 samples in the p95 tail (SE ≈ 1 %) and ≈ 5 in the p99 tail (informational only). p99 / max under sampling are flagged low-confidence in §Results |
 
 #### Out of scope (declared a priori)
 
@@ -225,42 +227,140 @@ After §Decision is written, the final commit of PR-perf-2 removes both setters 
 
 ## Results
 
-*To be populated incrementally — PR-perf-1 fills cells A and C; PR-perf-2 fills cells B and D and writes §Decision.*
+PR-perf-1 populates cells A (mono) and C (quad). Cells B and D (Morton on) plus §Decision land in PR-perf-2.
+
+**Hardware / build identifier** (recorded for cross-machine reproducibility):
+
+- CPU: AMD Ryzen 5 7600X, 6 cores
+- OS: Windows 11
+- Compiler: `rustc 1.94.1 (e408947bf 2026-03-25)`
+- Profile: `cargo build --release` defaults (no LTO, codegen-units = 16)
+- Rayon: default thread pool (12 logical via SMT)
+
+CSV exports: `target/perf-2x2/octree_pareto_<seed>.csv` (one per seed; 14 columns, 24 rows each). Aggregations below take the median across the 3 seeds.
 
 ### Tier 1 — Force accuracy
 
-*Pending.*
+Per-cell percentile bounds at θ = 0.5 (gates from `tier1_perf_2x2_force_accuracy_gates`):
+
+| Cell | N | Bound p50 | Observed p50 | Bound p95 | Observed p95 | Verdict |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| A (mono) | 1 000 | ≤ 1 × 10⁻² | 2.77 × 10⁻³ | ≤ 5 × 10⁻² | 7.01 × 10⁻³ | pass (3.6× / 7.1× headroom) |
+| A (mono) | 10 000 | ≤ 1 × 10⁻² | 5.12 × 10⁻³ | ≤ 5 × 10⁻² | 1.15 × 10⁻² | pass (1.95× / 4.3× headroom) |
+| C (quad) | 1 000 | ≤ 1 × 10⁻³ | 5.18 × 10⁻⁴ | ≤ 5 × 10⁻³ | 1.18 × 10⁻³ | pass (1.93× / 4.2× headroom) |
+| C (quad) | 10 000 | ≤ 1 × 10⁻³ | 7.17 × 10⁻⁴ | ≤ 5 × 10⁻³ | 1.94 × 10⁻³ | pass (1.39× / 2.6× headroom) |
+
+p99 and max (informational, not gated):
+
+| Cell | N | p99 (median) | max (median) |
+| --- | ---: | ---: | ---: |
+| A (mono) | 1 000 | 1.00 × 10⁻² | 2.51 × 10⁻² |
+| A (mono) | 10 000 | 1.57 × 10⁻² | 9.47 × 10⁻² |
+| C (quad) | 1 000 | 1.67 × 10⁻³ | 3.00 × 10⁻³ |
+| C (quad) | 10 000 | 3.64 × 10⁻³ | 1.32 × 10⁻² |
+
+**Mono → quad ratio at matched metric** (median of 3 seeds, θ = 0.5):
+
+| Metric | N = 1 000 | N = 10 000 |
+| --- | ---: | ---: |
+| p50 mono / p50 quad | 5.36× | 7.14× |
+| p95 mono / p95 quad | 5.94× | 5.94× |
+
+Hernquist & Katz 1989 reports ≈ 10× per-body error reduction at θ ≤ 0.5; observed ratio of 5.4–7.1× at p50 sits at the conservative end of that range, consistent with the (s/d)⁻² scaling of the improvement at this θ and with the classic `s/d < θ` MAC (no Barnes 1990 / Dehnen-MAC refinement).
+
+**Small-force outlier finding** (diagnostic emitted by `error_stats`): every worst-error body across all 12 (cell, N, seed) combinations sits at `|F_worst| / median(|F|)` between 0.03 and 0.27. The max-error column is dominated by the relative-error denominator collapsing on bodies in low-force pockets — a structural artefact of the metric, not a BH defect. The seed-2 cell-C N = 10⁰⁴ outlier (max = 3.15 × 10⁻²) is a body with `|F|` at 3 % of the population median; its p95 is 1.77 × 10⁻³, comfortably under the gate. This vindicates gating on percentile rather than max.
+
+**N = 10⁵ informational** (sampled reference, K = 512):
+
+| Cell | N | p50 | p95 | p99 (low conf.) |
+| --- | ---: | ---: | ---: | ---: |
+| A (mono) | 100 000 | 6.51 × 10⁻³ | 1.13 × 10⁻² | 1.30 × 10⁻² |
+| C (quad) | 100 000 | 1.31 × 10⁻³ | 2.56 × 10⁻³ | 3.84 × 10⁻³ |
+
+Mono → quad ratio at p95: 4.41× (versus 5.94× at smaller N — slight degradation tracking the small-force diagnostic, which fires more frequently in the sampled regime since the K = 512 sample includes proportionally more low-|F| pockets). p50 cell C at N = 10⁵ slightly exceeds the small-N gate (1.31 × 10⁻³ vs. 1 × 10⁻³); this is consistent with cell A's similar growth (5.12 × 10⁻³ → 6.51 × 10⁻³ from N = 10⁴ → 10⁵) and is not gated under the protocol.
 
 ### Tier 2 — Wall-time at matched accuracy
 
-*Pending.*
+**Build vs walk vs eval decomposition** (median across seeds, ms per call):
+
+| Cell | N | t_build | t_walk | t_eval | σ(t_eval) |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| A (mono) | 10 000 | 0.41 | 17.50 | 17.88 | 0.20 |
+| C (quad) | 10 000 | 0.45 | 19.78 | 18.88 | 0.21 |
+| A (mono) | 100 000 | 8.56 | 319.92 | 301.49 | 10.55 |
+| C (quad) | 100 000 | 11.63 | 318.16 | 329.48 | 3.66 |
+
+Build cost ratio C / A: 1.10× at N = 10⁴, 1.36× at N = 10⁵ (matches expectation: tensor-aggregation second pass is `O(nodes)`, growing slightly faster than the monopole `O(nodes)` because of the parallel-axis arithmetic).
+
+**Matched-accuracy θ at N = 10⁴** (target: quad p95 ≈ mono p95 at θ = 0.5):
+
+mono A at θ = 0.5: p95 = 1.15 × 10⁻², t_eval = 17.88 ms.
+
+Quad p95 at θ ∈ {0.5, 0.7, 0.9}: 1.94 × 10⁻³, 8.55 × 10⁻³, 2.39 × 10⁻². Log-linear interpolation gives θ_match ≈ 0.75. Closest grid point is θ = 0.7:
+
+| Comparison | Quad t_eval | Mono t_eval | Ratio | Notebook bound |
+| --- | ---: | ---: | ---: | --- |
+| t_eval_C(0.7) / t_eval_A(0.5) at N = 10⁴ | 9.40 ms | 17.88 ms | **0.53** | ∈ [0.30, 0.70] ✓ |
+| t_eval_C(0.7) / t_eval_A(0.5) at N = 10⁵ | 152.68 ms | 301.49 ms | **0.51** | (informational) |
+
+Quadrupole-at-matched-accuracy delivers ≈ 1.9× speedup at both measured N. Inside the literature range (Dehnen 2002 §5: 2–3× faster; Springel 2005 §2.4: ~2× in GADGET-2). The N-stability of the ratio (0.53 → 0.51) is the load-bearing PR-perf-1 finding: quadrupole's win is robust to scale within the tested range.
 
 ### Tier 3 — Cache-effect characterisation
 
-*Pending.*
+PR-perf-1 measures cells A and C only; both have Morton off, so this section is structurally incomplete. The N-doubling ratio table (per the octree-port Tier 3 format) is reported here for cells A and C; the Morton-on cells (B, D) and the cross-comparison that addresses the cache-locality question land in PR-perf-2.
+
+| N transition | Cell A (mono) ratio | Cell C (quad) ratio |
+| --- | ---: | ---: |
+| 1 000 → 10 000 (10× N, expected ≈ 10–13× for O(N log N)) | 21.6× | 23.6× |
+| 10 000 → 100 000 (10× N) | 16.9× | 17.5× |
+
+Both cells stay above the theoretical O(N log N) ratio at the 1k → 10k step (the same cache-pressure signature documented in octree-port §Tier 3). The 10k → 100k step is closer to the theoretical line, suggesting the cache cliff was crossed at the lower end of the range. Morton on (B, D) tests whether this gap closes.
 
 ### Pareto frontier
 
-*Pending.*
+CSVs exported per seed; the (p95, t_eval) Pareto curves for cells A and C are derivable directly. Plotting deferred to `docs/experiments/2026-05-08-octree-perf-frontier.py` in PR-perf-2 once cells B and D are also available, so the frontier figure shows all four cells in one panel.
+
+Preliminary read: the C frontier dominates A across the full θ range — at every θ value tested, cell C delivers strictly lower p95 with t_eval within 1.06× (or below, after relaxing θ for matched accuracy).
 
 ---
 
-## Interpretation
+## Interpretation *(PR-perf-1 partial; final §Decision lands in PR-perf-2)*
 
-*To be written after both PRs land and §Results is fully populated.*
+What PR-perf-1 establishes:
+
+1. **Quadrupole correctness is sound.** Tier 1 percentile gates pass with comfortable headroom across both gated N values and three seeds; the formula and sign convention agree with Hernquist & Katz 1989 to within the (s/d)⁻²-corrected literature ratio.
+2. **Quadrupole's matched-accuracy win is real and N-stable.** ~1.9× speedup at both N = 10⁴ and N = 10⁵, inside the literature range, with build cost overhead capped at ~36 % at the largest measured N.
+3. **The metric matters.** Distribution-based percentile gates (p50, p95) capture the algorithm's actual behaviour; max-error is dominated by a structural metric artefact in low-force pockets and would have produced misleading gate failures.
+4. **Independent reference closes the shared-code threat.** Both Full and Sampled references use a hand-rolled parallel pairwise loop that depends on the kernel primitives only, not on `BarnesHutEngine`. Tier 1 percentile values are byte-identical (to four significant figures) between the engine-shared and independent paths.
+
+What PR-perf-1 does **not** decide:
+
+1. Whether Morton sort delivers an additional ≥ 10 % gain on top of quadrupole at N = 10⁴ (D-vs-C, the load-bearing cache-pressure question).
+2. Whether the combination is super-additive or sub-additive (the structural-signal question).
+3. Whether the `LEAF_CAPACITY = 8` choice biases the result (sensitivity sweep deferred).
+
+All three are PR-perf-2 work and feed §Decision.
 
 ---
 
 ## Threats to validity
 
-1. **Multi-seed but single-machine.** Cache effects are hardware-sensitive; the gain measured on the development machine (Windows 11, Rayon-default thread pool, identified in §Results) may not reproduce on machines with different L2/L3 sizes, prefetcher behaviour, or core counts. Tier 2 ranges are conservative against literature spread to accommodate ±50 % variance from this; cross-machine reproducibility would require re-baselining all four cells.
+1. **Multi-seed but single-machine.** Cache effects are hardware-sensitive; the gain measured on the development machine (Ryzen 5 7600X, Windows 11, Rayon default thread pool, recorded in §Results) may not reproduce on machines with different L2/L3 sizes, prefetcher behaviour, or core counts. Tier 2 ranges are conservative against literature spread to accommodate ±50 % variance from this; cross-machine reproducibility would require re-baselining all four cells.
 
-2. **Rayon work-stealing fragmentation.** Morton-ordered iteration into Rayon's parallel iterator does not guarantee consecutive iterations process on the same thread. Work-stealing can fragment Morton blocks. Mitigation: if the Tier 2 walk-time bound for Morton-on cells fails, investigate `with_min_len` chunk-size tuning before declaring a regression.
+2. **Rayon work-stealing fragmentation.** Morton-ordered iteration into Rayon's parallel iterator does not guarantee consecutive iterations process on the same thread. Work-stealing can fragment Morton blocks. Mitigation: if the Tier 2 walk-time bound for Morton-on cells fails in PR-perf-2, investigate `with_min_len` chunk-size tuning before declaring a regression.
 
-3. **Quadrupole tensor algebra correctness.** The parallel-axis-theorem combination of children's tensors is error-prone (sign conventions, traceless enforcement). Mitigation: a synthetic 2-body test (one child, one body) exercises the leaf path; a 4-body symmetric test (3-child internal node with bodies symmetric about COM) exercises the parallel-axis path; both gated in Tier 1.
+3. **Quadrupole tensor algebra correctness.** The parallel-axis-theorem combination of children's tensors is error-prone (sign conventions, traceless enforcement). Two synthetic tests in `tree.rs` cover the algebra (`quadrupole_leaf_two_bodies_matches_closed_form`, `quadrupole_root_matches_direct_sum_under_subdivision`) plus a Monopole-leaves-tensor-zero regression test. The Tier 1 percentile gates passing across all 12 (cell, N, seed) combinations is the integration check.
 
-4. **Matched-accuracy θ search convergence.** Binary search on θ assumes monotonic error growth with θ. This holds for any well-behaved BH implementation but can break if the body distribution has degeneracies (e.g. all bodies on a plane, which the random-sphere distribution rules out). Pre-flight monotonicity check at θ ∈ {0.3, 0.5, 0.7, 0.9} per cell is required before invoking the binary search.
+4. **Matched-accuracy θ search convergence.** Binary search on θ assumes monotonic error growth with θ. The PR-perf-1 grid sweep at θ ∈ {0.3, 0.5, 0.7, 0.9} confirms strict monotonicity for cells A and C across all seeds at all N (verifiable in the per-seed CSV). PR-perf-2's automated binary search will re-verify this for cells B and D before invoking the search.
 
-5. **Sub-additivity false positive.** D being slower than C does not always mean the AoS layout is wrong; it could mean the build-time Morton encoding cost is large relative to the walk gain at the measured N. Mitigation: Tier 2's separated build/walk decomposition isolates this — sub-additivity is concluded only when `t_walk_D > t_walk_C`, not when `t_eval_D > t_eval_C`.
+5. **Independent reference (formerly: shared code path).** The original protocol's Full mode used `BarnesHutEngine::set_exact_threshold(usize::MAX)`, sharing engine code with the cells under test — a defect in `exact_eval` accumulation could silently mask a BH defect. Resolved in commit d44dfda: both Full and Sampled references route through `exact_pairwise_forces`, a hand-rolled parallel pairwise loop that depends on the `PlummerKernel` and `pair_eps2` primitives only. Tier 1 percentile values are byte-identical (to four significant figures) between the engine-shared and independent paths, which is exactly the FP-reorder agreement expected from a correct alternative implementation. Residual share: the kernel primitives themselves; an independent kernel implementation is out of scope.
 
-6. **Pareto frontier visualisation gap.** The frontier is reported as CSV; without a plotting step in the notebook itself, future readers must produce the figures externally. Mitigation: a separate `docs/experiments/2026-05-08-octree-perf-frontier.py` script alongside the CSV in PR-perf-2 produces matplotlib figures from the CSV; the §Decision references the figure.
+6. **Sub-additivity false positive.** D being slower than C does not always mean the AoS layout is wrong; it could mean the build-time Morton encoding cost is large relative to the walk gain at the measured N. Mitigation in PR-perf-2: Tier 2's separated build/walk decomposition isolates this — sub-additivity is concluded only when `t_walk_D > t_walk_C`, not when `t_eval_D > t_eval_C`.
+
+7. **Pareto frontier visualisation gap.** The frontier is reported as CSV; without a plotting step in the notebook itself, future readers must produce the figures externally. Mitigation: a separate `docs/experiments/2026-05-08-octree-perf-frontier.py` script alongside the CSV in PR-perf-2 produces matplotlib figures from the CSV; the §Decision references the figure.
+
+8. **Small-|F| denominator inflation in relative-error metric.** Confirmed empirically: every worst-error body across PR-perf-1's 12 (cell, N, seed) cases has reference-force magnitude in `[0.03, 0.27] × median(|F|)`. The relative-error metric `|ΔF| / |F_ref|` inflates wherever the denominator is small, so max and (to a lesser extent) p99 reflect the metric's interaction with low-force pockets, not BH fidelity. Mitigation: Tier 1 gates on p50 and p95 only; max and p99 are recorded as informational. A combined absolute + relative metric `|ΔF| / (|F_ref| + F_scale)` is a deeper redesign that changes literature comparability and is deferred — for v1, percentile-based gating is sufficient.
+
+9. **`LEAF_CAPACITY = 8` is a free variable.** Bucket size, split criterion, and bounding-box strategy all affect tree depth, BH error per θ, and traversal cost. PR-perf-1 pins `LEAF_CAPACITY = 8` (compile-time `const`; matches GADGET-2 / PKDGRAV3 default) and does not vary it. The sensitivity sweep across `{4, 8, 16, 32}` requires a generic `Octree<const LEAF: usize>` refactor that touches the entire engine surface — deferred to PR-perf-2 where `tree.rs` is reworked for Morton anyway, allowing a single coherent leaf × Morton cross-product. Until that lands, all PR-perf-1 conclusions are contingent on `LEAF_CAPACITY = 8`.
+
+10. **Warm-loop cache state in timing measurements.** Each (cell, N, θ) measurement runs 1 warmup + 10 timed evaluations in a tight loop — branch predictors warm, tree nodes resident in cache, Rayon worker threads pinned. Production cold-start timings (first call after a long pause, e.g. on simulation startup) will be slower. Relative comparisons (A vs C, eventually D vs C) are robust to this because both cells share the warm-cache regime. Absolute `t_eval` values should be read as a warm-cache lower bound; cold-start measurement is a separate experiment.
