@@ -35,48 +35,7 @@ use crate::math::Vec3;
 use rayon::prelude::*;
 
 use super::kernel::{G, Kernel, PlummerKernel, pair_eps2};
-use super::tree::{DIRECT_MODE_THRESHOLD, EXACT_THRESHOLD, NO_CHILD, Node, Octree};
-
-// ── MultipoleOrder ────────────────────────────────────────────────────────── //
-
-/// Multipole expansion order used in Barnes-Hut force evaluation.
-///
-/// Switches the per-node gravitational signature between point-mass at the
-/// centre of mass (`Monopole`) and a monopole + symmetric traceless
-/// quadrupole correction (`Quadrupole`). The latter halves the per-body
-/// force error at fixed θ at the cost of ~2.5–3× per-interaction work,
-/// which is amortised by the larger θ values it makes acceptable.
-///
-/// `Monopole` is the canonical Barnes-Hut tree-code default and the
-/// configuration validated by the octree-port lab notebook
-/// (`docs/experiments/2026-05-08-octree-port.md`).
-///
-/// **Toggle scope.** This enum and the [`set_multipole_order`] /
-/// [`multipole_order`] accessors are part of the in-flight perf 2×2
-/// experiment (`docs/experiments/2026-05-08-octree-perf-2x2.md`). They
-/// will be removed in the final commit of that experiment once §Decision
-/// is written and the chosen configuration is baked-in. Production code
-/// outside the experiment harness should not rely on this surface.
-///
-/// [`set_multipole_order`]: BarnesHutEngine::set_multipole_order
-/// [`multipole_order`]: BarnesHutEngine::multipole_order
-//
-// `dead_code` allowed for the scaffolding window: the `Quadrupole` variant
-// is read for the first time in the next commit that adds tensor
-// aggregation in `aggregate_mass`; the allow is removed there.
-#[allow(dead_code)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum MultipoleOrder {
-    /// Monopole only: each accepted node contributes `−G M / r² · r̂`.
-    /// Per-body error at θ = 0.5 sits at the Salmon-Warren ~5 % bound.
-    Monopole,
-    /// Monopole + quadrupole correction: each accepted node contributes the
-    /// monopole term plus `a_quad = −G/r⁵ · [Q · r̂ − (5/2) (r̂ᵀ Q r̂) r̂]`,
-    /// with `Q` the symmetric traceless second-moment tensor of the subtree
-    /// about its COM. Per-body error drops by ≈ 10× at fixed θ
-    /// (Hernquist & Katz 1989).
-    Quadrupole,
-}
+use super::tree::{DIRECT_MODE_THRESHOLD, EXACT_THRESHOLD, MultipoleOrder, NO_CHILD, Node, Octree};
 
 // ── BarnesHutEngine ───────────────────────────────────────────────────────── //
 
@@ -98,9 +57,6 @@ pub struct BarnesHutEngine {
     exact_threshold: usize,
     kernel: Arc<dyn Kernel>,
     /// Multipole expansion order. See [`MultipoleOrder`] for toggle scope.
-    /// `dead_code` allow removed in the next commit that branches on this
-    /// field in the BH walk.
-    #[allow(dead_code)]
     multipole_order: MultipoleOrder,
 }
 
@@ -183,16 +139,19 @@ impl BarnesHutEngine {
     // is written and the chosen multipole order is baked-in.
 
     /// Switch between [`MultipoleOrder::Monopole`] and
-    /// [`MultipoleOrder::Quadrupole`] for subsequent [`evaluate`] calls.
+    /// [`MultipoleOrder::Quadrupole`] for subsequent [`build`] calls. The
+    /// next [`build`] re-aggregates the tree under the new order; an
+    /// already-built tree retains the order it was last built with until
+    /// the engine rebuilds.
     ///
-    /// [`evaluate`]: Self::evaluate
-    #[allow(dead_code)] // wired up by the BH walk in the next commit
+    /// [`build`]: Self::build
+    #[allow(dead_code)] // perf 2x2 harness only; allow removed when bench lands
     pub(crate) fn set_multipole_order(&mut self, order: MultipoleOrder) {
         self.multipole_order = order;
     }
 
     /// Currently active multipole expansion order.
-    #[allow(dead_code)] // wired up by the BH walk in the next commit
+    #[allow(dead_code)] // read by perf 2x2 harness only; lib path passes the field directly
     pub(crate) fn multipole_order(&self) -> MultipoleOrder {
         self.multipole_order
     }
@@ -201,7 +160,7 @@ impl BarnesHutEngine {
     ///
     /// Must be called before [`evaluate`](Self::evaluate) whenever bodies have moved.
     pub fn build(&mut self, bodies: &[Body]) {
-        self.tree.build(bodies);
+        self.tree.build(bodies, self.multipole_order);
     }
 
     /// Compute gravitational accelerations and return total potential energy.
