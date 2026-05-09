@@ -58,6 +58,12 @@ pub struct BarnesHutEngine {
     kernel: Arc<dyn Kernel>,
     /// Multipole expansion order. See [`MultipoleOrder`] for toggle scope.
     multipole_order: MultipoleOrder,
+    /// When `true`, [`build`](Self::build) sorts bodies by Morton (Z-order)
+    /// code before insertion and the BH walk in [`evaluate`](Self::evaluate)
+    /// iterates the same permutation. Toggle scope mirrors the multipole
+    /// toggle: experiment-only, removed in the final commit of the perf 2×2
+    /// experiment once the chosen configuration is baked-in.
+    morton_enabled: bool,
 }
 
 impl BarnesHutEngine {
@@ -80,6 +86,7 @@ impl BarnesHutEngine {
             exact_threshold: EXACT_THRESHOLD,
             kernel,
             multipole_order: MultipoleOrder::Monopole,
+            morton_enabled: false,
         }
     }
 
@@ -136,7 +143,7 @@ impl BarnesHutEngine {
     //
     // Removed in the final commit of the perf 2×2 experiment
     // (`docs/experiments/2026-05-08-octree-perf-2x2.md`) once §Decision
-    // is written and the chosen multipole order is baked-in.
+    // is written and the chosen multipole order + Morton state are baked-in.
 
     /// Switch between [`MultipoleOrder::Monopole`] and
     /// [`MultipoleOrder::Quadrupole`] for subsequent [`build`] calls. The
@@ -156,11 +163,27 @@ impl BarnesHutEngine {
         self.multipole_order
     }
 
+    /// Enable or disable Morton (Z-order) sorting of bodies during
+    /// [`build`](Self::build) and the matching iteration order during
+    /// [`evaluate`](Self::evaluate). The change takes effect on the next
+    /// `build`; an already-built tree keeps the ordering it was constructed
+    /// with until the engine rebuilds.
+    #[allow(dead_code)] // perf 2x2 harness only; allow removed when bench lands
+    pub(crate) fn set_morton_enabled(&mut self, enabled: bool) {
+        self.morton_enabled = enabled;
+    }
+
+    /// Whether Morton ordering is currently active for subsequent builds.
+    #[allow(dead_code)] // read by perf 2x2 harness only; lib path passes the field directly
+    pub(crate) fn morton_enabled(&self) -> bool {
+        self.morton_enabled
+    }
+
     /// Rebuild the octree from the current body positions.
     ///
     /// Must be called before [`evaluate`](Self::evaluate) whenever bodies have moved.
     pub fn build(&mut self, bodies: &[Body]) {
-        self.tree.build(bodies, self.multipole_order, false);
+        self.tree.build(bodies, self.multipole_order, self.morton_enabled);
     }
 
     /// Compute gravitational accelerations and return total potential energy.
@@ -997,6 +1020,62 @@ mod tests {
 
         engine.set_multipole_order(MultipoleOrder::Monopole);
         assert_eq!(engine.multipole_order(), MultipoleOrder::Monopole);
+    }
+
+    #[test]
+    fn morton_default_is_disabled() {
+        let engine = BarnesHutEngine::new(16);
+        assert!(!engine.morton_enabled());
+    }
+
+    #[test]
+    fn morton_setter_round_trips() {
+        let mut engine = BarnesHutEngine::new(16);
+
+        engine.set_morton_enabled(true);
+        assert!(engine.morton_enabled());
+
+        engine.set_morton_enabled(false);
+        assert!(!engine.morton_enabled());
+    }
+
+    /// Cross-cell consistency for the Morton toggle: the same body
+    /// distribution evaluated with Morton on vs Morton off must produce
+    /// per-body accelerations that agree to the FP-reorder floor. Morton
+    /// is a permutation of insertion + walk order, not an algorithmic
+    /// change; any difference above ULP-class drift indicates a bug
+    /// (either in the permutation, the walk's perm-aware iteration, or
+    /// the writeback indexing).
+    #[test]
+    fn morton_toggle_agrees_with_natural_order_at_fp_reorder_floor() {
+        let bodies = sphere_distribution_lognormal(1000, 0x6F637472);
+        let theta = 0.5;
+
+        let mut bh_natural = BarnesHutEngine::new(16);
+        bh_natural.set_morton_enabled(false);
+        bh_natural.build(&bodies);
+        let mut acc_natural = vec![Vec3::ZERO; bodies.len()];
+        bh_natural.evaluate(&bodies, theta, &mut acc_natural);
+
+        let mut bh_morton = BarnesHutEngine::new(16);
+        bh_morton.set_morton_enabled(true);
+        bh_morton.build(&bodies);
+        let mut acc_morton = vec![Vec3::ZERO; bodies.len()];
+        bh_morton.evaluate(&bodies, theta, &mut acc_morton);
+
+        // Per-body BH walk visits ~80 nodes at N = 1000 with leaf
+        // accumulation extending the depth: bound `≈ 100 · ε ≈ 2 × 10⁻¹⁴`
+        // gives 5× headroom at 1e-13.
+        let max_diff = acc_natural.iter().zip(&acc_morton).fold(0.0_f64, |peak, (a, b)| {
+            let mag = a.length().max(1e-30);
+            let drift = (*a - *b).length() / mag;
+            peak.max(drift)
+        });
+        eprintln!("[morton-consistency] N=1000 theta={theta} max rel-drift = {max_diff:.4e}");
+        assert!(
+            max_diff < 1.0e-13,
+            "Morton on/off forces drift {max_diff:.4e} above FP-reorder floor 1e-13",
+        );
     }
 
     /// Smoke gate for the quadrupole correction. The expected improvement
