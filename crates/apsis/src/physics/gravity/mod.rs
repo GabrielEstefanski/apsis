@@ -5,7 +5,7 @@
 //! | Sub-module | Responsibility |
 //! |---|---|
 //! | [`kernel`] | [`Kernel`] trait and concrete implementations (Plummer default) |
-//! | [`tree`] | Barnes-Hut quadtree data structure (algorithm) |
+//! | [`tree`] | Barnes-Hut octree data structure (algorithm) |
 //! | [`engine`] | [`BarnesHutEngine`]: orchestrates tree + kernel (integration) |
 
 mod engine;

@@ -1,4 +1,4 @@
-//! Barnes-Hut force engine — orchestrates the quadtree and the Plummer kernel.
+//! Barnes-Hut force engine — orchestrates the octree and the Plummer kernel.
 //!
 //! ## Two evaluation strategies
 //!
@@ -35,13 +35,13 @@ use crate::math::Vec3;
 use rayon::prelude::*;
 
 use super::kernel::{G, Kernel, PlummerKernel, pair_eps2};
-use super::tree::{DIRECT_MODE_THRESHOLD, EXACT_THRESHOLD, NO_CHILD, Node, QuadTree};
+use super::tree::{DIRECT_MODE_THRESHOLD, EXACT_THRESHOLD, NO_CHILD, Node, Octree};
 
 // ── BarnesHutEngine ───────────────────────────────────────────────────────── //
 
-/// N-body force engine using a Barnes-Hut quadtree.
+/// N-body force engine using a Barnes-Hut octree.
 ///
-/// Each call to [`build`](Self::build) reconstructs the quadtree from the
+/// Each call to [`build`](Self::build) reconstructs the octree from the
 /// current body positions.  [`evaluate`](Self::evaluate) then computes
 /// gravitational accelerations and total potential energy using that tree.
 ///
@@ -52,7 +52,7 @@ use super::tree::{DIRECT_MODE_THRESHOLD, EXACT_THRESHOLD, NO_CHILD, Node, QuadTr
 /// default (from [`BarnesHutEngine::new`]) is [`PlummerKernel`], which
 /// reproduces the Plummer-softened force law used throughout the library.
 pub struct BarnesHutEngine {
-    tree: QuadTree,
+    tree: Octree,
     /// N ≤ this → exact O(N²); N > this → Barnes-Hut traversal.
     exact_threshold: usize,
     kernel: Arc<dyn Kernel>,
@@ -61,7 +61,7 @@ pub struct BarnesHutEngine {
 impl BarnesHutEngine {
     /// Create a new engine with the default [`PlummerKernel`].
     ///
-    /// `max_depth` bounds the quadtree depth; 16 is sufficient for all
+    /// `max_depth` bounds the octree depth; 16 is sufficient for all
     /// practical particle counts.
     pub fn new(max_depth: usize) -> Self {
         Self::with_kernel(max_depth, Arc::new(PlummerKernel::new()))
@@ -73,7 +73,7 @@ impl BarnesHutEngine {
     /// example, a kernel that demonstrates or tests a different Exactness
     /// or Continuity class.
     pub fn with_kernel(max_depth: usize, kernel: Arc<dyn Kernel>) -> Self {
-        Self { tree: QuadTree::new(max_depth), exact_threshold: EXACT_THRESHOLD, kernel }
+        Self { tree: Octree::new(max_depth), exact_threshold: EXACT_THRESHOLD, kernel }
     }
 
     /// Handle to the kernel this engine dispatches through.
@@ -125,7 +125,7 @@ impl BarnesHutEngine {
         self.exact_threshold >= DIRECT_MODE_THRESHOLD
     }
 
-    /// Rebuild the quadtree from the current body positions.
+    /// Rebuild the octree from the current body positions.
     ///
     /// Must be called before [`evaluate`](Self::evaluate) whenever bodies have moved.
     pub fn build(&mut self, bodies: &[Body]) {
@@ -140,11 +140,8 @@ impl BarnesHutEngine {
     /// - N ≤ `exact_threshold`: uses exact O(N²) pairwise sum.
     /// - N > `exact_threshold`: uses parallel BH traversal.
     ///
-    /// The kernel arithmetic is fully 3D (`r² = Δx² + Δy² + Δz²`); the
-    /// Barnes–Hut spatial index is still a quadtree (xy-only partition).
-    /// For systems with `z = 0` on every body the quadtree partition is
-    /// the correct 3D partition restricted to the orbital plane; non-zero
-    /// `z` requires an octree, which is staged separately.
+    /// Spatial partition is the 3D octree (`Octree`) and the kernel
+    /// arithmetic is fully 3D — `r² = Δx² + Δy² + Δz²` at every site.
     pub fn evaluate(&self, bodies: &[Body], theta: f64, acc: &mut [Vec3]) -> f64 {
         let n = bodies.len();
         acc.fill(Vec3::ZERO);
@@ -207,7 +204,8 @@ impl BarnesHutEngine {
 
             let dx = node.com_x - body.x;
             let dy = node.com_y - body.y;
-            let d = (dx * dx + dy * dy + eps2).sqrt();
+            let dz = node.com_z - body.z;
+            let d = (dx * dx + dy * dy + dz * dz + eps2).sqrt();
             let ratio = node.size() / d;
 
             if ratio < theta {
@@ -225,10 +223,11 @@ impl BarnesHutEngine {
         if weight_sum > 0.0 { (violation_sum / weight_sum).sqrt() } else { 0.0 }
     }
 
-    fn node_density(&self, node: &Node, x: f64, y: f64, theta: f64) -> f64 {
+    fn node_density(&self, node: &Node, x: f64, y: f64, z: f64, theta: f64) -> f64 {
         let dx = node.com_x - x;
         let dy = node.com_y - y;
-        let dist2 = dx * dx + dy * dy + 1e-6;
+        let dz = node.com_z - z;
+        let dist2 = dx * dx + dy * dy + dz * dz + 1e-6;
 
         let size = node.size();
 
@@ -242,23 +241,23 @@ impl BarnesHutEngine {
         for &c in &node.children {
             if c != NO_CHILD {
                 let child = &self.tree.nodes()[c as usize];
-                sum += self.node_density(child, x, y, theta);
+                sum += self.node_density(child, x, y, z, theta);
             }
         }
 
         sum
     }
 
-    pub fn estimate_local_density(&self, x: f64, y: f64, theta: f64) -> f64 {
+    pub fn estimate_local_density(&self, x: f64, y: f64, z: f64, theta: f64) -> f64 {
         if self.tree.nodes().is_empty() {
             return 0.0;
         }
 
         let root = &self.tree.nodes()[0];
-        self.node_density(root, x, y, theta)
+        self.node_density(root, x, y, z, theta)
     }
 
-    pub fn query_neighbors(&self, x: f64, y: f64, radius: f64, out: &mut Vec<usize>) {
+    pub fn query_neighbors(&self, x: f64, y: f64, z: f64, radius: f64, out: &mut Vec<usize>) {
         out.clear();
 
         let nodes = self.tree.nodes();
@@ -266,7 +265,7 @@ impl BarnesHutEngine {
             return;
         }
 
-        self.query_node(nodes, 0, x, y, radius * radius, out);
+        self.query_node(nodes, 0, x, y, z, radius * radius, out);
 
         out.sort_unstable();
         out.dedup();
@@ -278,6 +277,7 @@ impl BarnesHutEngine {
         node_idx: u32,
         x: f64,
         y: f64,
+        z: f64,
         radius2: f64,
         out: &mut Vec<usize>,
     ) {
@@ -287,7 +287,7 @@ impl BarnesHutEngine {
             return;
         }
 
-        if !self.node_intersects(node, x, y, radius2) {
+        if !self.node_intersects(node, x, y, z, radius2) {
             return;
         }
 
@@ -300,21 +300,19 @@ impl BarnesHutEngine {
 
         for &c in &node.children {
             if c != NO_CHILD {
-                self.query_node(nodes, c, x, y, radius2, out);
+                self.query_node(nodes, c, x, y, z, radius2, out);
             }
         }
     }
 
-    fn node_intersects(&self, node: &Node, x: f64, y: f64, radius2: f64) -> bool {
+    fn node_intersects(&self, node: &Node, x: f64, y: f64, z: f64, radius2: f64) -> bool {
         let half = node.half;
 
-        let dx = (x - node.cx).abs() - half;
-        let dy = (y - node.cy).abs() - half;
+        let dx = ((x - node.cx).abs() - half).max(0.0);
+        let dy = ((y - node.cy).abs() - half).max(0.0);
+        let dz = ((z - node.cz).abs() - half).max(0.0);
 
-        let dx = dx.max(0.0);
-        let dy = dy.max(0.0);
-
-        dx * dx + dy * dy <= radius2
+        dx * dx + dy * dy + dz * dz <= radius2
     }
 }
 
@@ -373,11 +371,8 @@ fn exact_eval(bodies: &[Body], kernel: &dyn Kernel, acc: &mut [Vec3]) -> f64 {
 /// specific gravitational potential (potential per unit mass) at the body's
 /// position.  Multiply by `body.mass` to get the contribution to total PE.
 ///
-/// Node interactions use the target body's own ε² (the tree stores only
-/// aggregated mass/COM, not per-body softening in internal nodes). The
-/// quadtree exposes only `(com_x, com_y)` — the BH branch therefore treats
-/// every node's `z` as zero. This matches the tree's xy-partition exactly
-/// when all bodies satisfy `z = 0`; non-zero `z` inputs require an octree.
+/// Node interactions use the target body's own ε² — the tree stores only
+/// aggregated mass and 3D COM, not per-body softening in internal nodes.
 fn bh_eval_body(
     nodes: &[Node],
     body_idx: usize,
@@ -425,11 +420,9 @@ fn bh_eval_body(
         }
 
         // BH criterion: accept this node as a pseudo-body when s/d < θ.
-        // Tree nodes carry only (com_x, com_y); the z-component of the
-        // node-to-body separation is implicitly the body's own z.
         let dx = node.com_x - body.x;
         let dy = node.com_y - body.y;
-        let dz = -body.z;
+        let dz = node.com_z - body.z;
         let eps2 = body.softening * body.softening;
         let d = (dx * dx + dy * dy + dz * dz + eps2).sqrt();
 
@@ -562,5 +555,348 @@ mod tests {
             assert!(rel_err(bh.x, ex.x) < 1e-2);
             assert!(rel_err(bh.y, ex.y) < 1e-2);
         }
+    }
+
+    // ── Octree validation (lab notebook 2026-05-08-octree-port) ────────── //
+    //
+    // Bounds declared a priori in
+    // `docs/experiments/2026-05-08-octree-port.md`. Failure here means the
+    // implementation is wrong, not the bound.
+
+    /// Tier 1 — Barnes-Hut force accuracy on a general 3D distribution.
+    ///
+    /// 100 bodies sampled in the unit sphere with log-normal masses, fixed
+    /// seed for reproducibility. Per-body max relative force error against
+    /// exact O(N²) must stay under the Salmon-Warren 5% bound at θ = 0.5.
+    #[test]
+    fn tier1_octree_bh_force_error_under_5pct_at_theta_0_5() {
+        let bodies = sphere_distribution_lognormal(100, 0x6F637472);
+
+        let mut exact = BarnesHutEngine::new(16);
+        exact.set_exact_threshold(usize::MAX);
+        exact.build(&bodies);
+        let mut acc_exact = vec![Vec3::ZERO; bodies.len()];
+        exact.evaluate(&bodies, 0.5, &mut acc_exact);
+
+        let mut bh = BarnesHutEngine::new(16);
+        bh.set_exact_threshold(1);
+        bh.build(&bodies);
+        let mut acc_bh = vec![Vec3::ZERO; bodies.len()];
+        bh.evaluate(&bodies, 0.5, &mut acc_bh);
+
+        let max_rel = body_max_rel_error(&acc_bh, &acc_exact);
+        eprintln!("[octree-tier1] θ=0.5 max rel-err = {max_rel:.4e}");
+        assert!(
+            max_rel <= 5e-2,
+            "max per-body rel-err = {max_rel:.4e} exceeds 5e-2 (Salmon-Warren) at θ = 0.5"
+        );
+    }
+
+    /// Tier 1 (exact-mode sanity) — Newton's third law at the round-off
+    /// floor. Exact pairwise evaluation IS symmetric by construction, so
+    /// `Σ m_i a_i` accumulates only floating-point summation noise. BH
+    /// mode is not gated on this — the monopole approximation breaks
+    /// pairwise symmetry by design (body A sees a far node at its COM,
+    /// the bodies inside that node see A individually; the action and
+    /// reaction sums are not algebraically equal). Failure of this test
+    /// would indicate a defect in the exact pairwise kernel, not in the
+    /// BH traversal.
+    #[test]
+    fn tier1_exact_mode_preserves_newton_third_law_at_roundoff() {
+        let bodies = sphere_distribution_lognormal(100, 0x6F637472);
+
+        let mut exact = BarnesHutEngine::new(16);
+        exact.set_exact_threshold(usize::MAX);
+        exact.build(&bodies);
+        let mut acc = vec![Vec3::ZERO; bodies.len()];
+        exact.evaluate(&bodies, 0.5, &mut acc);
+
+        let net: Vec3 = acc.iter().zip(&bodies).fold(Vec3::ZERO, |s, (a, b)| s + b.mass * *a);
+        eprintln!("[octree-tier1] exact mode |Σ m a| = {:.4e}", net.length());
+        assert!(
+            net.length() < 1e-12,
+            "exact-mode Σ m_i a_i = {} exceeds round-off floor 1e-12",
+            net.length(),
+        );
+    }
+
+    /// Tier 1 — Loose-θ regime. Same bodies, θ = 0.9 widens the bound to 10 %.
+    #[test]
+    fn tier1_octree_bh_force_error_under_10pct_at_theta_0_9() {
+        let bodies = sphere_distribution_lognormal(100, 0x6F637472);
+
+        let mut exact = BarnesHutEngine::new(16);
+        exact.set_exact_threshold(usize::MAX);
+        exact.build(&bodies);
+        let mut acc_exact = vec![Vec3::ZERO; bodies.len()];
+        exact.evaluate(&bodies, 0.9, &mut acc_exact);
+
+        let mut bh = BarnesHutEngine::new(16);
+        bh.set_exact_threshold(1);
+        bh.build(&bodies);
+        let mut acc_bh = vec![Vec3::ZERO; bodies.len()];
+        bh.evaluate(&bodies, 0.9, &mut acc_bh);
+
+        let max_rel = body_max_rel_error(&acc_bh, &acc_exact);
+        eprintln!("[octree-tier1] θ=0.9 max rel-err = {max_rel:.4e}");
+        assert!(max_rel <= 1e-1, "max per-body rel-err = {max_rel:.4e} exceeds 1e-1 at θ = 0.9");
+    }
+
+    /// Tier 2 — Inclined Kepler. Two-body at i = 30° padded to N > EXACT_THRESHOLD
+    /// so the BH branch is exercised. Integrate 100 orbital periods with
+    /// Velocity Verlet at `dt = T/200`. Specific angular momentum `|L|/|L₀|`
+    /// must drift no more than 1 × 10⁻³ — the Bug #4 bound from the WH
+    /// refactor (`docs/experiments/2026-05-03-wh-refactor.md`), reused here
+    /// because Lz was the diagnostic that originally caught 2D-only defects.
+    #[test]
+    fn tier2_octree_inclined_kepler_lz_below_1e_minus_3() {
+        // 2-body Kepler, mass ratio 1:1e-3, e = 0.3, i = 30°.
+        let m_central = 1.0_f64;
+        let m_planet = 1.0e-3_f64;
+        let a = 1.0_f64;
+        let e = 0.3_f64;
+        let inc = 30.0_f64.to_radians();
+        let mu = m_central + m_planet;
+        let period = 2.0 * std::f64::consts::PI * (a.powi(3) / mu).sqrt();
+
+        // Periapsis state in orbital plane, then rotated by i around x-axis.
+        let r_peri = a * (1.0 - e);
+        let v_peri = ((1.0 + e) * mu / (a * (1.0 - e))).sqrt();
+        let (sin_i, cos_i) = inc.sin_cos();
+
+        let mut bodies = vec![
+            // Central body at origin
+            Body::rocky(m_central).at(0.0, 0.0).with_velocity(0.0, 0.0),
+            // Planet at periapsis with inclined velocity
+            {
+                let mut b = Body::rocky(m_planet).at(r_peri, 0.0).with_velocity(0.0, 0.0);
+                b.vy = v_peri * cos_i;
+                b.vz = v_peri * sin_i;
+                b
+            },
+        ];
+
+        // Pad to N > EXACT_THRESHOLD with massless test particles far from
+        // the binary so they don't perturb the Kepler orbit. Using mass 1e-30
+        // keeps Newton's law evaluating but the contribution to Lz drift is
+        // negligible.
+        let n_pad = 100;
+        for i in 0..n_pad {
+            let phi = 2.0 * std::f64::consts::PI * (i as f64) / (n_pad as f64);
+            let r_far = 1.0e6;
+            bodies.push(
+                Body::rocky(1.0e-30)
+                    .at(r_far * phi.cos(), r_far * phi.sin())
+                    .with_velocity(0.0, 0.0),
+            );
+        }
+
+        // Initial angular momentum |L_0| over the binary only.
+        let l0 = orbital_angular_momentum(&bodies[0], &bodies[1]);
+        let l0_mag = l0.length();
+
+        let dt = period / 200.0;
+        let n_steps = (100.0 * period / dt).ceil() as usize;
+
+        let mut engine = BarnesHutEngine::new(16);
+        let mut acc = vec![Vec3::ZERO; bodies.len()];
+
+        // Velocity Verlet driver — minimal in-test loop, avoids pulling
+        // in System orchestration just for this measurement.
+        engine.build(&bodies);
+        engine.evaluate(&bodies, 0.5, &mut acc);
+
+        let mut peak_rel_drift = 0.0_f64;
+
+        for _ in 0..n_steps {
+            // kick (½dt)
+            for (b, a) in bodies.iter_mut().zip(&acc) {
+                b.vx += 0.5 * dt * a.x;
+                b.vy += 0.5 * dt * a.y;
+                b.vz += 0.5 * dt * a.z;
+            }
+            // drift (dt)
+            for b in bodies.iter_mut() {
+                b.x += dt * b.vx;
+                b.y += dt * b.vy;
+                b.z += dt * b.vz;
+            }
+            // recompute forces
+            engine.build(&bodies);
+            engine.evaluate(&bodies, 0.5, &mut acc);
+            // kick (½dt)
+            for (b, a) in bodies.iter_mut().zip(&acc) {
+                b.vx += 0.5 * dt * a.x;
+                b.vy += 0.5 * dt * a.y;
+                b.vz += 0.5 * dt * a.z;
+            }
+
+            let l = orbital_angular_momentum(&bodies[0], &bodies[1]);
+            let drift = (l - l0).length() / l0_mag;
+            if drift > peak_rel_drift {
+                peak_rel_drift = drift;
+            }
+        }
+
+        eprintln!("[octree-tier2] inclined-kepler peak |ΔL|/|L₀| = {peak_rel_drift:.4e}");
+        assert!(
+            peak_rel_drift <= 1.0e-3,
+            "peak |ΔL|/|L₀| = {peak_rel_drift:.4e} exceeds 1e-3 over 100 inclined Kepler periods"
+        );
+    }
+
+    /// Tier 1 — Larger-N variant that genuinely exercises the BH approximation.
+    ///
+    /// At N = 100 the tree is shallow enough that θ = 0.5 opens most internal
+    /// nodes down to leaves — the traversal effectively does exact pairwise
+    /// work and the per-body error sits at the round-off floor (which meets
+    /// the bound but doesn't probe the algorithm). At N = 1000 the tree
+    /// reaches depth ≈ log₈(1000) ≈ 3-4 and the BH criterion accepts a
+    /// meaningful number of distant nodes as monopoles. The 5 % bound is
+    /// the same Salmon-Warren value; if it holds here, the algorithm
+    /// approximates correctly under the load it was designed for.
+    #[test]
+    fn tier1_octree_bh_force_error_under_5pct_at_theta_0_5_n_1000() {
+        let bodies = sphere_distribution_lognormal(1000, 0x6F637472);
+
+        let mut exact = BarnesHutEngine::new(16);
+        exact.set_exact_threshold(usize::MAX);
+        exact.build(&bodies);
+        let mut acc_exact = vec![Vec3::ZERO; bodies.len()];
+        exact.evaluate(&bodies, 0.5, &mut acc_exact);
+
+        let mut bh = BarnesHutEngine::new(16);
+        bh.set_exact_threshold(1);
+        bh.build(&bodies);
+        let mut acc_bh = vec![Vec3::ZERO; bodies.len()];
+        bh.evaluate(&bodies, 0.5, &mut acc_bh);
+
+        let max_rel = body_max_rel_error(&acc_bh, &acc_exact);
+        eprintln!("[octree-tier1] N=1000 θ=0.5 max rel-err = {max_rel:.4e}");
+        assert!(
+            max_rel <= 5e-2,
+            "max per-body rel-err = {max_rel:.4e} exceeds 5e-2 (Salmon-Warren) at N=1000, θ=0.5"
+        );
+    }
+
+    /// Tier 3 — Empirical wall-time scaling. Builds + evaluates the octree at
+    /// a range of body counts in BH mode (θ = 0.5), reports the mean wall
+    /// time per `evaluate` call after a warm-up iteration. Output goes to
+    /// stderr (visible with `cargo test ... -- --nocapture`).
+    ///
+    /// The gate here is weak by design — absolute numbers vary by hardware
+    /// and Rayon thread count — but the **growth ratio** between consecutive
+    /// N values is intrinsic to the algorithm. O(N²) gives a 4× ratio when
+    /// N doubles; O(N log N) gives ~2.1-2.3×. The assert at the end checks
+    /// the worst observed ratio stays under 4× (i.e. better than O(N²)),
+    /// which is the bare minimum for "BH is doing its job".
+    #[test]
+    fn tier3_octree_evaluate_scaling_better_than_n_squared() {
+        let ns = [100, 250, 500, 1000, 2500];
+        let theta = 0.5;
+        let warmup = 1;
+        let measured = 5;
+
+        let mut times_ms = Vec::with_capacity(ns.len());
+        for &n in &ns {
+            let bodies = sphere_distribution_lognormal(n, 0x6F637472);
+            let mut bh = BarnesHutEngine::new(16);
+            bh.set_exact_threshold(1);
+            bh.build(&bodies);
+            let mut acc = vec![Vec3::ZERO; bodies.len()];
+
+            for _ in 0..warmup {
+                bh.evaluate(&bodies, theta, &mut acc);
+            }
+            let start = std::time::Instant::now();
+            for _ in 0..measured {
+                bh.evaluate(&bodies, theta, &mut acc);
+            }
+            let mean_ms = start.elapsed().as_secs_f64() * 1000.0 / (measured as f64);
+            times_ms.push(mean_ms);
+            eprintln!("[octree-tier3] N={n:5} θ={theta} mean evaluate = {mean_ms:.3} ms");
+        }
+
+        // Worst growth ratio across consecutive N pairs whose N ratio is
+        // approximately 2× (used to compare against the O(N²) reference of
+        // 4×). Pairs in `ns` with N ratios: 250/100=2.5, 500/250=2,
+        // 1000/500=2, 2500/1000=2.5 — all ~2-2.5×, consistent with each
+        // other for the ratio test.
+        let worst_ratio = times_ms
+            .windows(2)
+            .zip(ns.windows(2))
+            .map(|(t, n)| {
+                let n_ratio = n[1] as f64 / n[0] as f64;
+                // Normalise the time ratio to a 2× N-doubling so all pairs
+                // are compared on the same scale.
+                let t_ratio = t[1] / t[0];
+                t_ratio.powf((2.0_f64.ln()) / n_ratio.ln())
+            })
+            .fold(0.0_f64, f64::max);
+        eprintln!("[octree-tier3] worst N-doubling time ratio = {worst_ratio:.2}× (O(N²) = 4×)");
+
+        assert!(
+            worst_ratio < 4.0,
+            "worst N-doubling time ratio {worst_ratio:.2}× ≥ 4× — BH not pruning effectively, \
+             traversal degraded to O(N²)-class behaviour"
+        );
+    }
+
+    // ── Helpers for the validation tests ─────────────────────────────────── //
+
+    /// Sample N bodies uniformly inside the unit sphere with log-normal
+    /// masses (μ = 0, σ = 1). Deterministic for a given `seed`.
+    fn sphere_distribution_lognormal(n: usize, seed: u64) -> Vec<Body> {
+        // Linear congruential generator — sufficient for reproducible test
+        // initial conditions; not cryptographic.
+        let mut state = seed.wrapping_add(0x9E3779B97F4A7C15);
+        let mut next_u64 = || {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            state
+        };
+        let mut next_unit = || (next_u64() >> 11) as f64 / (1u64 << 53) as f64;
+
+        let mut bodies = Vec::with_capacity(n);
+        while bodies.len() < n {
+            // Rejection sampling for uniform-in-ball.
+            let x = 2.0 * next_unit() - 1.0;
+            let y = 2.0 * next_unit() - 1.0;
+            let z = 2.0 * next_unit() - 1.0;
+            if x * x + y * y + z * z > 1.0 {
+                continue;
+            }
+            // Log-normal mass via Box-Muller standard normal then exp.
+            let u1 = next_unit().max(1e-12);
+            let u2 = next_unit();
+            let normal = (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos();
+            let mass = normal.exp();
+
+            let mut b = Body::rocky(mass).at(x, y).with_velocity(0.0, 0.0);
+            b.z = z;
+            bodies.push(b);
+        }
+        bodies
+    }
+
+    /// Per-body maximum relative force error: `max_i |a_i − a_ref_i| / |a_ref_i|`,
+    /// with a small absolute-magnitude floor so bodies with near-zero
+    /// reference acceleration don't blow up the relative metric.
+    fn body_max_rel_error(acc: &[Vec3], reference: &[Vec3]) -> f64 {
+        acc.iter().zip(reference).fold(0.0_f64, |peak, (a, r)| {
+            let r_mag = r.length().max(1e-30);
+            let err = (*a - *r).length() / r_mag;
+            peak.max(err)
+        })
+    }
+
+    /// Specific angular momentum `r × v` of the relative orbit between
+    /// two bodies. Returns `m_planet · (r_planet − r_central) ×
+    /// (v_planet − v_central)` so the magnitude is dimensionally
+    /// `mass · length² / time`.
+    fn orbital_angular_momentum(central: &Body, planet: &Body) -> Vec3 {
+        let r = Vec3::new(planet.x - central.x, planet.y - central.y, planet.z - central.z);
+        let v = Vec3::new(planet.vx - central.vx, planet.vy - central.vy, planet.vz - central.vz);
+        let cross = Vec3::new(r.y * v.z - r.z * v.y, r.z * v.x - r.x * v.z, r.x * v.y - r.y * v.x);
+        planet.mass * cross
     }
 }
