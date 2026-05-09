@@ -54,7 +54,10 @@ pub(crate) const DIRECT_MODE_THRESHOLD: usize = 10_000;
 
 /// Small padding added to the root bounding cube so that no body ever sits
 /// exactly on a cell boundary (which would cause ambiguous octant assignment).
-const TREE_PAD: f64 = 1e-2;
+/// `pub(crate)` so [`super::morton::compute_aabb`] applies the identical
+/// padding when normalising bodies for Morton encoding — single source of
+/// truth, no drift risk between tree construction and spatial sorting.
+pub(crate) const TREE_PAD: f64 = 1e-2;
 
 // ── MultipoleOrder ────────────────────────────────────────────────────────── //
 

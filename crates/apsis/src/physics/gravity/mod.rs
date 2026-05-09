@@ -1,4 +1,4 @@
-//! Gravitational force evaluation for 2-D N-body simulations.
+//! Gravitational force evaluation for 3D N-body simulations.
 //!
 //! ## Module layout
 //!
@@ -6,10 +6,12 @@
 //! |---|---|
 //! | [`kernel`] | [`Kernel`] trait and concrete implementations (Plummer default) |
 //! | [`tree`] | Barnes-Hut octree data structure (algorithm) |
+//! | [`morton`] | Z-order spatial encoding for body insertion + walk locality |
 //! | [`engine`] | [`BarnesHutEngine`]: orchestrates tree + kernel (integration) |
 
 mod engine;
 pub mod kernel;
+mod morton;
 mod tree;
 
 #[cfg(test)]
