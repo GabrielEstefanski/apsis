@@ -203,21 +203,18 @@ enum Reference {
 fn build_reference(bodies: &[Body], seed: u64) -> Reference {
     let n = bodies.len();
     if n <= N_REFERENCE_FULL_MAX {
+        let all_indices: Vec<usize> = (0..n).collect();
         let t = Instant::now();
-        let mut bh_exact = BarnesHutEngine::new(16);
-        bh_exact.set_exact_threshold(usize::MAX);
-        bh_exact.build(bodies);
-        let mut acc = vec![Vec3::ZERO; n];
-        let _ = bh_exact.evaluate(bodies, 0.5, &mut acc);
+        let forces = exact_pairwise_forces(bodies, &all_indices);
         eprintln!(
-            "[perf_2x2]   N={n:>6} reference (full O(N^2)) in {:.2}s",
+            "[perf_2x2]   N={n:>6} reference (full O(N^2), independent kernel) in {:.2}s",
             t.elapsed().as_secs_f64()
         );
-        Reference::Full { forces: acc }
+        Reference::Full { forces }
     } else {
         let indices = sample_body_indices(n, K_SAMPLE, seed);
         let t = Instant::now();
-        let forces = exact_force_for_sample(bodies, &indices);
+        let forces = exact_pairwise_forces(bodies, &indices);
         eprintln!(
             "[perf_2x2]   N={n:>6} reference (sampled K={K_SAMPLE}) in {:.2}s",
             t.elapsed().as_secs_f64()
@@ -243,7 +240,14 @@ fn sample_body_indices(n: usize, k: usize, seed: u64) -> Vec<usize> {
     v
 }
 
-fn exact_force_for_sample(bodies: &[Body], indices: &[usize]) -> Vec<Vec3> {
+/// Exact O(N) per-target pairwise forces, parallelised over `indices`.
+///
+/// Hand-rolled — does not route through [`BarnesHutEngine`]. Sharing only
+/// the [`PlummerKernel`] and `pair_eps2` primitives means a defect in the
+/// engine's exact-mode accumulation cannot mask a BH defect by silently
+/// agreeing with the reference. Used by both Full mode (`indices = 0..N`)
+/// and Sampled mode (`indices` = a deterministic random subset).
+fn exact_pairwise_forces(bodies: &[Body], indices: &[usize]) -> Vec<Vec3> {
     let kernel = PlummerKernel::new();
     indices
         .par_iter()
