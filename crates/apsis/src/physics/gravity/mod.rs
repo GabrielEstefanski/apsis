@@ -12,5 +12,8 @@ mod engine;
 pub mod kernel;
 mod tree;
 
+#[cfg(test)]
+mod perf_2x2;
+
 pub use engine::BarnesHutEngine;
 pub use kernel::{G, Kernel, PlummerKernel, pair_eps2};
