@@ -35,7 +35,9 @@ use crate::math::Vec3;
 use rayon::prelude::*;
 
 use super::kernel::{G, Kernel, PlummerKernel, pair_eps2};
-use super::tree::{DIRECT_MODE_THRESHOLD, EXACT_THRESHOLD, MultipoleOrder, NO_CHILD, Node, Octree};
+use super::tree::{
+    DEFAULT_LEAF, DIRECT_MODE_THRESHOLD, EXACT_THRESHOLD, MultipoleOrder, NO_CHILD, Node, Octree,
+};
 
 // ── BarnesHutEngine ───────────────────────────────────────────────────────── //
 
@@ -288,7 +290,7 @@ impl BarnesHutEngine {
         if weight_sum > 0.0 { (violation_sum / weight_sum).sqrt() } else { 0.0 }
     }
 
-    fn node_density(&self, node: &Node, x: f64, y: f64, z: f64, theta: f64) -> f64 {
+    fn node_density(&self, node: &Node<DEFAULT_LEAF>, x: f64, y: f64, z: f64, theta: f64) -> f64 {
         let dx = node.com_x - x;
         let dy = node.com_y - y;
         let dz = node.com_z - z;
@@ -338,7 +340,7 @@ impl BarnesHutEngine {
 
     fn query_node(
         &self,
-        nodes: &[Node],
+        nodes: &[Node<DEFAULT_LEAF>],
         node_idx: u32,
         x: f64,
         y: f64,
@@ -370,7 +372,14 @@ impl BarnesHutEngine {
         }
     }
 
-    fn node_intersects(&self, node: &Node, x: f64, y: f64, z: f64, radius2: f64) -> bool {
+    fn node_intersects(
+        &self,
+        node: &Node<DEFAULT_LEAF>,
+        x: f64,
+        y: f64,
+        z: f64,
+        radius2: f64,
+    ) -> bool {
         let half = node.half;
 
         let dx = ((x - node.cx).abs() - half).max(0.0);
@@ -439,7 +448,7 @@ fn exact_eval(bodies: &[Body], kernel: &dyn Kernel, acc: &mut [Vec3]) -> f64 {
 /// Node interactions use the target body's own ε² — the tree stores only
 /// aggregated mass and 3D COM, not per-body softening in internal nodes.
 fn bh_eval_body(
-    nodes: &[Node],
+    nodes: &[Node<DEFAULT_LEAF>],
     body_idx: usize,
     body: &Body,
     bodies: &[Body],
