@@ -169,11 +169,21 @@ impl Node {
 pub(crate) struct Octree {
     pub(crate) nodes: Vec<Node>,
     max_depth: usize,
+    /// Multipole order the most recent [`build`](Self::build) populated.
+    /// Read by the BH walk to decide whether the per-node quadrupole tensor
+    /// is meaningful or zero-by-construction.
+    built_order: MultipoleOrder,
 }
 
 impl Octree {
     pub(crate) fn new(max_depth: usize) -> Self {
-        Self { nodes: Vec::new(), max_depth }
+        Self { nodes: Vec::new(), max_depth, built_order: MultipoleOrder::Monopole }
+    }
+
+    /// Multipole order the tree currently carries.
+    #[inline]
+    pub(crate) fn built_order(&self) -> MultipoleOrder {
+        self.built_order
     }
 
     /// Rebuild the tree from scratch for the given body slice.
@@ -189,6 +199,7 @@ impl Octree {
     /// at their initial zero, and the second pass is skipped.
     pub(crate) fn build(&mut self, bodies: &[Body], order: MultipoleOrder) {
         self.nodes.clear();
+        self.built_order = order;
 
         if bodies.is_empty() {
             return;
