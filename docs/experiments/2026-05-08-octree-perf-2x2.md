@@ -3,7 +3,7 @@
 **Date:** 2026-05-08
 **Subject:** Establish what makes the basic Barnes-Hut octree fast at the project's target scale (N ∈ [10³, 10⁵]) by adding (a) symmetric traceless quadrupole expansion at internal nodes and (b) Morton (Z-order) body sort. Measure both factors in a 2×2 factorial (mono/quad × no-Morton/Morton) at matched accuracy across N and θ. Decide which factors ship as always-on baked-in based on observed cost-vs-error frontier, not theory.
 
-**Status:** Protocol declared a priori, before any code is written. §Results populated incrementally — PR-perf-1 fills cells A and C; PR-perf-2 fills cells B and D and writes §Decision.
+**Status:** Protocol declared a priori, before any code is written. §Results populated incrementally — PR-perf-1 (merged) filled cells A and C; PR-perf-2 (in flight) fills cells B and D, runs the leaf-capacity sensitivity sweep, and writes §Decision.
 
 **Branch base:** PR-perf-1 stacked on `feat/octree-port` (PR #69, open at protocol time). Both PRs rebase onto `master` once #69 lands.
 
@@ -210,7 +210,7 @@ After §Decision is written, the final commit of PR-perf-2 removes both setters 
 | Warm-up evaluations | 1 per cell per N per θ before timed runs | Excludes first-touch effects (CPU frequency scaling, allocator warm-up, page faults) |
 | Timed evaluations | 10 per cell per N per θ; report median + 1σ | Robust to outliers from OS scheduling jitter; σ feeds the variance-stability decision |
 | Seeds | 3: `0x6F637472`, `0x71756164`, `0x6D6F7274` | Multi-seed addresses the single-seed threat-to-validity from octree-port |
-| `LEAF_CAPACITY` | 8 (compile-time `const` in `tree.rs`) | Matches the GADGET-2 / PKDGRAV3 default for tree codes at this regime. Sensitivity sweep across `{4, 8, 16, 32}` requires a generic `Octree<const LEAF: usize>` refactor; deferred to PR-perf-2, where `tree.rs` is touched substantively for Morton anyway, allowing a single coherent leaf × Morton cross-product measurement. The ungated nature of this choice is recorded in §Threats |
+| `LEAF_CAPACITY` | 8 (default of generic `Octree<const LEAF: usize = 8>`) | Production default matches GADGET-2 / PKDGRAV3. PR-perf-2 lands the generic refactor and a sensitivity sweep across `{4, 8, 16, 32}` to characterise dependency on this choice. Default value preserves callsite ergonomics (`Octree::new(16)` continues to work); sensitivity tests instantiate `Octree::<4>::new` etc. directly without going through `BarnesHutEngine` |
 | `K_SAMPLE` | 512 (sampled-reference size for `N > 10⁴`) | Independent O(N²) reference is prohibitive at N = 10⁵; hand-rolled parallel pairwise force on K randomly-chosen targets is used instead. K = 512 puts ≈ 25 samples in the p95 tail (SE ≈ 1 %) and ≈ 5 in the p99 tail (informational only). p99 / max under sampling are flagged low-confidence in §Results |
 
 #### Out of scope (declared a priori)
@@ -219,7 +219,7 @@ After §Decision is written, the final commit of PR-perf-2 removes both setters 
 - **SIMD inner loops in `bh_eval_body`.** Marginal-future bucket per the perf-categorisation plan; gated on Morton landing first to provide spatial coherence.
 - **Adaptive θ controllers.** `ThetaController` consumes the θ-error proxy unchanged; tuning it for quadrupole is a separate experiment.
 - **GPU offload.** Niche bucket; out of scope.
-- **Radix sort for Morton codes.** `std::sort_unstable_by_key` is the chosen sort; radix is a follow-up only if profiling shows the standard sort dominating (predicted not — for N = 10⁵ the sort is estimated < 5 % of build cost).
+- **Radix sort for Morton codes.** `std::sort_unstable_by_key` is the chosen sort; radix is a follow-up only if profiling shows the standard sort dominating. The estimate "sort < 5 % of build cost at N = 10⁵" is validated empirically by an isolated micro-test (`morton_permutation_micro_cost`, opt-in `#[ignore]`) before the main 2×2 measurement runs.
 - **Cargo features for the toggles.** Cargo features must be additive (Rust API guideline C-FEATURE); a `morton` or `quadrupole` feature would be exclusive/negative, breaking composability for downstream crates. The runtime knobs are `pub(crate)` only and removed in the final commit. No Cargo features, no public setters.
 - **Hot/cold field splitting in `Node`.** Only triggered if D-vs-C sub-additivity is observed (Decision Rule "structural signal"); otherwise the AoS layout matches the quadtree's and the diff stays focused.
 
