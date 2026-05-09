@@ -14,7 +14,7 @@
 //!
 //! Per-body force error is measured against:
 //! * an exact O(N²) reference for `N ≤ N_REFERENCE_FULL_MAX`, or
-//! * a sampled reference (`K_SAMPLE = 256` randomly chosen bodies, exact
+//! * a sampled reference (`K_SAMPLE = 512` randomly chosen bodies, exact
 //!   pairwise force on each) for larger `N`.
 //!
 //! The error array is summarised as `{p50, p95, p99, max, mean, std}` and
@@ -50,7 +50,12 @@ use super::tree::MultipoleOrder;
 const SEEDS: [u64; 3] = [0x6F637472, 0x71756164, 0x6D6F7274];
 const NS: [usize; 3] = [1_000, 10_000, 100_000];
 const N_REFERENCE_FULL_MAX: usize = 10_000;
-const K_SAMPLE: usize = 256;
+/// Sampled-reference size for `N > N_REFERENCE_FULL_MAX`. K = 512 puts ~25
+/// samples in the p95 tail and ~5 in the p99 tail (vs. 13 / 2.5 at K = 256).
+/// p99 is still informational under sampling — the notebook documents the
+/// confidence bound — but K = 512 is the cheapest size where p95 estimation
+/// is statistically solid (SE ≈ 1 %).
+const K_SAMPLE: usize = 512;
 const THETAS: [f64; 4] = [0.3, 0.5, 0.7, 0.9];
 const WARMUP: usize = 1;
 const MEASURED: usize = 10;
@@ -388,7 +393,35 @@ fn error_stats(
         },
     };
 
+    if let Some(signal) = small_force_signal(reference, &errors)
+        && signal < 0.5
+    {
+        eprintln!(
+            "[perf_2x2-diag]   worst-body |F|/median = {signal:.2} \
+             (small-force outlier; max/p99 inflated by relative-error denominator)"
+        );
+    }
+
     distribution_stats(&errors)
+}
+
+/// Ratio `|F_worst| / median(|F|)` where `F_worst` is the reference force on
+/// the body that hit the largest relative error. A value below ~0.5 means
+/// the max-error body sits in a small-|F| pocket, so its relative error is
+/// inflated by the denominator rather than by an actual BH defect — a known
+/// structural artefact of the metric, not the algorithm. Returns `None` for
+/// an empty error array.
+fn small_force_signal(reference: &Reference, errors: &[f64]) -> Option<f64> {
+    let (max_idx, _) = errors.iter().enumerate().max_by(|a, b| a.1.partial_cmp(b.1).unwrap())?;
+    let ref_forces = match reference {
+        Reference::Full { forces } => forces,
+        Reference::Sampled { forces, .. } => forces,
+    };
+    let worst_f = ref_forces[max_idx].length();
+    let mut mags: Vec<f64> = ref_forces.iter().map(|v| v.length()).collect();
+    mags.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let median_f = mags[mags.len() / 2];
+    Some(worst_f / median_f.max(1e-30))
 }
 
 fn relative_force_error(a: Vec3, r: Vec3) -> f64 {
