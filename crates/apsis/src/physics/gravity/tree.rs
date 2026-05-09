@@ -3,7 +3,7 @@
 //! ## Structure
 //!
 //! Flat `Vec<Node>`. Internal nodes subdivide their cubic cell into 8
-//! octants; leaf nodes store up to [`LEAF_CAPACITY`] body indices directly.
+//! octants; leaf nodes store up to [`LEAF`] body indices directly.
 //!
 //! ## Octant numbering
 //!
@@ -35,9 +35,10 @@ use super::morton::{Aabb, compute_aabb, compute_morton_permutation};
 
 // ── Constants ─────────────────────────────────────────────────────────────── //
 
-/// Maximum number of body indices stored directly in a leaf node before it
-/// is split into eight children.
-pub(crate) const LEAF_CAPACITY: usize = 8;
+/// Production default for the [`Octree`] leaf-capacity generic parameter.
+/// Matches GADGET-2 / PKDGRAV3 defaults; sensitivity sweep across
+/// `{4, 8, 16, 32}` lives in the perf 2×2 harness.
+pub(crate) const DEFAULT_LEAF: usize = 8;
 
 /// Sentinel value for an absent child pointer.
 pub(crate) const NO_CHILD: u32 = u32::MAX;
@@ -85,12 +86,15 @@ pub(crate) enum MultipoleOrder {
 
 // ── Node ──────────────────────────────────────────────────────────────────── //
 
-/// One node in the Barnes-Hut octree.
+/// One node in the Barnes-Hut octree, generic over leaf capacity.
 ///
-/// Leaf nodes hold up to [`LEAF_CAPACITY`] body indices directly.
-/// Internal nodes store only aggregated mass / COM and eight child pointers.
+/// Leaf nodes hold up to `LEAF` body indices directly. Internal nodes store
+/// only aggregated mass / COM and eight child pointers. The `LEAF` generic
+/// is propagated through [`Octree`] and ultimately pinned by
+/// [`BarnesHutEngine`] to [`DEFAULT_LEAF`] in production; the perf 2×2
+/// harness instantiates other values for the sensitivity sweep.
 #[derive(Clone, Copy)]
-pub(crate) struct Node {
+pub(crate) struct Node<const LEAF: usize> {
     /// Cell centre, world coordinates.
     pub cx: f64,
     pub cy: f64,
@@ -121,14 +125,14 @@ pub(crate) struct Node {
     /// Number of body indices stored in `bodies` (leaf nodes only).
     pub body_len: u8,
     /// Body index buffer for leaf nodes.  Valid range: `0..body_len`.
-    pub bodies: [u32; LEAF_CAPACITY],
+    pub bodies: [u32; LEAF],
 
     /// Child node indices in the flat node array. [`NO_CHILD`] means absent.
     /// Index follows the bit-pack `(z >= cz) << 2 | (y >= cy) << 1 | (x >= cx)`.
     pub children: [u32; 8],
 }
 
-impl Node {
+impl<const LEAF: usize> Node<LEAF> {
     fn new(cx: f64, cy: f64, cz: f64, half: f64) -> Self {
         Self {
             cx,
@@ -146,7 +150,7 @@ impl Node {
             q_yz: 0.0,
             body_count: 0,
             body_len: 0,
-            bodies: [0u32; LEAF_CAPACITY],
+            bodies: [0u32; LEAF],
             children: [NO_CHILD; 8],
         }
     }
@@ -166,13 +170,19 @@ impl Node {
 
 // ── Octree ────────────────────────────────────────────────────────────────── //
 
-/// Flat-array Barnes-Hut octree.
+/// Flat-array Barnes-Hut octree generic over leaf capacity.
 ///
 /// Call [`build`](Self::build) to (re)construct the tree from a body slice.
 /// The resulting [`Node`] array is accessed by the force engine for both the
 /// BH traversal and the `theta_error_proxy` heuristic.
-pub(crate) struct Octree {
-    pub(crate) nodes: Vec<Node>,
+///
+/// `LEAF` defaults to [`DEFAULT_LEAF`] = 8, which preserves the production
+/// callsite ergonomics (`Octree::new(max_depth)` continues to work unchanged
+/// from PR-perf-1). The perf 2×2 leaf-sensitivity sweep instantiates other
+/// values directly (`Octree::<4>::new(max_depth)` etc.) without going through
+/// `BarnesHutEngine`.
+pub(crate) struct Octree<const LEAF: usize = DEFAULT_LEAF> {
+    pub(crate) nodes: Vec<Node<LEAF>>,
     max_depth: usize,
     /// Multipole order the most recent [`build`](Self::build) populated.
     /// Read by the BH walk to decide whether the per-node quadrupole tensor
@@ -185,7 +195,7 @@ pub(crate) struct Octree {
     built_perm: Option<Vec<u32>>,
 }
 
-impl Octree {
+impl<const LEAF: usize> Octree<LEAF> {
     pub(crate) fn new(max_depth: usize) -> Self {
         Self {
             nodes: Vec::new(),
@@ -261,7 +271,7 @@ impl Octree {
 
     /// Read-only access to the flat node array.
     #[inline]
-    pub(crate) fn nodes(&self) -> &[Node] {
+    pub(crate) fn nodes(&self) -> &[Node<LEAF>] {
         &self.nodes
     }
 
@@ -272,7 +282,7 @@ impl Octree {
             // Hard depth cap: just store in current node and skip.
             if depth > self.max_depth {
                 let node = &mut self.nodes[node_idx];
-                if (node.body_len as usize) < LEAF_CAPACITY {
+                if (node.body_len as usize) < LEAF {
                     node.bodies[node.body_len as usize] = body_idx as u32;
                     node.body_len += 1;
                 }
@@ -283,8 +293,8 @@ impl Octree {
                 let len = self.nodes[node_idx].body_len as usize;
 
                 // Leaf has room, or we've hit the depth cap — store here.
-                if len < LEAF_CAPACITY || depth == self.max_depth {
-                    if (self.nodes[node_idx].body_len as usize) < LEAF_CAPACITY {
+                if len < LEAF || depth == self.max_depth {
+                    if (self.nodes[node_idx].body_len as usize) < LEAF {
                         self.nodes[node_idx].bodies[len] = body_idx as u32;
                         self.nodes[node_idx].body_len += 1;
                     }
@@ -589,7 +599,7 @@ mod tests {
     /// poisons every BH force computation.
     #[test]
     fn octant_numbering_matches_bit_pack_contract() {
-        // 16 bodies: 2 distinct positions per octant. 16 > LEAF_CAPACITY = 8
+        // 16 bodies: 2 distinct positions per octant. 16 > LEAF = 8
         // forces the root to subdivide. After build, each child[octant]
         // should contain exactly the two bodies whose corner sign pattern
         // matches that octant's bit-pack index.
@@ -658,7 +668,7 @@ mod tests {
     #[test]
     fn aggregate_propagates_com_z_through_subtree() {
         // 16 bodies at random-ish 3D positions with non-zero z. Forces
-        // multi-level subdivision (16 > LEAF_CAPACITY) and exercises the
+        // multi-level subdivision (16 > LEAF) and exercises the
         // recursive aggregate path.
         let bodies: Vec<Body> = (0..16)
             .map(|i| {
@@ -742,7 +752,7 @@ mod tests {
     /// parallel-axis combination, and that the two paths agree byte-wise.
     #[test]
     fn quadrupole_root_matches_direct_sum_under_subdivision() {
-        // 16 bodies arranged so the root must subdivide (LEAF_CAPACITY = 8),
+        // 16 bodies arranged so the root must subdivide (LEAF = 8),
         // log-normal masses, asymmetric positions to exercise every cross
         // term (q_xy, q_xz, q_yz all nonzero).
         let positions: Vec<(f64, f64, f64, f64)> = (0..16)
@@ -867,5 +877,46 @@ mod tests {
         tree.build(&bodies, MultipoleOrder::Monopole, true);
 
         assert_eq!(tree.nodes[0].body_count as usize, bodies.len());
+    }
+
+    // ── Generic LEAF parameter ─────────────────────────────────────────── //
+
+    /// Sanity check that the generic `Octree<const LEAF: usize>` parameter
+    /// actually changes leaf capacity. With LEAF = 4 a 5-body distribution
+    /// must subdivide the root; with LEAF = 16 the same distribution stays
+    /// in a single root leaf. Aggregated mass is independent of LEAF.
+    #[test]
+    fn generic_leaf_parameter_changes_split_threshold() {
+        let bodies: Vec<Body> = (0..5)
+            .map(|i| {
+                let t = i as f64 * 0.31;
+                body_xyz(t.sin(), t.cos(), (t * 0.7).sin(), 1.0)
+            })
+            .collect();
+
+        let mut tight: Octree<4> = Octree::new(16);
+        tight.build(&bodies, MultipoleOrder::Monopole, false);
+        assert!(!tight.nodes[0].is_leaf(), "5 > LEAF=4 must subdivide the root");
+
+        let mut loose: Octree<16> = Octree::new(16);
+        loose.build(&bodies, MultipoleOrder::Monopole, false);
+        assert!(loose.nodes[0].is_leaf(), "5 ≤ LEAF=16 keeps the root as a leaf");
+
+        let total_mass: f64 = bodies.iter().map(|b| b.mass).sum();
+        assert_relative_eq!(tight.nodes[0].mass, total_mass, epsilon = 1e-12);
+        assert_relative_eq!(loose.nodes[0].mass, total_mass, epsilon = 1e-12);
+    }
+
+    /// Default `Octree::new` instantiates `Octree<DEFAULT_LEAF>` so existing
+    /// callers (the engine, the perf 2×2 harness, every test in this module)
+    /// continue to compile unchanged. Spot-checked via `make_tree()` which
+    /// is the existing helper and still resolves to the default.
+    #[test]
+    fn default_octree_uses_default_leaf() {
+        // If this changes silently, the production tree-build path's
+        // measured costs in the lab notebook stop matching the deployed
+        // binary's behaviour.
+        assert_eq!(DEFAULT_LEAF, 8);
+        let _tree: Octree = Octree::new(16);
     }
 }
