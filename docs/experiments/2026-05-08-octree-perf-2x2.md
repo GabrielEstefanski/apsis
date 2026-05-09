@@ -428,6 +428,18 @@ Shipped configuration: `MultipoleOrder::Quadrupole` baked in, no toggle, no Mort
 
 Removed in the final commit: `MultipoleOrder` enum + setters, `set_morton_enabled` setter, `built_perm` field on `Octree`, `morton.rs` module, `perf_2x2.rs` module. Tier 1 / Tier 2 / Tier 3 measurements remain reachable through `git log` linked from this notebook.
 
+### Why Morton's gain is N-conditional (and what it implies for the next step)
+
+The N-monotone trend in the D-vs-C ratio (1.03 → 0.88 from 10⁴ → 10⁵) has a clean physical reading. At N ≤ 10⁴ on the recorded hardware, the BH walk is **compute-bound**: the working set (`~12 MB` of node array at N = 10⁴) fits inside L2/L3, and the parallel walk is rate-limited by FLOPs in the per-interaction kernel rather than by DRAM bandwidth. At N ≥ 10⁵ the working set (`~150 MB`) spills into DRAM (L3 = 32 MB on the test CPU); the walk becomes **memory-bound**, and Morton's cache-locality recovery translates directly into wall-time savings. The structural benefit Morton provides (visiting spatially-adjacent nodes consecutively) exists at every N; the **regime** in which it is rate-limiting starts above N = 10⁴ for this hardware class.
+
+This frames the next-step optimisation cleanly: at v1's primary regime (N ≤ 10⁴) the rate-limiting axis is FLOPs per evaluate, not memory traffic. The natural follow-up — gating with the same lab-notebook-first discipline as a future **PR-perf-3 (multipole acceptance criterion comparison)** — is to compare the classical `s/d < θ` MAC against alternatives that reduce interaction count at fixed accuracy:
+
+- **Barnes 1990 MAC** (`s / (d − δ_max) < θ`) — accounts for the cell's worst-case body offset from COM; cheap (1 extra `f64` per node), literature reports 15–25 % speedup at matched accuracy.
+- **Dehnen 2002 MAC** — adaptive opening based on accumulated relative-force error; ~30–50 % speedup, more state per walk, derivation non-trivial.
+- **GADGET-style** (Springel 2005) — combines Barnes 1990 with relative-acceleration error budget; ~25–40 %, intermediate complexity.
+
+Any of these attacks the compute-bound bottleneck directly and pays off at every N, including the v1 target where Morton stays inert. PR-perf-3 will declare bounds a priori, run the same per-cell × per-N × per-θ factorial against the classical MAC baseline, and either land an updated default or document the literature comparison as deferred — same discipline this notebook applied.
+
 **§Decision provenance.** Lab notebook `2026-05-08-octree-perf-2x2.md`, this section, written after the PR-perf-2 Pareto-frontier run completed (370 s total runtime on the recorded hardware) and the leaf-sensitivity sweep ran (~1 s). CSVs archived under `target/perf-2x2/` for the run that produced these numbers.
 
 ---
