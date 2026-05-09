@@ -188,12 +188,13 @@ impl BarnesHutEngine {
         }
 
         let nodes = self.tree.nodes();
+        let order = self.tree.built_order();
 
         let results: Vec<(Vec3, f64)> = (0..n)
             .into_par_iter()
             .map(|i| {
                 let mut stack = Vec::with_capacity(128);
-                bh_eval_body(nodes, i, &bodies[i], bodies, theta, kernel, &mut stack)
+                bh_eval_body(nodes, i, &bodies[i], bodies, theta, kernel, order, &mut stack)
             })
             .collect();
 
@@ -411,10 +412,12 @@ fn bh_eval_body(
     bodies: &[Body],
     theta: f64,
     kernel: &dyn Kernel,
+    order: MultipoleOrder,
     stack: &mut Vec<u32>,
 ) -> (Vec3, f64) {
     let mut a = Vec3::ZERO;
     let mut phi = 0.0_f64;
+    let use_quad = matches!(order, MultipoleOrder::Quadrupole);
 
     stack.clear();
     if !nodes.is_empty() {
@@ -464,6 +467,33 @@ fn bh_eval_body(
             a.y += dy * fac;
             a.z += dz * fac;
             phi += -G * node.mass * kernel.potential(r_sq, eps2);
+
+            if use_quad {
+                // Quadrupole correction in the same convention as the
+                // monopole branch (r = source − body, attractive a_mono
+                // points along +r):
+                //   a_quad = −G/r⁵ (Q·r) + (5G/2)(rᵀQr)/r⁷ · r
+                //   Φ_quad = −G (rᵀQr) / (2 r⁵)
+                // Plummer-style softening shared with the monopole:
+                // r² → r² + ε² in every inverse power.
+                let q_zz = -(node.q_xx + node.q_yy);
+                let qr_x = node.q_xx * dx + node.q_xy * dy + node.q_xz * dz;
+                let qr_y = node.q_xy * dx + node.q_yy * dy + node.q_yz * dz;
+                let qr_z = node.q_xz * dx + node.q_yz * dy + q_zz * dz;
+                let rqr = dx * qr_x + dy * qr_y + dz * qr_z;
+
+                let inv_r2 = 1.0 / (r_sq + eps2);
+                let inv_r5 = fac / node.mass * inv_r2; // (1/r³) · (1/r²)
+                let inv_r7 = inv_r5 * inv_r2;
+
+                let coef_qr = -G * inv_r5;
+                let coef_r = 2.5 * G * rqr * inv_r7;
+
+                a.x += coef_qr * qr_x + coef_r * dx;
+                a.y += coef_qr * qr_y + coef_r * dy;
+                a.z += coef_qr * qr_z + coef_r * dz;
+                phi += -0.5 * G * rqr * inv_r5;
+            }
         } else {
             for &c in &node.children {
                 if c != NO_CHILD {
@@ -940,13 +970,7 @@ mod tests {
         planet.mass * cross
     }
 
-    // ── MultipoleOrder toggle scaffold ────────────────────────────────── //
-    //
-    // Wired up at the BarnesHutEngine surface in the perf 2×2 experiment
-    // (`docs/experiments/2026-05-08-octree-perf-2x2.md`). The Quadrupole
-    // branch becomes physically active in the subsequent commit that adds
-    // the tensor aggregation; until then both variants must produce
-    // identical forces because the evaluation path is multipole-agnostic.
+    // ── MultipoleOrder toggle ─────────────────────────────────────────── //
 
     #[test]
     fn multipole_order_default_is_monopole() {
@@ -963,5 +987,53 @@ mod tests {
 
         engine.set_multipole_order(MultipoleOrder::Monopole);
         assert_eq!(engine.multipole_order(), MultipoleOrder::Monopole);
+    }
+
+    /// Smoke gate for the quadrupole correction. The expected improvement
+    /// ratio depends on θ: monopole BH error scales as `(s/d)^2` and
+    /// quadrupole as `(s/d)^4`, so the ratio is `(s/d)^(-2)`. At θ = 0.9
+    /// that ratio is only ~1.2–2×; the literature "≈ 10×" claim
+    /// (Hernquist & Katz 1989) assumes θ ≤ 0.5. This test runs at θ = 0.5
+    /// with N = 1000 — the octree-port Tier 1 baseline (mono error
+    /// 2.51 × 10⁻²) — and demands a 5× improvement (conservative versus
+    /// the 10× literature target). The formal Tier 1 bounds land in the
+    /// perf 2×2 tests; here we just prove the formula and sign convention
+    /// are right at all.
+    #[test]
+    fn quadrupole_branch_reduces_force_error_vs_monopole() {
+        let bodies = sphere_distribution_lognormal(1000, 0x6F637472);
+        let theta = 0.5;
+
+        let mut bh_exact = BarnesHutEngine::new(16);
+        bh_exact.set_exact_threshold(usize::MAX);
+        bh_exact.build(&bodies);
+        let mut acc_exact = vec![Vec3::ZERO; bodies.len()];
+        bh_exact.evaluate(&bodies, theta, &mut acc_exact);
+
+        let mut bh_mono = BarnesHutEngine::new(16);
+        bh_mono.set_multipole_order(MultipoleOrder::Monopole);
+        bh_mono.build(&bodies);
+        let mut acc_mono = vec![Vec3::ZERO; bodies.len()];
+        bh_mono.evaluate(&bodies, theta, &mut acc_mono);
+        let err_mono = body_max_rel_error(&acc_mono, &acc_exact);
+
+        let mut bh_quad = BarnesHutEngine::new(16);
+        bh_quad.set_multipole_order(MultipoleOrder::Quadrupole);
+        bh_quad.build(&bodies);
+        let mut acc_quad = vec![Vec3::ZERO; bodies.len()];
+        bh_quad.evaluate(&bodies, theta, &mut acc_quad);
+        let err_quad = body_max_rel_error(&acc_quad, &acc_exact);
+
+        eprintln!(
+            "[quad-smoke] theta={theta} N=1000 mono_err={err_mono:.4e} quad_err={err_quad:.4e} \
+             ratio={:.2}x",
+            err_mono / err_quad.max(1e-30)
+        );
+
+        assert!(
+            err_quad < err_mono / 5.0,
+            "quadrupole did not improve forces 5x over monopole at theta={theta}: \
+             mono={err_mono:.4e}, quad={err_quad:.4e}"
+        );
     }
 }
