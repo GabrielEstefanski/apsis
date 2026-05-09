@@ -31,13 +31,13 @@
 
 use crate::domain::body::Body;
 
-use super::morton::{Aabb, compute_aabb, compute_morton_permutation};
-
 // ── Constants ─────────────────────────────────────────────────────────────── //
 
 /// Production default for the [`Octree`] leaf-capacity generic parameter.
-/// Matches GADGET-2 / PKDGRAV3 defaults; sensitivity sweep across
-/// `{4, 8, 16, 32}` lives in the perf 2×2 harness.
+/// Matches GADGET-2 / PKDGRAV3 defaults; chosen at the speed end of the
+/// `{4, 8, 16, 32}` Pareto trade-off characterised by the perf 2×2
+/// experiment (`docs/experiments/2026-05-08-octree-perf-2x2.md`, §Results
+/// leaf-sensitivity sweep).
 pub(crate) const DEFAULT_LEAF: usize = 8;
 
 /// Sentinel value for an absent child pointer.
@@ -57,32 +57,7 @@ pub(crate) const DIRECT_MODE_THRESHOLD: usize = 10_000;
 
 /// Small padding added to the root bounding cube so that no body ever sits
 /// exactly on a cell boundary (which would cause ambiguous octant assignment).
-/// `pub(crate)` so [`super::morton::compute_aabb`] applies the identical
-/// padding when normalising bodies for Morton encoding — single source of
-/// truth, no drift risk between tree construction and spatial sorting.
-pub(crate) const TREE_PAD: f64 = 1e-2;
-
-// ── MultipoleOrder ────────────────────────────────────────────────────────── //
-
-/// Multipole expansion order populated during [`Octree::build`].
-///
-/// `Monopole` aggregates only mass and centre of mass; `Quadrupole` adds
-/// the symmetric traceless second-moment tensor `Q` about each node's COM.
-/// Build cost rises with order; the engine's force evaluation reads back
-/// only the components the active mode populated.
-///
-/// **Toggle scope.** Part of the in-flight perf 2×2 experiment
-/// (`docs/experiments/2026-05-08-octree-perf-2x2.md`); removed in the
-/// experiment's final commit once §Decision selects the production order.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum MultipoleOrder {
-    Monopole,
-    /// `dead_code` allow removed in the next commit that lights up the
-    /// quadrupole branch in `bh_eval_body` (currently constructed only by
-    /// the `aggregate_quadrupole` test surface and the perf 2×2 harness).
-    #[allow(dead_code)]
-    Quadrupole,
-}
+const TREE_PAD: f64 = 1e-2;
 
 // ── Node ──────────────────────────────────────────────────────────────────── //
 
@@ -111,8 +86,8 @@ pub(crate) struct Node<const LEAF: usize> {
 
     /// Symmetric traceless quadrupole tensor about this node's COM. Five
     /// independent components stored; `q_zz = -(q_xx + q_yy)` is reconstructed
-    /// at the evaluation site. Populated only when the tree was built with
-    /// [`MultipoleOrder::Quadrupole`]; zero otherwise.
+    /// at the evaluation site. Populated by [`Octree::build`]'s second-pass
+    /// `aggregate_quadrupole` traversal.
     pub q_xx: f64,
     pub q_xy: f64,
     pub q_xz: f64,
@@ -184,89 +159,60 @@ impl<const LEAF: usize> Node<LEAF> {
 pub(crate) struct Octree<const LEAF: usize = DEFAULT_LEAF> {
     pub(crate) nodes: Vec<Node<LEAF>>,
     max_depth: usize,
-    /// Multipole order the most recent [`build`](Self::build) populated.
-    /// Read by the BH walk to decide whether the per-node quadrupole tensor
-    /// is meaningful or zero-by-construction.
-    built_order: MultipoleOrder,
-    /// Morton (Z-order) permutation populated when [`build`](Self::build)
-    /// was called with `morton = true`. `None` means the tree was built in
-    /// natural (input) order. Read by the BH walk to drive parallel iteration
-    /// in spatially-coherent order.
-    built_perm: Option<Vec<u32>>,
 }
 
 impl<const LEAF: usize> Octree<LEAF> {
     pub(crate) fn new(max_depth: usize) -> Self {
-        Self {
-            nodes: Vec::new(),
-            max_depth,
-            built_order: MultipoleOrder::Monopole,
-            built_perm: None,
-        }
-    }
-
-    /// Multipole order the tree currently carries.
-    #[inline]
-    pub(crate) fn built_order(&self) -> MultipoleOrder {
-        self.built_order
-    }
-
-    /// Morton permutation produced by the most recent [`build`](Self::build),
-    /// or `None` if Morton was disabled.
-    #[inline]
-    pub(crate) fn built_perm(&self) -> Option<&[u32]> {
-        self.built_perm.as_deref()
+        Self { nodes: Vec::new(), max_depth }
     }
 
     /// Rebuild the tree from scratch for the given body slice.
     ///
-    /// After this call `nodes[0]` is the root covering an axis-aligned
-    /// cubic cell that contains all bodies with a small pad. Every node's
-    /// `mass` and `com_{x,y,z}` fields reflect the aggregated state of its
-    /// subtree.
-    ///
-    /// When `order == Quadrupole`, a second bottom-up pass populates each
-    /// node's traceless quadrupole tensor about its own COM (parallel-axis
-    /// theorem on internal nodes). Under `Monopole` the tensor fields stay
-    /// at their initial zero, and the second pass is skipped.
-    ///
-    /// When `morton == true`, bodies are inserted in Morton (Z-order)
-    /// permutation rather than input order. The permutation is retained on
-    /// the tree (see [`built_perm`](Self::built_perm)) so the BH walk can
-    /// iterate in the same spatially-coherent order. The final tree
-    /// structure is invariant under insertion permutation, so forces
-    /// match those of `morton == false` up to the FP-reorder floor.
-    pub(crate) fn build(&mut self, bodies: &[Body], order: MultipoleOrder, morton: bool) {
+    /// After this call `nodes[0]` is the root covering an axis-aligned cubic
+    /// cell that contains all bodies with a small pad. Every node's `mass`,
+    /// `com_{x,y,z}`, and traceless quadrupole tensor (`q_xx, q_xy, q_xz,
+    /// q_yy, q_yz`) fields reflect the aggregated state of its subtree.
+    /// Quadrupole aggregation is always performed — the perf 2×2 §Decision
+    /// settled it as the production multipole order.
+    pub(crate) fn build(&mut self, bodies: &[Body]) {
         self.nodes.clear();
-        self.built_order = order;
-        self.built_perm = None;
 
         if bodies.is_empty() {
             return;
         }
 
-        let aabb: Aabb = compute_aabb(bodies);
-        self.nodes.push(Node::new(aabb.center[0], aabb.center[1], aabb.center[2], aabb.half));
+        // ── Compute padded cubic AABB ────────────────────────────────── //
+        let mut min_x = bodies[0].x;
+        let mut max_x = bodies[0].x;
+        let mut min_y = bodies[0].y;
+        let mut max_y = bodies[0].y;
+        let mut min_z = bodies[0].z;
+        let mut max_z = bodies[0].z;
+        for b in &bodies[1..] {
+            min_x = min_x.min(b.x);
+            max_x = max_x.max(b.x);
+            min_y = min_y.min(b.y);
+            max_y = max_y.max(b.y);
+            min_z = min_z.min(b.z);
+            max_z = max_z.max(b.z);
+        }
+        let cx = 0.5 * (min_x + max_x);
+        let cy = 0.5 * (min_y + max_y);
+        let cz = 0.5 * (min_z + max_z);
+        let extent = (max_x - min_x).max(max_y - min_y).max(max_z - min_z);
+        let mut half = 0.5 * extent;
+        half = if half <= 0.0 { TREE_PAD } else { half * 1.0001 + TREE_PAD };
 
-        // ── Insert all bodies ────────────────────────────────────────── //
-        if morton {
-            let perm = compute_morton_permutation(bodies, &aabb);
-            for &i in &perm {
-                self.insert(0, i as usize, bodies, 0);
-            }
-            self.built_perm = Some(perm);
-        } else {
-            for i in 0..bodies.len() {
-                self.insert(0, i, bodies, 0);
-            }
+        self.nodes.push(Node::new(cx, cy, cz, half));
+
+        // ── Insert all bodies in input order ─────────────────────────── //
+        for i in 0..bodies.len() {
+            self.insert(0, i, bodies, 0);
         }
 
-        // ── Aggregate mass / COM bottom-up ──────────────────────────── //
+        // ── Aggregate mass / COM bottom-up, then quadrupole tensor ──── //
         self.aggregate_mass(0, bodies);
-
-        if matches!(order, MultipoleOrder::Quadrupole) {
-            self.aggregate_quadrupole(0, bodies);
-        }
+        self.aggregate_quadrupole(0, bodies);
     }
 
     /// Read-only access to the flat node array.
@@ -525,7 +471,7 @@ mod tests {
         let bodies = vec![body_xy(0.0, 0.0, 1.0), body_xy(4.0, 0.0, 3.0)];
 
         let mut tree = make_tree();
-        tree.build(&bodies, MultipoleOrder::Monopole, false);
+        tree.build(&bodies);
 
         let root = &tree.nodes[0];
 
@@ -541,7 +487,7 @@ mod tests {
         let bodies = vec![body_xyz(0.0, 0.0, 0.0, 1.0), body_xyz(4.0, 2.0, -2.0, 3.0)];
 
         let mut tree = make_tree();
-        tree.build(&bodies, MultipoleOrder::Monopole, false);
+        tree.build(&bodies);
 
         let root = &tree.nodes[0];
 
@@ -557,7 +503,7 @@ mod tests {
         let bodies: Vec<Body> = (0..10).map(|i| body_xy(i as f64, 0.0, 1.0)).collect();
 
         let mut tree = make_tree();
-        tree.build(&bodies, MultipoleOrder::Monopole, false);
+        tree.build(&bodies);
 
         assert_eq!(tree.nodes[0].body_count, 10);
     }
@@ -568,7 +514,7 @@ mod tests {
         let bodies = vec![body_xy(1.0, 2.0, 5.0)];
 
         let mut tree = make_tree();
-        tree.build(&bodies, MultipoleOrder::Monopole, false);
+        tree.build(&bodies);
 
         let root = &tree.nodes[0];
 
@@ -583,7 +529,7 @@ mod tests {
         let bodies = vec![body_xy(0.0, 0.0, 1.0), body_xy(0.0, 0.0, 2.0)];
 
         let mut tree = make_tree();
-        tree.build(&bodies, MultipoleOrder::Monopole, false);
+        tree.build(&bodies);
 
         let root = &tree.nodes[0];
 
@@ -615,7 +561,7 @@ mod tests {
         }
 
         let mut tree = make_tree();
-        tree.build(&bodies, MultipoleOrder::Monopole, false);
+        tree.build(&bodies);
 
         let root = &tree.nodes[0];
         assert!(!root.is_leaf(), "root should subdivide after 16 inserts");
@@ -683,7 +629,7 @@ mod tests {
         let com_z_expected: f64 = bodies.iter().map(|b| b.mass * b.z).sum::<f64>() / m_total;
 
         let mut tree = make_tree();
-        tree.build(&bodies, MultipoleOrder::Monopole, false);
+        tree.build(&bodies);
 
         let root = &tree.nodes[0];
         assert_relative_eq!(root.mass, m_total, epsilon = 1e-12);
@@ -709,7 +655,7 @@ mod tests {
             let expected_mass: f64 = bodies.iter().map(|b| b.mass).sum();
 
             let mut tree = make_tree();
-            tree.build(&bodies, MultipoleOrder::Monopole, false);
+            tree.build(&bodies);
 
             let root = &tree.nodes[0];
 
@@ -729,7 +675,7 @@ mod tests {
         let bodies = vec![body_xyz(1.0, 0.0, 0.0, 1.0), body_xyz(-1.0, 0.0, 0.0, 1.0)];
 
         let mut tree = make_tree();
-        tree.build(&bodies, MultipoleOrder::Quadrupole, false);
+        tree.build(&bodies);
 
         let root = &tree.nodes[0];
         assert!(root.is_leaf(), "2 bodies must fit in the root leaf");
@@ -769,7 +715,7 @@ mod tests {
             positions.iter().map(|&(x, y, z, m)| body_xyz(x, y, z, m)).collect();
 
         let mut tree = make_tree();
-        tree.build(&bodies, MultipoleOrder::Quadrupole, false);
+        tree.build(&bodies);
 
         let root = &tree.nodes[0];
         assert!(!root.is_leaf(), "16 bodies must force the root to subdivide");
@@ -803,82 +749,6 @@ mod tests {
         assert_relative_eq!(root.q_yz, q_yz, epsilon = 1e-12);
     }
 
-    /// Monopole build leaves the tensor untouched at zero. Confirms the
-    /// `aggregate_quadrupole` second pass is genuinely skipped under
-    /// `Monopole`, not silently still running.
-    #[test]
-    fn monopole_build_leaves_quadrupole_at_zero() {
-        let bodies = vec![body_xyz(1.0, 2.0, 3.0, 1.0), body_xyz(-2.0, 1.0, -1.0, 2.0)];
-
-        let mut tree = make_tree();
-        tree.build(&bodies, MultipoleOrder::Monopole, false);
-
-        let root = &tree.nodes[0];
-        assert_eq!(root.q_xx, 0.0);
-        assert_eq!(root.q_xy, 0.0);
-        assert_eq!(root.q_xz, 0.0);
-        assert_eq!(root.q_yy, 0.0);
-        assert_eq!(root.q_yz, 0.0);
-    }
-
-    // ── Morton-aware build ─────────────────────────────────────────────── //
-
-    /// Insertion order is a permutation invariant of the final tree:
-    /// regardless of whether bodies arrive in input order or in Morton order,
-    /// the same bodies end up in the same leaves (assuming no exact octant-
-    /// boundary ties, which `TREE_PAD` rules out). The aggregated root mass
-    /// and COM must therefore agree to the FP-reorder floor.
-    #[test]
-    fn morton_built_tree_matches_natural_order_at_root() {
-        let bodies: Vec<Body> = (0..32)
-            .map(|i| {
-                let t = i as f64 * 0.31;
-                body_xyz(t.sin(), t.cos(), (t * 0.7).sin(), 0.5 + (t * 0.13).sin().abs())
-            })
-            .collect();
-
-        let mut natural = make_tree();
-        natural.build(&bodies, MultipoleOrder::Monopole, false);
-
-        let mut morton = make_tree();
-        morton.build(&bodies, MultipoleOrder::Monopole, true);
-
-        let r_nat = &natural.nodes[0];
-        let r_mor = &morton.nodes[0];
-
-        // 32 bodies × 4-level accumulation depth ≈ 32 · ε ≈ 7e-15 drift bound.
-        assert_relative_eq!(r_nat.mass, r_mor.mass, epsilon = 1e-13);
-        assert_relative_eq!(r_nat.com_x, r_mor.com_x, epsilon = 1e-13);
-        assert_relative_eq!(r_nat.com_y, r_mor.com_y, epsilon = 1e-13);
-        assert_relative_eq!(r_nat.com_z, r_mor.com_z, epsilon = 1e-13);
-
-        assert!(natural.built_perm().is_none(), "natural-order build must not retain a perm");
-        let perm = morton.built_perm().expect("morton build must retain a perm");
-        assert_eq!(perm.len(), bodies.len());
-        // perm is a permutation of [0..N): every index appears exactly once.
-        let mut seen = vec![false; bodies.len()];
-        for &i in perm {
-            assert!(!seen[i as usize], "morton perm yields body {i} twice");
-            seen[i as usize] = true;
-        }
-        assert!(seen.iter().all(|&s| s));
-    }
-
-    #[test]
-    fn morton_built_tree_root_body_count_equals_n() {
-        let bodies: Vec<Body> = (0..50)
-            .map(|i| {
-                let t = i as f64;
-                body_xyz((t * 0.41).sin(), (t * 0.29).cos(), (t * 0.17).sin(), 1.0)
-            })
-            .collect();
-
-        let mut tree = make_tree();
-        tree.build(&bodies, MultipoleOrder::Monopole, true);
-
-        assert_eq!(tree.nodes[0].body_count as usize, bodies.len());
-    }
-
     // ── Generic LEAF parameter ─────────────────────────────────────────── //
 
     /// Sanity check that the generic `Octree<const LEAF: usize>` parameter
@@ -895,11 +765,11 @@ mod tests {
             .collect();
 
         let mut tight: Octree<4> = Octree::new(16);
-        tight.build(&bodies, MultipoleOrder::Monopole, false);
+        tight.build(&bodies);
         assert!(!tight.nodes[0].is_leaf(), "5 > LEAF=4 must subdivide the root");
 
         let mut loose: Octree<16> = Octree::new(16);
-        loose.build(&bodies, MultipoleOrder::Monopole, false);
+        loose.build(&bodies);
         assert!(loose.nodes[0].is_leaf(), "5 ≤ LEAF=16 keeps the root as a leaf");
 
         let total_mass: f64 = bodies.iter().map(|b| b.mass).sum();
@@ -908,9 +778,9 @@ mod tests {
     }
 
     /// Default `Octree::new` instantiates `Octree<DEFAULT_LEAF>` so existing
-    /// callers (the engine, the perf 2×2 harness, every test in this module)
-    /// continue to compile unchanged. Spot-checked via `make_tree()` which
-    /// is the existing helper and still resolves to the default.
+    /// callers (the engine, every test in this module) continue to compile
+    /// unchanged. Spot-checked via `make_tree()` which still resolves to
+    /// the default.
     #[test]
     fn default_octree_uses_default_leaf() {
         // If this changes silently, the production tree-build path's
