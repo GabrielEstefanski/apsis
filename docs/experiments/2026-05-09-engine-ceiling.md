@@ -52,8 +52,8 @@ Sub-bounds on phase composition (gated only when they are the rate-limiting cost
 
 | Cell | N | Bound | Origin |
 | --- | ---: | ---: | --- |
-| V (VV+BH) | ≥ 10⁵ | `t_tree_build + t_bh_traversal + t_kernel_force ≥ 85 %` | At memory-bound regime, BH stages dominate; if not, instrumentation or implementation has unaccounted overhead |
-| I (IAS15) | every | `t_kernel_force + t_integrator_overhead ≥ 80 %` | IAS15 has non-trivial integrator overhead (predictor coefficients, Gauss-Radau substep machinery, Picard convergence checks) plus the O(N²) force evaluation; together they must dominate |
+| V (VV+BH) | ≥ 10⁵ | `t_tree_build + t_bh_walk ≥ 85 %` | At memory-bound regime, BH stages dominate; if not, instrumentation or implementation has unaccounted overhead |
+| I (IAS15) | every | `t_force_eval + t_integrator_overhead ≥ 80 %` | IAS15 has non-trivial integrator overhead (predictor coefficients, Gauss-Radau substep machinery, Picard convergence checks) plus the O(N²) force evaluation; together they must dominate |
 
 **Gate-failure protocol.** If the sanity sum fails: dump per-phase breakdown, mark the run as untrustworthy, do not use the data for §Results Tier 2 or §Decision. Investigate instrumentation gaps before re-running.
 
@@ -63,7 +63,7 @@ For each (cell, N), report:
 
 | Metric | Definition | What it answers |
 | --- | --- | --- |
-| `t_per_interaction` | `t_kernel_force / (n_bh_accepted + n_leaf_interactions)` | "Is each interaction expensive?" → SIMD ROI signal |
+| `t_per_interaction` | `t_bh_walk / (n_bh_accepted + n_leaf_interactions)` | "Is each interaction expensive?" → SIMD ROI signal (captures kernel + traversal cost amortised; the split is escalation territory, see §Escalation rules) |
 | `t_per_body` | `t_total_step / N` | "Is per-body amortised cost interactive?" |
 | `n_interactions_per_body` | `(n_bh_accepted + n_leaf_interactions) / N` | "How much work per body?" → MAC ROI signal |
 | `bh_acceptance_ratio` | `n_bh_accepted / n_node_visits` | "Is the walk pruning effectively?" → opening-criterion efficiency |
@@ -121,19 +121,18 @@ Yoshida-4 and Wisdom-Holman are deferred — Y4 has the same per-step cost profi
 
 Each (cell, N) is measured twice: trail recorder enabled (production default) vs disabled. The difference quantifies trail's per-step cost; isolated knowledge of whether trail recording is rate-limiting at any N.
 
-#### Phases instrumented (5)
+#### Phases instrumented (4)
 
 | Phase | Definition | Where in code |
 | --- | --- | --- |
 | `t_tree_build` | `Octree::build` total (AABB + insert + aggregate_mass + aggregate_quadrupole) | wrapped at the engine.build call site |
-| `t_bh_traversal` | Stack-walk cost: `pop`, opening-criterion check, child push (no kernel) | inside `bh_eval_body`, around the stack ops |
-| `t_kernel_force` | Per-interaction force computation: monopole + quadrupole correction at accepted nodes; pairwise at leaves | inside `bh_eval_body`, around the force-accumulation block |
+| `t_bh_walk` | Whole `bh_eval_body` call: stack traversal + opening-criterion check + kernel force calc, all amortised together | wrapped at the parallel-iter outer boundary in `evaluate` |
 | `t_integrator_overhead` | Integrator step minus force calls: kick, drift, predictor updates, Picard convergence checks | wrapped at integrator step boundary, subtracted force-call time |
 | `t_trail_record` | Trail buffer push if enabled, no-op otherwise | wrapped at the trail-recorder call site |
 
-Total: `t_total_step = sum of the 5 phases ± 5 % (sanity gate)`.
+Total: `t_total_step = sum of the 4 phases ± 5 % (sanity gate)`.
 
-For IAS15, `t_kernel_force` is the direct O(N²) pairwise; `t_bh_traversal` is zero (no tree). For VV+BH, `t_kernel_force` and `t_bh_traversal` are interleaved inside `bh_eval_body` — separating them requires per-call timing markers around the force block, not around the stack ops (cleaner: time `kernel_force` directly, derive `bh_traversal` as `t_walk_total − t_kernel_force`).
+For IAS15, `t_bh_walk` is zero (no tree); the equivalent direct O(N²) pairwise cost is rolled into a unified `t_force_eval` phase under the same instrumentation hook. For VV+BH, `t_bh_walk` collapses kernel-force and traversal cost into a single measurement on purpose — separating them requires per-call timing markers (`Instant::now()` ~50–100 ns each, vs ~50 ns kernel call) which would contaminate the very measurement we want to isolate. The separation is escalated to method (γ) below only if the (α) data is ambiguous, per §Escalation rules. Decision-rule signals (SIMD ROI, MAC ROI) are derivable from the unified `t_per_interaction` and `n_interactions_per_body` metrics without the split.
 
 #### Counters (4)
 
@@ -150,7 +149,7 @@ For VV: `n_picard_iterations = 0` (not applicable). For IAS15: `n_node_visits = 
 
 Computed in post-processing:
 
-- `t_per_interaction = t_kernel_force / (n_bh_accepted + n_leaf_interactions)` for VV+BH; for IAS15 use `t_per_pair = t_kernel_force / (N × (N−1) / 2 × n_picard_iterations / 16)` (IAS15 has 16 substeps per step).
+- `t_per_interaction = t_bh_walk / (n_bh_accepted + n_leaf_interactions)` for VV+BH; for IAS15 use `t_per_pair = t_force_eval / (N × (N−1) / 2 × n_picard_iterations / 16)` (IAS15 has 16 substeps per step).
 - `t_per_body = t_total_step / N`
 - `n_interactions_per_body = (n_bh_accepted + n_leaf_interactions) / N`
 - `bh_acceptance_ratio = n_bh_accepted / n_node_visits`
@@ -180,6 +179,26 @@ For each (cell, N, trail_variant):
 #### Allocation hotspot detection
 
 `Octree::build` allocates a fresh `Vec<Node>`. Optional sub-measurement: track `tree.nodes.len()` peak per build and report total allocation cost as `peak_capacity × 144 bytes / step`. If this is > 5 % of `t_tree_build`, buffer-reuse is a follow-up investment. Defer if the instrumentation cost is non-trivial; first-pass run can skip this.
+
+#### Escalation rules (α → γ, declared a priori)
+
+Default measurement is method (α): unified `t_bh_walk` phase, no per-interaction timing. Sufficient to drive the SIMD vs MAC decision because both candidates affect `t_per_interaction` and `n_interactions_per_body` regardless of where inside the walk the cost lives. Escalation to method (γ) — kernel microbenchmark + algebraic derivation of `t_kernel_estimated` and `t_traversal_estimated = t_bh_walk − t_kernel_estimated` — happens only if the (α) data is ambiguous along one of these axes:
+
+| Signal | Threshold | Why it triggers γ |
+| --- | ---: | --- |
+| `t_per_interaction(θ = 0.3) / t_per_interaction(θ = 0.9)` | within `[0.85, 1.15]` (≈ flat across θ) | Per-interaction cost should vary with θ because high θ accepts more internal nodes (each costing a quadrupole tensor contract = ~50 FLOPs) while low θ recurses to leaves (cheap pairwise). A flat ratio means kernel cost is dominated by something other than arithmetic — likely cache loads — and the kernel-vs-traversal split becomes diagnostic for choosing SIMD vs SoA refactor. |
+| `t_per_body(N = 10⁵) / t_per_body(N = 10³)` divided by the algorithmic O(N log N) factor `100 × log₂(10⁵) / log₂(10³) ≈ 167×` | observed ratio / 167 > 2.0 | Wall time grows much faster than the algorithm's complexity prediction. Likely traversal cost grows sub-linearly with cache misses; need the split to know whether to invest in SoA layout or in interaction-count reduction. |
+| Predicted speedup vs measured (after applying any subsequent optimisation) | observed gain `< 50 %` of model prediction | Mental model wrong somewhere in the cost decomposition. The split is needed to find where the discrepancy lives. |
+
+**Method (γ) implementation when triggered**:
+
+1. Add `kernel_microbench` `#[ignore]`d test in the same `engine_ceiling` module.
+2. Mede `t_per_kernel_call` em loop tight (sem walk overhead): same kernel function applied N_calls times to fixed-input args, total time / N_calls.
+3. From the existing experiment data, compute `t_kernel_estimated = (n_bh_accepted + n_leaf_interactions) × t_per_kernel_call`.
+4. Derive `t_traversal_estimated = t_bh_walk − t_kernel_estimated`.
+5. Report as **estimated** decomposition in §Results (not measured directly), with the microbench number that anchors the estimate.
+
+The escalation is one-shot: if (γ) doesn't resolve ambiguity, the next investigation is hardware-level profiling (perf, vtune) which is out of this experiment's scope.
 
 #### Out of scope (declared a priori)
 
@@ -228,7 +247,7 @@ For each (cell, N, trail_variant):
 
 2. **Single-machine.** SPS numbers are not portable; the Apsis/REBOUND ratio computed here is anchored to the recorded hardware. A different CPU could shift the ratio by ±50 %.
 
-3. **Phase boundaries are instrumentation choices, not natural divisions.** `t_bh_traversal` vs `t_kernel_force` separation is artificial — both run interleaved in a single function. The split is achieved via timing markers around the force block; if those markers themselves have measurement overhead > 1 %, the split is contaminated. Mitigation: validate by running the unmarked baseline and comparing total time; markers must contribute ≤ 1 % of total.
+3. **`t_bh_walk` is unified by choice (method α).** Kernel-force vs traversal cost are not separated in the default measurement, because per-call timing markers (`Instant::now()` ≈ 50–100 ns each) would dominate the kernel call itself (~50 ns) and contaminate the very measurement we want. The unified `t_bh_walk` divided by `(n_bh_accepted + n_leaf_interactions)` gives `t_per_interaction` — sufficient for the SIMD vs MAC decision because both candidates affect that metric. The split is escalated to method (γ) — kernel microbenchmark + algebraic derivation — only when the (α) data triggers an ambiguity flag per §Escalation rules.
 
 4. **REBOUND comparison numbers come from published documentation, not co-run benchmarks.** Hardware differences and version skew between published REBOUND numbers and this experiment introduce uncertainty. The Apsis/REBOUND ratio is informational only; ±2× confidence interval is the honest reading.
 
