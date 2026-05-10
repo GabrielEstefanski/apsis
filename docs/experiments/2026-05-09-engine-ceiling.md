@@ -343,27 +343,53 @@ A subsidiary finding worth noting: the cell I dt-floor saturation at N ≥ 1 000
 
 ## Decision
 
+### System classification: interaction-bound
+
+The data supports a clean classification: **the engine is interaction-bound, not compute-bound and not memory-bound**, at the v1 target regime (N ≤ 10⁴) and continuing through N = 10⁵.
+
+- *Compute-bound* would mean `t_per_interaction` is dominated by FLOPs/cycle and would respond linearly to SIMD throughput. Observed `t_per_interaction` = 1.3–2.1 ns is already low — the per-interaction kernel is well-vectorised by the compiler, and explicit SIMD will yield engineering-baseline gains, not order-of-magnitude wins.
+- *Memory-bound* would show `t_per_interaction` growing materially with N as the working set spills DRAM. Observed variation is 1.24× across two orders of magnitude — mild cache pressure, not the dominant signal.
+- *Interaction-bound* is the right framing: the dominant cost is **how many interactions the walk performs**, not the cost of each. `n_interactions / body` grows from 1 110 at N = 10³ to 3 151 at N = 10⁵, and the `t_total` curve tracks this growth more closely than it tracks any per-interaction signal.
+
+This classification reframes the entire roadmap discussion. The MAC axis (work-volume reduction) is the structural lever; SIMD and layout are baseline-engineering levers that close the cross-implementation gap with REBOUND but do not address the interaction-bound nature of the algorithm.
+
+### Decision rules fired
+
 The data fires three of the protocol's decision rules cleanly:
 
 | Rule | Trigger | Action |
 | --- | --- | --- |
-| BH walk dominates VV at N = 10⁴ AND `t_per_interaction` ≈ N-flat | Walk = 96.6 %; t_per_interaction varies 1.24× | **MAC (PR-perf-4) is the right next investment**; SIMD second-order |
-| Apsis SPS / REBOUND SPS < 0.2 across comparable cells | All three measured comparisons fall below the threshold | **SIMD is mandatory before paper claims of scaling characterised land**; queued as PR-perf-5 |
+| BH walk dominates VV at N = 10⁴ AND `t_per_interaction` ≈ N-flat | Walk = 96.6 %; `t_per_interaction` varies 1.24× | **MAC (PR-perf-4) attacks the right axis**: reduces work volume the dominant stage processes |
+| Apsis SPS / REBOUND SPS < 0.2 across comparable cells | All three measured comparisons fall below the threshold | **SIMD + SoA layout (PR-perf-5/6) needed for paper-credibility baseline**; not a silver bullet — closes a structural engineering gap, does not fix the interaction-bound problem |
 | Trail recorder ≥ 30 % of total at N = 10⁴ | 0.2 % observed | **No trail-recorder optimisation needed**; the suspicion is empirically resolved |
 
-**Sequencing**:
+### Sequencing (4-axis roadmap, measure-first between SIMD and Morton)
 
-1. **PR-perf-4 (next)** — multipole acceptance criterion comparison (Barnes 1990, Dehnen 2002, GADGET-style). Design preserved from the perf 2×2 §Decision sub-section: per-cell × per-N × per-θ factorial against the classical MAC baseline, declare bounds a priori, ship the winner or document literature comparison as deferred. Targets the dominant cost (BH walk) at the v1 production regime where it lives.
-2. **PR-perf-5 (queued)** — SIMD inner loops in the BH walk's per-interaction kernel and (separately) in IAS15's pairwise direct sum. Required for the paper-credibility threshold; expected ~ 2–4 × speedup on the per-interaction cost, multiplicative with MAC's interaction-count reduction.
+The engine's roadmap is multi-factorial; no single PR closes the REBOUND gap or fully exploits the interaction-bound classification. Each axis ships as a discrete experiment with its own lab notebook and a-priori bounds:
 
-**Out-of-scope follow-ups noted but not queued**:
+| # | PR | Axis attacked | Expected ROI (a priori) | Notes |
+| ---: | --- | --- | --- | --- |
+| 4 | **MAC comparison** | work-volume reduction | 0.6–0.8× walk time (Barnes 1990 ≈ 15–25 %; Dehnen 2002 ≈ 30–50 %) | Discrete, literature-backed, no layout dependency. Ships first. |
+| 5 | **SoA layout refactor** | foundation enabler | 0.85–0.95× standalone (mild cache locality gain) | Foundational — SoA is **not** primarily a cache optimisation; it is the prerequisite for efficient SIMD vectorisation across nodes. AoS Node forces gather/scatter loads in any SIMD attempt. |
+| 6 | **SIMD inner kernel** | per-interaction cost | 0.4–0.7× per-interaction (1.5–2.5× speedup, 3× ceiling with full alignment) | Engineering baseline against REBOUND. Multiplicative with MAC's interaction reduction. Realistic ceiling, not silver bullet — `t_per_interaction` is already low. |
+| 6.5 | **Re-measure ceiling profile** | calibration | n/a | Critical step. SoA + SIMD will materially shift the cache-pressure profile (denser access patterns, faster kernel makes traversal relatively heavier). The Morton calculus from PR-perf-2 (deferred at D-vs-C = 1.03×) is invalidated by these changes. Re-running this experiment at this point answers "does Morton now help or still not?" with current data. |
+| 7 | **Re-evaluate Morton sortation** | conditional cache locality | 0.85–0.95× **conditional on PR-6.5 results**; may stay deferred | Either ship (if re-measurement shows D-vs-C now under 0.90) or document as still-deferred (if Morton remains marginal). The decision is gated on re-measurement, not re-litigated by intuition. |
+| 8 | Tree shape micro-tuning | fine-tuning | < 10 % | Defers; LEAF = 8 stays as production default per perf 2×2 §Results. |
+
+**Multiplicative speedup ceiling (a priori, with explicit non-independence caveat)**:
+
+`MAC × SIMD × layout = 0.7 × 0.5 × 0.9 ≈ 0.32×` → **3× speedup ceiling** in the most optimistic scenario where the factors compose without erosion. Realistic central estimate, accounting for the fact that MAC reduces the material SIMD vectorises and layout improves both walk traversal and kernel cost (double-counting risk): **2.5–3.5× total**. Translation at N = 50 000: from 4 SPS to 10–14 SPS — shifts the regime from "step every 250 ms" to "step every 70–100 ms" (borderline-interactive → almost-smooth). At N = 10 000: from 25 SPS to 60–90 SPS (borderline-interactive → smooth-interactive).
+
+This is the realistic v1 paper claim envelope. It does not chase REBOUND parity (REBOUND has years of micro-optimisation on top of layout + SIMD), but it lands the engine in the same order of magnitude on the recorded hardware — defensibly "comparable scale", suitable for a research-codebase first-version paper.
+
+### Out-of-scope follow-ups noted but not queued
 
 - **IAS15 ceiling characterisation on a stable scene** — needs a Plummer-equilibrium or nested-Kepler initial-condition generator. Worth doing before the paper to pin "IAS15 at N = 100 is interactive, IAS15 at N = 1 000 is offline-by-design" with numbers, but does not affect the optimisation roadmap.
 - **Cross-machine REBOUND co-run** — the published REBOUND numbers are from different hardware and slightly older versions; a same-machine same-version comparison would tighten the ratio confidence interval. Logistically substantial; deferred.
 
 **Production engine remains unchanged.** The instrumentation infrastructure (`WalkCounters`, `evaluate_profile`, `engine_ceiling.rs` test module) ships as-is — `evaluate_profile` is `pub(crate)` and the harness is `#[cfg(test)]`, so the public API and the `evaluate` hot path are untouched.
 
-**§Decision provenance.** This section was written after the cell V harness completed (220 s) and the cell I harness completed (19 s, partial), with all derived metrics computed from the per-row eprintln output and the CSVs archived under `target/engine-ceiling/`. Decision rules and escalation triggers were declared a priori in the Hypothesis and §Escalation rules sections of this same notebook before any instrumentation code was written.
+**§Decision provenance.** This section was written after the cell V harness completed (220 s) and the cell I harness completed (19 s, partial), with all derived metrics computed from the per-row eprintln output and the CSVs archived under `target/engine-ceiling/`. Decision rules and escalation triggers were declared a priori in the Hypothesis and §Escalation rules sections of this same notebook before any instrumentation code was written. The 4-axis sequencing was added after the data landed, in response to the recognition that the original "MAC vs SIMD" framing collapsed two distinct axes (work-volume reduction vs per-interaction cost) and a foundation enabler (SoA layout) into a binary that did not survive the data; the roadmap now respects the multi-factorial nature of the gap to REBOUND.
 
 ---
 
