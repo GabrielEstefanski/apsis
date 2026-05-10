@@ -8,6 +8,3 @@ pub mod radiation;
 
 #[cfg(test)]
 mod engine_ceiling;
-
-#[cfg(test)]
-mod perf_mac;
