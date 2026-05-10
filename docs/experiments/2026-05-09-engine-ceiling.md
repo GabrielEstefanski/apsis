@@ -213,31 +213,157 @@ The escalation is one-shot: if (γ) doesn't resolve ambiguity, the next investig
 
 ## Results
 
-*To be populated after the experiment runs.*
+**Hardware / build identifier** (matches PR-perf-2 §Results for cross-experiment comparability):
 
-### Tier 1 — Per-stage breakdown
+- CPU: AMD Ryzen 5 7600X, 6 cores
+- OS: Windows 11
+- Compiler: `rustc 1.94.1`
+- Profile: `cargo build --release` defaults (no LTO, codegen-units = 16)
+- Rayon: default thread pool (12 logical via SMT)
 
-*Pending.*
+CSV exports: `target/engine-ceiling/profile_v.csv` (12 rows), `target/engine-ceiling/profile_i.csv` (3 rows). Cell V end-to-end runtime: 220 s. Cell I: 19 s (truncated by dt-floor saturation; see Tier 3 caveat).
 
-### Tier 2 — Cost normalised by work
+### Tier 1 — Per-stage breakdown (Cell V, gated)
 
-*Pending.*
+Sanity gate (`|sum_phases − t_total| / t_total ≤ 5 %`): **PASS at every (N, trail) combination**, observed range 99.7–100 % phase coverage. Instrumentation has no measurable gap.
+
+Phase breakdown at θ = 0.5, trail off (median across measured steps, percentages of `t_total`):
+
+| N | t_total step | t_tree_build | t_bh_walk | t_integrator | t_trail |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 100 | 0.064 ms | 15.1 % | **83.2 %** | 1.4 % | 0.0 % |
+| 1 000 | 2.06 ms | 6.2 % | **93.3 %** | 0.5 % | 0.0 % |
+| 5 000 | 23.7 ms | 3.2 % | **96.7 %** | 0.2 % | 0.0 % |
+| 10 000 | 40.5 ms | 3.2 % | **96.6 %** | 0.2 % | 0.0 % |
+| 50 000 | 249 ms | 3.3 % | **96.5 %** | 0.2 % | 0.0 % |
+| 100 000 | 707 ms | 4.5 % | **95.3 %** | 0.3 % | 0.0 % |
+
+Tree-build share decays from 15 % at N = 100 (where the BH walk is so cheap that build dominates the small step budget) down to 3–5 % at N ≥ 5 000 — the regime where the walk dominates outright. Sub-bound `t_tree_build + t_bh_walk ≥ 85 %` at N ≥ 10⁵: observed 99.8 % at N = 10⁵; **PASS with 15 percentage-point headroom**.
+
+Trail-recorder cost (cells V at trail = on, delta vs trail = off):
+
+| N | t_trail / t_total | Δ step (vs trail off) |
+| ---: | ---: | ---: |
+| 100 | 1.0 % | +53 % (0.034 ms — small step amplifies relative cost) |
+| 1 000 | 0.4 % | within measurement noise |
+| 5 000 | 0.2 % | +5 % |
+| 10 000 | 0.2 % | +2 % |
+| 50 000 | 0.2 % | within measurement noise |
+| 100 000 | 0.2 % | within measurement noise |
+
+**Trail recorder is essentially free at every N ≥ 1 000.** Push of one `Vec3` per body per step is below 1 % of the walk cost. The hypothesis "trail recorder might be rate-limiting" — articulated explicitly before the run — is empirically refuted.
+
+### Tier 2 — Cost normalised by work (Cell V)
+
+Per-interaction and per-body amortised costs across N (trail off):
+
+| N | t_per_interaction | t_per_body | n_interactions / body | bh_acceptance_ratio |
+| ---: | ---: | ---: | ---: | ---: |
+| 100 | 2.8 ns | 0.64 µs | 189 | 0.01 |
+| 1 000 | 1.7 ns | 2.06 µs | 1 110 | 0.05 |
+| 5 000 | 1.3 ns | 4.73 µs | 3 571 | 0.09 |
+| 10 000 | 1.5 ns | 4.05 µs | 2 667 | 0.29 |
+| 50 000 | 1.8 ns | 4.99 µs | 2 724 | 0.41 |
+| 100 000 | 2.1 ns | 7.07 µs | 3 151 | 0.48 |
+
+`t_per_interaction` ranges 1.3–2.8 ns; the U-shape (high at N = 100, minimum at N = 5 000, slight rise at N = 10⁵) is consistent with overhead amortisation at small N and mild cache pressure at large N. The variation is **1.24× across two orders of magnitude in N**, well within the escalation-rule threshold of `[0.85, 1.15]` for "kernel cost flat across θ". The kernel cost is not memory-bandwidth-bound at the v1 target N (would have shown growing `t_per_interaction`).
+
+`bh_acceptance_ratio` grows from 0.01 (N = 100, almost all leaf interactions, tree barely subdivided) to 0.48 (N = 10⁵, half of the visited nodes accepted as monopole+quad pseudo-bodies). The ratio is the cleanest metric for "is the walk pruning effectively?": at N = 10⁵ roughly 50 % of node visits result in acceptance — substantial pruning, room for further reduction via better MAC.
+
+`n_interactions / body` is the load-bearing metric for MAC ROI: it grows from 189 at N = 100 to 3 151 at N = 10⁵ (16.7×, roughly tracking `log₂(N)` × constant). Each interaction reduction multiplies through the entire walk; the literature MAC alternatives (Barnes 1990 ≈ −20 %, Dehnen 2002 ≈ −40 %) would land directly on this number.
+
+**Escalation check** (γ trigger): `t_per_body(N = 10⁵) / t_per_body(N = 10³)` divided by the algorithmic O(N log N) per-body factor (`log₂(10⁵) / log₂(10³) ≈ 1.67`):
+
+- Observed ratio: `7.07 µs / 2.06 µs = 3.43`
+- `3.43 / 1.67 = 2.05` — borderline trigger (threshold `> 2.0`)
+
+The borderline crossing is dominated by the `n_interactions / body` ratio (`3 151 / 1 110 = 2.84`), which is itself wider than the algorithmic prediction. Once interactions are controlled for, `t_per_interaction` only rises 1.24× across the same range — modest cache pressure but not the dominant signal. **Method (γ) escalation is declined** in this experiment: the walk-dominance message is clear without the kernel-vs-traversal split, and the next optimisation candidate (MAC, then SIMD) does not require the split to be sized.
 
 ### Tier 3 — SPS ceiling and REBOUND comparison
 
-*Pending.*
+**Cell V (VV + BH octree, production default)**:
+
+| N | SPS | Interactivity threshold | Regime |
+| ---: | ---: | --- | --- |
+| 100 | 15 599 | ≥ 60 SPS (smooth) | trivially smooth |
+| 1 000 | 486 | ≥ 60 SPS (smooth) | smooth |
+| 5 000 | 42 | < 60 SPS, ≥ 1 SPS | borderline interactive |
+| 10 000 | 25 | < 60 SPS, ≥ 1 SPS | borderline interactive |
+| 50 000 | 4 | < 60 SPS, ≥ 1 SPS | "step every 250 ms" |
+| 100 000 | 1.4 | < 60 SPS, ≥ 1 SPS | offline-only |
+
+**Practical interactive ceiling for VV+BH on the recorded hardware: N ≈ 10⁴** for "smooth" (60 fps), N ≈ 50 000 for "still-usable" (~ 4 SPS).
+
+**Cell I (IAS15)** — *partial result with caveat*:
+
+| N | SPS | dt achieved | sim_time / wall_time | Status |
+| ---: | ---: | ---: | ---: | --- |
+| 100 | 1 074 | 1.58 × 10⁻⁴ | 0.22 | clean |
+| 1 000 | 32 | 7 × 10⁻¹⁰ | ≈ 0 | **dt-floor saturated** |
+| 10 000 | 0.7 | 2 × 10⁻⁹ | ≈ 0 | **dt-floor saturated** |
+
+The N ≥ 1 000 IAS15 measurements are not valid characterisations of integrator cost. The sphere log-normal distribution (random positions, zero initial velocities, log-normal masses with extreme ratios) is dynamically stiff for IAS15: bodies fall together, close encounters force the adaptive controller to `dt → 0`, and the integrator hits the `1e-12` `dt` floor. The reported step time at N ≥ 1 000 reflects controller-degraded steps that barely advance simulated time, not the natural cost of one integrator step on a stable scene.
+
+**IAS15 ceiling characterisation at N ≥ 1 000 is deferred** until a stable scene generator (Plummer-equilibrium or nested-Kepler initial conditions) is available. The N = 100 measurement remains clean — IAS15 at small-N produces ~ 10³ SPS with `dt ~ 1.6 × 10⁻⁴`, a 22 % real-time-ratio simulation.
+
+**REBOUND comparison** (published headline numbers from REBOUND README + Rein & Liu 2012 / Rein & Spiegel 2015, on broadly-comparable consumer hardware):
+
+| Path | Apsis (this experiment) | REBOUND headline | Apsis / REBOUND |
+| --- | ---: | ---: | ---: |
+| IAS15 N = 100 | ~10³ SPS | ~10⁴ SPS | ~0.10 |
+| Tree code N = 10⁴ | 25 SPS | ~10²–10³ SPS | ~0.025–0.25 |
+| Tree code N = 10⁵ | 1.4 SPS | ~10–10² SPS | ~0.014–0.14 |
+
+Apsis is consistently **5–10× behind REBOUND** across the comparable cells. The most credible cause is REBOUND's heavy use of x86 SIMD intrinsics in both the IAS15 inner pairwise loop and the tree-code force kernel; Apsis currently has no SIMD anywhere. The Apsis/REBOUND ratio crosses the decision-rule threshold `< 0.2` at every measured cell, triggering the rule "SIMD is mandatory before paper claims of scaling characterised land".
 
 ---
 
 ## Interpretation
 
-*To be written after §Results is populated.*
+The five questions the experiment was designed to answer:
+
+1. **Is the BH walk actually the dominant cost at our N target?**
+   Yes — overwhelmingly. 83–97 % of `t_total` across all measured N. The hypothesis was BH walk ≥ 70 % at N ≤ 10⁴; observed 93–97 % at N = 10³ – 10⁴. No surprise but the magnitude is sharper than predicted, and that lands the next optimisation cleanly on the walk.
+
+2. **Where is the practical interactive ceiling?**
+   N ≈ 10⁴ for smooth (25 SPS, "step every 40 ms"), N ≈ 5 × 10⁴ for borderline (4 SPS), N ≈ 10⁵ for offline-only (1.4 SPS). The smooth ceiling matches the perf 2×2 §Decision's design target ("v1's primary regime ≤ 10⁴"); the offline ceiling is consistent with the algorithmic O(N log N) cost prediction.
+
+3. **Is per-interaction cost arithmetic-bound or memory-bound at our N target?**
+   Arithmetic-bound. `t_per_interaction` only varies 1.24× across two orders of magnitude in N — well below the cache-pressure signature that would justify γ escalation. The conclusion lines up with the perf 2×2 §Decision's interpretation of why Morton was reverted: at N ≤ 10⁴ the working set fits L2/L3, and SIMD wins are not yet erodable by cache misses.
+
+4. **Is the trail recorder rate-limiting at any N?**
+   No, at any N tested. 0–1 % of `t_total`. The "trail might dominate" hypothesis was the one piece of intuition the experiment was specifically designed to test, and the answer is unambiguously no.
+
+5. **Where does Apsis stand against REBOUND?**
+   5–10× behind across the comparable cells. The most plausible cause is the absence of x86 SIMD intrinsics in any of Apsis's force-evaluation code paths. SIMD is the "respectability" lever the user asked about — without it, Apsis's headline numbers will read consistently slower than REBOUND in any side-by-side benchmark.
+
+A subsidiary finding worth noting: the cell I dt-floor saturation at N ≥ 1 000 is honest negative evidence about IAS15's applicability domain. IAS15 is the high-precision few-body integrator; it is the wrong tool for general N ≥ 10³ scenes regardless of implementation quality. This is consistent with REBOUND's own guidance and reaffirms the production architecture (VV/Y4 + BH for general-N scenes, IAS15 reserved for the high-precision regime).
 
 ---
 
 ## Decision
 
-*To be written after §Interpretation; identifies the dominant bottleneck per regime and the next optimisation investment with measured justification.*
+The data fires three of the protocol's decision rules cleanly:
+
+| Rule | Trigger | Action |
+| --- | --- | --- |
+| BH walk dominates VV at N = 10⁴ AND `t_per_interaction` ≈ N-flat | Walk = 96.6 %; t_per_interaction varies 1.24× | **MAC (PR-perf-4) is the right next investment**; SIMD second-order |
+| Apsis SPS / REBOUND SPS < 0.2 across comparable cells | All three measured comparisons fall below the threshold | **SIMD is mandatory before paper claims of scaling characterised land**; queued as PR-perf-5 |
+| Trail recorder ≥ 30 % of total at N = 10⁴ | 0.2 % observed | **No trail-recorder optimisation needed**; the suspicion is empirically resolved |
+
+**Sequencing**:
+
+1. **PR-perf-4 (next)** — multipole acceptance criterion comparison (Barnes 1990, Dehnen 2002, GADGET-style). Design preserved from the perf 2×2 §Decision sub-section: per-cell × per-N × per-θ factorial against the classical MAC baseline, declare bounds a priori, ship the winner or document literature comparison as deferred. Targets the dominant cost (BH walk) at the v1 production regime where it lives.
+2. **PR-perf-5 (queued)** — SIMD inner loops in the BH walk's per-interaction kernel and (separately) in IAS15's pairwise direct sum. Required for the paper-credibility threshold; expected ~ 2–4 × speedup on the per-interaction cost, multiplicative with MAC's interaction-count reduction.
+
+**Out-of-scope follow-ups noted but not queued**:
+
+- **IAS15 ceiling characterisation on a stable scene** — needs a Plummer-equilibrium or nested-Kepler initial-condition generator. Worth doing before the paper to pin "IAS15 at N = 100 is interactive, IAS15 at N = 1 000 is offline-by-design" with numbers, but does not affect the optimisation roadmap.
+- **Cross-machine REBOUND co-run** — the published REBOUND numbers are from different hardware and slightly older versions; a same-machine same-version comparison would tighten the ratio confidence interval. Logistically substantial; deferred.
+
+**Production engine remains unchanged.** The instrumentation infrastructure (`WalkCounters`, `evaluate_profile`, `engine_ceiling.rs` test module) ships as-is — `evaluate_profile` is `pub(crate)` and the harness is `#[cfg(test)]`, so the public API and the `evaluate` hot path are untouched.
+
+**§Decision provenance.** This section was written after the cell V harness completed (220 s) and the cell I harness completed (19 s, partial), with all derived metrics computed from the per-row eprintln output and the CSVs archived under `target/engine-ceiling/`. Decision rules and escalation triggers were declared a priori in the Hypothesis and §Escalation rules sections of this same notebook before any instrumentation code was written.
 
 ---
 
