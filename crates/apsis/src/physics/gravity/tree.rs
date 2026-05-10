@@ -123,6 +123,13 @@ pub(crate) struct Node<const LEAF: usize> {
     pub q_yy: f64,
     pub q_yz: f64,
 
+    /// Conservative upper bound on the maximum distance from any body in
+    /// this subtree to this node's COM (Barnes 1990 `δ_max`). Computed by
+    /// the optional [`Octree::aggregate_delta_max`] pass when the tree is
+    /// built with [`MacKind::Barnes1990`]; stays at `0.0` under
+    /// [`MacKind::Classical`] (the production default).
+    pub delta_max: f64,
+
     /// Total body count in this subtree (leaf + all descendants).
     pub body_count: u32,
 
@@ -152,6 +159,7 @@ impl<const LEAF: usize> Node<LEAF> {
             q_xz: 0.0,
             q_yy: 0.0,
             q_yz: 0.0,
+            delta_max: 0.0,
             body_count: 0,
             body_len: 0,
             bodies: [0u32; LEAF],
@@ -188,11 +196,24 @@ impl<const LEAF: usize> Node<LEAF> {
 pub(crate) struct Octree<const LEAF: usize = DEFAULT_LEAF> {
     pub(crate) nodes: Vec<Node<LEAF>>,
     max_depth: usize,
+    /// MAC the most recent [`build`](Self::build) populated. Read by the
+    /// BH walk to decide whether the per-node `δ_max` field is meaningful
+    /// or zero-by-construction. Allow removed when the walk wires the
+    /// Barnes 1990 opening criterion in the next commit.
+    #[allow(dead_code)]
+    built_mac: MacKind,
 }
 
 impl<const LEAF: usize> Octree<LEAF> {
     pub(crate) fn new(max_depth: usize) -> Self {
-        Self { nodes: Vec::new(), max_depth }
+        Self { nodes: Vec::new(), max_depth, built_mac: MacKind::Classical }
+    }
+
+    /// MAC the tree currently carries.
+    #[allow(dead_code)] // wired up by the BH walk in the next commit
+    #[inline]
+    pub(crate) fn built_mac(&self) -> MacKind {
+        self.built_mac
     }
 
     /// Rebuild the tree from scratch for the given body slice.
@@ -203,8 +224,14 @@ impl<const LEAF: usize> Octree<LEAF> {
     /// q_yy, q_yz`) fields reflect the aggregated state of its subtree.
     /// Quadrupole aggregation is always performed — the perf 2×2 §Decision
     /// settled it as the production multipole order.
-    pub(crate) fn build(&mut self, bodies: &[Body]) {
+    ///
+    /// When `mac == Barnes1990`, a third bottom-up pass populates each
+    /// node's `δ_max` (max distance from any subtree body to the node's
+    /// COM, triangle-inequality bound). Under `Classical` the field stays
+    /// at its initial zero, and the third pass is skipped.
+    pub(crate) fn build(&mut self, bodies: &[Body], mac: MacKind) {
         self.nodes.clear();
+        self.built_mac = mac;
 
         if bodies.is_empty() {
             return;
@@ -242,6 +269,10 @@ impl<const LEAF: usize> Octree<LEAF> {
         // ── Aggregate mass / COM bottom-up, then quadrupole tensor ──── //
         self.aggregate_mass(0, bodies);
         self.aggregate_quadrupole(0, bodies);
+
+        if matches!(mac, MacKind::Barnes1990) {
+            self.aggregate_delta_max(0, bodies);
+        }
     }
 
     /// Read-only access to the flat node array.
@@ -467,6 +498,70 @@ impl<const LEAF: usize> Octree<LEAF> {
         n.q_yy = q_yy;
         n.q_yz = q_yz;
     }
+
+    /// Bottom-up pass populating each node's `δ_max` (Barnes 1990) — a
+    /// conservative upper bound on the maximum distance from any body in
+    /// the subtree to this node's COM.
+    ///
+    /// Leaves: `δ_max = max over body in leaf of |pos_b − COM|` (exact).
+    /// Internals: `δ_max = max over children c of (|COM_c − COM| + δ_max_c)`
+    /// (triangle-inequality bound; tight enough for the Barnes 1990 opening
+    /// test and avoids tracking per-body distances all the way up).
+    /// Reference: Barnes 1990 §3.1.
+    ///
+    /// Skipped entirely under [`MacKind::Classical`]; `δ_max` then stays at
+    /// the initial zero set by [`Node::new`].
+    #[allow(dead_code)] // wired by the BH walk in the next commit
+    fn aggregate_delta_max(&mut self, idx: usize, bodies: &[Body]) {
+        if self.nodes[idx].is_leaf() {
+            let cmx = self.nodes[idx].com_x;
+            let cmy = self.nodes[idx].com_y;
+            let cmz = self.nodes[idx].com_z;
+            let len = self.nodes[idx].body_len as usize;
+
+            let mut delta_max: f64 = 0.0;
+            for k in 0..len {
+                let b = bodies[self.nodes[idx].bodies[k] as usize];
+                let dx = b.x - cmx;
+                let dy = b.y - cmy;
+                let dz = b.z - cmz;
+                let d = (dx * dx + dy * dy + dz * dz).sqrt();
+                if d > delta_max {
+                    delta_max = d;
+                }
+            }
+            self.nodes[idx].delta_max = delta_max;
+            return;
+        }
+
+        let children = self.nodes[idx].children;
+        for &c in &children {
+            if c != NO_CHILD {
+                self.aggregate_delta_max(c as usize, bodies);
+            }
+        }
+
+        let pcom_x = self.nodes[idx].com_x;
+        let pcom_y = self.nodes[idx].com_y;
+        let pcom_z = self.nodes[idx].com_z;
+
+        let mut delta_max: f64 = 0.0;
+        for &c in &children {
+            if c == NO_CHILD {
+                continue;
+            }
+            let child = &self.nodes[c as usize];
+            let dx = child.com_x - pcom_x;
+            let dy = child.com_y - pcom_y;
+            let dz = child.com_z - pcom_z;
+            let d_child_to_parent_com = (dx * dx + dy * dy + dz * dz).sqrt();
+            let bound = d_child_to_parent_com + child.delta_max;
+            if bound > delta_max {
+                delta_max = bound;
+            }
+        }
+        self.nodes[idx].delta_max = delta_max;
+    }
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────── //
@@ -500,7 +595,7 @@ mod tests {
         let bodies = vec![body_xy(0.0, 0.0, 1.0), body_xy(4.0, 0.0, 3.0)];
 
         let mut tree = make_tree();
-        tree.build(&bodies);
+        tree.build(&bodies, MacKind::Classical);
 
         let root = &tree.nodes[0];
 
@@ -516,7 +611,7 @@ mod tests {
         let bodies = vec![body_xyz(0.0, 0.0, 0.0, 1.0), body_xyz(4.0, 2.0, -2.0, 3.0)];
 
         let mut tree = make_tree();
-        tree.build(&bodies);
+        tree.build(&bodies, MacKind::Classical);
 
         let root = &tree.nodes[0];
 
@@ -532,7 +627,7 @@ mod tests {
         let bodies: Vec<Body> = (0..10).map(|i| body_xy(i as f64, 0.0, 1.0)).collect();
 
         let mut tree = make_tree();
-        tree.build(&bodies);
+        tree.build(&bodies, MacKind::Classical);
 
         assert_eq!(tree.nodes[0].body_count, 10);
     }
@@ -543,7 +638,7 @@ mod tests {
         let bodies = vec![body_xy(1.0, 2.0, 5.0)];
 
         let mut tree = make_tree();
-        tree.build(&bodies);
+        tree.build(&bodies, MacKind::Classical);
 
         let root = &tree.nodes[0];
 
@@ -558,7 +653,7 @@ mod tests {
         let bodies = vec![body_xy(0.0, 0.0, 1.0), body_xy(0.0, 0.0, 2.0)];
 
         let mut tree = make_tree();
-        tree.build(&bodies);
+        tree.build(&bodies, MacKind::Classical);
 
         let root = &tree.nodes[0];
 
@@ -590,7 +685,7 @@ mod tests {
         }
 
         let mut tree = make_tree();
-        tree.build(&bodies);
+        tree.build(&bodies, MacKind::Classical);
 
         let root = &tree.nodes[0];
         assert!(!root.is_leaf(), "root should subdivide after 16 inserts");
@@ -658,7 +753,7 @@ mod tests {
         let com_z_expected: f64 = bodies.iter().map(|b| b.mass * b.z).sum::<f64>() / m_total;
 
         let mut tree = make_tree();
-        tree.build(&bodies);
+        tree.build(&bodies, MacKind::Classical);
 
         let root = &tree.nodes[0];
         assert_relative_eq!(root.mass, m_total, epsilon = 1e-12);
@@ -684,7 +779,7 @@ mod tests {
             let expected_mass: f64 = bodies.iter().map(|b| b.mass).sum();
 
             let mut tree = make_tree();
-            tree.build(&bodies);
+            tree.build(&bodies, MacKind::Classical);
 
             let root = &tree.nodes[0];
 
@@ -704,7 +799,7 @@ mod tests {
         let bodies = vec![body_xyz(1.0, 0.0, 0.0, 1.0), body_xyz(-1.0, 0.0, 0.0, 1.0)];
 
         let mut tree = make_tree();
-        tree.build(&bodies);
+        tree.build(&bodies, MacKind::Classical);
 
         let root = &tree.nodes[0];
         assert!(root.is_leaf(), "2 bodies must fit in the root leaf");
@@ -744,7 +839,7 @@ mod tests {
             positions.iter().map(|&(x, y, z, m)| body_xyz(x, y, z, m)).collect();
 
         let mut tree = make_tree();
-        tree.build(&bodies);
+        tree.build(&bodies, MacKind::Classical);
 
         let root = &tree.nodes[0];
         assert!(!root.is_leaf(), "16 bodies must force the root to subdivide");
@@ -794,11 +889,11 @@ mod tests {
             .collect();
 
         let mut tight: Octree<4> = Octree::new(16);
-        tight.build(&bodies);
+        tight.build(&bodies, MacKind::Classical);
         assert!(!tight.nodes[0].is_leaf(), "5 > LEAF=4 must subdivide the root");
 
         let mut loose: Octree<16> = Octree::new(16);
-        loose.build(&bodies);
+        loose.build(&bodies, MacKind::Classical);
         assert!(loose.nodes[0].is_leaf(), "5 ≤ LEAF=16 keeps the root as a leaf");
 
         let total_mass: f64 = bodies.iter().map(|b| b.mass).sum();
@@ -817,5 +912,61 @@ mod tests {
         // binary's behaviour.
         assert_eq!(DEFAULT_LEAF, 8);
         let _tree: Octree = Octree::new(16);
+    }
+
+    /// Barnes 1990's geometric MAC opens a node when `s / (d − δ_max) ≥ θ`,
+    /// where `δ_max` is the maximum distance from any body in the subtree
+    /// to the node's COM. The aggregation pass uses the triangle-inequality
+    /// bound `parent.δ_max ≤ max_c(|c.com − parent.com| + c.δ_max)`, which
+    /// must be ≥ the exact value (a true upper bound — never an under-estimate).
+    #[test]
+    fn barnes1990_delta_max_is_upper_bound_at_root() {
+        let bodies: Vec<Body> = (0..32)
+            .map(|i| {
+                let t = i as f64 * 0.37;
+                body_xyz(t.sin() * 3.0, t.cos() * 2.0, (t * 0.7).sin() * 1.5, 1.0)
+            })
+            .collect();
+
+        let mut tree = make_tree();
+        tree.build(&bodies, MacKind::Barnes1990);
+
+        let root = &tree.nodes[0];
+        let exact = bodies
+            .iter()
+            .map(|b| {
+                let dx = b.x - root.com_x;
+                let dy = b.y - root.com_y;
+                let dz = b.z - root.com_z;
+                (dx * dx + dy * dy + dz * dz).sqrt()
+            })
+            .fold(0.0_f64, f64::max);
+
+        assert!(
+            root.delta_max + 1e-12 >= exact,
+            "δ_max must bound the true max distance: got δ_max={}, exact={}",
+            root.delta_max,
+            exact,
+        );
+    }
+
+    /// `MacKind::Classical` skips the δ_max aggregation pass — the field
+    /// stays at its `Node::new` default of 0. Guards against accidental
+    /// build-time cost regressions when running the production MAC.
+    #[test]
+    fn classical_build_leaves_delta_max_at_zero() {
+        let bodies: Vec<Body> = (0..16)
+            .map(|i| {
+                let t = i as f64 * 0.41;
+                body_xyz(t.sin(), t.cos(), (t * 0.9).sin(), 1.0)
+            })
+            .collect();
+
+        let mut tree = make_tree();
+        tree.build(&bodies, MacKind::Classical);
+
+        for node in &tree.nodes {
+            assert_eq!(node.delta_max, 0.0, "classical build must leave δ_max at 0 in every node",);
+        }
     }
 }

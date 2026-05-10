@@ -207,7 +207,7 @@ impl BarnesHutEngine {
     ///
     /// Must be called before [`evaluate`](Self::evaluate) whenever bodies have moved.
     pub fn build(&mut self, bodies: &[Body]) {
-        self.tree.build(bodies);
+        self.tree.build(bodies, self.mac_kind);
     }
 
     /// Compute gravitational accelerations and return total potential energy.
