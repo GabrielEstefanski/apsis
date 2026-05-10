@@ -182,19 +182,72 @@ Implementation cost: intermediate — `a_internal_scale` is per-node (one additi
 
 ## Results
 
-*To be populated incrementally as cells are implemented and measured.*
+Hardware: AMD Ryzen 5 7600X, Windows 11 (matches perf 2×2 / engine ceiling). Run via `cargo test --release -p apsis perf_mac_m0_vs_m1 -- --ignored --nocapture`. Per-cell wall-time is the within-seed median over 5 measured runs after 3 warmup runs; cross-seed values below are the median of those 3 per-seed medians. Raw rows in `target/perf-mac/profile.csv`.
+
+Cells populated to date: **M0** (production baseline, classical `s/d < θ` at θ = 0.5) and **M1** (Barnes 1990, `s/(d − δ_max) < θ`, δ_max from triangle-inequality aggregation per Salmon 1991 §3.2). Cells M2 and M3 are pending — implementation gated on §Decision once M1's outcome is read.
 
 ### Tier 1 — Force accuracy preserved
 
-*Pending.*
+Per-body p95 relative force error against the exact O(N²) reference, all six (cell, N) combinations:
+
+| Cell | N | seed `0x6F637472` | seed `0x71756164` | seed `0x6D6F7274` | bound | verdict |
+| --- | ---: | ---: | ---: | ---: | --- | --- |
+| M0 (θ = 0.5) | 1 000 | 1.39 × 10⁻³ | 1.07 × 10⁻³ | 1.19 × 10⁻³ | ≤ 5 × 10⁻³ | pass |
+| M0 (θ = 0.5) | 10 000 | 2.24 × 10⁻³ | 1.77 × 10⁻³ | 1.94 × 10⁻³ | ≤ 5 × 10⁻³ | pass |
+| M1 (θ_match) | 1 000 | 1.45 × 10⁻³ | 1.05 × 10⁻³ | 1.24 × 10⁻³ | ≤ 5 × 10⁻³ | pass |
+| M1 (θ_match) | 10 000 | 2.22 × 10⁻³ | 1.79 × 10⁻³ | 2.00 × 10⁻³ | ≤ 5 × 10⁻³ | pass |
+
+The matched-accuracy bisection lands every M1 cell within 5 % of its M0 target (the `MATCH_TOL` gate inside `perf_mac::bisect_matched_theta`); both MACs comfortably clear the 5 × 10⁻³ Salmon-Warren bound. **Tier 1 passes for both cells.** N = 5 000 is omitted from this table — it is not in the perf 2×2 Tier 1 N grid; the harness measures it for Tier 2 / Tier 3 trend visibility only.
 
 ### Tier 2 — Wall-time at matched accuracy
 
-*Pending.*
+`t_eval` here is the median of (build + parallel BH evaluate) across 5 measured runs, restored body positions between runs. The `θ_match` column is the value the bisection converged on for each (N, seed); it is the θ at which M1's p95 force error equals M0's at θ = 0.5 within `MATCH_TOL` = 5 %. Per-seed values reported, then median across seeds.
+
+| N | seed | θ_match (M1) | t_M0 (ms) | t_M1 (ms) | `t_M1 / t_M0` |
+| ---: | --- | ---: | ---: | ---: | ---: |
+| 1 000 | `0x6F637472` | 1.019 | 0.630 | 0.730 | 1.16 |
+| 1 000 | `0x71756164` | 0.975 | 0.765 | 0.858 | 1.12 |
+| 1 000 | `0x6D6F7274` | 1.019 | 0.775 | 0.804 | 1.04 |
+| 1 000 | **median** | **1.019** | **0.765** | **0.804** | **1.12** |
+| 5 000 | `0x6F637472` | 1.150 | 5.686 | 11.849 | 2.08 |
+| 5 000 | `0x71756164` | 1.106 | 5.092 | 12.238 | 2.40 |
+| 5 000 | `0x6D6F7274` | 1.237 | 4.947 | 11.284 | 2.28 |
+| 5 000 | **median** | **1.150** | **5.092** | **11.849** | **2.28** |
+| 10 000 | `0x6F637472` | 1.413 | 14.045 | 38.275 | 2.73 |
+| 10 000 | `0x71756164` | 1.194 | 15.199 | 42.067 | 2.77 |
+| 10 000 | `0x6D6F7274` | 1.325 | 15.354 | 40.416 | 2.63 |
+| 10 000 | **median** | **1.325** | **15.199** | **40.416** | **2.73** |
+
+Comparison against the a-priori range:
+
+| Comparison | Predicted range | Observed median | Status |
+| --- | --- | ---: | --- |
+| `t_eval_M1(θ_match) / t_eval_M0(0.5)` at N = 10⁴ | ∈ [0.75, 0.95] | 2.73 | **outside upper bound by 2.9×** |
+
+M1 is consistently *slower* at matched accuracy than M0 at every N tested, and the ratio worsens with N (1.12 → 2.28 → 2.73). The literature-derived 5–25 % speedup window does not reproduce in our codebase under the triangle-inequality δ_max bound. **The Tier 2 gate fails for M1.**
 
 ### Tier 3 — Interaction-count reduction at fixed θ
 
-*Pending.*
+The structural diagnostic. `n_interactions = n_bh_accepted + n_leaf_interactions`, captured per single `evaluate_profile` call (deterministic for fixed (mac, θ, bodies)).
+
+| N | seed | n_int M0 (M) | n_int M1 (M) | `n_int_M1 / n_int_M0` |
+| ---: | --- | ---: | ---: | ---: |
+| 1 000 | `0x6F637472` | 0.529 | 0.631 | 1.19 |
+| 1 000 | `0x71756164` | 0.548 | 0.652 | 1.19 |
+| 1 000 | `0x6D6F7274` | 0.572 | 0.629 | 1.10 |
+| 1 000 | **median** | **0.548** | **0.631** | **1.19** |
+| 5 000 | `0x6F637472` | 3.531 | 9.151 | 2.59 |
+| 5 000 | `0x71756164` | 3.582 | 9.228 | 2.58 |
+| 5 000 | `0x6D6F7274` | 3.544 | 8.724 | 2.46 |
+| 5 000 | **median** | **3.544** | **9.151** | **2.58** |
+| 10 000 | `0x6F637472` | 10.948 | 29.565 | 2.70 |
+| 10 000 | `0x71756164` | 11.161 | 30.232 | 2.71 |
+| 10 000 | `0x6D6F7274` | 11.195 | 31.330 | 2.80 |
+| 10 000 | **median** | **11.161** | **30.232** | **2.71** |
+
+The interaction-count ratio tracks the wall-time ratio almost exactly (1.19 vs 1.12 at N = 10³; 2.58 vs 2.28 at N = 5×10³; 2.71 vs 2.73 at N = 10⁴). `t_per_interaction` is essentially MAC-invariant — the M1 walk does not pay extra per accepted interaction; it simply *performs more interactions*. The build-pass overhead for δ_max aggregation is small (≤ 8 % of total wall time at N = 10⁴ for M1).
+
+This is the diagnostic the protocol's decision rules listed: *"A MAC that reduces wall-time without reducing interactions is suspect"*. The inverse statement — "a MAC that *increases* interactions cannot reduce wall-time" — fires here. M1's loose triangle-inequality δ_max bound makes the effective body-to-COM gap `d − δ_max` collapse for many internal nodes; the criterion `s/(d − δ_max) < θ` then forces descent into nodes M0 would happily accept, even at θ_match well above 1.0.
 
 ---
 

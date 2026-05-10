@@ -29,18 +29,19 @@
 //!
 //! ## Frozen variables
 //!
-//! * Seed: `0x6D6163` ("mac")
+//! * Seeds: `0x6F637472`, `0x71756164`, `0x6D6F7274` (the perf 2×2 / engine
+//!   ceiling canonical set; cross-experiment comparability)
 //! * Body distribution: sphere log-normal mass (matches perf 2×2 / engine
 //!   ceiling)
 //! * θ for M0: `0.5` (the production default tested elsewhere)
 //! * Bisection range for M1: `[0.1, 1.5]`
 //! * Match tolerance: 5 %
-//! * Warmup runs (discarded): 3 per cell
-//! * Measured runs: 5 per cell, median wall-time
+//! * Warmup runs (discarded): 3 per (cell, seed)
+//! * Measured runs: 5 per (cell, seed), median wall-time within seed
 //! * N grid: `{1_000, 5_000, 10_000}`
 //!
 //! CSV output: `target/perf-mac/profile.csv`. Per-row schema in
-//! [`write_header`].
+//! [`write_header`]; one row per (n, seed, mac).
 
 #![allow(dead_code)]
 
@@ -54,7 +55,7 @@ use crate::math::Vec3;
 use crate::physics::gravity::BarnesHutEngine;
 use crate::physics::gravity::tree::MacKind;
 
-const SEED: u64 = 0x6D6163;
+const SEEDS: [u64; 3] = [0x6F637472, 0x71756164, 0x6D6F7274];
 const THETA0: f64 = 0.5;
 const MATCH_TOL: f64 = 0.05;
 const BISECT_THETA_LO: f64 = 0.1;
@@ -85,16 +86,18 @@ fn perf_mac_m0_vs_m1() {
 
     let t_total = Instant::now();
     for &n in &n_values {
-        let bodies = sphere_distribution_lognormal(n, SEED);
-        let exact_acc = compute_exact_acc(&bodies);
+        for &seed in &SEEDS {
+            let bodies = sphere_distribution_lognormal(n, seed);
+            let exact_acc = compute_exact_acc(&bodies);
 
-        let m0 = measure_cell(&bodies, MacKind::Classical, THETA0, &exact_acc);
-        let theta_m1 = bisect_matched_theta(&bodies, m0.p95_force_err, &exact_acc);
-        let m1 = measure_cell(&bodies, MacKind::Barnes1990, theta_m1, &exact_acc);
+            let m0 = measure_cell(&bodies, MacKind::Classical, THETA0, &exact_acc);
+            let theta_m1 = bisect_matched_theta(&bodies, m0.p95_force_err, &exact_acc);
+            let m1 = measure_cell(&bodies, MacKind::Barnes1990, theta_m1, &exact_acc);
 
-        write_row(&mut writer, n, &m0);
-        write_row(&mut writer, n, &m1);
-        print_pair(n, &m0, &m1);
+            write_row(&mut writer, n, seed, &m0);
+            write_row(&mut writer, n, seed, &m1);
+            print_pair(n, seed, &m0, &m1);
+        }
     }
     eprintln!("[perf-mac] runtime: {:.1}s", t_total.elapsed().as_secs_f64());
     eprintln!("[perf-mac] wrote {}", csv_path.display());
@@ -264,7 +267,7 @@ fn compute_exact_acc(bodies: &[Body]) -> Vec<Vec3> {
 fn write_header(writer: &mut fs::File) {
     writeln!(
         writer,
-        "n,mac,theta,p95_force_err,t_median_ms,t_min_ms,t_max_ms,\
+        "n,seed,mac,theta,p95_force_err,t_median_ms,t_min_ms,t_max_ms,\
          t_build_median_ms,t_walk_median_ms,\
          n_node_visits,n_bh_accepted,n_leaf_interactions,\
          n_runs,warmup_runs"
@@ -272,15 +275,16 @@ fn write_header(writer: &mut fs::File) {
     .unwrap();
 }
 
-fn write_row(writer: &mut fs::File, n: usize, r: &Row) {
+fn write_row(writer: &mut fs::File, n: usize, seed: u64, r: &Row) {
     let mac_str = match r.mac {
         MacKind::Classical => "M0_classical",
         MacKind::Barnes1990 => "M1_barnes1990",
     };
     writeln!(
         writer,
-        "{},{},{:.6},{:.6e},{:.6},{:.6},{:.6},{:.6},{:.6},{},{},{},{},{}",
+        "{},0x{:X},{},{:.6},{:.6e},{:.6},{:.6},{:.6},{:.6},{:.6},{},{},{},{},{}",
         n,
+        seed,
         mac_str,
         r.theta,
         r.p95_force_err,
@@ -298,7 +302,7 @@ fn write_row(writer: &mut fs::File, n: usize, r: &Row) {
     .unwrap();
 }
 
-fn print_pair(n: usize, m0: &Row, m1: &Row) {
+fn print_pair(n: usize, seed: u64, m0: &Row, m1: &Row) {
     let t_ratio = m1.t_median_ms / m0.t_median_ms;
     let p95_ratio = m1.p95_force_err / m0.p95_force_err.max(1e-300);
     let int0 = m0.n_bh_accepted + m0.n_leaf_interactions;
@@ -306,9 +310,10 @@ fn print_pair(n: usize, m0: &Row, m1: &Row) {
     let int_ratio = int1 as f64 / int0.max(1) as f64;
 
     eprintln!(
-        "[perf-mac] N={:>5}  M0(θ={:.3}): p95={:.3e} t={:>7.3}ms \
+        "[perf-mac] N={:>5} seed=0x{:X}  M0(θ={:.3}): p95={:.3e} t={:>7.3}ms \
          (build={:.3} walk={:.3}) interactions={}",
         n,
+        seed,
         m0.theta,
         m0.p95_force_err,
         m0.t_median_ms,
@@ -317,9 +322,10 @@ fn print_pair(n: usize, m0: &Row, m1: &Row) {
         int0
     );
     eprintln!(
-        "[perf-mac] N={:>5}  M1(θ={:.3}): p95={:.3e} t={:>7.3}ms \
+        "[perf-mac] N={:>5} seed=0x{:X}  M1(θ={:.3}): p95={:.3e} t={:>7.3}ms \
          (build={:.3} walk={:.3}) interactions={}",
         n,
+        seed,
         m1.theta,
         m1.p95_force_err,
         m1.t_median_ms,
@@ -328,8 +334,8 @@ fn print_pair(n: usize, m0: &Row, m1: &Row) {
         int1
     );
     eprintln!(
-        "[perf-mac] N={:>5}  ratios: p95={:.3}  t={:.3}  interactions={:.3}",
-        n, p95_ratio, t_ratio, int_ratio
+        "[perf-mac] N={:>5} seed=0x{:X}  ratios: p95={:.3}  t={:.3}  interactions={:.3}",
+        n, seed, p95_ratio, t_ratio, int_ratio
     );
 }
 
