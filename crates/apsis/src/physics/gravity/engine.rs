@@ -31,6 +31,7 @@
 use std::sync::Arc;
 
 use crate::domain::body::Body;
+use crate::domain::body_arrays::BodyArrays;
 use crate::math::Vec3;
 use rayon::prelude::*;
 
@@ -174,6 +175,16 @@ impl BarnesHutEngine {
         self.tree.build(bodies);
     }
 
+    /// Rebuild the octree from a [`BodyArrays`] snapshot.
+    ///
+    /// SoA-fed peer of [`build`](Self::build); used by the `System::step`
+    /// hot path that packs the snapshot once per step before force eval.
+    /// See `docs/experiments/2026-05-10-soa-layout.md` for the lifecycle
+    /// contract (write-once, never mutated during the step).
+    pub fn build_from_arrays(&mut self, arrays: &BodyArrays) {
+        self.tree.build_from_arrays(arrays);
+    }
+
     /// Compute gravitational accelerations and return total potential energy.
     ///
     /// Fills `acc[i] = (aₓ, aᵧ, a_z)` for each body.
@@ -236,6 +247,59 @@ impl BarnesHutEngine {
         }
 
         // Each pair counted once from each side → divide by 2
+        (0.5 * potential, counters)
+    }
+
+    /// SoA peer of [`evaluate`](Self::evaluate).
+    ///
+    /// Reads positions / mass / softening from a packed [`BodyArrays`]
+    /// snapshot (typically packed once per step by `System::step`).
+    /// Same semantics as [`evaluate`]; same exact-vs-BH dispatch on
+    /// `exact_threshold`. The Tier 1 gate of PR-perf-5 asserts the
+    /// per-body acceleration vector is bit-equal to [`evaluate`] on the
+    /// equivalent `&[Body]`.
+    pub fn evaluate_arrays(&self, arrays: &BodyArrays, theta: f64, acc: &mut [Vec3]) -> f64 {
+        self.evaluate_arrays_profile(arrays, theta, acc).0
+    }
+
+    /// SoA peer of [`evaluate_profile`](Self::evaluate_profile).
+    pub(crate) fn evaluate_arrays_profile(
+        &self,
+        arrays: &BodyArrays,
+        theta: f64,
+        acc: &mut [Vec3],
+    ) -> (f64, WalkCounters) {
+        let n = arrays.len();
+        acc.fill(Vec3::ZERO);
+
+        if n == 0 {
+            return (0.0, WalkCounters::default());
+        }
+
+        let kernel: &dyn Kernel = &*self.kernel;
+
+        if n <= self.exact_threshold {
+            return (exact_eval_arrays(arrays, kernel, acc), WalkCounters::default());
+        }
+
+        let nodes = self.tree.nodes();
+
+        let results: Vec<(Vec3, f64, WalkCounters)> = (0..n)
+            .into_par_iter()
+            .map(|i| {
+                let mut stack = Vec::with_capacity(128);
+                bh_eval_body_arrays(nodes, i, arrays, theta, kernel, &mut stack)
+            })
+            .collect();
+
+        let mut potential = 0.0_f64;
+        let mut counters = WalkCounters::default();
+        for (i, (a, phi, c)) in results.into_iter().enumerate() {
+            acc[i] = a;
+            potential += arrays.mass[i] * phi;
+            counters.merge(&c);
+        }
+
         (0.5 * potential, counters)
     }
 
@@ -532,6 +596,148 @@ fn bh_eval_body(
 
             let inv_r2 = 1.0 / (r_sq + eps2);
             let inv_r5 = fac / node.mass * inv_r2; // (1/r³) · (1/r²)
+            let inv_r7 = inv_r5 * inv_r2;
+
+            let coef_qr = -G * inv_r5;
+            let coef_r = 2.5 * G * rqr * inv_r7;
+
+            a.x += coef_qr * qr_x + coef_r * dx;
+            a.y += coef_qr * qr_y + coef_r * dy;
+            a.z += coef_qr * qr_z + coef_r * dz;
+            phi += -0.5 * G * rqr * inv_r5;
+            counters.n_bh_accepted += 1;
+        } else {
+            for &c in &node.children {
+                if c != NO_CHILD {
+                    stack.push(c);
+                }
+            }
+        }
+    }
+
+    (a, phi, counters)
+}
+
+/// SoA peer of [`exact_eval`].
+///
+/// Indexed reads of `arrays.{pos_x,pos_y,pos_z,mass,softening}[i]` in the
+/// inner loop. Same Newton-3rd-law per-pair update, same component-by-
+/// component arithmetic order — produces a bit-identical acceleration
+/// vector to [`exact_eval`] on the equivalent `&[Body]`.
+fn exact_eval_arrays(arrays: &BodyArrays, kernel: &dyn Kernel, acc: &mut [Vec3]) -> f64 {
+    let n = arrays.len();
+    let mut potential = 0.0_f64;
+
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let dx = arrays.pos_x[j] - arrays.pos_x[i];
+            let dy = arrays.pos_y[j] - arrays.pos_y[i];
+            let dz = arrays.pos_z[j] - arrays.pos_z[i];
+            let eps2 = pair_eps2(arrays.softening[i], arrays.softening[j]);
+            let r_sq = dx * dx + dy * dy + dz * dz;
+
+            let fac = G * kernel.acceleration_factor(r_sq, eps2);
+
+            let mass_i = arrays.mass[i];
+            let mass_j = arrays.mass[j];
+
+            acc[i].x += mass_j * dx * fac;
+            acc[i].y += mass_j * dy * fac;
+            acc[i].z += mass_j * dz * fac;
+            acc[j].x -= mass_i * dx * fac;
+            acc[j].y -= mass_i * dy * fac;
+            acc[j].z -= mass_i * dz * fac;
+
+            let phi_ij = -G * mass_j * kernel.potential(r_sq, eps2);
+            potential += mass_i * phi_ij;
+        }
+    }
+
+    potential
+}
+
+/// SoA peer of [`bh_eval_body`].
+///
+/// The walk reads node fields (which are unchanged by this PR — the tree
+/// itself is built from the same data) and reads positions / mass /
+/// softening of leaf-pair neighbours from the [`BodyArrays`] snapshot.
+/// The body's own state is loaded once at the top from `arrays[body_idx]`.
+#[inline(always)]
+fn bh_eval_body_arrays(
+    nodes: &[Node<DEFAULT_LEAF>],
+    body_idx: usize,
+    arrays: &BodyArrays,
+    theta: f64,
+    kernel: &dyn Kernel,
+    stack: &mut Vec<u32>,
+) -> (Vec3, f64, WalkCounters) {
+    let body_pos_x = arrays.pos_x[body_idx];
+    let body_pos_y = arrays.pos_y[body_idx];
+    let body_pos_z = arrays.pos_z[body_idx];
+    let body_softening = arrays.softening[body_idx];
+
+    let mut a = Vec3::ZERO;
+    let mut phi = 0.0_f64;
+    let mut counters = WalkCounters::default();
+
+    stack.clear();
+    if !nodes.is_empty() {
+        stack.push(0);
+    }
+
+    while let Some(raw) = stack.pop() {
+        counters.n_node_visits += 1;
+        let node = &nodes[raw as usize];
+        if node.mass <= 0.0 {
+            continue;
+        }
+
+        if node.is_leaf() {
+            for k in 0..node.body_len as usize {
+                let bi = node.bodies[k] as usize;
+                if bi == body_idx {
+                    continue;
+                }
+                let other_mass = arrays.mass[bi];
+                let dx = arrays.pos_x[bi] - body_pos_x;
+                let dy = arrays.pos_y[bi] - body_pos_y;
+                let dz = arrays.pos_z[bi] - body_pos_z;
+                let eps2 = pair_eps2(body_softening, arrays.softening[bi]);
+                let r_sq = dx * dx + dy * dy + dz * dz;
+
+                let fac = G * other_mass * kernel.acceleration_factor(r_sq, eps2);
+                a.x += dx * fac;
+                a.y += dy * fac;
+                a.z += dz * fac;
+                phi += -G * other_mass * kernel.potential(r_sq, eps2);
+                counters.n_leaf_interactions += 1;
+            }
+            continue;
+        }
+
+        // BH criterion: accept this node as a pseudo-body when s/d < θ.
+        let dx = node.com_x - body_pos_x;
+        let dy = node.com_y - body_pos_y;
+        let dz = node.com_z - body_pos_z;
+        let eps2 = body_softening * body_softening;
+        let d = (dx * dx + dy * dy + dz * dz + eps2).sqrt();
+
+        if node.size() / d < theta {
+            let r_sq = dx * dx + dy * dy + dz * dz;
+            let fac = G * node.mass * kernel.acceleration_factor(r_sq, eps2);
+            a.x += dx * fac;
+            a.y += dy * fac;
+            a.z += dz * fac;
+            phi += -G * node.mass * kernel.potential(r_sq, eps2);
+
+            let q_zz = -(node.q_xx + node.q_yy);
+            let qr_x = node.q_xx * dx + node.q_xy * dy + node.q_xz * dz;
+            let qr_y = node.q_xy * dx + node.q_yy * dy + node.q_yz * dz;
+            let qr_z = node.q_xz * dx + node.q_yz * dy + q_zz * dz;
+            let rqr = dx * qr_x + dy * qr_y + dz * qr_z;
+
+            let inv_r2 = 1.0 / (r_sq + eps2);
+            let inv_r5 = fac / node.mass * inv_r2;
             let inv_r7 = inv_r5 * inv_r2;
 
             let coef_qr = -G * inv_r5;
@@ -1091,5 +1297,102 @@ mod tests {
         assert_eq!(counters_exact.n_node_visits, 0);
         assert_eq!(counters_exact.n_bh_accepted, 0);
         assert_eq!(counters_exact.n_leaf_interactions, 0);
+    }
+
+    // ── PR-perf-5 Tier 1 gate ──────────────────────────────────────────────── //
+
+    /// **Tier 1 (hard gate) of `2026-05-10-soa-layout.md`** — the SoA force
+    /// path must produce per-body accelerations bit-equal to the AoS path
+    /// on the same body distribution. The walk is per-body with no
+    /// cross-body reduction in the per-body acceleration sum, so floating-
+    /// point reordering cannot excuse divergence.
+    ///
+    /// Failure here is non-negotiable: any per-body divergence means an
+    /// indexing bug in `bh_eval_body_arrays`, `aggregate_*_from_arrays`, or
+    /// `BodyArrays::pack_from`. The Tier 2 wall-time measurement and the
+    /// System integration commit are gated on this test passing.
+    ///
+    /// Removed in the System-integration commit alongside the legacy AoS
+    /// path it compares against.
+    #[test]
+    fn tier1_soa_walk_matches_aos_walk_bit_exact() {
+        for &n in &[1_000usize, 5_000] {
+            for &seed in &[0x6F637472u64, 0x71756164, 0x6D6F7274] {
+                let bodies = sphere_distribution_lognormal(n, seed);
+
+                // AoS reference path.
+                let mut bh_aos = BarnesHutEngine::new(16);
+                bh_aos.set_exact_threshold(1);
+                bh_aos.build(&bodies);
+                let mut acc_aos = vec![Vec3::ZERO; bodies.len()];
+                bh_aos.evaluate(&bodies, 0.5, &mut acc_aos);
+
+                // SoA path — same data, packed once.
+                let mut arrays = BodyArrays::with_capacity(bodies.len());
+                arrays.pack_from(&bodies);
+                let mut bh_soa = BarnesHutEngine::new(16);
+                bh_soa.set_exact_threshold(1);
+                bh_soa.build_from_arrays(&arrays);
+                let mut acc_soa = vec![Vec3::ZERO; bodies.len()];
+                bh_soa.evaluate_arrays(&arrays, 0.5, &mut acc_soa);
+
+                for (i, (a, b)) in acc_aos.iter().zip(acc_soa.iter()).enumerate() {
+                    assert_eq!(
+                        a.x.to_bits(),
+                        b.x.to_bits(),
+                        "N={n} seed=0x{seed:X} body[{i}].acc.x diverges: \
+                         AoS={} SoA={}",
+                        a.x,
+                        b.x,
+                    );
+                    assert_eq!(
+                        a.y.to_bits(),
+                        b.y.to_bits(),
+                        "N={n} seed=0x{seed:X} body[{i}].acc.y diverges: \
+                         AoS={} SoA={}",
+                        a.y,
+                        b.y,
+                    );
+                    assert_eq!(
+                        a.z.to_bits(),
+                        b.z.to_bits(),
+                        "N={n} seed=0x{seed:X} body[{i}].acc.z diverges: \
+                         AoS={} SoA={}",
+                        a.z,
+                        b.z,
+                    );
+                }
+            }
+        }
+    }
+
+    /// Tier 1 gate, exact-mode branch (`N ≤ exact_threshold`). Same
+    /// bit-exactness contract as the BH branch, exercised at small N where
+    /// `exact_eval_arrays` runs instead of the tree walk.
+    #[test]
+    fn tier1_soa_exact_matches_aos_exact_bit_exact() {
+        for &seed in &[0x6F637472u64, 0x71756164, 0x6D6F7274] {
+            let bodies = sphere_distribution_lognormal(50, seed);
+
+            let mut bh_aos = BarnesHutEngine::new(16);
+            bh_aos.set_exact_threshold(usize::MAX);
+            bh_aos.build(&bodies);
+            let mut acc_aos = vec![Vec3::ZERO; bodies.len()];
+            bh_aos.evaluate(&bodies, 0.5, &mut acc_aos);
+
+            let mut arrays = BodyArrays::with_capacity(bodies.len());
+            arrays.pack_from(&bodies);
+            let mut bh_soa = BarnesHutEngine::new(16);
+            bh_soa.set_exact_threshold(usize::MAX);
+            bh_soa.build_from_arrays(&arrays);
+            let mut acc_soa = vec![Vec3::ZERO; bodies.len()];
+            bh_soa.evaluate_arrays(&arrays, 0.5, &mut acc_soa);
+
+            for (i, (a, b)) in acc_aos.iter().zip(acc_soa.iter()).enumerate() {
+                assert_eq!(a.x.to_bits(), b.x.to_bits(), "exact mode body[{i}].acc.x diverges");
+                assert_eq!(a.y.to_bits(), b.y.to_bits(), "exact mode body[{i}].acc.y diverges");
+                assert_eq!(a.z.to_bits(), b.z.to_bits(), "exact mode body[{i}].acc.z diverges");
+            }
+        }
     }
 }
