@@ -93,10 +93,8 @@ pub struct BarnesHutEngine {
     /// N ≤ this → exact O(N²); N > this → Barnes-Hut traversal.
     exact_threshold: usize,
     kernel: Arc<dyn Kernel>,
-    /// Multipole acceptance criterion. See [`MacKind`] for toggle scope.
-    /// `dead_code` allow removed in the next commit that branches on this
-    /// field in the BH walk.
-    #[allow(dead_code)]
+    /// Multipole acceptance criterion forwarded into [`Octree::build`] on
+    /// every rebuild. See [`MacKind`] for toggle scope.
     mac_kind: MacKind,
 }
 
@@ -253,12 +251,13 @@ impl BarnesHutEngine {
         }
 
         let nodes = self.tree.nodes();
+        let mac = self.tree.built_mac();
 
         let results: Vec<(Vec3, f64, WalkCounters)> = (0..n)
             .into_par_iter()
             .map(|i| {
                 let mut stack = Vec::with_capacity(128);
-                bh_eval_body(nodes, i, &bodies[i], bodies, theta, kernel, &mut stack)
+                bh_eval_body(nodes, i, &bodies[i], bodies, theta, mac, kernel, &mut stack)
             })
             .collect();
 
@@ -496,6 +495,7 @@ fn bh_eval_body(
     body: &Body,
     bodies: &[Body],
     theta: f64,
+    mac: MacKind,
     kernel: &dyn Kernel,
     stack: &mut Vec<u32>,
 ) -> (Vec3, f64, WalkCounters) {
@@ -539,14 +539,27 @@ fn bh_eval_body(
             continue;
         }
 
-        // BH criterion: accept this node as a pseudo-body when s/d < θ.
+        // BH criterion: accept this node as a pseudo-body when s/d < θ
+        // (Classical), or s/(d − δ_max) < θ (Barnes 1990, with descend
+        // when d ≤ δ_max — i.e. the body sits inside the worst-case ball
+        // around this subtree, where the multipole expansion has no
+        // convergence guarantee).
         let dx = node.com_x - body.x;
         let dy = node.com_y - body.y;
         let dz = node.com_z - body.z;
         let eps2 = body.softening * body.softening;
         let d = (dx * dx + dy * dy + dz * dz + eps2).sqrt();
+        let s = node.size();
 
-        if node.size() / d < theta {
+        let accept = match mac {
+            MacKind::Classical => s / d < theta,
+            MacKind::Barnes1990 => {
+                let denom = d - node.delta_max;
+                denom > 0.0 && s / denom < theta
+            },
+        };
+
+        if accept {
             let r_sq = dx * dx + dy * dy + dz * dz;
             let fac = G * node.mass * kernel.acceleration_factor(r_sq, eps2);
             a.x += dx * fac;
@@ -734,6 +747,52 @@ mod tests {
         assert!(
             max_rel <= 5e-2,
             "max per-body rel-err = {max_rel:.4e} exceeds 5e-2 (Salmon-Warren) at θ = 0.5"
+        );
+    }
+
+    /// Tier 1 (MAC behavioral gate) — Barnes 1990's `s/(d − δ_max) < θ` is
+    /// strictly more conservative than the classical `s/d < θ` at the same
+    /// `θ` (it descends into every node Classical does, plus those whose
+    /// `δ_max` pushes the effective gap-to-COM into the rejection band).
+    /// Therefore at fixed `θ` and fixed body distribution, `max_rel(M1) ≤
+    /// max_rel(M0)` must hold up to round-off. A regression here means
+    /// either the `δ_max` upper bound is being violated or the opening
+    /// test was flipped.
+    ///
+    /// Uses N = 1000 for the same reason as
+    /// [`tier1_octree_bh_force_error_under_5pct_at_theta_0_5_n_1000`]: at
+    /// N = 100 the BH branch barely opens any node, both errors collapse
+    /// to the round-off floor, and the comparison is vacuous.
+    #[test]
+    fn barnes1990_force_error_no_worse_than_classical_at_matched_theta() {
+        let bodies = sphere_distribution_lognormal(1000, 0x6F637472);
+
+        let mut exact = BarnesHutEngine::new(16);
+        exact.set_exact_threshold(usize::MAX);
+        exact.build(&bodies);
+        let mut acc_exact = vec![Vec3::ZERO; bodies.len()];
+        exact.evaluate(&bodies, 0.5, &mut acc_exact);
+
+        let mut classical = BarnesHutEngine::new(16);
+        classical.set_exact_threshold(1);
+        classical.set_mac_kind(MacKind::Classical);
+        classical.build(&bodies);
+        let mut acc_m0 = vec![Vec3::ZERO; bodies.len()];
+        classical.evaluate(&bodies, 0.5, &mut acc_m0);
+        let err_m0 = body_max_rel_error(&acc_m0, &acc_exact);
+
+        let mut barnes90 = BarnesHutEngine::new(16);
+        barnes90.set_exact_threshold(1);
+        barnes90.set_mac_kind(MacKind::Barnes1990);
+        barnes90.build(&bodies);
+        let mut acc_m1 = vec![Vec3::ZERO; bodies.len()];
+        barnes90.evaluate(&bodies, 0.5, &mut acc_m1);
+        let err_m1 = body_max_rel_error(&acc_m1, &acc_exact);
+
+        eprintln!("[octree-tier1] N=1000 θ=0.5 M0 err = {err_m0:.4e}, M1 err = {err_m1:.4e}");
+        assert!(
+            err_m1 <= err_m0 + 1e-12,
+            "Barnes 1990 must be no worse than Classical at fixed θ: M1 = {err_m1:.4e}, M0 = {err_m0:.4e}"
         );
     }
 

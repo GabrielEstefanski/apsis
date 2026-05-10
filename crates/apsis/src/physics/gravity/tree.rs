@@ -80,10 +80,11 @@ const TREE_PAD: f64 = 1e-2;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum MacKind {
     Classical,
-    /// `dead_code` allow removed in the next commit that wires `delta_max`
-    /// aggregation in `aggregate_mass` and the modified opening test in
-    /// `bh_eval_body`. Until then the variant is constructible only from
-    /// tests and from the upcoming MAC harness.
+    /// Production code never constructs this variant — `BarnesHutEngine`
+    /// defaults to `Classical` and only the in-flight MAC harness flips it.
+    /// `dead_code` would fire on the variant itself in non-test builds; the
+    /// allow goes away when the experiment's §Decision bakes one MAC and
+    /// removes the toggle.
     #[allow(dead_code)]
     Barnes1990,
 }
@@ -197,10 +198,9 @@ pub(crate) struct Octree<const LEAF: usize = DEFAULT_LEAF> {
     pub(crate) nodes: Vec<Node<LEAF>>,
     max_depth: usize,
     /// MAC the most recent [`build`](Self::build) populated. Read by the
-    /// BH walk to decide whether the per-node `δ_max` field is meaningful
-    /// or zero-by-construction. Allow removed when the walk wires the
-    /// Barnes 1990 opening criterion in the next commit.
-    #[allow(dead_code)]
+    /// BH walk to decide whether to use the classical `s/d < θ` test or
+    /// the Barnes 1990 `s/(d − δ_max) < θ` test (the latter requires the
+    /// optional `aggregate_delta_max` pass to have run).
     built_mac: MacKind,
 }
 
@@ -210,7 +210,6 @@ impl<const LEAF: usize> Octree<LEAF> {
     }
 
     /// MAC the tree currently carries.
-    #[allow(dead_code)] // wired up by the BH walk in the next commit
     #[inline]
     pub(crate) fn built_mac(&self) -> MacKind {
         self.built_mac
@@ -511,7 +510,6 @@ impl<const LEAF: usize> Octree<LEAF> {
     ///
     /// Skipped entirely under [`MacKind::Classical`]; `δ_max` then stays at
     /// the initial zero set by [`Node::new`].
-    #[allow(dead_code)] // wired by the BH walk in the next commit
     fn aggregate_delta_max(&mut self, idx: usize, bodies: &[Body]) {
         if self.nodes[idx].is_leaf() {
             let cmx = self.nodes[idx].com_x;
