@@ -253,13 +253,66 @@ This is the diagnostic the protocol's decision rules listed: *"A MAC that reduce
 
 ## Interpretation
 
-*To be written after enough cells land to make a structural reading.*
+### M1 fails for a structural reason, not a measurement artefact
+
+Three observations rule out the easy explanations:
+
+1. **Tier 1 holds, ruling out an accuracy bug.** M1's p95 force error matches M0's at every (N, seed) pair within the 5 % bisection tolerance, and both stay well under the 5 × 10⁻³ Salmon-Warren bound. The opening criterion `s/(d − δ_max) < θ` is wired correctly; the engine-level test [`barnes1990_force_error_no_worse_than_classical_at_matched_theta`](../../crates/apsis/src/physics/gravity/engine.rs) confirms it preserves the strict-monotonicity property of M1 vs M0 at matched θ.
+
+2. **Tier 3 tracks Tier 2 within ~5 %**, ruling out a per-interaction cost regression. `t_per_interaction = t_walk / n_interactions` is essentially MAC-invariant at every cell: M1 walks are not slower per interaction, they just *perform more interactions*. The build pass for `δ_max` (`Octree::aggregate_delta_max`) costs ≤ 8 % of total wall time at N = 10⁴ — small and not the dominant contributor.
+
+3. **The `t_M1 / t_M0` ratio worsens monotonically with N** (1.12 → 2.28 → 2.73 going N = 10³ → 5×10³ → 10⁴) and the matched θ_M1 climbs (1.02 → 1.15 → 1.32). The structural cause amplifies with tree depth; this is consistent with a property of the tree itself, not a per-call overhead.
+
+The mechanism is the looseness of the triangle-inequality `δ_max` aggregation. For each internal node, the bound
+
+$$
+\delta_\text{max}^\text{parent} \;\leq\; \max_c \Bigl( |\mathbf{c}_c - \mathbf{c}_\text{parent}| + \delta_\text{max}^c \Bigr)
+$$
+
+stacks slack at every recursion level — the parent's true worst-case body offset is generally much smaller than the sum of "child COM offset from parent COM" plus "child's own δ_max" because those two displacements partially cancel. Over a tree of depth `log₈(N) ≈ 3.3` at N = 10⁴, the accumulated slack inflates δ_max for high-up internal nodes to a substantial fraction of the cell side. The criterion's effective gap `d − δ_max` then collapses for any body that is not far outside the cell, forcing M1 to descend even when M0 would happily accept the node as a pseudo-body.
+
+### Why M2 and M3 inherit the failure mode
+
+Both Dehnen 2002 and Springel 2005 layer an *additional* rejection on top of a geometric criterion equivalent to or stricter than Barnes 1990's. M2 adds a per-walk error-budget rejection; M3 (GADGET-style) adds an acceleration-relative rejection — neither can *accept* a node that the geometric component already wants to descend into. So whatever interaction count M1 produces under the loose `δ_max` is a *floor* for M2 and M3 — they can only reject more, not less. With M1 already at 2.7× M0's interaction count at N = 10⁴, the implementation cost of M2 / M3 cannot be justified by the geometry as currently bounded.
+
+The literature speedups for M2 / M3 assume a tighter `δ_max` than the triangle-inequality aggregation gives. GADGET-2 stores the actual body-position bounding box per node and re-derives δ_max from cell geometry plus an exact recursion; falcON (Dehnen) uses a different multipole representation (centred-multipole, no δ_max in the same form). Reproducing those speedups in apsis would require either a tighter δ_max construction (per-body recursion bottom-up, ~3–5× more arithmetic at build time) or a multipole representation change. Both are large investments and neither is the next-cheapest move on the perf roadmap.
+
+### What this means for the engine ceiling §Decision's MAC axis
+
+The engine ceiling §Decision listed MAC as the first axis on the four-axis roadmap (MAC → SoA → SIMD → re-measure → Morton). The premise was that interaction-bound walk cost would drop with a better MAC. The measurement here invalidates that premise *for the cheap MAC variants and our `δ_max` construction*. The roadmap's next step shifts: SoA and SIMD become the lead, with their own re-measurement; MAC re-enters as a candidate only if (a) the post-SoA/SIMD profile re-classifies the engine in a way that puts MAC back in scope, or (b) a tighter `δ_max` construction looks affordable to investigate.
 
 ---
 
 ## Decision
 
-*To be written after Tier 2 ranges are populated and the decision rules can fire.*
+**Do not ship M1.** Do not implement M2 or M3 at this time. Production stays on M0 (classical `s/d < θ`) at θ = 0.5; the toggle scaffolding (`MacKind` enum, `Octree::built_mac`, `Node::delta_max`, `Octree::aggregate_delta_max`, `BarnesHutEngine::set_mac_kind`, MAC harness) is removed in the experiment's final commit per the perf 2×2 (PR #72) precedent.
+
+The decision fires the protocol's *"Tier 3 shows interaction reduction but Tier 2 wall-time gain < 50 % of expected ratio range → possibly defer MAC pending SoA / SIMD work"* branch, modified for the actual outcome: Tier 3 shows interaction *increase*, which is a strictly stronger negative signal. Combined with §Interpretation's argument that M2 and M3 inherit the failure mode under the same `δ_max` construction, the parsimonious move is to defer the entire MAC axis rather than pay the M2 / M3 implementation cost for a likely-equivalent or worse outcome.
+
+### Updated four-axis roadmap (post this §Decision)
+
+| Step | Axis | Status |
+| --- | --- | --- |
+| 1 | MAC (this experiment) | **deferred** — see below for re-entry condition |
+| 2 | SoA layout (PR-perf-5) | next; gated on this PR landing on `develop` |
+| 3 | SIMD kernel (PR-perf-6) | follows SoA; brings cache locality + vectorisation in the same engine cycle |
+| 4 | Re-measure interaction-bound vs compute-bound classification | gates whether MAC re-enters scope |
+| 5 | Morton (PR-perf-7) | follows the re-measurement, per the engine ceiling §Decision |
+
+**MAC re-entry condition.** This experiment is filed as a closed negative result for the cheap-MAC variants under the triangle-inequality `δ_max` bound. MAC re-enters the roadmap only if a post-SoA/SIMD measurement on this same body distribution shows: (a) the walk is still interaction-bound (`t_per_interaction` still low, `n_interactions / body` still the dominant cost driver) AND (b) somebody has done the prior literature work to identify a `δ_max` construction or alternative MAC formulation that does not stack slack with tree depth. Without (b), repeating M1/M2/M3 with a different harness will not change the outcome.
+
+### What ships in this PR
+
+| Item | State after PR |
+| --- | --- |
+| `MacKind` enum, `Octree::built_mac`, `Node::delta_max`, `Octree::aggregate_delta_max` | removed |
+| `BarnesHutEngine::mac_kind` field, `set_mac_kind`, `mac_kind()` accessors, MAC tests in `engine.rs` | removed |
+| `physics::perf_mac` harness | removed (superseded by this notebook) |
+| `physics::gravity::tree` visibility (bumped to `pub(crate)` for the harness) | reverted to `mod tree` |
+| `BarnesHutEngine::build` signature back to no-op-MAC form | identical to pre-experiment baseline |
+| Notebook (`docs/experiments/2026-05-09-octree-mac.md`) | retained as the closed lab record; this is the artefact a future PR-perf-MAC-v2 must read first |
+
+The diff at PR-perf-4's final commit is therefore: production source + runtime is byte-identical to pre-experiment; the only added code is the lab notebook. This matches the perf 2×2 / PR #72 closure pattern (toggle code lived only on the experiment branch; merge baked the §Decision and removed the knobs).
 
 ---
 
