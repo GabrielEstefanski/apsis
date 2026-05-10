@@ -229,8 +229,8 @@ impl OrbitHierarchy {
                 continue;
             }
             let bj = &bodies[j];
-            let dx = bj.x - h.x;
-            let dy = bj.y - h.y;
+            let dx = bj.pos_x - h.pos_x;
+            let dy = bj.pos_y - h.pos_y;
             let r = (dx * dx + dy * dy).sqrt();
             if !r.is_finite() || r == 0.0 {
                 self.soi[j] = 0.0;
@@ -309,15 +309,15 @@ fn heaviest_index(bodies: &[Body]) -> usize {
 /// Specific orbital energy of body `a` as a test particle in `b`'s field.
 /// Returns `None` if the pair is coincident or any value is non-finite.
 fn binding_energy(a: &Body, b: &Body, g_factor: f64) -> Option<f64> {
-    let dx = b.x - a.x;
-    let dy = b.y - a.y;
+    let dx = b.pos_x - a.pos_x;
+    let dy = b.pos_y - a.pos_y;
     let r2 = dx * dx + dy * dy;
     if r2 == 0.0 || !r2.is_finite() {
         return None;
     }
     let r = r2.sqrt();
-    let dvx = a.vx - b.vx;
-    let dvy = a.vy - b.vy;
+    let dvx = a.vel_x - b.vel_x;
+    let dvy = a.vel_y - b.vel_y;
     let v2 = dvx * dvx + dvy * dvy;
     let mu = g_factor * b.mass;
     let eps = 0.5 * v2 - mu / r;
@@ -326,8 +326,8 @@ fn binding_energy(a: &Body, b: &Body, g_factor: f64) -> Option<f64> {
 
 /// Returns the pair-distance between two bodies. None if non-finite.
 fn distance(a: &Body, b: &Body) -> Option<f64> {
-    let dx = b.x - a.x;
-    let dy = b.y - a.y;
+    let dx = b.pos_x - a.pos_x;
+    let dy = b.pos_y - a.pos_y;
     let r2 = dx * dx + dy * dy;
     if !r2.is_finite() {
         return None;

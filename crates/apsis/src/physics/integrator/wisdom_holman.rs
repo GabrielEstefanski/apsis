@@ -120,9 +120,10 @@ impl Integrator for WisdomHolman {
         // `v0`, `a0` fields carry the body-aligned, original-frame
         // kinematics every consumer of `DenseSnapshot` expects (the
         // wh_data path uses its own rest-frame state separately).
-        let pre_x0_inertial: Vec<Vec3> = bodies.iter().map(|b| Vec3::new(b.x, b.y, b.z)).collect();
+        let pre_x0_inertial: Vec<Vec3> =
+            bodies.iter().map(|b| Vec3::new(b.pos_x, b.pos_y, b.pos_z)).collect();
         let pre_v0_inertial: Vec<Vec3> =
-            bodies.iter().map(|b| Vec3::new(b.vx, b.vy, b.vz)).collect();
+            bodies.iter().map(|b| Vec3::new(b.vel_x, b.vel_y, b.vel_z)).collect();
         let pre_a0_inertial: Vec<Vec3> = if acc.len() == bodies.len() {
             acc.clone()
         } else {
@@ -141,30 +142,31 @@ impl Integrator for WisdomHolman {
         // inverse Galilean transformation at step exit. Total momentum is
         // exactly conserved by the symplectic split, so `v_com` is unchanged
         // through the step.
-        let p_total =
-            bodies.iter().fold(Vec3::ZERO, |s, b| s + b.mass * Vec3::new(b.vx, b.vy, b.vz));
+        let p_total = bodies
+            .iter()
+            .fold(Vec3::ZERO, |s, b| s + b.mass * Vec3::new(b.vel_x, b.vel_y, b.vel_z));
         let v_com = p_total / m_total;
         for b in bodies.iter_mut() {
-            b.vx -= v_com.x;
-            b.vy -= v_com.y;
-            b.vz -= v_com.z;
+            b.vel_x -= v_com.x;
+            b.vel_y -= v_com.y;
+            b.vel_z -= v_com.z;
         }
 
         // Step-entry snapshots in the rest frame.
-        let r0_in = Vec3::new(bodies[0].x, bodies[0].y, bodies[0].z);
+        let r0_in = Vec3::new(bodies[0].pos_x, bodies[0].pos_y, bodies[0].pos_z);
 
         // The barycenter-constraint reconstruction at step exit needs the
         // step-entry value of `Σ m_i q_i_in` (i ≥ 1) to derive `r_0_out` from
         // the post-step planet positions. In the rest frame `Q_0` is invariant.
         let m_q_in: Vec3 = bodies[1..]
             .iter()
-            .fold(Vec3::ZERO, |s, b| s + b.mass * (Vec3::new(b.x, b.y, b.z) - r0_in));
+            .fold(Vec3::ZERO, |s, b| s + b.mass * (Vec3::new(b.pos_x, b.pos_y, b.pos_z) - r0_in));
 
         // ── Translate planets to heliocentric (positions only) ────────────
         for b in bodies[1..].iter_mut() {
-            b.x -= r0_in.x;
-            b.y -= r0_in.y;
-            b.z -= r0_in.z;
+            b.pos_x -= r0_in.x;
+            b.pos_y -= r0_in.y;
+            b.pos_z -= r0_in.z;
         }
 
         // Capture the rest-frame (q_helio, v_inertial) pair for every
@@ -173,9 +175,9 @@ impl Integrator for WisdomHolman {
         // half-kick mutates velocities. This is the input the dense-
         // output Kepler interpolator replays at sub-step times.
         let q0_helio_rest: Vec<Vec3> =
-            bodies[1..].iter().map(|b| Vec3::new(b.x, b.y, b.z)).collect();
+            bodies[1..].iter().map(|b| Vec3::new(b.pos_x, b.pos_y, b.pos_z)).collect();
         let v0_inertial_rest: Vec<Vec3> =
-            bodies[1..].iter().map(|b| Vec3::new(b.vx, b.vy, b.vz)).collect();
+            bodies[1..].iter().map(|b| Vec3::new(b.vel_x, b.vel_y, b.vel_z)).collect();
         let planet_masses: Vec<f64> = bodies[1..].iter().map(|b| b.mass).collect();
 
         // ── First half-kick ───────────────────────────────────────────────
@@ -188,15 +190,15 @@ impl Integrator for WisdomHolman {
         // relative to the true two-body problem is absorbed by the H_indirect
         // drift below.
         for b in bodies[1..].iter_mut() {
-            let q = Vec3::new(b.x, b.y, b.z);
-            let v = Vec3::new(b.vx, b.vy, b.vz);
+            let q = Vec3::new(b.pos_x, b.pos_y, b.pos_z);
+            let v = Vec3::new(b.vel_x, b.vel_y, b.vel_z);
             let (q_new, v_new) = kepler_step(q, v, dt, mu);
-            b.x = q_new.x;
-            b.y = q_new.y;
-            b.z = q_new.z;
-            b.vx = v_new.x;
-            b.vy = v_new.y;
-            b.vz = v_new.z;
+            b.pos_x = q_new.x;
+            b.pos_y = q_new.y;
+            b.pos_z = q_new.z;
+            b.vel_x = v_new.x;
+            b.vel_y = v_new.y;
+            b.vel_z = v_new.z;
         }
 
         // ── Drift: H_indirect (uniform shift on all heliocentric positions)
@@ -204,13 +206,14 @@ impl Integrator for WisdomHolman {
         // momenta and so generates a position drift; under H_K + H_indirect
         // applied sequentially the indirect drift uses the post-Kepler planet
         // momenta. The shift is identical for all planets.
-        let p_planets_post_kepler: Vec3 =
-            bodies[1..].iter().fold(Vec3::ZERO, |s, b| s + b.mass * Vec3::new(b.vx, b.vy, b.vz));
+        let p_planets_post_kepler: Vec3 = bodies[1..]
+            .iter()
+            .fold(Vec3::ZERO, |s, b| s + b.mass * Vec3::new(b.vel_x, b.vel_y, b.vel_z));
         let indirect_shift = (p_planets_post_kepler / m0) * dt;
         for b in bodies[1..].iter_mut() {
-            b.x += indirect_shift.x;
-            b.y += indirect_shift.y;
-            b.z += indirect_shift.z;
+            b.pos_x += indirect_shift.x;
+            b.pos_y += indirect_shift.y;
+            b.pos_z += indirect_shift.z;
         }
 
         // ── Second half-kick ──────────────────────────────────────────────
@@ -221,41 +224,43 @@ impl Integrator for WisdomHolman {
         //   r_0_out = r_0_in + (m_q_in − m_q_out) / M
         // where m_q_out is `Σ m_i q_i_post` evaluated on the post-step
         // heliocentric positions.
-        let m_q_out: Vec3 =
-            bodies[1..].iter().fold(Vec3::ZERO, |s, b| s + b.mass * Vec3::new(b.x, b.y, b.z));
+        let m_q_out: Vec3 = bodies[1..]
+            .iter()
+            .fold(Vec3::ZERO, |s, b| s + b.mass * Vec3::new(b.pos_x, b.pos_y, b.pos_z));
         let r0_out = r0_in + (m_q_in - m_q_out) / m_total;
 
         // ── Translate planets back to rest-frame inertial coordinates ────
         for b in bodies[1..].iter_mut() {
-            b.x += r0_out.x;
-            b.y += r0_out.y;
-            b.z += r0_out.z;
+            b.pos_x += r0_out.x;
+            b.pos_y += r0_out.y;
+            b.pos_z += r0_out.z;
         }
 
         // Rest-frame total-momentum conservation: `Σ_all m_i v_i = 0`, so
         //   v_0_out = −(1/m_0) Σ_{i≥1} m_i v_i_out.
-        let p_planets_out: Vec3 =
-            bodies[1..].iter().fold(Vec3::ZERO, |s, b| s + b.mass * Vec3::new(b.vx, b.vy, b.vz));
+        let p_planets_out: Vec3 = bodies[1..]
+            .iter()
+            .fold(Vec3::ZERO, |s, b| s + b.mass * Vec3::new(b.vel_x, b.vel_y, b.vel_z));
         let v0_out_rest = -p_planets_out / m0;
 
-        bodies[0].x = r0_out.x;
-        bodies[0].y = r0_out.y;
-        bodies[0].z = r0_out.z;
-        bodies[0].vx = v0_out_rest.x;
-        bodies[0].vy = v0_out_rest.y;
-        bodies[0].vz = v0_out_rest.z;
+        bodies[0].pos_x = r0_out.x;
+        bodies[0].pos_y = r0_out.y;
+        bodies[0].pos_z = r0_out.z;
+        bodies[0].vel_x = v0_out_rest.x;
+        bodies[0].vel_y = v0_out_rest.y;
+        bodies[0].vel_z = v0_out_rest.z;
 
         // ── Inverse Galilean transformation back to the original frame ────
         // Advance all bodies by `v_com · dt` (centre-of-mass position drift
         // over the step) and restore each body's `v_com` velocity component.
         let dr_com = v_com * dt;
         for b in bodies.iter_mut() {
-            b.x += dr_com.x;
-            b.y += dr_com.y;
-            b.z += dr_com.z;
-            b.vx += v_com.x;
-            b.vy += v_com.y;
-            b.vz += v_com.z;
+            b.pos_x += dr_com.x;
+            b.pos_y += dr_com.y;
+            b.pos_z += dr_com.z;
+            b.vel_x += v_com.x;
+            b.vel_y += v_com.y;
+            b.vel_z += v_com.z;
         }
 
         // Populate `acc` with the total inertial acceleration of every
@@ -291,11 +296,11 @@ impl Integrator for WisdomHolman {
         // are evaluated in the original inertial frame the bodies are
         // now in (post Galilean inverse shift above).
         let n = bodies.len();
-        let r0_inertial = Vec3::new(bodies[0].x, bodies[0].y, bodies[0].z);
+        let r0_inertial = Vec3::new(bodies[0].pos_x, bodies[0].pos_y, bodies[0].pos_z);
         let mut planet_total_acc = Vec::with_capacity(n - 1);
         let mut sun_acc = Vec3::ZERO;
         for (i, b) in bodies[1..].iter().enumerate() {
-            let q = Vec3::new(b.x, b.y, b.z) - r0_inertial;
+            let q = Vec3::new(b.pos_x, b.pos_y, b.pos_z) - r0_inertial;
             let r2 = q.length_squared().max(1e-60);
             let inv_r3 = 1.0 / (r2 * r2.sqrt());
             let kepler_pull_on_planet = -mu * q * inv_r3;
@@ -392,9 +397,9 @@ fn wh_kick(
     let indirect = indirect_raw * ctx.g_factor;
     for (i, ai) in acc.iter().enumerate() {
         let kick = (*ai + indirect) * dt;
-        bodies[i + 1].vx += kick.x;
-        bodies[i + 1].vy += kick.y;
-        bodies[i + 1].vz += kick.z;
+        bodies[i + 1].vel_x += kick.x;
+        bodies[i + 1].vel_y += kick.y;
+        bodies[i + 1].vel_z += kick.z;
     }
 
     pe_inter + pe_central
@@ -406,7 +411,7 @@ fn central_potential(bodies: &[Body], mu: f64) -> f64 {
     bodies[1..]
         .iter()
         .map(|b| {
-            let r = (b.x * b.x + b.y * b.y + b.z * b.z).sqrt().max(1e-30);
+            let r = (b.pos_x * b.pos_x + b.pos_y * b.pos_y + b.pos_z * b.pos_z).sqrt().max(1e-30);
             -mu * b.mass / r
         })
         .sum()

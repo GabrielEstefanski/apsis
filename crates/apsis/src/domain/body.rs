@@ -23,12 +23,12 @@ pub const EPS_BASE: f64 = 0.02;
 /// is sensible for a non-emitting non-receiving point mass.
 #[derive(Clone, Copy, Debug)]
 pub struct Body {
-    pub x: f64,
-    pub y: f64,
-    pub z: f64,
-    pub vx: f64,
-    pub vy: f64,
-    pub vz: f64,
+    pub pos_x: f64,
+    pub pos_y: f64,
+    pub pos_z: f64,
+    pub vel_x: f64,
+    pub vel_y: f64,
+    pub vel_z: f64,
     pub mass: f64,
 
     /// Gravitational softening length ε for this body.
@@ -130,12 +130,12 @@ impl Body {
         let physical_radius = radius_from_density_mass(density, mass);
         let softening = default_softening(mass);
         Self {
-            x: 0.0,
-            y: 0.0,
-            z: 0.0,
-            vx: 0.0,
-            vy: 0.0,
-            vz: 0.0,
+            pos_x: 0.0,
+            pos_y: 0.0,
+            pos_z: 0.0,
+            vel_x: 0.0,
+            vel_y: 0.0,
+            vel_z: 0.0,
             mass,
             softening,
             physical_radius,
@@ -170,12 +170,12 @@ impl Body {
             .unwrap_or(0.0);
 
         Self {
-            x: 0.0,
-            y: 0.0,
-            z: 0.0,
-            vx: 0.0,
-            vy: 0.0,
-            vz: 0.0,
+            pos_x: 0.0,
+            pos_y: 0.0,
+            pos_z: 0.0,
+            vel_x: 0.0,
+            vel_y: 0.0,
+            vel_z: 0.0,
             mass,
             softening,
             physical_radius,
@@ -250,8 +250,8 @@ impl Body {
     #[inline]
     #[must_use]
     pub fn at(mut self, x: f64, y: f64) -> Self {
-        self.x = x;
-        self.y = y;
+        self.pos_x = x;
+        self.pos_y = y;
         self
     }
 
@@ -259,9 +259,9 @@ impl Body {
     #[inline]
     #[must_use]
     pub fn at_3d(mut self, x: f64, y: f64, z: f64) -> Self {
-        self.x = x;
-        self.y = y;
-        self.z = z;
+        self.pos_x = x;
+        self.pos_y = y;
+        self.pos_z = z;
         self
     }
 
@@ -271,8 +271,8 @@ impl Body {
     #[inline]
     #[must_use]
     pub fn with_velocity(mut self, vx: f64, vy: f64) -> Self {
-        self.vx = vx;
-        self.vy = vy;
+        self.vel_x = vx;
+        self.vel_y = vy;
         self
     }
 
@@ -280,9 +280,9 @@ impl Body {
     #[inline]
     #[must_use]
     pub fn with_velocity_3d(mut self, vx: f64, vy: f64, vz: f64) -> Self {
-        self.vx = vx;
-        self.vy = vy;
-        self.vz = vz;
+        self.vel_x = vx;
+        self.vel_y = vy;
+        self.vel_z = vz;
         self
     }
 
@@ -466,52 +466,52 @@ mod tests {
     #[test]
     fn fluent_builder_produces_expected_state() {
         let b = Body::rocky(3e-6).at(1.0, 0.0).with_velocity(0.0, 1.0);
-        assert_eq!(b.x, 1.0);
-        assert_eq!(b.y, 0.0);
-        assert_eq!(b.z, 0.0);
-        assert_eq!(b.vx, 0.0);
-        assert_eq!(b.vy, 1.0);
-        assert_eq!(b.vz, 0.0);
+        assert_eq!(b.pos_x, 1.0);
+        assert_eq!(b.pos_y, 0.0);
+        assert_eq!(b.pos_z, 0.0);
+        assert_eq!(b.vel_x, 0.0);
+        assert_eq!(b.vel_y, 1.0);
+        assert_eq!(b.vel_z, 0.0);
         assert_eq!(b.mass, 3e-6);
     }
 
     #[test]
     fn material_constructors_default_z_and_vz_to_zero() {
         let b = Body::star(1.0);
-        assert_eq!(b.z, 0.0);
-        assert_eq!(b.vz, 0.0);
+        assert_eq!(b.pos_z, 0.0);
+        assert_eq!(b.vel_z, 0.0);
     }
 
     #[test]
     fn at_leaves_z_untouched() {
         let b = Body::rocky(1.0).at_3d(0.0, 0.0, 5.0).at(1.0, 2.0);
-        assert_eq!(b.x, 1.0);
-        assert_eq!(b.y, 2.0);
-        assert_eq!(b.z, 5.0);
+        assert_eq!(b.pos_x, 1.0);
+        assert_eq!(b.pos_y, 2.0);
+        assert_eq!(b.pos_z, 5.0);
     }
 
     #[test]
     fn at_3d_sets_all_three_components() {
         let b = Body::rocky(1.0).at_3d(1.0, 2.0, 3.0);
-        assert_eq!(b.x, 1.0);
-        assert_eq!(b.y, 2.0);
-        assert_eq!(b.z, 3.0);
+        assert_eq!(b.pos_x, 1.0);
+        assert_eq!(b.pos_y, 2.0);
+        assert_eq!(b.pos_z, 3.0);
     }
 
     #[test]
     fn with_velocity_leaves_vz_untouched() {
         let b = Body::rocky(1.0).with_velocity_3d(0.0, 0.0, 7.0).with_velocity(1.0, 2.0);
-        assert_eq!(b.vx, 1.0);
-        assert_eq!(b.vy, 2.0);
-        assert_eq!(b.vz, 7.0);
+        assert_eq!(b.vel_x, 1.0);
+        assert_eq!(b.vel_y, 2.0);
+        assert_eq!(b.vel_z, 7.0);
     }
 
     #[test]
     fn with_velocity_3d_sets_all_three_components() {
         let b = Body::rocky(1.0).with_velocity_3d(1.0, 2.0, 3.0);
-        assert_eq!(b.vx, 1.0);
-        assert_eq!(b.vy, 2.0);
-        assert_eq!(b.vz, 3.0);
+        assert_eq!(b.vel_x, 1.0);
+        assert_eq!(b.vel_y, 2.0);
+        assert_eq!(b.vel_z, 3.0);
     }
 
     // ── Density / luminosity propagation from presets ────────────────────────

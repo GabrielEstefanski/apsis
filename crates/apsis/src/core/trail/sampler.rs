@@ -82,7 +82,8 @@ impl TrailSampler for ArcLengthSampler {
         // body's trail starts immediately.
         if self.anchors.len() != n {
             self.anchors.clear();
-            self.anchors.extend(bodies.iter().map(|b| (b.x as f32, b.y as f32, b.z as f32)));
+            self.anchors
+                .extend(bodies.iter().map(|b| (b.pos_x as f32, b.pos_y as f32, b.pos_z as f32)));
             return n > 0;
         }
         if n == 0 {
@@ -94,9 +95,9 @@ impl TrailSampler for ArcLengthSampler {
         // blow up the ratio test.
         let mut scale_sq_acc = 0.0_f32;
         for b in bodies {
-            let x = b.x as f32;
-            let y = b.y as f32;
-            let z = b.z as f32;
+            let x = b.pos_x as f32;
+            let y = b.pos_y as f32;
+            let z = b.pos_z as f32;
             scale_sq_acc += x * x + y * y + z * z;
         }
         let scene_scale_sq = (scale_sq_acc / n as f32).max(EPS_SCALE_SQ);
@@ -104,9 +105,9 @@ impl TrailSampler for ArcLengthSampler {
         // Maximum squared displacement since the last recorded sample.
         let mut max_disp_sq = 0.0_f32;
         for (i, b) in bodies.iter().enumerate() {
-            let dx = b.x as f32 - self.anchors[i].0;
-            let dy = b.y as f32 - self.anchors[i].1;
-            let dz = b.z as f32 - self.anchors[i].2;
+            let dx = b.pos_x as f32 - self.anchors[i].0;
+            let dy = b.pos_y as f32 - self.anchors[i].1;
+            let dz = b.pos_z as f32 - self.anchors[i].2;
             let d = dx * dx + dy * dy + dz * dz;
             if d > max_disp_sq {
                 max_disp_sq = d;
@@ -116,7 +117,7 @@ impl TrailSampler for ArcLengthSampler {
         let ratio_sq = max_disp_sq / scene_scale_sq;
         if ratio_sq >= self.threshold_sq {
             for (i, b) in bodies.iter().enumerate() {
-                self.anchors[i] = (b.x as f32, b.y as f32, b.z as f32);
+                self.anchors[i] = (b.pos_x as f32, b.pos_y as f32, b.pos_z as f32);
             }
             true
         } else {
@@ -225,7 +226,7 @@ mod tests {
         let mut bodies = vec![body_at(1.0, 0.0), body_at(-1.0, 0.0)];
         let _ = s.should_sample(&bodies); // seat anchors
         // Scene scale sqrt = 1.0. Move body 0 by 0.1 → ratio 0.1 > 0.05.
-        bodies[0].x = 1.1;
+        bodies[0].pos_x = 1.1;
         assert!(s.should_sample(&bodies));
         // Anchors updated — no further fire without more motion.
         assert!(!s.should_sample(&bodies));

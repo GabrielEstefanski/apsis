@@ -65,14 +65,16 @@ const INTEGRATORS: &[(IntegratorKind, &str)] = &[
 /// All 13 scenarios in the protocol use the default Plummer kernel, so this
 /// formula matches the integrator's energy bookkeeping for the scored runs.
 fn total_energy(bodies: &[Body], g: f64) -> f64 {
-    let ke: f64 =
-        bodies.iter().map(|b| 0.5 * b.mass * (b.vx * b.vx + b.vy * b.vy + b.vz * b.vz)).sum();
+    let ke: f64 = bodies
+        .iter()
+        .map(|b| 0.5 * b.mass * (b.vel_x * b.vel_x + b.vel_y * b.vel_y + b.vel_z * b.vel_z))
+        .sum();
     let mut pe = 0.0;
     for i in 0..bodies.len() {
         for j in (i + 1)..bodies.len() {
-            let dx = bodies[i].x - bodies[j].x;
-            let dy = bodies[i].y - bodies[j].y;
-            let dz = bodies[i].z - bodies[j].z;
+            let dx = bodies[i].pos_x - bodies[j].pos_x;
+            let dy = bodies[i].pos_y - bodies[j].pos_y;
+            let dz = bodies[i].pos_z - bodies[j].pos_z;
             let r2 = dx * dx + dy * dy + dz * dz;
             let eps2 = 0.5
                 * (bodies[i].softening * bodies[i].softening
@@ -84,7 +86,7 @@ fn total_energy(bodies: &[Body], g: f64) -> f64 {
 }
 
 fn lz(bodies: &[Body]) -> f64 {
-    bodies.iter().map(|b| b.mass * (b.x * b.vy - b.y * b.vx)).sum()
+    bodies.iter().map(|b| b.mass * (b.pos_x * b.vel_y - b.pos_y * b.vel_x)).sum()
 }
 
 // ── Main ────────────────────────────────────────────────────────────────── //

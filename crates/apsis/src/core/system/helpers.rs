@@ -47,8 +47,8 @@ pub(crate) fn compute_closeness(bodies: &[Body]) -> (f64, f64) {
 
     for i in 0..bodies.len() {
         for j in (i + 1)..bodies.len() {
-            let dx = bodies[i].x - bodies[j].x;
-            let dy = bodies[i].y - bodies[j].y;
+            let dx = bodies[i].pos_x - bodies[j].pos_x;
+            let dy = bodies[i].pos_y - bodies[j].pos_y;
             let r = (dx * dx + dy * dy).sqrt();
             if r < r_min {
                 r_min = r;

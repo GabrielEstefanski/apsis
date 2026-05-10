@@ -278,9 +278,9 @@ mod tests {
     impl PerturbationForce for LinearDrag {
         fn accumulate(&self, bodies: &[Body], acc: &mut [Vec3]) {
             for (b, a) in bodies.iter().zip(acc.iter_mut()) {
-                a.x -= self.0 * b.vx;
-                a.y -= self.0 * b.vy;
-                a.z -= self.0 * b.vz;
+                a.x -= self.0 * b.vel_x;
+                a.y -= self.0 * b.vel_y;
+                a.z -= self.0 * b.vel_z;
             }
         }
     }
@@ -304,9 +304,9 @@ mod tests {
     impl PerturbationForce for RadialPull {
         fn accumulate(&self, bodies: &[Body], acc: &mut [Vec3]) {
             for (b, a) in bodies.iter().zip(acc.iter_mut()) {
-                a.x -= self.0 * b.x;
-                a.y -= self.0 * b.y;
-                a.z -= self.0 * b.z;
+                a.x -= self.0 * b.pos_x;
+                a.y -= self.0 * b.pos_y;
+                a.z -= self.0 * b.pos_z;
             }
         }
     }
@@ -370,7 +370,14 @@ mod tests {
     fn snapshot(sys: &System) -> Vec<BodyState> {
         sys.bodies()
             .iter()
-            .map(|b| BodyState { x: b.x, y: b.y, z: b.z, vx: b.vx, vy: b.vy, vz: b.vz })
+            .map(|b| BodyState {
+                x: b.pos_x,
+                y: b.pos_y,
+                z: b.pos_z,
+                vx: b.vel_x,
+                vy: b.vel_y,
+                vz: b.vel_z,
+            })
             .collect()
     }
 

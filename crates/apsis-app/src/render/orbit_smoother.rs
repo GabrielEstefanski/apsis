@@ -337,8 +337,8 @@ fn compute_tau(
 
     let bp = &bodies[primary_idx];
     let bi = &bodies[idx];
-    let r_p = (bp.x, bp.y);
-    let r_i = (bi.x, bi.y);
+    let r_p = (bp.pos_x, bp.pos_y);
+    let r_i = (bi.pos_x, bi.pos_y);
 
     let mut total_score = 0.0_f64;
     let mut weighted_period_sum = 0.0_f64;
@@ -348,7 +348,7 @@ fn compute_tau(
             continue;
         }
         let bj = &bodies[j];
-        let r_j = (bj.x, bj.y);
+        let r_j = (bj.pos_x, bj.pos_y);
 
         let dx_pj = r_p.0 - r_j.0;
         let dy_pj = r_p.1 - r_j.1;
@@ -446,7 +446,7 @@ mod tests {
         // Perturb to e ≈ 0.3 by boosting tangential velocity. With no
         // siblings τ = TAU_MIN · P_self, so each step has α very close to
         // 1; convergence is fast.
-        bodies[1].vy *= 1.15;
+        bodies[1].vel_y *= 1.15;
         for k in 1..=200 {
             s.smoothed(&bodies, &names, 1, 0, &[], 1.0, k as f64);
         }
@@ -522,8 +522,8 @@ mod tests {
     fn body_lies_on_orbit(el: &OrbitalElements, body: &Body, primary: &Body) -> f64 {
         // Geometric check: at the body's azimuth from focus, the orbit's
         // predicted distance must equal the body's actual distance.
-        let rx = body.x - primary.x;
-        let ry = body.y - primary.y;
+        let rx = body.pos_x - primary.pos_x;
+        let ry = body.pos_y - primary.pos_y;
         let r = (rx * rx + ry * ry).sqrt();
         let theta = ry.atan2(rx);
         let nu = theta - el.omega;
@@ -610,7 +610,7 @@ mod tests {
         // many sim seconds (no smoother calls). When overlay returns,
         // a single call with a long Δt should yield α ≈ 1 (essentially
         // snap to current state), not α ≈ small (frame-step assumption).
-        bodies[1].vy *= 1.3;
+        bodies[1].vel_y *= 1.3;
         let el = s.smoothed(&bodies, &names, 1, 0, &[], 1.0, 1e6).unwrap();
         // After a Δt much larger than τ_min, EMA should have effectively
         // collapsed to the current invariants.

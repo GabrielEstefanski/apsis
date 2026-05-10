@@ -137,14 +137,14 @@ fn write_sample(w: &mut BufWriter<File>, orbit: u64, sys: &System) {
         w,
         "{orbit},{t:.18e},{x0:.18e},{y0:.18e},{vx0:.18e},{vy0:.18e},{x1:.18e},{y1:.18e},{vx1:.18e},{vy1:.18e},{e:.18e}",
         t = sys.t(),
-        x0 = b0.x,
-        y0 = b0.y,
-        vx0 = b0.vx,
-        vy0 = b0.vy,
-        x1 = b1.x,
-        y1 = b1.y,
-        vx1 = b1.vx,
-        vy1 = b1.vy,
+        x0 = b0.pos_x,
+        y0 = b0.pos_y,
+        vx0 = b0.vel_x,
+        vy0 = b0.vel_y,
+        x1 = b1.pos_x,
+        y1 = b1.pos_y,
+        vx1 = b1.vel_x,
+        vy1 = b1.vel_y,
         e = e_total,
     )
     .unwrap();
@@ -158,12 +158,13 @@ fn write_sample(w: &mut BufWriter<File>, orbit: u64, sys: &System) {
 /// −Σᵢ<ⱼ G mᵢ mⱼ / rᵢⱼ, with G = 1 and no softening (verified by
 /// `Body::unsoftened()` on every body in this configuration).
 fn total_energy(bodies: &[Body]) -> f64 {
-    let ke: f64 = bodies.iter().map(|b| 0.5 * b.mass * (b.vx * b.vx + b.vy * b.vy)).sum();
+    let ke: f64 =
+        bodies.iter().map(|b| 0.5 * b.mass * (b.vel_x * b.vel_x + b.vel_y * b.vel_y)).sum();
     let mut pe = 0.0;
     for i in 0..bodies.len() {
         for j in (i + 1)..bodies.len() {
-            let dx = bodies[i].x - bodies[j].x;
-            let dy = bodies[i].y - bodies[j].y;
+            let dx = bodies[i].pos_x - bodies[j].pos_x;
+            let dy = bodies[i].pos_y - bodies[j].pos_y;
             let r = (dx * dx + dy * dy).sqrt();
             pe -= bodies[i].mass * bodies[j].mass / r;
         }

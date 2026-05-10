@@ -264,9 +264,9 @@ impl BarnesHutEngine {
                 continue;
             }
 
-            let dx = node.com_x - body.x;
-            let dy = node.com_y - body.y;
-            let dz = node.com_z - body.z;
+            let dx = node.com_x - body.pos_x;
+            let dy = node.com_y - body.pos_y;
+            let dz = node.com_z - body.pos_z;
             let d = (dx * dx + dy * dy + dz * dz + eps2).sqrt();
             let ratio = node.size() / d;
 
@@ -400,9 +400,9 @@ fn exact_eval(bodies: &[Body], kernel: &dyn Kernel, acc: &mut [Vec3]) -> f64 {
 
     for i in 0..n {
         for j in (i + 1)..n {
-            let dx = bodies[j].x - bodies[i].x;
-            let dy = bodies[j].y - bodies[i].y;
-            let dz = bodies[j].z - bodies[i].z;
+            let dx = bodies[j].pos_x - bodies[i].pos_x;
+            let dy = bodies[j].pos_y - bodies[i].pos_y;
+            let dz = bodies[j].pos_z - bodies[i].pos_z;
             let eps2 = pair_eps2(bodies[i].softening, bodies[j].softening);
             let r_sq = dx * dx + dy * dy + dz * dz;
 
@@ -487,9 +487,9 @@ fn bh_eval_body(
                     continue;
                 }
                 let other = bodies[bi];
-                let dx = other.x - body.x;
-                let dy = other.y - body.y;
-                let dz = other.z - body.z;
+                let dx = other.pos_x - body.pos_x;
+                let dy = other.pos_y - body.pos_y;
+                let dz = other.pos_z - body.pos_z;
                 let eps2 = pair_eps2(body.softening, other.softening);
                 let r_sq = dx * dx + dy * dy + dz * dz;
 
@@ -504,9 +504,9 @@ fn bh_eval_body(
         }
 
         // BH criterion: accept this node as a pseudo-body when s/d < θ.
-        let dx = node.com_x - body.x;
-        let dy = node.com_y - body.y;
-        let dz = node.com_z - body.z;
+        let dx = node.com_x - body.pos_x;
+        let dy = node.com_y - body.pos_y;
+        let dz = node.com_z - body.pos_z;
         let eps2 = body.softening * body.softening;
         let d = (dx * dx + dy * dy + dz * dz + eps2).sqrt();
 
@@ -779,8 +779,8 @@ mod tests {
             // Planet at periapsis with inclined velocity
             {
                 let mut b = Body::rocky(m_planet).at(r_peri, 0.0).with_velocity(0.0, 0.0);
-                b.vy = v_peri * cos_i;
-                b.vz = v_peri * sin_i;
+                b.vel_y = v_peri * cos_i;
+                b.vel_z = v_peri * sin_i;
                 b
             },
         ];
@@ -820,24 +820,24 @@ mod tests {
         for _ in 0..n_steps {
             // kick (½dt)
             for (b, a) in bodies.iter_mut().zip(&acc) {
-                b.vx += 0.5 * dt * a.x;
-                b.vy += 0.5 * dt * a.y;
-                b.vz += 0.5 * dt * a.z;
+                b.vel_x += 0.5 * dt * a.x;
+                b.vel_y += 0.5 * dt * a.y;
+                b.vel_z += 0.5 * dt * a.z;
             }
             // drift (dt)
             for b in bodies.iter_mut() {
-                b.x += dt * b.vx;
-                b.y += dt * b.vy;
-                b.z += dt * b.vz;
+                b.pos_x += dt * b.vel_x;
+                b.pos_y += dt * b.vel_y;
+                b.pos_z += dt * b.vel_z;
             }
             // recompute forces
             engine.build(&bodies);
             engine.evaluate(&bodies, 0.5, &mut acc);
             // kick (½dt)
             for (b, a) in bodies.iter_mut().zip(&acc) {
-                b.vx += 0.5 * dt * a.x;
-                b.vy += 0.5 * dt * a.y;
-                b.vz += 0.5 * dt * a.z;
+                b.vel_x += 0.5 * dt * a.x;
+                b.vel_y += 0.5 * dt * a.y;
+                b.vel_z += 0.5 * dt * a.z;
             }
 
             let l = orbital_angular_momentum(&bodies[0], &bodies[1]);
@@ -990,7 +990,7 @@ mod tests {
             let mass = normal.exp();
 
             let mut b = Body::rocky(mass).at(x, y).with_velocity(0.0, 0.0);
-            b.z = z;
+            b.pos_z = z;
             bodies.push(b);
         }
         bodies
@@ -1012,8 +1012,16 @@ mod tests {
     /// (v_planet − v_central)` so the magnitude is dimensionally
     /// `mass · length² / time`.
     fn orbital_angular_momentum(central: &Body, planet: &Body) -> Vec3 {
-        let r = Vec3::new(planet.x - central.x, planet.y - central.y, planet.z - central.z);
-        let v = Vec3::new(planet.vx - central.vx, planet.vy - central.vy, planet.vz - central.vz);
+        let r = Vec3::new(
+            planet.pos_x - central.pos_x,
+            planet.pos_y - central.pos_y,
+            planet.pos_z - central.pos_z,
+        );
+        let v = Vec3::new(
+            planet.vel_x - central.vel_x,
+            planet.vel_y - central.vel_y,
+            planet.vel_z - central.vel_z,
+        );
         let cross = Vec3::new(r.y * v.z - r.z * v.y, r.z * v.x - r.x * v.z, r.x * v.y - r.y * v.x);
         planet.mass * cross
     }

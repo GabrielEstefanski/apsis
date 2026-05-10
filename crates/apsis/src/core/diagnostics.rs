@@ -49,7 +49,7 @@ impl DiagnosticsComputer {
         }
 
         for b in bodies {
-            let v2 = b.vx * b.vx + b.vy * b.vy + b.vz * b.vz;
+            let v2 = b.vel_x * b.vel_x + b.vel_y * b.vel_y + b.vel_z * b.vel_z;
             max_vel = max_vel.max(v2.sqrt());
         }
 

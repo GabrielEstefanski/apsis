@@ -352,8 +352,8 @@ impl SimulationApp {
         if self.follow_selected_body {
             if let Some(idx) = self.selection.single() {
                 if let Some(body) = self.system.bodies().get(idx).copied() {
-                    let body_pos = glam::DVec3::new(body.x, body.y, body.z);
-                    let body_vel = glam::DVec3::new(body.vx, body.vy, body.vz);
+                    let body_pos = glam::DVec3::new(body.pos_x, body.pos_y, body.pos_z);
+                    let body_vel = glam::DVec3::new(body.vel_x, body.vel_y, body.vel_z);
                     let body_acc = self
                         .system
                         .accelerations()
@@ -518,7 +518,7 @@ impl SimulationApp {
                     .filter(|b| b.is_luminous())
                     .map(|b| {
                         let rel = RenderRelativeVec3::from_world(
-                            glam::DVec3::new(b.x, b.y, b.z),
+                            glam::DVec3::new(b.pos_x, b.pos_y, b.pos_z),
                             render_origin,
                         );
                         LightSpec {
@@ -550,13 +550,13 @@ impl SimulationApp {
             // raw body for clarity.
             let primary_luminous = bodies.iter().find(|b| b.is_luminous());
             let r_ref = if let Some(primary) = primary_luminous {
-                let (lx, ly, lz) = (primary.x, primary.y, primary.z);
+                let (lx, ly, lz) = (primary.pos_x, primary.pos_y, primary.pos_z);
                 let (sum_sq, n) = bodies.iter().filter(|b| !b.is_luminous()).fold(
                     (0.0_f64, 0usize),
                     |(acc, k), b| {
-                        let dx = b.x - lx;
-                        let dy = b.y - ly;
-                        let dz = b.z - lz;
+                        let dx = b.pos_x - lx;
+                        let dy = b.pos_y - ly;
+                        let dz = b.pos_z - lz;
                         (acc + dx * dx + dy * dy + dz * dz, k + 1)
                     },
                 );
@@ -590,7 +590,7 @@ impl SimulationApp {
             let photometry_lights: Vec<(apsis::math::Vec3, f64)> = bodies
                 .iter()
                 .filter(|b| b.is_luminous())
-                .map(|b| (apsis::math::Vec3::new(b.x, b.y, b.z), b.luminosity))
+                .map(|b| (apsis::math::Vec3::new(b.pos_x, b.pos_y, b.pos_z), b.luminosity))
                 .collect();
 
             // Reference magnitude that maps to linear pixel = 1.0
@@ -609,7 +609,7 @@ impl SimulationApp {
                     Some(colors) => colors[i],
                     None => b.color,
                 };
-                let body_world = glam::DVec3::new(b.x, b.y, b.z);
+                let body_world = glam::DVec3::new(b.pos_x, b.pos_y, b.pos_z);
                 let center_rel = RenderRelativeVec3::from_world(body_world, render_origin);
                 let body_dist = center_rel.as_vec3().length().max(1e-6);
                 let r_world = radius_world_3d(
@@ -672,7 +672,7 @@ impl SimulationApp {
                     if let Some(pix) =
                         world_to_screen(body_world, render_origin, view_proj_relative, rect)
                     {
-                        let body_pos = apsis::math::Vec3::new(b.x, b.y, b.z);
+                        let body_pos = apsis::math::Vec3::new(b.pos_x, b.pos_y, b.pos_z);
                         let observer = apsis::math::Vec3::new(
                             render_origin.x,
                             render_origin.y,
@@ -821,7 +821,7 @@ impl SimulationApp {
                         // behind-camera bodies skip the candidate
                         // pool — the orbit ranking only looks at what
                         // the user might plausibly be looking at.
-                        let world = glam::DVec3::new(b.x, b.y, b.z);
+                        let world = glam::DVec3::new(b.pos_x, b.pos_y, b.pos_z);
                         let Some(sp) =
                             world_to_screen(world, render_origin, view_proj_relative, rect)
                         else {
@@ -859,7 +859,7 @@ impl SimulationApp {
                             continue;
                         };
                         let primary = &bodies[*primary_idx];
-                        let primary_pos = [primary.x, primary.y, primary.z];
+                        let primary_pos = [primary.pos_x, primary.pos_y, primary.pos_z];
                         let sampled = el.sample_orbit(primary_pos, 64);
                         draw_orbit_polyline(&mut backend, &sampled, project, &bg_style, None, None);
                         draw_orbit_apsides(&mut backend, &el, primary_pos, project, &bg_style);
@@ -893,10 +893,11 @@ impl SimulationApp {
                             continue;
                         };
                         let primary_b = &bodies[primary_idx];
-                        let primary_pos = [primary_b.x, primary_b.y, primary_b.z];
+                        let primary_pos = [primary_b.pos_x, primary_b.pos_y, primary_b.pos_z];
                         let sampled = el.sample_orbit(primary_pos, 96);
                         let body = &bodies[i];
-                        let anchor = closest_sample_index(&sampled, [body.x, body.y, body.z]);
+                        let anchor =
+                            closest_sample_index(&sampled, [body.pos_x, body.pos_y, body.pos_z]);
                         draw_orbit_polyline(
                             &mut backend,
                             &sampled,
@@ -926,12 +927,14 @@ impl SimulationApp {
                                 t_sim,
                             ) {
                                 let primary = &bodies[primary_idx];
-                                let primary_pos = [primary.x, primary.y, primary.z];
+                                let primary_pos = [primary.pos_x, primary.pos_y, primary.pos_z];
                                 let sampled = el.sample_orbit(primary_pos, 128);
                                 let style = OrbitOverlayStyle::selected_default();
                                 let body = &bodies[idx];
-                                let anchor =
-                                    closest_sample_index(&sampled, [body.x, body.y, body.z]);
+                                let anchor = closest_sample_index(
+                                    &sampled,
+                                    [body.pos_x, body.pos_y, body.pos_z],
+                                );
                                 draw_orbit_polyline_with_halo(
                                     &mut backend,
                                     &sampled,
@@ -1428,7 +1431,7 @@ impl SimulationApp {
         let pulse = (time * 3.5).sin() * 1.5_f32;
 
         for (i, (body, name)) in bodies.iter().zip(names.iter()).enumerate() {
-            let world = glam::DVec3::new(body.x, body.y, body.z);
+            let world = glam::DVec3::new(body.pos_x, body.pos_y, body.pos_z);
             let Some(body_pos) = world_to_screen(world, render_origin, view_proj_relative, rect)
             else {
                 continue;
@@ -1607,7 +1610,7 @@ impl SimulationApp {
         // bodies can occlude each other regardless of insertion order.
         let mut best: Option<(usize, f32)> = None;
         for (i, b) in bodies.iter().enumerate() {
-            let world = glam::DVec3::new(b.x, b.y, b.z);
+            let world = glam::DVec3::new(b.pos_x, b.pos_y, b.pos_z);
             let Some(screen) = world_to_screen(world, render_origin, view_proj_relative, rect)
             else {
                 continue;

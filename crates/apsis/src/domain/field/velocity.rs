@@ -20,6 +20,6 @@ impl BodyField for VelocityMagnitudeField {
         // addition, so the colour-bar normalisation observed in 2D
         // scenes is preserved bit-for-bit by the 3D sampler.
         let b = &ctx.bodies[i];
-        (b.vx * b.vx + b.vy * b.vy + b.vz * b.vz).sqrt()
+        (b.vel_x * b.vel_x + b.vel_y * b.vel_y + b.vel_z * b.vel_z).sqrt()
     }
 }
