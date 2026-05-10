@@ -284,12 +284,12 @@ impl PhysicsHandle {
             } else {
                 (snap.interpolate(i, h), snap.velocity_at(i, h))
             };
-            body.x = p.x;
-            body.y = p.y;
-            body.z = p.z;
-            body.vx = v.x;
-            body.vy = v.y;
-            body.vz = v.z;
+            body.pos_x = p.x;
+            body.pos_y = p.y;
+            body.pos_z = p.z;
+            body.vel_x = v.x;
+            body.vel_y = v.y;
+            body.vel_z = v.z;
         }
         // Acceleration consumers (camera feedforward, |a| field) read
         // through `accelerations()` — overwrite with the interpolated
@@ -1076,7 +1076,7 @@ fn physics_loop(
                     let col: Vec<[f32; 3]> = system
                         .bodies()
                         .iter()
-                        .map(|b| [b.x as f32, b.y as f32, b.z as f32])
+                        .map(|b| [b.pos_x as f32, b.pos_y as f32, b.pos_z as f32])
                         .collect();
                     trail_samples_pending.push(col);
                 }

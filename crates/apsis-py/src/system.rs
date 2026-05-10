@@ -607,12 +607,12 @@ fn record_state(sys: &CoreSystem, buf: &mut TrajectoryBuffers) {
     buf.energy_drift.push(m.rel_energy_error);
     buf.lz_drift.push(m.rel_angular_momentum_error);
     for b in sys.bodies() {
-        buf.x.push(b.x);
-        buf.y.push(b.y);
-        buf.z.push(b.z);
-        buf.vx.push(b.vx);
-        buf.vy.push(b.vy);
-        buf.vz.push(b.vz);
+        buf.x.push(b.pos_x);
+        buf.y.push(b.pos_y);
+        buf.z.push(b.pos_z);
+        buf.vx.push(b.vel_x);
+        buf.vy.push(b.vel_y);
+        buf.vz.push(b.vel_z);
     }
 }
 

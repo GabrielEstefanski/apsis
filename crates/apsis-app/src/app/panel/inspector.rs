@@ -62,12 +62,12 @@ impl SimulationApp {
         for &i in indices {
             let b = bodies[i];
             total_mass += b.mass;
-            com[0] += b.mass * b.x;
-            com[1] += b.mass * b.y;
-            com[2] += b.mass * b.z;
-            v_com[0] += b.mass * b.vx;
-            v_com[1] += b.mass * b.vy;
-            v_com[2] += b.mass * b.vz;
+            com[0] += b.mass * b.pos_x;
+            com[1] += b.mass * b.pos_y;
+            com[2] += b.mass * b.pos_z;
+            v_com[0] += b.mass * b.vel_x;
+            v_com[1] += b.mass * b.vel_y;
+            v_com[2] += b.mass * b.vel_z;
         }
 
         if total_mass > 0.0 {
@@ -84,9 +84,9 @@ impl SimulationApp {
             .iter()
             .map(|&i| {
                 let b = bodies[i];
-                let dx = b.x - com[0];
-                let dy = b.y - com[1];
-                let dz = b.z - com[2];
+                let dx = b.pos_x - com[0];
+                let dy = b.pos_y - com[1];
+                let dz = b.pos_z - com[2];
                 (dx * dx + dy * dy + dz * dz).sqrt()
             })
             .fold(0.0_f64, f64::max);
@@ -220,8 +220,8 @@ impl SimulationApp {
             },
             identity: Identity { mass_kg: body.mass, radius_m: Some(body.physical_radius) },
             state: KinematicState {
-                position_m: [body.x, body.y, body.z],
-                velocity_m_s: [body.vx, body.vy, body.vz],
+                position_m: [body.pos_x, body.pos_y, body.pos_z],
+                velocity_m_s: [body.vel_x, body.vel_y, body.vel_z],
             },
             orbit,
             relations,
@@ -303,7 +303,7 @@ fn build_energy(
     g: f64,
 ) -> EnergyData {
     let body = bodies[idx];
-    let v2 = body.vx * body.vx + body.vy * body.vy + body.vz * body.vz;
+    let v2 = body.vel_x * body.vel_x + body.vel_y * body.vel_y + body.vel_z * body.vel_z;
     let kinetic = 0.5 * body.mass * v2;
 
     let mut potential = 0.0;
@@ -311,9 +311,9 @@ fn build_energy(
         if j == idx {
             continue;
         }
-        let dx = body.x - other.x;
-        let dy = body.y - other.y;
-        let dz = body.z - other.z;
+        let dx = body.pos_x - other.pos_x;
+        let dy = body.pos_y - other.pos_y;
+        let dz = body.pos_z - other.pos_z;
         let r = (dx * dx + dy * dy + dz * dz).sqrt();
         if r > 1e-15 {
             potential -= g * body.mass * other.mass / r;
@@ -363,8 +363,8 @@ mod tests {
 
     fn make_body(x: f64, y: f64, vx: f64, vy: f64, mass: f64) -> Body {
         let mut b = Body::rocky(mass).at(x, y).with_velocity(vx, vy);
-        b.z = 0.0;
-        b.vz = 0.0;
+        b.pos_z = 0.0;
+        b.vel_z = 0.0;
         b
     }
 
@@ -376,12 +376,12 @@ mod tests {
         for &i in indices {
             let b = bodies[i];
             total_mass += b.mass;
-            com[0] += b.mass * b.x;
-            com[1] += b.mass * b.y;
-            com[2] += b.mass * b.z;
-            v_com[0] += b.mass * b.vx;
-            v_com[1] += b.mass * b.vy;
-            v_com[2] += b.mass * b.vz;
+            com[0] += b.mass * b.pos_x;
+            com[1] += b.mass * b.pos_y;
+            com[2] += b.mass * b.pos_z;
+            v_com[0] += b.mass * b.vel_x;
+            v_com[1] += b.mass * b.vel_y;
+            v_com[2] += b.mass * b.vel_z;
         }
 
         if total_mass > 0.0 {
@@ -397,9 +397,9 @@ mod tests {
             .iter()
             .map(|&i| {
                 let b = bodies[i];
-                let dx = b.x - com[0];
-                let dy = b.y - com[1];
-                let dz = b.z - com[2];
+                let dx = b.pos_x - com[0];
+                let dy = b.pos_y - com[1];
+                let dz = b.pos_z - com[2];
                 (dx * dx + dy * dy + dz * dz).sqrt()
             })
             .fold(0.0_f64, f64::max);

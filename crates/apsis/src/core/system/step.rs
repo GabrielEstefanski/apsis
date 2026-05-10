@@ -53,8 +53,8 @@ impl System {
             && self.integrator.kind() != IntegratorKind::Ias15
             && self.scratch_acc.len() == self.bodies.len();
         if need_order2 {
-            pre_x0 = self.bodies.iter().map(|b| Vec3::new(b.x, b.y, b.z)).collect();
-            pre_v0 = self.bodies.iter().map(|b| Vec3::new(b.vx, b.vy, b.vz)).collect();
+            pre_x0 = self.bodies.iter().map(|b| Vec3::new(b.pos_x, b.pos_y, b.pos_z)).collect();
+            pre_v0 = self.bodies.iter().map(|b| Vec3::new(b.vel_x, b.vel_y, b.vel_z)).collect();
             pre_a0 = self.scratch_acc.clone();
         } else {
             pre_x0 = Vec::new();

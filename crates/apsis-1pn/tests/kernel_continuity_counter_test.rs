@@ -69,8 +69,8 @@ fn two_body_eccentric() -> Vec<Body> {
 
 /// Current pair separation between the two bodies.
 fn pair_separation(bodies: &[Body]) -> f64 {
-    let dx = bodies[1].x - bodies[0].x;
-    let dy = bodies[1].y - bodies[0].y;
+    let dx = bodies[1].pos_x - bodies[0].pos_x;
+    let dy = bodies[1].pos_y - bodies[0].pos_y;
     (dx * dx + dy * dy).sqrt()
 }
 

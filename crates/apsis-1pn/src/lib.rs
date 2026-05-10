@@ -185,7 +185,7 @@ impl PerturbationForce for PostNewtonian1PN {
         // minus sign.
         for i in 0..bodies.len() {
             let b_i = &bodies[i];
-            let v_i = Vec3::new(b_i.vx, b_i.vy, b_i.vz);
+            let v_i = Vec3::new(b_i.vel_x, b_i.vel_y, b_i.vel_z);
             let v2_i = v_i.length_squared();
 
             let mut a = Vec3::ZERO;
@@ -195,9 +195,9 @@ impl PerturbationForce for PostNewtonian1PN {
                     continue;
                 }
                 let b_j = &bodies[j];
-                let dx = b_j.x - b_i.x;
-                let dy = b_j.y - b_i.y;
-                let dz = b_j.z - b_i.z;
+                let dx = b_j.pos_x - b_i.pos_x;
+                let dy = b_j.pos_y - b_i.pos_y;
+                let dz = b_j.pos_z - b_i.pos_z;
                 let r2 = dx * dx + dy * dy + dz * dz;
                 if r2 < 1e-30 {
                     continue;

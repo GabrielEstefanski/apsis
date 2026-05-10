@@ -213,7 +213,7 @@ fn vv_step_timed(
     if trail_on {
         let t = Instant::now();
         for b in bodies.iter() {
-            trail.push(Vec3::new(b.x, b.y, b.z));
+            trail.push(Vec3::new(b.pos_x, b.pos_y, b.pos_z));
         }
         row.t_trail_ns += t.elapsed().as_nanos() as u64;
     }
@@ -236,7 +236,7 @@ fn vv_step_untimed(
     kick(bodies, acc, 0.5 * DT);
     if trail_on {
         for b in bodies.iter() {
-            trail.push(Vec3::new(b.x, b.y, b.z));
+            trail.push(Vec3::new(b.pos_x, b.pos_y, b.pos_z));
         }
     }
 }
@@ -244,18 +244,18 @@ fn vv_step_untimed(
 #[inline(always)]
 fn kick(bodies: &mut [Body], acc: &[Vec3], half_dt: f64) {
     for (b, a) in bodies.iter_mut().zip(acc.iter()) {
-        b.vx += a.x * half_dt;
-        b.vy += a.y * half_dt;
-        b.vz += a.z * half_dt;
+        b.vel_x += a.x * half_dt;
+        b.vel_y += a.y * half_dt;
+        b.vel_z += a.z * half_dt;
     }
 }
 
 #[inline(always)]
 fn drift(bodies: &mut [Body], dt: f64) {
     for b in bodies.iter_mut() {
-        b.x += b.vx * dt;
-        b.y += b.vy * dt;
-        b.z += b.vz * dt;
+        b.pos_x += b.vel_x * dt;
+        b.pos_y += b.vel_y * dt;
+        b.pos_z += b.vel_z * dt;
     }
 }
 
@@ -447,7 +447,7 @@ fn sphere_distribution_lognormal(n: usize, seed: u64) -> Vec<Body> {
         let normal = (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos();
         let mass = normal.exp();
         let mut b = Body::rocky(mass).at(x, y).with_velocity(0.0, 0.0);
-        b.z = z;
+        b.pos_z = z;
         bodies.push(b);
     }
     bodies

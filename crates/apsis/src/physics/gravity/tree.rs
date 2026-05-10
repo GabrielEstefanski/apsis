@@ -182,19 +182,19 @@ impl<const LEAF: usize> Octree<LEAF> {
         }
 
         // ── Compute padded cubic AABB ────────────────────────────────── //
-        let mut min_x = bodies[0].x;
-        let mut max_x = bodies[0].x;
-        let mut min_y = bodies[0].y;
-        let mut max_y = bodies[0].y;
-        let mut min_z = bodies[0].z;
-        let mut max_z = bodies[0].z;
+        let mut min_x = bodies[0].pos_x;
+        let mut max_x = bodies[0].pos_x;
+        let mut min_y = bodies[0].pos_y;
+        let mut max_y = bodies[0].pos_y;
+        let mut min_z = bodies[0].pos_z;
+        let mut max_z = bodies[0].pos_z;
         for b in &bodies[1..] {
-            min_x = min_x.min(b.x);
-            max_x = max_x.max(b.x);
-            min_y = min_y.min(b.y);
-            max_y = max_y.max(b.y);
-            min_z = min_z.min(b.z);
-            max_z = max_z.max(b.z);
+            min_x = min_x.min(b.pos_x);
+            max_x = max_x.max(b.pos_x);
+            min_y = min_y.min(b.pos_y);
+            max_y = max_y.max(b.pos_y);
+            min_z = min_z.min(b.pos_z);
+            max_z = max_z.max(b.pos_z);
         }
         let cx = 0.5 * (min_x + max_x);
         let cy = 0.5 * (min_y + max_y);
@@ -297,8 +297,9 @@ impl<const LEAF: usize> Octree<LEAF> {
     fn child_octant(&self, node_idx: usize, body_idx: usize, bodies: &[Body]) -> usize {
         let n = &self.nodes[node_idx];
         let b = bodies[body_idx];
-        let octant =
-            ((b.z >= n.cz) as usize) << 2 | ((b.y >= n.cy) as usize) << 1 | (b.x >= n.cx) as usize;
+        let octant = ((b.pos_z >= n.cz) as usize) << 2
+            | ((b.pos_y >= n.cy) as usize) << 1
+            | (b.pos_x >= n.cx) as usize;
         self.nodes[node_idx].children[octant] as usize
     }
 
@@ -315,9 +316,9 @@ impl<const LEAF: usize> Octree<LEAF> {
             for k in 0..len {
                 let b = bodies[self.nodes[idx].bodies[k] as usize];
                 m += b.mass;
-                wx += b.mass * b.x;
-                wy += b.mass * b.y;
-                wz += b.mass * b.z;
+                wx += b.mass * b.pos_x;
+                wy += b.mass * b.pos_y;
+                wz += b.mass * b.pos_z;
             }
 
             self.nodes[idx].body_count = len as u32;
@@ -380,9 +381,9 @@ impl<const LEAF: usize> Octree<LEAF> {
 
             for k in 0..len {
                 let b = bodies[self.nodes[idx].bodies[k] as usize];
-                let dx = b.x - cmx;
-                let dy = b.y - cmy;
-                let dz = b.z - cmz;
+                let dx = b.pos_x - cmx;
+                let dy = b.pos_y - cmy;
+                let dz = b.pos_z - cmz;
                 let d2 = dx * dx + dy * dy + dz * dz;
                 q_xx += b.mass * (3.0 * dx * dx - d2);
                 q_xy += b.mass * 3.0 * dx * dy;
@@ -456,7 +457,7 @@ mod tests {
 
     fn body_xyz(x: f64, y: f64, z: f64, m: f64) -> Body {
         let mut b = Body::rocky(m).at(x, y).with_velocity(0.0, 0.0);
-        b.z = z;
+        b.pos_z = z;
         b
     }
 
@@ -624,9 +625,9 @@ mod tests {
             .collect();
 
         let m_total: f64 = bodies.iter().map(|b| b.mass).sum();
-        let com_x_expected: f64 = bodies.iter().map(|b| b.mass * b.x).sum::<f64>() / m_total;
-        let com_y_expected: f64 = bodies.iter().map(|b| b.mass * b.y).sum::<f64>() / m_total;
-        let com_z_expected: f64 = bodies.iter().map(|b| b.mass * b.z).sum::<f64>() / m_total;
+        let com_x_expected: f64 = bodies.iter().map(|b| b.mass * b.pos_x).sum::<f64>() / m_total;
+        let com_y_expected: f64 = bodies.iter().map(|b| b.mass * b.pos_y).sum::<f64>() / m_total;
+        let com_z_expected: f64 = bodies.iter().map(|b| b.mass * b.pos_z).sum::<f64>() / m_total;
 
         let mut tree = make_tree();
         tree.build(&bodies);
@@ -726,9 +727,9 @@ mod tests {
 
         let (mut q_xx, mut q_xy, mut q_xz, mut q_yy, mut q_yz) = (0.0, 0.0, 0.0, 0.0, 0.0);
         for b in &bodies {
-            let dx = b.x - cmx;
-            let dy = b.y - cmy;
-            let dz = b.z - cmz;
+            let dx = b.pos_x - cmx;
+            let dy = b.pos_y - cmy;
+            let dz = b.pos_z - cmz;
             let d2 = dx * dx + dy * dy + dz * dz;
             q_xx += b.mass * (3.0 * dx * dx - d2);
             q_xy += b.mass * 3.0 * dx * dy;

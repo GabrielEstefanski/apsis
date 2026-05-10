@@ -137,12 +137,12 @@ pub struct SimSnapshot {
 /// added an `albedo` f64.
 #[derive(Clone, Copy)]
 pub struct BodyRecord {
-    pub x: f64,
-    pub y: f64,
-    pub z: f64,
-    pub vx: f64,
-    pub vy: f64,
-    pub vz: f64,
+    pub pos_x: f64,
+    pub pos_y: f64,
+    pub pos_z: f64,
+    pub vel_x: f64,
+    pub vel_y: f64,
+    pub vel_z: f64,
     pub mass: f64,
     pub density: f64,
     pub softening: f64,
@@ -163,12 +163,12 @@ impl BodyRecord {
     /// Capture the current state of `b` into a record.
     pub fn from_body(b: &Body) -> Self {
         Self {
-            x: b.x,
-            y: b.y,
-            z: b.z,
-            vx: b.vx,
-            vy: b.vy,
-            vz: b.vz,
+            pos_x: b.pos_x,
+            pos_y: b.pos_y,
+            pos_z: b.pos_z,
+            vel_x: b.vel_x,
+            vel_y: b.vel_y,
+            vel_z: b.vel_z,
             mass: b.mass,
             density: b.density,
             softening: b.softening,
@@ -187,8 +187,8 @@ impl BodyRecord {
     /// for every quantity, so no preset is consulted on load.
     pub fn into_body(self) -> Body {
         let mut b = Body::new(self.mass, self.density)
-            .at_3d(self.x, self.y, self.z)
-            .with_velocity_3d(self.vx, self.vy, self.vz);
+            .at_3d(self.pos_x, self.pos_y, self.pos_z)
+            .with_velocity_3d(self.vel_x, self.vel_y, self.vel_z);
         b.softening = self.softening;
         b.physical_radius = self.physical_radius;
         b.color = self.color;
@@ -455,12 +455,12 @@ impl SimSnapshot {
         //                     physical_radius, color[3], q_pr, class[1], albedo)
         wu32(&mut w, self.bodies.len() as u32)?;
         for b in &self.bodies {
-            wf64(&mut w, b.x)?;
-            wf64(&mut w, b.y)?;
-            wf64(&mut w, b.z)?;
-            wf64(&mut w, b.vx)?;
-            wf64(&mut w, b.vy)?;
-            wf64(&mut w, b.vz)?;
+            wf64(&mut w, b.pos_x)?;
+            wf64(&mut w, b.pos_y)?;
+            wf64(&mut w, b.pos_z)?;
+            wf64(&mut w, b.vel_x)?;
+            wf64(&mut w, b.vel_y)?;
+            wf64(&mut w, b.vel_z)?;
             wf64(&mut w, b.mass)?;
             wf64(&mut w, b.density)?;
             wf64(&mut w, b.softening)?;
@@ -594,12 +594,12 @@ impl SimSnapshot {
             let albedo = if ver >= 11 { rf64(&mut r)? } else { albedo_fallback_for(class) };
 
             bodies.push(BodyRecord {
-                x,
-                y,
-                z,
-                vx,
-                vy,
-                vz,
+                pos_x: x,
+                pos_y: y,
+                pos_z: z,
+                vel_x: vx,
+                vel_y: vy,
+                vel_z: vz,
                 mass,
                 density,
                 softening,

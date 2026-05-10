@@ -530,8 +530,12 @@ pub fn dominant_primary(bodies: &[Body], idx: usize) -> Option<usize> {
         .enumerate()
         .filter(|(j, _)| *j != idx)
         .max_by(|(_, bj), (_, bk)| {
-            let rj2 = (bj.x - bi.x).powi(2) + (bj.y - bi.y).powi(2) + (bj.z - bi.z).powi(2);
-            let rk2 = (bk.x - bi.x).powi(2) + (bk.y - bi.y).powi(2) + (bk.z - bi.z).powi(2);
+            let rj2 = (bj.pos_x - bi.pos_x).powi(2)
+                + (bj.pos_y - bi.pos_y).powi(2)
+                + (bj.pos_z - bi.pos_z).powi(2);
+            let rk2 = (bk.pos_x - bi.pos_x).powi(2)
+                + (bk.pos_y - bi.pos_y).powi(2)
+                + (bk.pos_z - bi.pos_z).powi(2);
             // Compare m_j/r_j² vs m_k/r_k²  (G cancels)
             let score_j = if rj2 > 0.0 { bj.mass / rj2 } else { f64::INFINITY };
             let score_k = if rk2 > 0.0 { bk.mass / rk2 } else { f64::INFINITY };
@@ -628,15 +632,20 @@ pub fn hierarchical_primary(bodies: &[Body], idx: usize) -> Option<(usize, Hiera
                 None => continue,
             };
             let bp = &bodies[parent_idx];
-            let a_cp =
-                ((bc.x - bp.x).powi(2) + (bc.y - bp.y).powi(2) + (bc.z - bp.z).powi(2)).sqrt();
+            let a_cp = ((bc.pos_x - bp.pos_x).powi(2)
+                + (bc.pos_y - bp.pos_y).powi(2)
+                + (bc.pos_z - bp.pos_z).powi(2))
+            .sqrt();
             if a_cp < 1e-15 || bp.mass < 1e-30 {
                 continue;
             }
             a_cp * (bc.mass / (3.0 * bp.mass)).cbrt()
         };
 
-        let r_self = ((bi.x - bc.x).powi(2) + (bi.y - bc.y).powi(2) + (bi.z - bc.z).powi(2)).sqrt();
+        let r_self = ((bi.pos_x - bc.pos_x).powi(2)
+            + (bi.pos_y - bc.pos_y).powi(2)
+            + (bi.pos_z - bc.pos_z).powi(2))
+        .sqrt();
         if r_self < r_hill {
             return Some((cand, HierarchicalRelation::HillSphere));
         }
@@ -645,16 +654,16 @@ pub fn hierarchical_primary(bodies: &[Body], idx: usize) -> Option<(usize, Hiera
     // Energy fallback — pick the smallest bound candidate.
     for &cand in &candidates {
         let bc = &bodies[cand];
-        let dx = bi.x - bc.x;
-        let dy = bi.y - bc.y;
-        let dz = bi.z - bc.z;
+        let dx = bi.pos_x - bc.pos_x;
+        let dy = bi.pos_y - bc.pos_y;
+        let dz = bi.pos_z - bc.pos_z;
         let r = (dx * dx + dy * dy + dz * dz).sqrt();
         if r < 1e-15 {
             continue;
         }
-        let dvx = bi.vx - bc.vx;
-        let dvy = bi.vy - bc.vy;
-        let dvz = bi.vz - bc.vz;
+        let dvx = bi.vel_x - bc.vel_x;
+        let dvy = bi.vel_y - bc.vel_y;
+        let dvz = bi.vel_z - bc.vel_z;
         let v2 = dvx * dvx + dvy * dvy + dvz * dvz;
         // Sign of the orbital energy proxy `½v² − m_cand/r`. The constant
         // `G` would scale both terms identically and is irrelevant to the
@@ -729,8 +738,8 @@ pub fn compute_invariants(
     let b = &bodies[idx];
     let p = &bodies[primary_idx];
 
-    let r_vec = Vec3::new(b.x - p.x, b.y - p.y, b.z - p.z);
-    let v_vec = Vec3::new(b.vx - p.vx, b.vy - p.vy, b.vz - p.vz);
+    let r_vec = Vec3::new(b.pos_x - p.pos_x, b.pos_y - p.pos_y, b.pos_z - p.pos_z);
+    let v_vec = Vec3::new(b.vel_x - p.vel_x, b.vel_y - p.vel_y, b.vel_z - p.vel_z);
 
     let r = r_vec.length();
     let gm = g_factor * (b.mass + p.mass);
@@ -1043,8 +1052,16 @@ pub fn elements_anchored_to_body(
     let period = TAU * (a * a * a / gm).sqrt();
 
     // 3D state vectors in the primary's frame.
-    let r_vec = Vec3::new(body.x - primary.x, body.y - primary.y, body.z - primary.z);
-    let v_vec = Vec3::new(body.vx - primary.vx, body.vy - primary.vy, body.vz - primary.vz);
+    let r_vec = Vec3::new(
+        body.pos_x - primary.pos_x,
+        body.pos_y - primary.pos_y,
+        body.pos_z - primary.pos_z,
+    );
+    let v_vec = Vec3::new(
+        body.vel_x - primary.vel_x,
+        body.vel_y - primary.vel_y,
+        body.vel_z - primary.vel_z,
+    );
 
     let h_mag = inv.h_vec.length();
 
@@ -1267,8 +1284,8 @@ mod tests {
         let gm = G * (bodies[1].mass + bodies[0].mass);
         let el = elements_anchored_to_body(&inv, 0, gm, &bodies[1], &bodies[0]);
 
-        let rx = bodies[1].x - bodies[0].x;
-        let ry = bodies[1].y - bodies[0].y;
+        let rx = bodies[1].pos_x - bodies[0].pos_x;
+        let ry = bodies[1].pos_y - bodies[0].pos_y;
         let r = (rx * rx + ry * ry).sqrt();
         let nu = ry.atan2(rx) - el.omega;
         let r_orbit = el.a * (1.0 - el.e * el.e) / (1.0 + el.e * nu.cos());
@@ -1289,8 +1306,8 @@ mod tests {
         let gm = G * (bodies[1].mass + bodies[0].mass);
         let el = elements_anchored_to_body(&inv, 0, gm, &bodies[1], &bodies[0]);
 
-        let rx = bodies[1].x - bodies[0].x;
-        let ry = bodies[1].y - bodies[0].y;
+        let rx = bodies[1].pos_x - bodies[0].pos_x;
+        let ry = bodies[1].pos_y - bodies[0].pos_y;
         let r = (rx * rx + ry * ry).sqrt();
         let nu = ry.atan2(rx) - el.omega;
         let r_orbit = el.a * (1.0 - el.e * el.e) / (1.0 + el.e * nu.cos());
@@ -1324,8 +1341,8 @@ mod tests {
         let gm = G * (bodies[1].mass + bodies[0].mass);
         let el = elements_anchored_to_body(&inv_smooth, 0, gm, &bodies[1], &bodies[0]);
 
-        let rx = bodies[1].x - bodies[0].x;
-        let ry = bodies[1].y - bodies[0].y;
+        let rx = bodies[1].pos_x - bodies[0].pos_x;
+        let ry = bodies[1].pos_y - bodies[0].pos_y;
         let r = (rx * rx + ry * ry).sqrt();
         let nu = ry.atan2(rx) - el.omega;
         let r_orbit = el.a * (1.0 - el.e * el.e) / (1.0 + el.e * nu.cos());
@@ -1481,7 +1498,7 @@ mod tests {
     #[test]
     fn cw_orbit_has_negative_angular_momentum() {
         let (p, mut s) = circular_orbit(10.0, 1e6);
-        s.vy = -s.vy; // inverte para CW
+        s.vel_y = -s.vel_y; // inverte para CW
         let el = elements(p, s);
         assert!(el.h_vec.z < 0.0, "h_z = {}, deve ser negativo (CW)", el.h_vec.z);
     }
@@ -2382,24 +2399,24 @@ mod tests {
             // bound here is the f64 round-off floor — anything above 1e-14
             // indicates a structural coupling, not a tolerance failure.
             assert!(
-                body.x.abs() < 1e-14,
+                body.pos_x.abs() < 1e-14,
                 "body {k}: x drifted to {} from a pure-z initial condition",
-                body.x,
+                body.pos_x,
             );
             assert!(
-                body.y.abs() < 1e-14,
+                body.pos_y.abs() < 1e-14,
                 "body {k}: y drifted to {} from a pure-z initial condition",
-                body.y,
+                body.pos_y,
             );
             assert!(
-                body.vx.abs() < 1e-14,
+                body.vel_x.abs() < 1e-14,
                 "body {k}: vx drifted to {} from a pure-z initial condition",
-                body.vx,
+                body.vel_x,
             );
             assert!(
-                body.vy.abs() < 1e-14,
+                body.vel_y.abs() < 1e-14,
                 "body {k}: vy drifted to {} from a pure-z initial condition",
-                body.vy,
+                body.vel_y,
             );
         }
     }
@@ -2441,19 +2458,19 @@ mod tests {
         // localises a swizzle bug to the offending axis.
         assert!(
             (unit.x - expected.x).abs() < 1e-12,
-            "h.x direction off: {} vs {}",
+            "h.pos_x direction off: {} vs {}",
             unit.x,
             expected.x
         );
         assert!(
             (unit.y - expected.y).abs() < 1e-12,
-            "h.y direction off: {} vs {}",
+            "h.pos_y direction off: {} vs {}",
             unit.y,
             expected.y
         );
         assert!(
             (unit.z - expected.z).abs() < 1e-12,
-            "h.z direction off: {} vs {}",
+            "h.pos_z direction off: {} vs {}",
             unit.z,
             expected.z
         );
@@ -2753,9 +2770,10 @@ mod tests {
         let (p_planar, s_planar) = ellipse_at_true_anomaly(a, e, nu, m);
         // Rotate (r, v) around x̂: y' = y cos i, z' = y sin i; same for v.
         let (s_i, c_i) = i.sin_cos();
-        let mut s = body(s_planar.x, s_planar.y * c_i, s_planar.vx, s_planar.vy * c_i, 1e-10);
-        s.z = s_planar.y * s_i;
-        s.vz = s_planar.vy * s_i;
+        let mut s =
+            body(s_planar.pos_x, s_planar.pos_y * c_i, s_planar.vel_x, s_planar.vel_y * c_i, 1e-10);
+        s.pos_z = s_planar.pos_y * s_i;
+        s.vel_z = s_planar.vel_y * s_i;
         s.sync_physical_properties();
 
         let bodies = vec![p_planar, s];
@@ -2848,8 +2866,8 @@ mod tests {
 
         let primary = body(0.0, 0.0, 0.0, 0.0, primary_mass);
         let mut sat = body(r0.x, r0.y, v0.x, v0.y, 1e-10);
-        sat.z = r0.z;
-        sat.vz = v0.z;
+        sat.pos_z = r0.z;
+        sat.vel_z = v0.z;
         sat.sync_physical_properties();
 
         let bodies = vec![primary, sat];
@@ -2914,8 +2932,8 @@ mod tests {
         let (r0, v0) = reconstruct_state(a, e, 0.0, 0.0, 0.0, nu, mu);
         let primary = body(0.0, 0.0, 0.0, 0.0, primary_mass);
         let mut sat = body(r0.x, r0.y, v0.x, v0.y, 1e-10);
-        sat.z = r0.z;
-        sat.vz = v0.z;
+        sat.pos_z = r0.z;
+        sat.vel_z = v0.z;
         sat.sync_physical_properties();
         let bodies = vec![primary, sat];
         let el = compute_elements(&bodies, 1, 0, G).expect("circular regime is computable");
@@ -2944,7 +2962,7 @@ mod tests {
     /// the energy fallback, which is exercised separately.
     fn body3(x: f64, y: f64, z: f64, mass: f64) -> Body {
         let mut b = Body::rocky(mass).at(x, y);
-        b.z = z;
+        b.pos_z = z;
         b.sync_physical_properties();
         b
     }
