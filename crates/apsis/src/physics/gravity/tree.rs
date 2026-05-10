@@ -30,6 +30,7 @@
 //!   (or `body_len` for leaves).
 
 use crate::domain::body::Body;
+use crate::domain::body_arrays::BodyArrays;
 
 // ── Constants ─────────────────────────────────────────────────────────────── //
 
@@ -405,6 +406,252 @@ impl<const LEAF: usize> Octree<LEAF> {
         for &c in &children {
             if c != NO_CHILD {
                 self.aggregate_quadrupole(c as usize, bodies);
+            }
+        }
+
+        let pcom_x = self.nodes[idx].com_x;
+        let pcom_y = self.nodes[idx].com_y;
+        let pcom_z = self.nodes[idx].com_z;
+
+        let (mut q_xx, mut q_xy, mut q_xz, mut q_yy, mut q_yz) = (0.0, 0.0, 0.0, 0.0, 0.0);
+
+        for &c in &children {
+            if c == NO_CHILD {
+                continue;
+            }
+            let child = &self.nodes[c as usize];
+            let dx = child.com_x - pcom_x;
+            let dy = child.com_y - pcom_y;
+            let dz = child.com_z - pcom_z;
+            let d2 = dx * dx + dy * dy + dz * dz;
+            let m = child.mass;
+
+            q_xx += child.q_xx + m * (3.0 * dx * dx - d2);
+            q_xy += child.q_xy + m * 3.0 * dx * dy;
+            q_xz += child.q_xz + m * 3.0 * dx * dz;
+            q_yy += child.q_yy + m * (3.0 * dy * dy - d2);
+            q_yz += child.q_yz + m * 3.0 * dy * dz;
+        }
+
+        let n = &mut self.nodes[idx];
+        n.q_xx = q_xx;
+        n.q_xy = q_xy;
+        n.q_xz = q_xz;
+        n.q_yy = q_yy;
+        n.q_yz = q_yz;
+    }
+
+    // ── SoA build path ───────────────────────────────────────────────────────
+    //
+    // Mirror of [`build`] / [`insert`] / [`aggregate_mass`] /
+    // [`aggregate_quadrupole`] / [`child_octant`] that reads from
+    // [`BodyArrays`] indexed loops instead of `&[Body]` field accesses. The
+    // tree built from `BodyArrays` is bit-identical to one built from the
+    // equivalent `&[Body]` (same insertion order, same FP ops, same data) —
+    // verified by [`tier1_soa_walk_matches_aos_walk_bit_exact`] in
+    // `BarnesHutEngine`.
+    //
+    // The duplicated AoS path (`build` and friends above) is removed in the
+    // System-integration commit once the Tier 1 gate has fired.
+
+    /// Rebuild the tree from a [`BodyArrays`] snapshot. See [`build`] for
+    /// the per-node aggregation contract — the only difference here is the
+    /// data source.
+    pub(crate) fn build_from_arrays(&mut self, arrays: &BodyArrays) {
+        self.nodes.clear();
+
+        if arrays.is_empty() {
+            return;
+        }
+
+        let mut min_x = arrays.pos_x[0];
+        let mut max_x = arrays.pos_x[0];
+        let mut min_y = arrays.pos_y[0];
+        let mut max_y = arrays.pos_y[0];
+        let mut min_z = arrays.pos_z[0];
+        let mut max_z = arrays.pos_z[0];
+        for i in 1..arrays.len() {
+            min_x = min_x.min(arrays.pos_x[i]);
+            max_x = max_x.max(arrays.pos_x[i]);
+            min_y = min_y.min(arrays.pos_y[i]);
+            max_y = max_y.max(arrays.pos_y[i]);
+            min_z = min_z.min(arrays.pos_z[i]);
+            max_z = max_z.max(arrays.pos_z[i]);
+        }
+        let cx = 0.5 * (min_x + max_x);
+        let cy = 0.5 * (min_y + max_y);
+        let cz = 0.5 * (min_z + max_z);
+        let extent = (max_x - min_x).max(max_y - min_y).max(max_z - min_z);
+        let mut half = 0.5 * extent;
+        half = if half <= 0.0 { TREE_PAD } else { half * 1.0001 + TREE_PAD };
+
+        self.nodes.push(Node::new(cx, cy, cz, half));
+
+        for i in 0..arrays.len() {
+            self.insert_from_arrays(0, i, arrays, 0);
+        }
+
+        self.aggregate_mass_from_arrays(0, arrays);
+        self.aggregate_quadrupole_from_arrays(0, arrays);
+    }
+
+    fn insert_from_arrays(
+        &mut self,
+        mut node_idx: usize,
+        body_idx: usize,
+        arrays: &BodyArrays,
+        mut depth: usize,
+    ) {
+        loop {
+            if depth > self.max_depth {
+                let node = &mut self.nodes[node_idx];
+                if (node.body_len as usize) < LEAF {
+                    node.bodies[node.body_len as usize] = body_idx as u32;
+                    node.body_len += 1;
+                }
+                return;
+            }
+
+            if self.nodes[node_idx].is_leaf() {
+                let len = self.nodes[node_idx].body_len as usize;
+
+                if len < LEAF || depth == self.max_depth {
+                    if (self.nodes[node_idx].body_len as usize) < LEAF {
+                        self.nodes[node_idx].bodies[len] = body_idx as u32;
+                        self.nodes[node_idx].body_len += 1;
+                    }
+                    return;
+                }
+
+                let existing_len = self.nodes[node_idx].body_len as usize;
+                let existing = self.nodes[node_idx].bodies;
+                self.nodes[node_idx].body_len = 0;
+
+                self.subdivide(node_idx);
+
+                for &bi in &existing[..existing_len] {
+                    let child = self.child_octant_from_arrays(node_idx, bi as usize, arrays);
+                    self.insert_from_arrays(child, bi as usize, arrays, depth + 1);
+                }
+            }
+
+            node_idx = self.child_octant_from_arrays(node_idx, body_idx, arrays);
+            depth += 1;
+        }
+    }
+
+    fn child_octant_from_arrays(
+        &self,
+        node_idx: usize,
+        body_idx: usize,
+        arrays: &BodyArrays,
+    ) -> usize {
+        let n = &self.nodes[node_idx];
+        let octant = ((arrays.pos_z[body_idx] >= n.cz) as usize) << 2
+            | ((arrays.pos_y[body_idx] >= n.cy) as usize) << 1
+            | (arrays.pos_x[body_idx] >= n.cx) as usize;
+        self.nodes[node_idx].children[octant] as usize
+    }
+
+    fn aggregate_mass_from_arrays(
+        &mut self,
+        idx: usize,
+        arrays: &BodyArrays,
+    ) -> (f64, f64, f64, f64) {
+        if self.nodes[idx].is_leaf() {
+            let len = self.nodes[idx].body_len as usize;
+            let mut m = 0.0_f64;
+            let mut wx = 0.0_f64;
+            let mut wy = 0.0_f64;
+            let mut wz = 0.0_f64;
+
+            for k in 0..len {
+                let bi = self.nodes[idx].bodies[k] as usize;
+                let mass = arrays.mass[bi];
+                m += mass;
+                wx += mass * arrays.pos_x[bi];
+                wy += mass * arrays.pos_y[bi];
+                wz += mass * arrays.pos_z[bi];
+            }
+
+            self.nodes[idx].body_count = len as u32;
+            self.nodes[idx].mass = m;
+
+            if m > 0.0 {
+                self.nodes[idx].com_x = wx / m;
+                self.nodes[idx].com_y = wy / m;
+                self.nodes[idx].com_z = wz / m;
+                return (m, self.nodes[idx].com_x, self.nodes[idx].com_y, self.nodes[idx].com_z);
+            }
+            return (0.0, 0.0, 0.0, 0.0);
+        }
+
+        let children = self.nodes[idx].children;
+        let mut m = 0.0_f64;
+        let mut wx = 0.0_f64;
+        let mut wy = 0.0_f64;
+        let mut wz = 0.0_f64;
+        let mut cnt = 0u32;
+
+        for &c in &children {
+            if c == NO_CHILD {
+                continue;
+            }
+            let (cm, cx, cy, cz) = self.aggregate_mass_from_arrays(c as usize, arrays);
+            m += cm;
+            wx += cm * cx;
+            wy += cm * cy;
+            wz += cm * cz;
+            cnt += self.nodes[c as usize].body_count;
+        }
+
+        self.nodes[idx].body_count = cnt;
+        self.nodes[idx].mass = m;
+        if m > 0.0 {
+            self.nodes[idx].com_x = wx / m;
+            self.nodes[idx].com_y = wy / m;
+            self.nodes[idx].com_z = wz / m;
+        }
+
+        (self.nodes[idx].mass, self.nodes[idx].com_x, self.nodes[idx].com_y, self.nodes[idx].com_z)
+    }
+
+    fn aggregate_quadrupole_from_arrays(&mut self, idx: usize, arrays: &BodyArrays) {
+        if self.nodes[idx].is_leaf() {
+            let cmx = self.nodes[idx].com_x;
+            let cmy = self.nodes[idx].com_y;
+            let cmz = self.nodes[idx].com_z;
+            let len = self.nodes[idx].body_len as usize;
+
+            let (mut q_xx, mut q_xy, mut q_xz, mut q_yy, mut q_yz) = (0.0, 0.0, 0.0, 0.0, 0.0);
+
+            for k in 0..len {
+                let bi = self.nodes[idx].bodies[k] as usize;
+                let mass = arrays.mass[bi];
+                let dx = arrays.pos_x[bi] - cmx;
+                let dy = arrays.pos_y[bi] - cmy;
+                let dz = arrays.pos_z[bi] - cmz;
+                let d2 = dx * dx + dy * dy + dz * dz;
+                q_xx += mass * (3.0 * dx * dx - d2);
+                q_xy += mass * 3.0 * dx * dy;
+                q_xz += mass * 3.0 * dx * dz;
+                q_yy += mass * (3.0 * dy * dy - d2);
+                q_yz += mass * 3.0 * dy * dz;
+            }
+
+            let n = &mut self.nodes[idx];
+            n.q_xx = q_xx;
+            n.q_xy = q_xy;
+            n.q_xz = q_xz;
+            n.q_yy = q_yy;
+            n.q_yz = q_yz;
+            return;
+        }
+
+        let children = self.nodes[idx].children;
+        for &c in &children {
+            if c != NO_CHILD {
+                self.aggregate_quadrupole_from_arrays(c as usize, arrays);
             }
         }
 
