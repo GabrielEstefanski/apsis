@@ -37,6 +37,41 @@ use rayon::prelude::*;
 use super::kernel::{G, Kernel, PlummerKernel, pair_eps2};
 use super::tree::{DEFAULT_LEAF, DIRECT_MODE_THRESHOLD, EXACT_THRESHOLD, NO_CHILD, Node, Octree};
 
+// ── WalkCounters ──────────────────────────────────────────────────────────── //
+
+/// Per-walk work counters incremented inside [`bh_eval_body`] and aggregated
+/// across the parallel iter in [`BarnesHutEngine::evaluate_profile`].
+///
+/// Used by the engine ceiling profiling experiment
+/// (`docs/experiments/2026-05-09-engine-ceiling.md`) to derive
+/// `t_per_interaction = t_bh_walk / (n_bh_accepted + n_leaf_interactions)`,
+/// which is the metric both SIMD and MAC optimisations affect.
+///
+/// The struct is `repr(C)` and contains only `u64` — no Option, Vec, or
+/// branching helpers — so the increment in the hot path is a single
+/// register-level `+= 1` per accepted interaction.
+#[repr(C)]
+#[derive(Debug, Default, Clone, Copy)]
+pub(crate) struct WalkCounters {
+    /// Total `stack.pop()` invocations (each a node visit, regardless of
+    /// whether the node was BH-accepted or recursed into).
+    pub n_node_visits: u64,
+    /// Internal nodes accepted as monopole + traceless quadrupole via the
+    /// `s/d < θ` opening criterion.
+    pub n_bh_accepted: u64,
+    /// Pairwise force calls inside leaf nodes (excluding self-pair).
+    pub n_leaf_interactions: u64,
+}
+
+impl WalkCounters {
+    #[inline(always)]
+    pub(crate) fn merge(&mut self, other: &WalkCounters) {
+        self.n_node_visits += other.n_node_visits;
+        self.n_bh_accepted += other.n_bh_accepted;
+        self.n_leaf_interactions += other.n_leaf_interactions;
+    }
+}
+
 // ── BarnesHutEngine ───────────────────────────────────────────────────────── //
 
 /// N-body force engine using a Barnes-Hut octree.
@@ -150,22 +185,40 @@ impl BarnesHutEngine {
     /// Spatial partition is the 3D octree (`Octree`) and the kernel
     /// arithmetic is fully 3D — `r² = Δx² + Δy² + Δz²` at every site.
     pub fn evaluate(&self, bodies: &[Body], theta: f64, acc: &mut [Vec3]) -> f64 {
+        // The profiling harness consumes the same code path via
+        // [`evaluate_profile`] (see `engine_ceiling.rs`); the public surface
+        // discards the work counters this method also produces internally.
+        self.evaluate_profile(bodies, theta, acc).0
+    }
+
+    /// Variant of [`evaluate`] that also returns the per-step BH walk work
+    /// counters aggregated across all bodies. Used by the engine ceiling
+    /// profiling harness (`docs/experiments/2026-05-09-engine-ceiling.md`)
+    /// to derive per-interaction cost metrics. Counters are zero in the
+    /// exact-mode branch (`N ≤ exact_threshold`) since the BH walk does not
+    /// execute.
+    pub(crate) fn evaluate_profile(
+        &self,
+        bodies: &[Body],
+        theta: f64,
+        acc: &mut [Vec3],
+    ) -> (f64, WalkCounters) {
         let n = bodies.len();
         acc.fill(Vec3::ZERO);
 
         if n == 0 {
-            return 0.0;
+            return (0.0, WalkCounters::default());
         }
 
         let kernel: &dyn Kernel = &*self.kernel;
 
         if n <= self.exact_threshold {
-            return exact_eval(bodies, kernel, acc);
+            return (exact_eval(bodies, kernel, acc), WalkCounters::default());
         }
 
         let nodes = self.tree.nodes();
 
-        let results: Vec<(Vec3, f64)> = (0..n)
+        let results: Vec<(Vec3, f64, WalkCounters)> = (0..n)
             .into_par_iter()
             .map(|i| {
                 let mut stack = Vec::with_capacity(128);
@@ -174,14 +227,16 @@ impl BarnesHutEngine {
             .collect();
 
         let mut potential = 0.0_f64;
-        for (i, (a, phi)) in results.into_iter().enumerate() {
+        let mut counters = WalkCounters::default();
+        for (i, (a, phi, c)) in results.into_iter().enumerate() {
             acc[i] = a;
             // phi is the specific potential at body i; multiply by mass for energy
             potential += bodies[i].mass * phi;
+            counters.merge(&c);
         }
 
         // Each pair counted once from each side → divide by 2
-        0.5 * potential
+        (0.5 * potential, counters)
     }
 
     /// Approximate θ-error proxy for a single body.
@@ -390,6 +445,15 @@ fn exact_eval(bodies: &[Body], kernel: &dyn Kernel, acc: &mut [Vec3]) -> f64 {
 /// Each accepted node contributes monopole + traceless-quadrupole; the
 /// quadrupole tensor is always populated by `Octree::build` per the perf
 /// 2×2 §Decision.
+///
+/// Returns `(a, phi, counters)`. The counters track work performed during the
+/// walk (`n_node_visits, n_bh_accepted, n_leaf_interactions`); they are
+/// always populated regardless of whether a caller consumes them — the
+/// per-body cost is three register-level `+= 1` ops in the hot path,
+/// negligible compared to the kernel itself but valuable for the engine
+/// ceiling profiling experiment, which derives `t_per_interaction` from
+/// the aggregated counts.
+#[inline(always)]
 fn bh_eval_body(
     nodes: &[Node<DEFAULT_LEAF>],
     body_idx: usize,
@@ -398,9 +462,10 @@ fn bh_eval_body(
     theta: f64,
     kernel: &dyn Kernel,
     stack: &mut Vec<u32>,
-) -> (Vec3, f64) {
+) -> (Vec3, f64, WalkCounters) {
     let mut a = Vec3::ZERO;
     let mut phi = 0.0_f64;
+    let mut counters = WalkCounters::default();
 
     stack.clear();
     if !nodes.is_empty() {
@@ -408,6 +473,7 @@ fn bh_eval_body(
     }
 
     while let Some(raw) = stack.pop() {
+        counters.n_node_visits += 1;
         let node = &nodes[raw as usize];
         if node.mass <= 0.0 {
             continue;
@@ -432,6 +498,7 @@ fn bh_eval_body(
                 a.y += dy * fac;
                 a.z += dz * fac;
                 phi += -G * other.mass * kernel.potential(r_sq, eps2);
+                counters.n_leaf_interactions += 1;
             }
             continue;
         }
@@ -474,6 +541,7 @@ fn bh_eval_body(
             a.y += coef_qr * qr_y + coef_r * dy;
             a.z += coef_qr * qr_z + coef_r * dz;
             phi += -0.5 * G * rqr * inv_r5;
+            counters.n_bh_accepted += 1;
         } else {
             for &c in &node.children {
                 if c != NO_CHILD {
@@ -483,7 +551,7 @@ fn bh_eval_body(
         }
     }
 
-    (a, phi)
+    (a, phi, counters)
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────── //
@@ -983,5 +1051,37 @@ mod tests {
             "quadrupole BH at theta={theta} N=1000 gives max rel-err {err:.4e} -- \
              quadrupole correction may have regressed",
         );
+    }
+
+    /// Sanity: walk counters returned by `evaluate_profile` are populated
+    /// with positive values on a representative non-trivial run, and equal
+    /// zero in the exact-mode branch where the BH walk does not execute.
+    /// Bounded relations a priori: `n_node_visits ≥ n_bh_accepted`,
+    /// `n_node_visits ≥ 1` per body that triggered the walk.
+    #[test]
+    fn walk_counters_populate_on_bh_path_and_zero_on_exact_path() {
+        let bodies = sphere_distribution_lognormal(1000, 0x6F637472);
+        let theta = 0.5;
+        let mut acc = vec![Vec3::ZERO; bodies.len()];
+
+        let mut bh = BarnesHutEngine::new(16);
+        bh.build(&bodies);
+        let (_, counters_bh) = bh.evaluate_profile(&bodies, theta, &mut acc);
+
+        assert!(counters_bh.n_node_visits > 0, "BH walk visited zero nodes");
+        assert!(counters_bh.n_bh_accepted > 0, "BH walk accepted zero internal nodes");
+        assert!(counters_bh.n_leaf_interactions > 0, "BH walk did zero leaf interactions");
+        assert!(counters_bh.n_node_visits >= counters_bh.n_bh_accepted);
+        // Each body's walk does at least one stack pop.
+        assert!(counters_bh.n_node_visits >= bodies.len() as u64);
+
+        // Exact-mode branch: counters must stay zero.
+        let mut bh_exact = BarnesHutEngine::new(16);
+        bh_exact.set_exact_threshold(usize::MAX);
+        bh_exact.build(&bodies);
+        let (_, counters_exact) = bh_exact.evaluate_profile(&bodies, theta, &mut acc);
+        assert_eq!(counters_exact.n_node_visits, 0);
+        assert_eq!(counters_exact.n_bh_accepted, 0);
+        assert_eq!(counters_exact.n_leaf_interactions, 0);
     }
 }
