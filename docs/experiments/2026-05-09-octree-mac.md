@@ -65,13 +65,17 @@ For Dehnen-style MACs (M2, M3), the per-walk error budget tolerance is tuned to 
 
 #### Tier 2 — Wall-time at matched accuracy *(gated as ranges; literature-referenced)*
 
-For each candidate MAC at its Tier-1-passing parameter, the wall-time ratio against M0 at the same θ:
+The candidate MACs are **strictly more conservative than M0 at the same θ** (M1's `s / (d − δ_max) < θ` recurses earlier than M0's `s / d < θ`; M2 / M3 use the same δ_max correction plus an error / acceleration budget). Comparing them at fixed θ would show the candidates *slower* and *more accurate* than M0, missing the structural lever — the candidate's strictness is what lets it accept more aggressively at a *higher* θ for the same accuracy budget.
+
+The honest comparison is therefore **at matched p95 accuracy**: pick θ_match for each candidate such that the candidate's p95 at θ_match equals M0's p95 at θ = 0.5 (the production canonical), then compare wall times at those θ values. Same matched-accuracy pattern from `2026-05-08-octree-perf-2x2.md` §Tier 2 (where C / D quadrupole speedup was measured at matched accuracy via θ binary search).
 
 | Comparison | Range bound | Reference |
 | --- | --- | --- |
-| `t_eval_M1(θ = 0.5) / t_eval_M0(θ = 0.5)` at N = 10⁴ | ∈ [0.75, 0.95] | Barnes 1990 §3.2: 5–25 % speedup at matched accuracy |
-| `t_eval_M2(θ = 0.5) / t_eval_M0(θ = 0.5)` at N = 10⁴ | ∈ [0.50, 0.80] | Dehnen 2002 §5: 20–50 % speedup at matched accuracy |
-| `t_eval_M3(θ = 0.5) / t_eval_M0(θ = 0.5)` at N = 10⁴ | ∈ [0.60, 0.85] | Springel 2005 §2.4 / GADGET-2: 15–40 % speedup |
+| `t_eval_M1(θ_match) / t_eval_M0(0.5)` at N = 10⁴ | ∈ [0.75, 0.95] | Barnes 1990 §3.2: 5–25 % speedup at matched accuracy |
+| `t_eval_M2(θ_match) / t_eval_M0(0.5)` at N = 10⁴ | ∈ [0.50, 0.80] | Dehnen 2002 §5: 20–50 % speedup at matched accuracy |
+| `t_eval_M3(θ_match) / t_eval_M0(0.5)` at N = 10⁴ | ∈ [0.60, 0.85] | Springel 2005 §2.4 / GADGET-2: 15–40 % speedup |
+
+θ_match is found by binary search over θ ∈ [0.5, 1.0], target tolerance ±0.01, accepted when `|p95_candidate(θ_match) − p95_M0(0.5)| / p95_M0(0.5) ≤ 0.05` (5 % p95 agreement). The search runs once per (candidate, N, seed) before the timed measurement; the resulting θ_match is locked and reported alongside the wall-time ratio.
 
 A measurement outside its range is investigated; a measurement at the edge is reported with the discrepancy. Decision-rule "ship" requires the cell to land inside its range AND for the ratio to be lower than at least one cheaper cell (otherwise the cheaper cell wins on parsimony grounds).
 
