@@ -359,24 +359,24 @@ mod tests {
     /// of every f64 field.
     #[derive(Clone, PartialEq, Debug)]
     struct BodyState {
-        x: f64,
-        y: f64,
-        z: f64,
-        vx: f64,
-        vy: f64,
-        vz: f64,
+        pos_x: f64,
+        pos_y: f64,
+        pos_z: f64,
+        vel_x: f64,
+        vel_y: f64,
+        vel_z: f64,
     }
 
     fn snapshot(sys: &System) -> Vec<BodyState> {
         sys.bodies()
             .iter()
             .map(|b| BodyState {
-                x: b.pos_x,
-                y: b.pos_y,
-                z: b.pos_z,
-                vx: b.vel_x,
-                vy: b.vel_y,
-                vz: b.vel_z,
+                pos_x: b.pos_x,
+                pos_y: b.pos_y,
+                pos_z: b.pos_z,
+                vel_x: b.vel_x,
+                vel_y: b.vel_y,
+                vel_z: b.vel_z,
             })
             .collect()
     }
