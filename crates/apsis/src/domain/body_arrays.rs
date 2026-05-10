@@ -137,9 +137,10 @@ mod tests {
         ]
     }
 
-    /// `pack_from` preserves every hot field bit-for-bit. This is the
-    /// invariant the Tier 1 gate of PR-perf-5 rests on — if a field is
-    /// reordered or coerced, accelerations downstream will diverge.
+    /// `pack_from` preserves every hot field bit-for-bit. If a field is
+    /// reordered, coerced, or arithmetically transformed during packing,
+    /// the accelerations the BH walk computes downstream will diverge
+    /// from those computed against the equivalent `&[Body]`.
     #[test]
     fn pack_from_preserves_fields_bit_exact() {
         let bodies = sample_bodies();

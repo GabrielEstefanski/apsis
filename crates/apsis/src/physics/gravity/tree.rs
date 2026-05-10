@@ -29,7 +29,6 @@
 //! - `node.body_count` equals the sum of `body_count` of all children
 //!   (or `body_len` for leaves).
 
-use crate::domain::body::Body;
 use crate::domain::body_arrays::BodyArrays;
 
 // ── Constants ─────────────────────────────────────────────────────────────── //
@@ -148,13 +147,12 @@ impl<const LEAF: usize> Node<LEAF> {
 
 /// Flat-array Barnes-Hut octree generic over leaf capacity.
 ///
-/// Call [`build`](Self::build) to (re)construct the tree from a body slice.
-/// The resulting [`Node`] array is accessed by the force engine for both the
-/// BH traversal and the `theta_error_proxy` heuristic.
+/// Call [`build`](Self::build) to (re)construct the tree from a [`BodyArrays`]
+/// snapshot. The resulting [`Node`] array is accessed by the force engine for
+/// both the BH traversal and the `theta_error_proxy` heuristic.
 ///
-/// `LEAF` defaults to [`DEFAULT_LEAF`] = 8, which preserves the production
-/// callsite ergonomics (`Octree::new(max_depth)` continues to work unchanged
-/// from PR-perf-1). The perf 2×2 leaf-sensitivity sweep instantiates other
+/// `LEAF` defaults to [`DEFAULT_LEAF`] = 8. The perf 2×2 leaf-sensitivity
+/// sweep (`docs/experiments/2026-05-08-octree-perf-2x2.md`) instantiates other
 /// values directly (`Octree::<4>::new(max_depth)` etc.) without going through
 /// `BarnesHutEngine`.
 pub(crate) struct Octree<const LEAF: usize = DEFAULT_LEAF> {
@@ -167,55 +165,6 @@ impl<const LEAF: usize> Octree<LEAF> {
         Self { nodes: Vec::new(), max_depth }
     }
 
-    /// Rebuild the tree from scratch for the given body slice.
-    ///
-    /// After this call `nodes[0]` is the root covering an axis-aligned cubic
-    /// cell that contains all bodies with a small pad. Every node's `mass`,
-    /// `com_{x,y,z}`, and traceless quadrupole tensor (`q_xx, q_xy, q_xz,
-    /// q_yy, q_yz`) fields reflect the aggregated state of its subtree.
-    /// Quadrupole aggregation is always performed — the perf 2×2 §Decision
-    /// settled it as the production multipole order.
-    pub(crate) fn build(&mut self, bodies: &[Body]) {
-        self.nodes.clear();
-
-        if bodies.is_empty() {
-            return;
-        }
-
-        // ── Compute padded cubic AABB ────────────────────────────────── //
-        let mut min_x = bodies[0].pos_x;
-        let mut max_x = bodies[0].pos_x;
-        let mut min_y = bodies[0].pos_y;
-        let mut max_y = bodies[0].pos_y;
-        let mut min_z = bodies[0].pos_z;
-        let mut max_z = bodies[0].pos_z;
-        for b in &bodies[1..] {
-            min_x = min_x.min(b.pos_x);
-            max_x = max_x.max(b.pos_x);
-            min_y = min_y.min(b.pos_y);
-            max_y = max_y.max(b.pos_y);
-            min_z = min_z.min(b.pos_z);
-            max_z = max_z.max(b.pos_z);
-        }
-        let cx = 0.5 * (min_x + max_x);
-        let cy = 0.5 * (min_y + max_y);
-        let cz = 0.5 * (min_z + max_z);
-        let extent = (max_x - min_x).max(max_y - min_y).max(max_z - min_z);
-        let mut half = 0.5 * extent;
-        half = if half <= 0.0 { TREE_PAD } else { half * 1.0001 + TREE_PAD };
-
-        self.nodes.push(Node::new(cx, cy, cz, half));
-
-        // ── Insert all bodies in input order ─────────────────────────── //
-        for i in 0..bodies.len() {
-            self.insert(0, i, bodies, 0);
-        }
-
-        // ── Aggregate mass / COM bottom-up, then quadrupole tensor ──── //
-        self.aggregate_mass(0, bodies);
-        self.aggregate_quadrupole(0, bodies);
-    }
-
     /// Read-only access to the flat node array.
     #[inline]
     pub(crate) fn nodes(&self) -> &[Node<LEAF>] {
@@ -223,48 +172,6 @@ impl<const LEAF: usize> Octree<LEAF> {
     }
 
     // ── Private tree-building helpers ─────────────────────────────────── //
-
-    fn insert(&mut self, mut node_idx: usize, body_idx: usize, bodies: &[Body], mut depth: usize) {
-        loop {
-            // Hard depth cap: just store in current node and skip.
-            if depth > self.max_depth {
-                let node = &mut self.nodes[node_idx];
-                if (node.body_len as usize) < LEAF {
-                    node.bodies[node.body_len as usize] = body_idx as u32;
-                    node.body_len += 1;
-                }
-                return;
-            }
-
-            if self.nodes[node_idx].is_leaf() {
-                let len = self.nodes[node_idx].body_len as usize;
-
-                // Leaf has room, or we've hit the depth cap — store here.
-                if len < LEAF || depth == self.max_depth {
-                    if (self.nodes[node_idx].body_len as usize) < LEAF {
-                        self.nodes[node_idx].bodies[len] = body_idx as u32;
-                        self.nodes[node_idx].body_len += 1;
-                    }
-                    return;
-                }
-
-                // Leaf is full — split into eight children, reinsert existing bodies.
-                let existing_len = self.nodes[node_idx].body_len as usize;
-                let existing = self.nodes[node_idx].bodies;
-                self.nodes[node_idx].body_len = 0;
-
-                self.subdivide(node_idx);
-
-                for &bi in &existing[..existing_len] {
-                    let child = self.child_octant(node_idx, bi as usize, bodies);
-                    self.insert(child, bi as usize, bodies, depth + 1);
-                }
-            }
-
-            node_idx = self.child_octant(node_idx, body_idx, bodies);
-            depth += 1;
-        }
-    }
 
     fn subdivide(&mut self, idx: usize) {
         let (cx, cy, cz, half) = {
@@ -293,171 +200,15 @@ impl<const LEAF: usize> Octree<LEAF> {
         idx
     }
 
-    /// Returns the index of the child node covering the octant that
-    /// contains `bodies[body_idx]`.
-    fn child_octant(&self, node_idx: usize, body_idx: usize, bodies: &[Body]) -> usize {
-        let n = &self.nodes[node_idx];
-        let b = bodies[body_idx];
-        let octant = ((b.pos_z >= n.cz) as usize) << 2
-            | ((b.pos_y >= n.cy) as usize) << 1
-            | (b.pos_x >= n.cx) as usize;
-        self.nodes[node_idx].children[octant] as usize
-    }
-
-    /// Recursively aggregate mass and 3D centre-of-mass bottom-up.
-    /// Returns `(mass, com_x, com_y, com_z)` for the subtree rooted at `idx`.
-    fn aggregate_mass(&mut self, idx: usize, bodies: &[Body]) -> (f64, f64, f64, f64) {
-        if self.nodes[idx].is_leaf() {
-            let len = self.nodes[idx].body_len as usize;
-            let mut m = 0.0_f64;
-            let mut wx = 0.0_f64;
-            let mut wy = 0.0_f64;
-            let mut wz = 0.0_f64;
-
-            for k in 0..len {
-                let b = bodies[self.nodes[idx].bodies[k] as usize];
-                m += b.mass;
-                wx += b.mass * b.pos_x;
-                wy += b.mass * b.pos_y;
-                wz += b.mass * b.pos_z;
-            }
-
-            self.nodes[idx].body_count = len as u32;
-            self.nodes[idx].mass = m;
-
-            if m > 0.0 {
-                self.nodes[idx].com_x = wx / m;
-                self.nodes[idx].com_y = wy / m;
-                self.nodes[idx].com_z = wz / m;
-                return (m, self.nodes[idx].com_x, self.nodes[idx].com_y, self.nodes[idx].com_z);
-            }
-            return (0.0, 0.0, 0.0, 0.0);
-        }
-
-        let children = self.nodes[idx].children;
-        let mut m = 0.0_f64;
-        let mut wx = 0.0_f64;
-        let mut wy = 0.0_f64;
-        let mut wz = 0.0_f64;
-        let mut cnt = 0u32;
-
-        for &c in &children {
-            if c == NO_CHILD {
-                continue;
-            }
-            let (cm, cx, cy, cz) = self.aggregate_mass(c as usize, bodies);
-            m += cm;
-            wx += cm * cx;
-            wy += cm * cy;
-            wz += cm * cz;
-            cnt += self.nodes[c as usize].body_count;
-        }
-
-        self.nodes[idx].body_count = cnt;
-        self.nodes[idx].mass = m;
-        if m > 0.0 {
-            self.nodes[idx].com_x = wx / m;
-            self.nodes[idx].com_y = wy / m;
-            self.nodes[idx].com_z = wz / m;
-        }
-
-        (self.nodes[idx].mass, self.nodes[idx].com_x, self.nodes[idx].com_y, self.nodes[idx].com_z)
-    }
-
-    /// Bottom-up second pass: populate the symmetric traceless quadrupole
-    /// tensor `Q` at every node, expressed about that node's COM.
+    /// Rebuild the tree from a [`BodyArrays`] snapshot.
     ///
-    /// Leaves: `Q = Σ_b m_b · (3 d_b ⊗ d_b − I |d_b|²)` with `d_b = pos_b − COM`.
-    /// Internals: parallel-axis theorem on children — `Q = Σ_c [Q_c + M_c (3 D_c ⊗ D_c − I |D_c|²)]`
-    /// with `D_c = COM_c − COM_node`. Reference: Goldstein, Poole & Safko §11.3;
-    /// Hernquist & Katz 1989 eq. (2.7–2.10).
-    fn aggregate_quadrupole(&mut self, idx: usize, bodies: &[Body]) {
-        if self.nodes[idx].is_leaf() {
-            let cmx = self.nodes[idx].com_x;
-            let cmy = self.nodes[idx].com_y;
-            let cmz = self.nodes[idx].com_z;
-            let len = self.nodes[idx].body_len as usize;
-
-            let (mut q_xx, mut q_xy, mut q_xz, mut q_yy, mut q_yz) = (0.0, 0.0, 0.0, 0.0, 0.0);
-
-            for k in 0..len {
-                let b = bodies[self.nodes[idx].bodies[k] as usize];
-                let dx = b.pos_x - cmx;
-                let dy = b.pos_y - cmy;
-                let dz = b.pos_z - cmz;
-                let d2 = dx * dx + dy * dy + dz * dz;
-                q_xx += b.mass * (3.0 * dx * dx - d2);
-                q_xy += b.mass * 3.0 * dx * dy;
-                q_xz += b.mass * 3.0 * dx * dz;
-                q_yy += b.mass * (3.0 * dy * dy - d2);
-                q_yz += b.mass * 3.0 * dy * dz;
-            }
-
-            let n = &mut self.nodes[idx];
-            n.q_xx = q_xx;
-            n.q_xy = q_xy;
-            n.q_xz = q_xz;
-            n.q_yy = q_yy;
-            n.q_yz = q_yz;
-            return;
-        }
-
-        let children = self.nodes[idx].children;
-        for &c in &children {
-            if c != NO_CHILD {
-                self.aggregate_quadrupole(c as usize, bodies);
-            }
-        }
-
-        let pcom_x = self.nodes[idx].com_x;
-        let pcom_y = self.nodes[idx].com_y;
-        let pcom_z = self.nodes[idx].com_z;
-
-        let (mut q_xx, mut q_xy, mut q_xz, mut q_yy, mut q_yz) = (0.0, 0.0, 0.0, 0.0, 0.0);
-
-        for &c in &children {
-            if c == NO_CHILD {
-                continue;
-            }
-            let child = &self.nodes[c as usize];
-            let dx = child.com_x - pcom_x;
-            let dy = child.com_y - pcom_y;
-            let dz = child.com_z - pcom_z;
-            let d2 = dx * dx + dy * dy + dz * dz;
-            let m = child.mass;
-
-            q_xx += child.q_xx + m * (3.0 * dx * dx - d2);
-            q_xy += child.q_xy + m * 3.0 * dx * dy;
-            q_xz += child.q_xz + m * 3.0 * dx * dz;
-            q_yy += child.q_yy + m * (3.0 * dy * dy - d2);
-            q_yz += child.q_yz + m * 3.0 * dy * dz;
-        }
-
-        let n = &mut self.nodes[idx];
-        n.q_xx = q_xx;
-        n.q_xy = q_xy;
-        n.q_xz = q_xz;
-        n.q_yy = q_yy;
-        n.q_yz = q_yz;
-    }
-
-    // ── SoA build path ───────────────────────────────────────────────────────
-    //
-    // Mirror of [`build`] / [`insert`] / [`aggregate_mass`] /
-    // [`aggregate_quadrupole`] / [`child_octant`] that reads from
-    // [`BodyArrays`] indexed loops instead of `&[Body]` field accesses. The
-    // tree built from `BodyArrays` is bit-identical to one built from the
-    // equivalent `&[Body]` (same insertion order, same FP ops, same data) —
-    // verified by [`tier1_soa_walk_matches_aos_walk_bit_exact`] in
-    // `BarnesHutEngine`.
-    //
-    // The duplicated AoS path (`build` and friends above) is removed in the
-    // System-integration commit once the Tier 1 gate has fired.
-
-    /// Rebuild the tree from a [`BodyArrays`] snapshot. See [`build`] for
-    /// the per-node aggregation contract — the only difference here is the
-    /// data source.
-    pub(crate) fn build_from_arrays(&mut self, arrays: &BodyArrays) {
+    /// After this call `nodes[0]` is the root covering an axis-aligned cubic
+    /// cell that contains all bodies with a small pad. Every node's `mass`,
+    /// `com_{x,y,z}`, and traceless quadrupole tensor (`q_xx, q_xy, q_xz,
+    /// q_yy, q_yz`) fields reflect the aggregated state of its subtree.
+    /// Quadrupole aggregation is always performed — the perf 2×2 §Decision
+    /// settled it as the production multipole order.
+    pub(crate) fn build(&mut self, arrays: &BodyArrays) {
         self.nodes.clear();
 
         if arrays.is_empty() {
@@ -488,14 +239,14 @@ impl<const LEAF: usize> Octree<LEAF> {
         self.nodes.push(Node::new(cx, cy, cz, half));
 
         for i in 0..arrays.len() {
-            self.insert_from_arrays(0, i, arrays, 0);
+            self.insert(0, i, arrays, 0);
         }
 
-        self.aggregate_mass_from_arrays(0, arrays);
-        self.aggregate_quadrupole_from_arrays(0, arrays);
+        self.aggregate_mass(0, arrays);
+        self.aggregate_quadrupole(0, arrays);
     }
 
-    fn insert_from_arrays(
+    fn insert(
         &mut self,
         mut node_idx: usize,
         body_idx: usize,
@@ -530,22 +281,17 @@ impl<const LEAF: usize> Octree<LEAF> {
                 self.subdivide(node_idx);
 
                 for &bi in &existing[..existing_len] {
-                    let child = self.child_octant_from_arrays(node_idx, bi as usize, arrays);
-                    self.insert_from_arrays(child, bi as usize, arrays, depth + 1);
+                    let child = self.child_octant(node_idx, bi as usize, arrays);
+                    self.insert(child, bi as usize, arrays, depth + 1);
                 }
             }
 
-            node_idx = self.child_octant_from_arrays(node_idx, body_idx, arrays);
+            node_idx = self.child_octant(node_idx, body_idx, arrays);
             depth += 1;
         }
     }
 
-    fn child_octant_from_arrays(
-        &self,
-        node_idx: usize,
-        body_idx: usize,
-        arrays: &BodyArrays,
-    ) -> usize {
+    fn child_octant(&self, node_idx: usize, body_idx: usize, arrays: &BodyArrays) -> usize {
         let n = &self.nodes[node_idx];
         let octant = ((arrays.pos_z[body_idx] >= n.cz) as usize) << 2
             | ((arrays.pos_y[body_idx] >= n.cy) as usize) << 1
@@ -553,11 +299,7 @@ impl<const LEAF: usize> Octree<LEAF> {
         self.nodes[node_idx].children[octant] as usize
     }
 
-    fn aggregate_mass_from_arrays(
-        &mut self,
-        idx: usize,
-        arrays: &BodyArrays,
-    ) -> (f64, f64, f64, f64) {
+    fn aggregate_mass(&mut self, idx: usize, arrays: &BodyArrays) -> (f64, f64, f64, f64) {
         if self.nodes[idx].is_leaf() {
             let len = self.nodes[idx].body_len as usize;
             let mut m = 0.0_f64;
@@ -597,7 +339,7 @@ impl<const LEAF: usize> Octree<LEAF> {
             if c == NO_CHILD {
                 continue;
             }
-            let (cm, cx, cy, cz) = self.aggregate_mass_from_arrays(c as usize, arrays);
+            let (cm, cx, cy, cz) = self.aggregate_mass(c as usize, arrays);
             m += cm;
             wx += cm * cx;
             wy += cm * cy;
@@ -616,7 +358,7 @@ impl<const LEAF: usize> Octree<LEAF> {
         (self.nodes[idx].mass, self.nodes[idx].com_x, self.nodes[idx].com_y, self.nodes[idx].com_z)
     }
 
-    fn aggregate_quadrupole_from_arrays(&mut self, idx: usize, arrays: &BodyArrays) {
+    fn aggregate_quadrupole(&mut self, idx: usize, arrays: &BodyArrays) {
         if self.nodes[idx].is_leaf() {
             let cmx = self.nodes[idx].com_x;
             let cmy = self.nodes[idx].com_y;
@@ -651,7 +393,7 @@ impl<const LEAF: usize> Octree<LEAF> {
         let children = self.nodes[idx].children;
         for &c in &children {
             if c != NO_CHILD {
-                self.aggregate_quadrupole_from_arrays(c as usize, arrays);
+                self.aggregate_quadrupole(c as usize, arrays);
             }
         }
 
@@ -718,8 +460,10 @@ mod tests {
     fn root_com_equals_mass_weighted_average() {
         let bodies = vec![body_xy(0.0, 0.0, 1.0), body_xy(4.0, 0.0, 3.0)];
 
+        let mut __arrays = BodyArrays::with_capacity(bodies.len());
+        __arrays.pack_from(&bodies);
         let mut tree = make_tree();
-        tree.build(&bodies);
+        tree.build(&__arrays);
 
         let root = &tree.nodes[0];
 
@@ -734,8 +478,10 @@ mod tests {
     fn root_com_3d_equals_mass_weighted_average() {
         let bodies = vec![body_xyz(0.0, 0.0, 0.0, 1.0), body_xyz(4.0, 2.0, -2.0, 3.0)];
 
+        let mut __arrays = BodyArrays::with_capacity(bodies.len());
+        __arrays.pack_from(&bodies);
         let mut tree = make_tree();
-        tree.build(&bodies);
+        tree.build(&__arrays);
 
         let root = &tree.nodes[0];
 
@@ -750,8 +496,10 @@ mod tests {
     fn root_body_count_equals_n() {
         let bodies: Vec<Body> = (0..10).map(|i| body_xy(i as f64, 0.0, 1.0)).collect();
 
+        let mut __arrays = BodyArrays::with_capacity(bodies.len());
+        __arrays.pack_from(&bodies);
         let mut tree = make_tree();
-        tree.build(&bodies);
+        tree.build(&__arrays);
 
         assert_eq!(tree.nodes[0].body_count, 10);
     }
@@ -761,8 +509,10 @@ mod tests {
     fn single_body_root_is_leaf_with_no_children() {
         let bodies = vec![body_xy(1.0, 2.0, 5.0)];
 
+        let mut __arrays = BodyArrays::with_capacity(bodies.len());
+        __arrays.pack_from(&bodies);
         let mut tree = make_tree();
-        tree.build(&bodies);
+        tree.build(&__arrays);
 
         let root = &tree.nodes[0];
 
@@ -776,8 +526,10 @@ mod tests {
     fn bodies_same_position() {
         let bodies = vec![body_xy(0.0, 0.0, 1.0), body_xy(0.0, 0.0, 2.0)];
 
+        let mut __arrays = BodyArrays::with_capacity(bodies.len());
+        __arrays.pack_from(&bodies);
         let mut tree = make_tree();
-        tree.build(&bodies);
+        tree.build(&__arrays);
 
         let root = &tree.nodes[0];
 
@@ -808,8 +560,10 @@ mod tests {
             bodies.push(body_xyz(sx * 0.5, sy * 0.5, sz * 0.5, 1.0));
         }
 
+        let mut __arrays = BodyArrays::with_capacity(bodies.len());
+        __arrays.pack_from(&bodies);
         let mut tree = make_tree();
-        tree.build(&bodies);
+        tree.build(&__arrays);
 
         let root = &tree.nodes[0];
         assert!(!root.is_leaf(), "root should subdivide after 16 inserts");
@@ -876,8 +630,10 @@ mod tests {
         let com_y_expected: f64 = bodies.iter().map(|b| b.mass * b.pos_y).sum::<f64>() / m_total;
         let com_z_expected: f64 = bodies.iter().map(|b| b.mass * b.pos_z).sum::<f64>() / m_total;
 
+        let mut __arrays = BodyArrays::with_capacity(bodies.len());
+        __arrays.pack_from(&bodies);
         let mut tree = make_tree();
-        tree.build(&bodies);
+        tree.build(&__arrays);
 
         let root = &tree.nodes[0];
         assert_relative_eq!(root.mass, m_total, epsilon = 1e-12);
@@ -902,8 +658,10 @@ mod tests {
 
             let expected_mass: f64 = bodies.iter().map(|b| b.mass).sum();
 
+            let mut __arrays = BodyArrays::with_capacity(bodies.len());
+            __arrays.pack_from(&bodies);
             let mut tree = make_tree();
-            tree.build(&bodies);
+            tree.build(&__arrays);
 
             let root = &tree.nodes[0];
 
@@ -922,8 +680,10 @@ mod tests {
     fn quadrupole_leaf_two_bodies_matches_closed_form() {
         let bodies = vec![body_xyz(1.0, 0.0, 0.0, 1.0), body_xyz(-1.0, 0.0, 0.0, 1.0)];
 
+        let mut __arrays = BodyArrays::with_capacity(bodies.len());
+        __arrays.pack_from(&bodies);
         let mut tree = make_tree();
-        tree.build(&bodies);
+        tree.build(&__arrays);
 
         let root = &tree.nodes[0];
         assert!(root.is_leaf(), "2 bodies must fit in the root leaf");
@@ -962,8 +722,10 @@ mod tests {
         let bodies: Vec<Body> =
             positions.iter().map(|&(x, y, z, m)| body_xyz(x, y, z, m)).collect();
 
+        let mut __arrays = BodyArrays::with_capacity(bodies.len());
+        __arrays.pack_from(&bodies);
         let mut tree = make_tree();
-        tree.build(&bodies);
+        tree.build(&__arrays);
 
         let root = &tree.nodes[0];
         assert!(!root.is_leaf(), "16 bodies must force the root to subdivide");
@@ -1012,12 +774,14 @@ mod tests {
             })
             .collect();
 
+        let mut __arrays = BodyArrays::with_capacity(bodies.len());
+        __arrays.pack_from(&bodies);
         let mut tight: Octree<4> = Octree::new(16);
-        tight.build(&bodies);
+        tight.build(&__arrays);
         assert!(!tight.nodes[0].is_leaf(), "5 > LEAF=4 must subdivide the root");
 
         let mut loose: Octree<16> = Octree::new(16);
-        loose.build(&bodies);
+        loose.build(&__arrays);
         assert!(loose.nodes[0].is_leaf(), "5 ≤ LEAF=16 keeps the root as a leaf");
 
         let total_mass: f64 = bodies.iter().map(|b| b.mass).sum();

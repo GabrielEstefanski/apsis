@@ -95,11 +95,16 @@ A measurement inside the range ships SoA. Below the range triggers root-cause in
 
 `pack_from(&[Body]) → BodyArrays` is a linear-in-N memory copy: `5N × 8 bytes` written sequentially across five `Vec<f64>`. At ~10 GB/s memory bandwidth, expected cost is ~4 µs per 1 000 bodies, ~40 µs per 10 000 bodies.
 
+**Pack frequency reality check.** The protocol's earlier framing assumed "pack once per step" (Velocity Verlet model). IAS15 invalidates that — its adaptive step makes `ForceModel::compute` 7-15 calls per step (one per Picard substep at 7 substeps × initial pass + Picard iterations × refine), with body positions mutating between calls so each invocation needs a fresh pack. The pack lives in `GravityForceModel` and runs every `compute()`, not every step.
+
+Updated budget framing:
+
 | Bound | Threshold | Rationale |
 | --- | --- | --- |
-| `t_pack / t_step` at N = 10⁴ | `≤ 0.01` (1 %) | Pack overhead must not erase the walk gain. With expected `t_step ≈ 4 ms` post-SoA at N = 10⁴, 1 % budget is ~40 µs — exactly the bandwidth-limited estimate. |
+| `t_pack / t_compute` at N = 10⁴ | `≤ 0.01` (1 %) | Pack overhead per `ForceModel::compute()` call must not erase the per-call walk gain. With expected `t_compute ≈ 4 ms` post-SoA at N = 10⁴, 1 % budget is ~40 µs — exactly the bandwidth-limited estimate. |
+| `Σ t_pack / t_step_ias15` at N = 10⁴ | `≤ 0.05` (5 %) | Aggregate pack overhead across all `compute()` calls in one IAS15 step. ~15 calls × 40 µs = 600 µs vs ~12 ms IAS15 step → ~5 %. Still net win because walk savings compound over the same call count. |
 
-Pack frequency is **once per step** by construction (rebuilt every step from `Vec<Body>`; no caching). The harness logs `t_pack` per N + per seed so future regressions are caught — if `t_pack` ever crosses the 1 % threshold in a later experiment, that PR has to root-cause before merge.
+The harness logs `t_pack` per (N, seed, integrator) so future regressions are caught — if `t_pack` ever crosses either threshold in a later experiment, that PR has to root-cause before merge.
 
 #### Decision rules
 
