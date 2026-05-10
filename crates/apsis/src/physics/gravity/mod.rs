@@ -10,7 +10,10 @@
 
 mod engine;
 pub mod kernel;
-mod tree;
+// `pub(crate)` so the in-flight MAC harness (`physics::perf_mac`) can name
+// `tree::MacKind` directly. Reverts to private in the experiment's final
+// commit when the toggle is removed.
+pub(crate) mod tree;
 
 pub use engine::BarnesHutEngine;
 pub use kernel::{G, Kernel, PlummerKernel, pair_eps2};
