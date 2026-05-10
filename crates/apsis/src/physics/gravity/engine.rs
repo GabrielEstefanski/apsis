@@ -35,7 +35,9 @@ use crate::math::Vec3;
 use rayon::prelude::*;
 
 use super::kernel::{G, Kernel, PlummerKernel, pair_eps2};
-use super::tree::{DEFAULT_LEAF, DIRECT_MODE_THRESHOLD, EXACT_THRESHOLD, NO_CHILD, Node, Octree};
+use super::tree::{
+    DEFAULT_LEAF, DIRECT_MODE_THRESHOLD, EXACT_THRESHOLD, MacKind, NO_CHILD, Node, Octree,
+};
 
 // ── WalkCounters ──────────────────────────────────────────────────────────── //
 
@@ -91,6 +93,11 @@ pub struct BarnesHutEngine {
     /// N ≤ this → exact O(N²); N > this → Barnes-Hut traversal.
     exact_threshold: usize,
     kernel: Arc<dyn Kernel>,
+    /// Multipole acceptance criterion. See [`MacKind`] for toggle scope.
+    /// `dead_code` allow removed in the next commit that branches on this
+    /// field in the BH walk.
+    #[allow(dead_code)]
+    mac_kind: MacKind,
 }
 
 impl BarnesHutEngine {
@@ -108,7 +115,12 @@ impl BarnesHutEngine {
     /// example, a kernel that demonstrates or tests a different Exactness
     /// or Continuity class.
     pub fn with_kernel(max_depth: usize, kernel: Arc<dyn Kernel>) -> Self {
-        Self { tree: Octree::new(max_depth), exact_threshold: EXACT_THRESHOLD, kernel }
+        Self {
+            tree: Octree::new(max_depth),
+            exact_threshold: EXACT_THRESHOLD,
+            kernel,
+            mac_kind: MacKind::Classical,
+        }
     }
 
     /// Handle to the kernel this engine dispatches through.
@@ -158,6 +170,30 @@ impl BarnesHutEngine {
     /// go through this rather than hard-coding the clamp ceiling.
     pub fn is_direct_mode(&self) -> bool {
         self.exact_threshold >= DIRECT_MODE_THRESHOLD
+    }
+
+    // ── MAC kind — experiment toggle ──────────────────────────────────────
+    //
+    // Removed in the final commit of the MAC comparison experiment
+    // (`docs/experiments/2026-05-09-octree-mac.md`) once §Decision is
+    // written and the chosen MAC is baked-in.
+
+    /// Switch between [`MacKind::Classical`] and [`MacKind::Barnes1990`]
+    /// for subsequent [`build`] calls. The next [`build`] re-aggregates
+    /// the per-node `δ_max` field (Barnes 1990) or skips the pass
+    /// (Classical); an already-built tree retains the MAC it was last
+    /// built with until the engine rebuilds.
+    ///
+    /// [`build`]: Self::build
+    #[allow(dead_code)] // MAC harness only; allow removed when bench lands
+    pub(crate) fn set_mac_kind(&mut self, kind: MacKind) {
+        self.mac_kind = kind;
+    }
+
+    /// Currently active MAC.
+    #[allow(dead_code)] // read by MAC harness only; lib path passes the field directly
+    pub(crate) fn mac_kind(&self) -> MacKind {
+        self.mac_kind
     }
 
     /// Rebuild the octree from the current body positions.
@@ -1083,5 +1119,24 @@ mod tests {
         assert_eq!(counters_exact.n_node_visits, 0);
         assert_eq!(counters_exact.n_bh_accepted, 0);
         assert_eq!(counters_exact.n_leaf_interactions, 0);
+    }
+
+    // ── MacKind toggle scaffold ──────────────────────────────────────────── //
+
+    #[test]
+    fn mac_kind_default_is_classical() {
+        let engine = BarnesHutEngine::new(16);
+        assert_eq!(engine.mac_kind(), MacKind::Classical);
+    }
+
+    #[test]
+    fn mac_kind_setter_round_trips() {
+        let mut engine = BarnesHutEngine::new(16);
+
+        engine.set_mac_kind(MacKind::Barnes1990);
+        assert_eq!(engine.mac_kind(), MacKind::Barnes1990);
+
+        engine.set_mac_kind(MacKind::Classical);
+        assert_eq!(engine.mac_kind(), MacKind::Classical);
     }
 }

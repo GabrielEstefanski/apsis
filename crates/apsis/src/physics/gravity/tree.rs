@@ -59,6 +59,35 @@ pub(crate) const DIRECT_MODE_THRESHOLD: usize = 10_000;
 /// exactly on a cell boundary (which would cause ambiguous octant assignment).
 const TREE_PAD: f64 = 1e-2;
 
+// ── MacKind ───────────────────────────────────────────────────────────────── //
+
+/// Multipole acceptance criterion (MAC) used by the Barnes-Hut walk.
+///
+/// `Classical` is the production default and the baseline of the perf 2×2
+/// experiment: a node is accepted as a single pseudo-body when `s/d < θ`,
+/// where `s` is the cell side, `d` is the body-to-COM distance, and `θ` is
+/// the user-controlled opening angle.
+///
+/// `Barnes1990` tightens the criterion by accounting for the worst-case
+/// body offset from the node's COM (`δ_max`), giving `s / (d − δ_max) < θ`.
+/// Same algorithm at slightly higher per-node state cost; allows a higher
+/// `θ` at matched accuracy and therefore reduces interaction count for the
+/// same per-body force error.
+///
+/// **Toggle scope.** Part of the in-flight MAC comparison experiment
+/// (`docs/experiments/2026-05-09-octree-mac.md`); removed in the
+/// experiment's final commit once §Decision selects the production MAC.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MacKind {
+    Classical,
+    /// `dead_code` allow removed in the next commit that wires `delta_max`
+    /// aggregation in `aggregate_mass` and the modified opening test in
+    /// `bh_eval_body`. Until then the variant is constructible only from
+    /// tests and from the upcoming MAC harness.
+    #[allow(dead_code)]
+    Barnes1990,
+}
+
 // ── Node ──────────────────────────────────────────────────────────────────── //
 
 /// One node in the Barnes-Hut octree, generic over leaf capacity.
