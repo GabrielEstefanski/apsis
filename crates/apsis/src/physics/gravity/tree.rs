@@ -108,7 +108,7 @@ pub(crate) struct Node<const LEAF: usize> {
 }
 
 impl<const LEAF: usize> Node<LEAF> {
-    fn new(cx: f64, cy: f64, cz: f64, half: f64) -> Self {
+    pub(crate) fn new(cx: f64, cy: f64, cz: f64, half: f64) -> Self {
         Self {
             cx,
             cy,

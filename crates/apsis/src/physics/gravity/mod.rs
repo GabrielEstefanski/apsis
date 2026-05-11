@@ -14,3 +14,10 @@ mod tree;
 
 pub use engine::BarnesHutEngine;
 pub use kernel::{G, Kernel, PlummerKernel, pair_eps2};
+
+// Re-exported for the perf_soa harness's AoS shadow path; reverted with
+// the harness when the SoA experiment closes.
+#[cfg(test)]
+pub(crate) use engine::WalkCounters;
+#[cfg(test)]
+pub(crate) use tree::{DEFAULT_LEAF, NO_CHILD, Node};
