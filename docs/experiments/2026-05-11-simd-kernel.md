@@ -241,12 +241,11 @@ The user's framing from conversation: *"se a gente não ganha nada de performanc
 #### Implementation order
 
 1. **Notebook a priori** (this commit).
-2. **Two-phase walk** — `Octree::walk` restructured to emit per-body interaction lists (`Vec<u32>` of leaf body indices, `Vec<NodeRef>` of accepted nodes). Reads from existing SoA `BodyArrays` (no layout change). Force computation deferred to phase 2. Tier 1 bit-exact gate vs production single-phase walk to confirm refactor preserves accelerations.
-3. **Scalar dense kernel** — phase 2 implemented in idiomatic Rust (no `unsafe`), branchless flat loop processing the lists with gather-style indexed reads from `BodyArrays`. Tier 1 bit-exact gate vs the pre-two-phase production walk.
-4. **AVX2 intrinsic kernel** — `std::arch::x86_64` AVX2 path with `_mm256_i32gather_pd` for scattered-index loads. Tier 0 + Tier 1 + Tier 2a gates run here.
-5. **AVX-512 intrinsic kernel + runtime dispatch** — AVX-512 path added with `_mm512_i32gather_pd`, `is_x86_feature_detected!` chooses scalar / AVX2 / AVX-512 at engine construction time.
-6. **`perf_simd` harness** — runs Tier 0 + Tier 2a + Tier 2b + Tier 3 + Tier 4 measurements on the canonical seed × N grid.
-7. **§Results, §Interpretation, §Decision** populated; bake removes the harness per the perf-2 / perf-4 / perf-5 closure pattern.
+2. **Two-phase walk + scalar dense kernel together** — `Octree::walk` restructured to emit per-body interaction lists (`Vec<u32>` of leaf body indices, `Vec<u32>` of accepted node indices). Phase 2 is a branchless scalar kernel that processes both lists with indexed reads from `BodyArrays`. **Tier 1 here uses tolerance `≤ 1e-13` relative, NOT bit-exact**: the two-phase pattern changes summation order from DFS-interleaved (leaf-pair, leaf-pair, accepted-node, leaf-pair, ...) to segregated (all leaf-pairs first, then all accepted-nodes). Floating-point addition is not associative; per-body acceleration drift at ~`O(n_interactions × ULP)` ≈ `~3000 × 2^-52 ≈ 7e-13` is the physical floor for this reordering. The single-phase walk is preserved as `#[cfg(test)] fn bh_eval_body_single_phase` so the tolerance test can compare the two paths on identical inputs. Combined into one commit because the two-phase walk and scalar kernel are conceptually inseparable — the walk emits lists that only make sense if a kernel processes them.
+3. **AVX2 intrinsic kernel** — `std::arch::x86_64` AVX2 path with `_mm256_i32gather_pd` for scattered-index loads. Tier 0 + Tier 1 + Tier 2a gates run here.
+4. **AVX-512 intrinsic kernel + runtime dispatch** — AVX-512 path added with `_mm512_i32gather_pd`, `is_x86_feature_detected!` chooses scalar / AVX2 / AVX-512 at engine construction time.
+5. **`perf_simd` harness** — runs Tier 0 + Tier 2a + Tier 2b + Tier 3 + Tier 4 measurements on the canonical seed × N grid.
+6. **§Results, §Interpretation, §Decision** populated; bake removes the harness per the perf-2 / perf-4 / perf-5 closure pattern.
 
 #### Run parameters
 
