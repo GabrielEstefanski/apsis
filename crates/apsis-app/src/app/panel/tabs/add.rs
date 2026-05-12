@@ -72,7 +72,7 @@ fn preset_grid(ui: &mut egui::Ui, selected: &mut &'static BodyPreset) -> bool {
                     ui.end_row();
                 }
             }
-            if body_preset::ALL.len() % cols != 0 {
+            if !body_preset::ALL.len().is_multiple_of(cols) {
                 ui.end_row();
             }
         },

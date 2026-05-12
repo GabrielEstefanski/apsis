@@ -144,34 +144,35 @@ impl System {
             }
         };
 
-        if self.adaptive_theta && !self.bodies.is_empty() {
-            if let Some(engine) = self.force_model.bh_engine() {
-                // theta_error_proxy reads body 0's pos / softening from
-                // the SoA snapshot. Pack a transient buffer for this one
-                // call (~40 µs at N = 10⁴; called once per step) — the
-                // ForceModel's own snapshot was packed at the previous
-                // compute() and may be stale relative to current bodies.
-                let theta = self.force_model.theta();
-                let mut probe_arrays = BodyArrays::with_capacity(self.bodies.len());
-                probe_arrays.pack_from(&self.bodies);
-                let e_theta = engine.theta_error_proxy(0, &probe_arrays, theta);
-                let new_theta = self.theta_ctrl.update(e_theta, self.current_dt);
-                self.force_model.set_theta(new_theta);
-            }
+        if self.adaptive_theta
+            && !self.bodies.is_empty()
+            && let Some(engine) = self.force_model.bh_engine()
+        {
+            // theta_error_proxy reads body 0's pos / softening from
+            // the SoA snapshot. Pack a transient buffer for this one
+            // call (~40 µs at N = 10⁴; called once per step) — the
+            // ForceModel's own snapshot was packed at the previous
+            // compute() and may be stale relative to current bodies.
+            let theta = self.force_model.theta();
+            let mut probe_arrays = BodyArrays::with_capacity(self.bodies.len());
+            probe_arrays.pack_from(&self.bodies);
+            let e_theta = engine.theta_error_proxy(0, &probe_arrays, theta);
+            let new_theta = self.theta_ctrl.update(e_theta, self.current_dt);
+            self.force_model.set_theta(new_theta);
         }
 
-        if self.steps % 97 == 0 {
-            if let Some((dx, dy)) = calibration::com_offset(&self.bodies, self.total_mass) {
-                // Route through the integrator's `recenter_bodies` rather
-                // than the bare `apply_body_shift`: this preserves the
-                // per-body compensation accumulators that IAS15 uses to
-                // bound round-off error to `O(ε)` over long horizons.
-                // Fixed-step integrators inherit the trait default (bare
-                // subtraction), so behaviour is unchanged for them.
-                self.integrator.recenter_bodies(&mut self.bodies, dx, dy);
-                self.pending_com_shift.0 += -dx as f32;
-                self.pending_com_shift.1 += -dy as f32;
-            }
+        if self.steps.is_multiple_of(97)
+            && let Some((dx, dy)) = calibration::com_offset(&self.bodies, self.total_mass)
+        {
+            // Route through the integrator's `recenter_bodies` rather
+            // than the bare `apply_body_shift`: this preserves the
+            // per-body compensation accumulators that IAS15 uses to
+            // bound round-off error to `O(ε)` over long horizons.
+            // Fixed-step integrators inherit the trait default (bare
+            // subtraction), so behaviour is unchanged for them.
+            self.integrator.recenter_bodies(&mut self.bodies, dx, dy);
+            self.pending_com_shift.0 += -dx as f32;
+            self.pending_com_shift.1 += -dy as f32;
         }
 
         let (r_min, soft_max) = compute_closeness(&self.bodies);
@@ -185,7 +186,8 @@ impl System {
 
             let mut hooks = take_hooks(self);
             let heartbeat_interval = hooks.heartbeat_interval;
-            let fire_heartbeat = heartbeat_interval > 0 && self.steps % heartbeat_interval == 0;
+            let fire_heartbeat =
+                heartbeat_interval > 0 && self.steps.is_multiple_of(heartbeat_interval);
 
             let ctx = build_hook_context(self, HookPhaseKind::PostStep);
             let mut cmds = Vec::new();
