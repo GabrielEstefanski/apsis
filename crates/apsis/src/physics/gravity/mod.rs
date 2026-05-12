@@ -15,4 +15,6 @@ mod simd;
 mod tree;
 
 pub use engine::BarnesHutEngine;
+#[cfg(test)]
+pub(crate) use engine::LeafPairKernel;
 pub use kernel::{G, Kernel, PlummerKernel, pair_eps2};
