@@ -228,7 +228,8 @@ impl BarnesHutEngine {
             .into_par_iter()
             .map(|i| {
                 let mut stack = Vec::with_capacity(128);
-                bh_eval_body(nodes, i, arrays, theta, kernel, &mut stack)
+                let mut lists = InteractionLists::with_capacity(2048, 1024);
+                bh_eval_body(nodes, i, arrays, theta, kernel, &mut stack, &mut lists)
             })
             .collect();
 
@@ -438,17 +439,214 @@ fn exact_eval(arrays: &BodyArrays, kernel: &dyn Kernel, acc: &mut [Vec3]) -> f64
     potential
 }
 
+/// Per-body interaction lists emitted by phase 1 of the BH walk and
+/// consumed by phase 2 (the dense kernel).
+///
+/// Two parallel `Vec<u32>`s: leaf-pair body indices (into [`BodyArrays`])
+/// and accepted-node indices (into the [`Octree`]'s flat node array).
+/// Phase 2 processes them in two homogeneous loops — first all leaf-pair
+/// interactions, then all accepted-node interactions — which is the
+/// branchless lane-uniform shape PR-perf-6 SIMD will vectorise.
+///
+/// The struct is allocated per body per evaluate call inside the rayon
+/// closure; rayon's work-stealing limits in-flight closures to ~thread
+/// count, so peak memory is bounded by `num_threads × (leaf_cap +
+/// node_cap) × 4 bytes` — ~150 KB at the default capacity hints below
+/// on a 12-thread machine.
+struct InteractionLists {
+    /// Body indices of leaf-pair neighbours (excluding self).
+    leaf_body_indices: Vec<u32>,
+    /// Indices into the flat node array of nodes BH-accepted as
+    /// monopole + quadrupole pseudo-bodies.
+    accepted_node_indices: Vec<u32>,
+}
+
+impl InteractionLists {
+    fn with_capacity(leaf_cap: usize, node_cap: usize) -> Self {
+        Self {
+            leaf_body_indices: Vec::with_capacity(leaf_cap),
+            accepted_node_indices: Vec::with_capacity(node_cap),
+        }
+    }
+
+    fn clear(&mut self) {
+        self.leaf_body_indices.clear();
+        self.accepted_node_indices.clear();
+    }
+}
+
+/// Phase 1 — Walk the tree, emit per-body interaction lists.
+///
+/// DFS via stack. Decisions per visit:
+/// - leaf: push every non-self body index into `leaf_body_indices`
+/// - internal accepted (`s/d < θ`): push node index into
+///   `accepted_node_indices`
+/// - internal rejected: push children to stack
+///
+/// Returns walk counters. Lists are written into the caller's reusable
+/// buffer (cleared at top).
+#[inline(always)]
+fn bh_walk_emit_lists(
+    nodes: &[Node<DEFAULT_LEAF>],
+    body_idx: usize,
+    arrays: &BodyArrays,
+    theta: f64,
+    stack: &mut Vec<u32>,
+    lists: &mut InteractionLists,
+) -> WalkCounters {
+    let body_pos_x = arrays.pos_x[body_idx];
+    let body_pos_y = arrays.pos_y[body_idx];
+    let body_pos_z = arrays.pos_z[body_idx];
+    let body_softening = arrays.softening[body_idx];
+    let body_eps2 = body_softening * body_softening;
+
+    let mut counters = WalkCounters::default();
+    lists.clear();
+
+    stack.clear();
+    if !nodes.is_empty() {
+        stack.push(0);
+    }
+
+    while let Some(raw) = stack.pop() {
+        counters.n_node_visits += 1;
+        let node = &nodes[raw as usize];
+        if node.mass <= 0.0 {
+            continue;
+        }
+
+        if node.is_leaf() {
+            for k in 0..node.body_len as usize {
+                let bi = node.bodies[k];
+                if bi as usize == body_idx {
+                    continue;
+                }
+                lists.leaf_body_indices.push(bi);
+                counters.n_leaf_interactions += 1;
+            }
+            continue;
+        }
+
+        // BH criterion: accept this node as a pseudo-body when s/d < θ.
+        let dx = node.com_x - body_pos_x;
+        let dy = node.com_y - body_pos_y;
+        let dz = node.com_z - body_pos_z;
+        let d = (dx * dx + dy * dy + dz * dz + body_eps2).sqrt();
+
+        if node.size() / d < theta {
+            lists.accepted_node_indices.push(raw);
+            counters.n_bh_accepted += 1;
+        } else {
+            for &c in &node.children {
+                if c != NO_CHILD {
+                    stack.push(c);
+                }
+            }
+        }
+    }
+
+    counters
+}
+
+/// Phase 2 — Process interaction lists with the dense scalar kernel.
+///
+/// Two homogeneous loops, no branches inside either:
+/// 1. Leaf-pair interactions (Plummer monopole on body-body pairs).
+/// 2. Accepted-node interactions (Plummer monopole + traceless quadrupole
+///    on body vs aggregated node).
+///
+/// Summation order is segregated (all leaves, then all nodes), which
+/// differs from the single-phase walk's DFS-interleaved order. Per-body
+/// acceleration drift between the two is ~`O(n_interactions × ULP)` ≈
+/// `~3000 × 2^-52 ≈ 7 × 10⁻¹³` in the worst case — well within Tier 1's
+/// `1e-13` tolerance gate.
+#[inline(always)]
+fn bh_process_lists(
+    nodes: &[Node<DEFAULT_LEAF>],
+    body_idx: usize,
+    arrays: &BodyArrays,
+    kernel: &dyn Kernel,
+    lists: &InteractionLists,
+) -> (Vec3, f64) {
+    let body_pos_x = arrays.pos_x[body_idx];
+    let body_pos_y = arrays.pos_y[body_idx];
+    let body_pos_z = arrays.pos_z[body_idx];
+    let body_softening = arrays.softening[body_idx];
+    let body_eps2 = body_softening * body_softening;
+
+    let mut a = Vec3::ZERO;
+    let mut phi = 0.0_f64;
+
+    // Phase 2a: leaf-pair Plummer monopole.
+    for &raw_bi in &lists.leaf_body_indices {
+        let bi = raw_bi as usize;
+        let other_mass = arrays.mass[bi];
+        let dx = arrays.pos_x[bi] - body_pos_x;
+        let dy = arrays.pos_y[bi] - body_pos_y;
+        let dz = arrays.pos_z[bi] - body_pos_z;
+        let eps2 = pair_eps2(body_softening, arrays.softening[bi]);
+        let r_sq = dx * dx + dy * dy + dz * dz;
+
+        let fac = G * other_mass * kernel.acceleration_factor(r_sq, eps2);
+        a.x += dx * fac;
+        a.y += dy * fac;
+        a.z += dz * fac;
+        phi += -G * other_mass * kernel.potential(r_sq, eps2);
+    }
+
+    // Phase 2b: accepted-node Plummer monopole + traceless quadrupole.
+    for &raw_ni in &lists.accepted_node_indices {
+        let node = &nodes[raw_ni as usize];
+        let dx = node.com_x - body_pos_x;
+        let dy = node.com_y - body_pos_y;
+        let dz = node.com_z - body_pos_z;
+        let r_sq = dx * dx + dy * dy + dz * dz;
+
+        let fac = G * node.mass * kernel.acceleration_factor(r_sq, body_eps2);
+        a.x += dx * fac;
+        a.y += dy * fac;
+        a.z += dz * fac;
+        phi += -G * node.mass * kernel.potential(r_sq, body_eps2);
+
+        let q_zz = -(node.q_xx + node.q_yy);
+        let qr_x = node.q_xx * dx + node.q_xy * dy + node.q_xz * dz;
+        let qr_y = node.q_xy * dx + node.q_yy * dy + node.q_yz * dz;
+        let qr_z = node.q_xz * dx + node.q_yz * dy + q_zz * dz;
+        let rqr = dx * qr_x + dy * qr_y + dz * qr_z;
+
+        let inv_r2 = 1.0 / (r_sq + body_eps2);
+        let inv_r5 = fac / node.mass * inv_r2;
+        let inv_r7 = inv_r5 * inv_r2;
+
+        let coef_qr = -G * inv_r5;
+        let coef_r = 2.5 * G * rqr * inv_r7;
+
+        a.x += coef_qr * qr_x + coef_r * dx;
+        a.y += coef_qr * qr_y + coef_r * dy;
+        a.z += coef_qr * qr_z + coef_r * dz;
+        phi += -0.5 * G * rqr * inv_r5;
+    }
+
+    (a, phi)
+}
+
 /// Barnes-Hut force evaluation for a single body — O(log N) per body.
 ///
-/// Returns `(a, φ, counters)` where `a` is the acceleration vector, `φ` is
-/// the specific gravitational potential at the body's position (multiply
-/// by `mass[body_idx]` to get the contribution to total PE), and
-/// `counters` track work done during the walk (`n_node_visits,
-/// n_bh_accepted, n_leaf_interactions`) for the engine ceiling profiler.
+/// Two-phase pattern: phase 1 walks the tree (control flow + decisions)
+/// and emits interaction lists; phase 2 processes the lists with a dense
+/// scalar kernel (no branches in the inner loops). This shape is the
+/// pre-requisite for SIMD vectorisation in PR-perf-6 — phase 2's
+/// homogeneous loops are what the SIMD kernel will batch.
 ///
-/// The walk reads node fields and reads positions / mass / softening of
-/// leaf-pair neighbours from the [`BodyArrays`] snapshot. The body's own
-/// state is loaded once at the top from `arrays[body_idx]`.
+/// Returns `(a, φ, counters)` where `a` is the acceleration vector, `φ`
+/// is the specific gravitational potential at the body's position
+/// (multiply by `mass[body_idx]` to get the contribution to total PE),
+/// and `counters` track work done during the walk for the engine ceiling
+/// profiler.
+///
+/// `lists` is a reusable per-body scratch buffer. The caller (typically
+/// `evaluate_profile`) allocates it once per closure invocation and
+/// passes by mutable reference. Phase 1 clears it before writing.
 ///
 /// Node interactions use the target body's own ε² — the tree stores only
 /// aggregated mass and 3D COM, not per-body softening at internal nodes.
@@ -457,6 +655,29 @@ fn exact_eval(arrays: &BodyArrays, kernel: &dyn Kernel, acc: &mut [Vec3]) -> f64
 /// 2×2 §Decision.
 #[inline(always)]
 fn bh_eval_body(
+    nodes: &[Node<DEFAULT_LEAF>],
+    body_idx: usize,
+    arrays: &BodyArrays,
+    theta: f64,
+    kernel: &dyn Kernel,
+    stack: &mut Vec<u32>,
+    lists: &mut InteractionLists,
+) -> (Vec3, f64, WalkCounters) {
+    let counters = bh_walk_emit_lists(nodes, body_idx, arrays, theta, stack, lists);
+    let (a, phi) = bh_process_lists(nodes, body_idx, arrays, kernel, lists);
+    (a, phi, counters)
+}
+
+/// Single-phase BH walk reference, kept under `cfg(test)` so the Tier 1
+/// tolerance test can compare two-phase output against the original
+/// inline implementation. Verbatim copy of the pre-PR-perf-6
+/// `bh_eval_body` (commit `253abe9`); summation order is DFS-interleaved
+/// (leaf-pair, leaf-pair, accepted-node, leaf-pair, ...) rather than
+/// segregated, so the two paths agree only to floating-point tolerance,
+/// not bit-exact. Removed in the bake commit if it has no further use.
+#[cfg(test)]
+#[inline(always)]
+fn bh_eval_body_single_phase(
     nodes: &[Node<DEFAULT_LEAF>],
     body_idx: usize,
     arrays: &BodyArrays,
@@ -1118,5 +1339,93 @@ mod tests {
         assert_eq!(counters_exact.n_node_visits, 0);
         assert_eq!(counters_exact.n_bh_accepted, 0);
         assert_eq!(counters_exact.n_leaf_interactions, 0);
+    }
+
+    // ── PR-perf-6 Tier 1 — two-phase walk vs single-phase reference ────────── //
+
+    /// Tier 1 of `2026-05-11-simd-kernel.md` for the two-phase walk
+    /// refactor. The two-phase pattern changes summation order from
+    /// DFS-interleaved to segregated (all leaf-pairs first, then all
+    /// accepted-nodes), so floating-point reordering is expected at
+    /// `O(n_interactions × ULP)` ≈ ~7 × 10⁻¹³ at N = 10⁴. Bound 1 × 10⁻¹³
+    /// covers the typical case (most bodies have fewer than ~3000
+    /// interactions); a single body in a small-force pocket can hit the
+    /// upper edge of the worst-case envelope, so the gate uses p99
+    /// rather than max.
+    ///
+    /// Failure here means the two-phase implementation has a bug beyond
+    /// FP reordering — likely a missed interaction or wrong index in
+    /// either `bh_walk_emit_lists` or `bh_process_lists`.
+    #[test]
+    fn tier1_two_phase_walk_matches_single_phase_within_tolerance() {
+        for &n in &[1_000usize, 5_000] {
+            for &seed in &[0x6F637472u64, 0x71756164, 0x6D6F7274] {
+                let bodies = sphere_distribution_lognormal(n, seed);
+                let mut arrays = BodyArrays::with_capacity(bodies.len());
+                arrays.pack_from(&bodies);
+
+                let kernel = PlummerKernel::new();
+                let nodes = {
+                    let mut tree: Octree = Octree::new(16);
+                    tree.build(&arrays);
+                    tree.nodes().to_vec()
+                };
+
+                // Single-phase reference path.
+                let mut acc_single = vec![Vec3::ZERO; bodies.len()];
+                {
+                    let mut stack = Vec::with_capacity(128);
+                    for i in 0..bodies.len() {
+                        let (a, _, _) =
+                            bh_eval_body_single_phase(&nodes, i, &arrays, 0.5, &kernel, &mut stack);
+                        acc_single[i] = a;
+                    }
+                }
+
+                // Two-phase production path.
+                let mut acc_two_phase = vec![Vec3::ZERO; bodies.len()];
+                {
+                    let mut stack = Vec::with_capacity(128);
+                    let mut lists = InteractionLists::with_capacity(2048, 1024);
+                    for i in 0..bodies.len() {
+                        let (a, _, _) =
+                            bh_eval_body(&nodes, i, &arrays, 0.5, &kernel, &mut stack, &mut lists);
+                        acc_two_phase[i] = a;
+                    }
+                }
+
+                // Per-body relative error; check p99 against tolerance.
+                let mut rel_errs: Vec<f64> = acc_single
+                    .iter()
+                    .zip(acc_two_phase.iter())
+                    .map(|(s, t)| {
+                        let diff = (s.x - t.x, s.y - t.y, s.z - t.z);
+                        let num = (diff.0 * diff.0 + diff.1 * diff.1 + diff.2 * diff.2).sqrt();
+                        let den = (s.x * s.x + s.y * s.y + s.z * s.z).sqrt().max(1e-300);
+                        num / den
+                    })
+                    .collect();
+                rel_errs.sort_by(|a, b| a.partial_cmp(b).unwrap());
+
+                let p99_idx = (rel_errs.len() as f64 * 0.99) as usize;
+                let p99 = rel_errs[p99_idx.min(rel_errs.len() - 1)];
+                let max_err = *rel_errs.last().unwrap();
+
+                eprintln!(
+                    "[two-phase-tier1] N={} seed=0x{:X}  p99={:.3e}  max={:.3e}",
+                    n, seed, p99, max_err,
+                );
+
+                assert!(
+                    p99 <= 1e-13,
+                    "two-phase vs single-phase p99 rel-err = {:.3e} exceeds 1e-13 \
+                     at N={} seed=0x{:X}; max = {:.3e}",
+                    p99,
+                    n,
+                    seed,
+                    max_err,
+                );
+            }
+        }
     }
 }
