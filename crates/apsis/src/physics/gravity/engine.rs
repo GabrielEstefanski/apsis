@@ -141,9 +141,11 @@ pub struct BarnesHutEngine {
     exact_threshold: usize,
     kernel: Arc<dyn Kernel>,
     /// Resolved at engine construction (and every [`set_kernel`](Self::set_kernel))
-    /// from the kernel identity + host AVX2 detection. Read once per body
-    /// inside [`evaluate_profile`], never mutated during a walk.
-    leaf_pair_kernel: LeafPairKernel,
+    /// from the kernel identity + host AVX2/AVX-512 detection. Read once
+    /// per body inside [`evaluate_profile`], never mutated during a walk.
+    /// Crate-visible so the [`perf_simd`](crate::physics::perf_simd) harness
+    /// can pin a specific dispatch for cross-kernel comparison.
+    pub(crate) leaf_pair_kernel: LeafPairKernel,
 }
 
 impl BarnesHutEngine {
