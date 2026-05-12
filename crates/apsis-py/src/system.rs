@@ -109,13 +109,13 @@ impl PySystem {
                 format!("expected a strictly positive finite float, got {dt}"),
             ));
         }
-        if let Some(eps) = epsilon {
-            if !eps.is_finite() || eps <= 0.0 {
-                return Err(value_error(
-                    "epsilon",
-                    format!("expected a strictly positive finite float, got {eps}"),
-                ));
-            }
+        if let Some(eps) = epsilon
+            && (!eps.is_finite() || eps <= 0.0)
+        {
+            return Err(value_error(
+                "epsilon",
+                format!("expected a strictly positive finite float, got {eps}"),
+            ));
         }
 
         let kind: CoreIntegratorKind = resolve_integrator(integrator)?;

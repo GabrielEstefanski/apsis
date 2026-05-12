@@ -1052,10 +1052,10 @@ fn physics_loop(
                 // Forward the fresh dense-output snapshot to RenderState so the
                 // render thread always has the most recent sub-step to interpolate.
                 // try_lock is non-blocking; missing one snapshot frame is harmless.
-                if system.last_dense_snapshot.is_some() {
-                    if let Ok(mut rs) = render.try_lock() {
-                        rs.step_snapshot = system.last_dense_snapshot.clone();
-                    }
+                if system.last_dense_snapshot.is_some()
+                    && let Ok(mut rs) = render.try_lock()
+                {
+                    rs.step_snapshot = system.last_dense_snapshot.clone();
                 }
 
                 let dt = system.metrics().dt;

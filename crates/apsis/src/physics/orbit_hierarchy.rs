@@ -273,10 +273,10 @@ impl OrbitHierarchy {
         // ── Class finalisation ──────────────────────────────────────────
         let mut has_child = vec![false; n];
         for i in 0..n {
-            if let Some(p) = self.primary[i] {
-                if p < n {
-                    has_child[p] = true;
-                }
+            if let Some(p) = self.primary[i]
+                && p < n
+            {
+                has_child[p] = true;
             }
         }
         for i in 0..n {
