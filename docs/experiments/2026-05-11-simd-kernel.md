@@ -54,7 +54,7 @@ This notebook honours that rule. Bounds below are derived from the engine ceilin
 
 4. **Per-walk dispatch overhead** (stack push/pop, accept/recurse decision, mass-zero checks) is sequential and not vectorisable. Engine ceiling §Results: `n_node_visits ≈ 2-3 × (n_bh_accepted + n_leaf_interactions)`, meaning ~half the walk visits are pure control flow that produces no interaction. This sets the hard floor on walk speedup achievable from kernel SIMD alone.
 
-5. **Two-phase walk pattern** (used by GADGET-2 / PKDGRAV3 / falcON-derived codes) separates control flow from compute: phase 1 is per-body walk that emits interaction lists; phase 2 is dense SIMD kernel that processes the lists. The branchless lane-uniform phase 2 is what makes SIMD applicable at all.
+5. **Two-phase walk pattern** separates control flow from compute: phase 1 is the per-body walk that emits interaction lists; phase 2 is the dense SIMD kernel that processes the lists. Pattern follows PKDGRAV3 (Potter et al. 2017) and GADGET-4 (Springel et al. 2021); a similar split appears in falcON-derived dual-tree codes (Dehnen 2014). The branchless lane-uniform phase 2 is what makes SIMD applicable at all.
 
 ### What this experiment is NOT testing
 
@@ -420,7 +420,9 @@ AVX2 vs AVX-512 head-to-head, same hardware:
 
 **The AVX-512-over-AVX2 walk-level advantage is essentially zero on both hardware classes** (largest delta 1.22× at cell A N=1k, well within per-seed variance; all other cells under 1.05×). The Tier 2a kernel-level +5 % does not propagate to the walk because the walk's non-vectorisable phases (dispatch, list emit, accepted-node scalar processing) absorb most of the kernel premium.
 
-The joint revert criterion (`walk_speedup ≤ 1.0×`) does **not** fire on either cell — every AVX2 and AVX-512 cell delivers walk_speedup > 1.0× by a comfortable margin. The SoA pre-requisite from PR-perf-5 is justified by measurement across two hardware vendors.
+The joint revert criterion (`walk_speedup ≤ 1.0×`) does **not** fire on either cell. The worst-case AVX2 cell is N = 5 000 on Zen 4 at 1.29×, and on Sapphire Rapids at 1.52×; both more than 25 % above the revert threshold. The SoA pre-requisite from PR-perf-5 is justified by measurement across two hardware vendors.
+
+Cell B's AVX2 N = 1 000 median (2.06×) sits 0.06× above the upper bound of the engine-ceiling envelope `[1.3, 2.0]×`. At N = 1 000 the absolute walk wall-time is ~2.5 ms and the per-seed range (2.02× / 2.06× / 2.10×) brackets the bound; the over-performance is reported per the §Decision rules (*"Above range — Compiler underperformed scalar baseline more than estimated; ship and document the surprise"*) but is not interpreted as a regime where SIMD systematically over-delivers — small-N noise covers the 3 % margin.
 
 ### Tier 4 — Pack overhead per `compute()`
 
@@ -493,7 +495,7 @@ The calibration doc's standing rule applies forward: future perf experiments on 
 
 **Ship the AVX2 leaf-pair SIMD kernel; remove the AVX-512 path; keep PR-perf-5 SoA layout.**
 
-The joint revert criterion (`walk_speedup ≤ 1.0×` on the SIMD axis would force PR-perf-5 + PR-perf-6 to revert together) does **not** fire. AVX2 walk speedups are ≥ 1.0× by a comfortable margin on every cell measured across both hardware classes:
+The joint revert criterion (`walk_speedup ≤ 1.0×` on the SIMD axis would force PR-perf-5 + PR-perf-6 to revert together) does **not** fire. The worst-case AVX2 cells across the grid are 1.29× (Zen 4 N = 5 000) and 1.52× (Sapphire Rapids N = 5 000); both more than 25 % above the revert threshold across both hardware classes:
 
 | Cell | AVX2 walk speedup range across N | All cells > 1.0× |
 | --- | --- | --- |
