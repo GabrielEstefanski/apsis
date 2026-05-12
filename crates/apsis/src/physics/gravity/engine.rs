@@ -41,44 +41,31 @@ use super::tree::{DEFAULT_LEAF, DIRECT_MODE_THRESHOLD, EXACT_THRESHOLD, NO_CHILD
 
 // ── Leaf-pair dispatch ───────────────────────────────────────────────────── //
 
-/// Selects the implementation that processes the leaf-pair phase of the
-/// two-phase BH walk. Determined once when the kernel is set on the
-/// [`BarnesHutEngine`] and read from inside the per-body parallel closure.
+/// Implementation that processes the leaf-pair phase of the two-phase
+/// BH walk. Resolved once at engine construction; read once per body
+/// inside the parallel walk, never mutated mid-walk.
 ///
-/// SIMD variants are only chosen when both conditions hold:
-/// - the kernel reports [`Kernel::is_plummer`] — the SIMD path inlines the
-///   Plummer formula directly, so a non-Plummer kernel would silently
-///   produce wrong forces on the leaf-pair phase.
-/// - the host CPU advertises the corresponding instruction set via
-///   runtime detection. Preference order is AVX-512F → AVX2+FMA → scalar.
-///
-/// The accepted-node phase remains scalar in every branch: vectorising
-/// across non-contiguous `Node` storage was shown to be net-negative on
-/// the recorded hardware (see SIMD lab notebook §Scope, deferred to a
-/// conditional PR-perf-7).
+/// `Avx2` requires both [`Kernel::is_plummer`] (the SIMD path inlines
+/// the Plummer formula) and runtime AVX2 + FMA detection on the host.
+/// All other configurations route to `Scalar`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LeafPairKernel {
     Scalar,
     #[cfg(target_arch = "x86_64")]
     Avx2,
-    #[cfg(target_arch = "x86_64")]
-    Avx512,
 }
 
 impl LeafPairKernel {
     /// Pick the fastest available leaf-pair implementation for the given
-    /// kernel on the recorded hardware. Preference order:
-    /// AVX-512F → AVX2+FMA → scalar.
+    /// kernel on the recorded hardware.
     fn select(kernel: &dyn Kernel) -> Self {
         #[cfg(target_arch = "x86_64")]
         {
-            if kernel.is_plummer() {
-                if std::is_x86_feature_detected!("avx512f") {
-                    return Self::Avx512;
-                }
-                if std::is_x86_feature_detected!("avx2") && std::is_x86_feature_detected!("fma") {
-                    return Self::Avx2;
-                }
+            if kernel.is_plummer()
+                && std::is_x86_feature_detected!("avx2")
+                && std::is_x86_feature_detected!("fma")
+            {
+                return Self::Avx2;
             }
         }
         let _ = kernel;
@@ -141,11 +128,9 @@ pub struct BarnesHutEngine {
     exact_threshold: usize,
     kernel: Arc<dyn Kernel>,
     /// Resolved at engine construction (and every [`set_kernel`](Self::set_kernel))
-    /// from the kernel identity + host AVX2/AVX-512 detection. Read once
-    /// per body inside [`evaluate_profile`], never mutated during a walk.
-    /// Crate-visible so the [`perf_simd`](crate::physics::perf_simd) harness
-    /// can pin a specific dispatch for cross-kernel comparison.
-    pub(crate) leaf_pair_kernel: LeafPairKernel,
+    /// from the kernel identity + host AVX2 detection. Read once per body
+    /// inside [`evaluate_profile`], never mutated during a walk.
+    leaf_pair_kernel: LeafPairKernel,
 }
 
 impl BarnesHutEngine {
@@ -518,7 +503,7 @@ fn exact_eval(arrays: &BodyArrays, kernel: &dyn Kernel, acc: &mut [Vec3]) -> f64
 /// and accepted-node indices (into the [`Octree`]'s flat node array).
 /// Phase 2 processes them in two homogeneous loops — first all leaf-pair
 /// interactions, then all accepted-node interactions — which is the
-/// branchless lane-uniform shape PR-perf-6 SIMD will vectorise.
+/// branchless lane-uniform shape the AVX2 leaf-pair kernel vectorises.
 ///
 /// The struct is allocated per body per evaluate call inside the rayon
 /// closure; rayon's work-stealing limits in-flight closures to ~thread
@@ -647,8 +632,8 @@ fn bh_process_lists(
     let body_softening = arrays.softening[body_idx];
     let body_eps2 = body_softening * body_softening;
 
-    // Phase 2a: leaf-pair Plummer monopole. Dispatched per-engine across
-    // the scalar dyn-kernel path, AVX2, and AVX-512 inlined-Plummer paths.
+    // Phase 2a: leaf-pair Plummer monopole. Dispatched per-engine to either
+    // the scalar dyn-kernel path or the AVX2 inlined-Plummer path.
     let (mut a, mut phi) = match leaf_pair_kernel {
         LeafPairKernel::Scalar => leaf_pair_scalar(
             body_pos_x,
@@ -662,17 +647,6 @@ fn bh_process_lists(
         #[cfg(target_arch = "x86_64")]
         LeafPairKernel::Avx2 => unsafe {
             simd::process_leafpair_avx2(
-                body_pos_x,
-                body_pos_y,
-                body_pos_z,
-                body_softening,
-                arrays,
-                &lists.leaf_body_indices,
-            )
-        },
-        #[cfg(target_arch = "x86_64")]
-        LeafPairKernel::Avx512 => unsafe {
-            simd::process_leafpair_avx512(
                 body_pos_x,
                 body_pos_y,
                 body_pos_z,
@@ -722,10 +696,8 @@ fn bh_process_lists(
 /// Barnes-Hut force evaluation for a single body — O(log N) per body.
 ///
 /// Two-phase pattern: phase 1 walks the tree (control flow + decisions)
-/// and emits interaction lists; phase 2 processes the lists with a dense
-/// scalar kernel (no branches in the inner loops). This shape is the
-/// pre-requisite for SIMD vectorisation in PR-perf-6 — phase 2's
-/// homogeneous loops are what the SIMD kernel will batch.
+/// and emits interaction lists; phase 2 processes the lists with the
+/// dense scalar or AVX2 kernel selected by [`LeafPairKernel`].
 ///
 /// Returns `(a, φ, counters)` where `a` is the acceleration vector, `φ`
 /// is the specific gravitational potential at the body's position
@@ -796,13 +768,11 @@ fn leaf_pair_scalar(
     (a, phi)
 }
 
-/// Single-phase BH walk reference, kept under `cfg(test)` so the Tier 1
-/// tolerance test can compare two-phase output against the original
-/// inline implementation. Verbatim copy of the pre-PR-perf-6
-/// `bh_eval_body` (commit `253abe9`); summation order is DFS-interleaved
-/// (leaf-pair, leaf-pair, accepted-node, leaf-pair, ...) rather than
-/// segregated, so the two paths agree only to floating-point tolerance,
-/// not bit-exact. Removed in the bake commit if it has no further use.
+/// Single-phase BH walk reference, kept under `cfg(test)` so the
+/// tolerance test can compare two-phase output against an inline
+/// implementation that interleaves walk and kernel arithmetic. The
+/// interleaved (DFS-order) summation is not bit-exact with the
+/// two-phase segregated summation; the test gates on FP tolerance.
 #[cfg(test)]
 #[inline(always)]
 fn bh_eval_body_single_phase(
@@ -1469,7 +1439,7 @@ mod tests {
         assert_eq!(counters_exact.n_leaf_interactions, 0);
     }
 
-    // ── PR-perf-6 Tier 1 — two-phase walk vs single-phase reference ────────── //
+    // ── Tier 1 — two-phase walk vs single-phase reference ──────────────────── //
 
     /// Tier 1 of `2026-05-11-simd-kernel.md` for the two-phase walk
     /// refactor. The two-phase pattern changes summation order from
@@ -1566,7 +1536,7 @@ mod tests {
         }
     }
 
-    // ── PR-perf-6 Tier 0/1/2a — AVX2 leaf-pair kernel ─────────────────────── //
+    // ── Tier 0/1/2a — AVX2 leaf-pair kernel ────────────────────────────────── //
 
     /// Tier 0 (hardware sanity) — saxpy speedup.
     ///
@@ -1810,257 +1780,38 @@ mod tests {
 
         assert!(
             (1.8..=2.5).contains(&speedup),
-            "AVX2 microkernel speedup {speedup:.2}× outside [1.8, 2.5]× — \
-             see SIMD lab notebook §A-priori bounds; do not retune the bound"
+            "AVX2 microkernel speedup {speedup:.2}× outside [1.8, 2.5]× envelope"
         );
     }
 
-    // ── PR-perf-6 Tier 0/1/2a — AVX-512 leaf-pair kernel ──────────────────── //
+    // ── Leaf-pair kernel dispatch ──────────────────────────────────────────── //
 
-    /// Tier 0 — AVX-512 saxpy speedup over scalar.
-    ///
-    /// `y[i] += a · x[i]` over 1 M lanes, scalar vs AVX-512F. A-priori
-    /// `t_scalar / t_avx512 ≥ 4.0×` from the SIMD lab notebook §A-priori
-    /// bounds: 8-lane double FMA on Zen 4 — but Zen 4 implements 512-bit
-    /// ops via two 256-bit µops in some pipelines, so the realistic
-    /// ratio over scalar is 4-5×, not the naive 8×.
+    /// `LeafPairKernel::select` picks the AVX2 path on a Plummer kernel
+    /// plus an AVX2/FMA-capable host, and falls back to scalar otherwise.
+    /// Hardware capability is read at runtime.
     #[test]
     #[cfg(target_arch = "x86_64")]
-    #[ignore = "wall-time gate: opt-in via --ignored, run in --release on a quiet machine"]
-    fn tier0_saxpy_avx512_speedup_geq_4x() {
-        if !std::is_x86_feature_detected!("avx512f") {
-            eprintln!("[simd-tier0] AVX-512F unavailable, skipping");
-            return;
-        }
-
-        const N: usize = 1_000_000;
-        let x: Vec<f64> = (0..N).map(|i| (i as f64) * 1.0e-3).collect();
-        let mut y_scalar: Vec<f64> = vec![0.0; N];
-        let mut y_avx512: Vec<f64> = vec![0.0; N];
-        let a = 0.7_f64;
-
-        super::super::simd::saxpy_scalar(a, &x, &mut y_scalar);
-        unsafe { super::super::simd::saxpy_avx512(a, &x, &mut y_avx512) };
-
-        let measured = 5;
-        let start_scalar = std::time::Instant::now();
-        for _ in 0..measured {
-            super::super::simd::saxpy_scalar(a, &x, &mut y_scalar);
-        }
-        let t_scalar_ns = start_scalar.elapsed().as_nanos() as f64 / measured as f64;
-
-        let start_avx512 = std::time::Instant::now();
-        for _ in 0..measured {
-            unsafe { super::super::simd::saxpy_avx512(a, &x, &mut y_avx512) };
-        }
-        let t_avx512_ns = start_avx512.elapsed().as_nanos() as f64 / measured as f64;
-
-        let speedup = t_scalar_ns / t_avx512_ns;
-        eprintln!(
-            "[simd-tier0] AVX-512 saxpy N={N}  t_scalar={t_scalar_ns:.0}ns  \
-             t_avx512={t_avx512_ns:.0}ns  speedup={speedup:.2}×",
-        );
-
-        assert!(
-            speedup >= 4.0,
-            "AVX-512 saxpy speedup {speedup:.2}× < 4.0× — toolchain or hardware not delivering \
-             the expected SIMD throughput; investigate before trusting downstream gates"
-        );
-    }
-
-    /// Tier 1 — AVX-512 leaf-pair kernel matches scalar within tolerance.
-    /// Same envelope as the AVX2 Tier 1 (`p99 ≤ 1e-13`) — the additional
-    /// 4-lane reduction in the 8-lane horizontal sum reorders summation
-    /// further but still inside `O(n_interactions × ULP)` worst case.
-    #[test]
-    #[cfg(target_arch = "x86_64")]
-    fn tier1_avx512_leaf_pair_matches_scalar_within_tolerance() {
-        if !std::is_x86_feature_detected!("avx512f") {
-            eprintln!("[simd-tier1] AVX-512F unavailable, skipping");
-            return;
-        }
-
-        for &n in &[1_000usize, 5_000] {
-            for &seed in &[0x6F637472u64, 0x71756164, 0x6D6F7274] {
-                let bodies = sphere_distribution_lognormal(n, seed);
-                let mut arrays = BodyArrays::with_capacity(bodies.len());
-                arrays.pack_from(&bodies);
-
-                let mut engine_scalar = BarnesHutEngine::new(16);
-                engine_scalar.leaf_pair_kernel = LeafPairKernel::Scalar;
-                engine_scalar.build(&arrays);
-                let mut acc_scalar = vec![Vec3::ZERO; bodies.len()];
-                engine_scalar.evaluate(&arrays, 0.5, &mut acc_scalar);
-
-                let mut engine_avx512 = BarnesHutEngine::new(16);
-                engine_avx512.leaf_pair_kernel = LeafPairKernel::Avx512;
-                engine_avx512.build(&arrays);
-                let mut acc_avx512 = vec![Vec3::ZERO; bodies.len()];
-                engine_avx512.evaluate(&arrays, 0.5, &mut acc_avx512);
-
-                let mut rel_errs: Vec<f64> = acc_scalar
-                    .iter()
-                    .zip(acc_avx512.iter())
-                    .map(|(s, t)| {
-                        let diff = (s.x - t.x, s.y - t.y, s.z - t.z);
-                        let num = (diff.0 * diff.0 + diff.1 * diff.1 + diff.2 * diff.2).sqrt();
-                        let den = (s.x * s.x + s.y * s.y + s.z * s.z).sqrt().max(1e-300);
-                        num / den
-                    })
-                    .collect();
-                rel_errs.sort_by(|a, b| a.partial_cmp(b).unwrap());
-
-                let p99_idx = (rel_errs.len() as f64 * 0.99) as usize;
-                let p99 = rel_errs[p99_idx.min(rel_errs.len() - 1)];
-                let max_err = *rel_errs.last().unwrap();
-
-                eprintln!(
-                    "[simd-tier1] AVX-512 vs scalar  N={n}  seed=0x{seed:X}  \
-                     p99={p99:.3e}  max={max_err:.3e}",
-                );
-
-                assert!(
-                    p99 <= 1e-13,
-                    "AVX-512 leaf-pair vs scalar p99 rel-err = {p99:.3e} exceeds 1e-13 \
-                     at N={n} seed=0x{seed:X}; max = {max_err:.3e}"
-                );
-            }
-        }
-    }
-
-    /// Tier 2a — AVX-512 Plummer microkernel speedup over scalar.
-    ///
-    /// A-priori range `[2.5, 3.5]×` from the SIMD lab notebook
-    /// §A-priori bounds: 8-lane FMA + cross-lane reduce vs scalar that
-    /// the compiler is already auto-vectorising at 2 lanes. Realistic
-    /// delta is 2.5-3.5×, not the naive 8×; on Zen 4 the 512-bit pipe
-    /// is decomposed into 256-bit µops on some operations, capping the
-    /// throughput improvement.
-    #[test]
-    #[cfg(target_arch = "x86_64")]
-    #[ignore = "wall-time gate: opt-in via --ignored, run in --release on a quiet machine"]
-    fn tier2a_kernel_avx512_speedup_in_range() {
-        if !std::is_x86_feature_detected!("avx512f") {
-            eprintln!("[simd-tier2a] AVX-512F unavailable, skipping");
-            return;
-        }
-
-        const N: usize = 1_000_000;
-        let mut tuples: Vec<(f64, f64, f64, f64, f64)> = Vec::with_capacity(N);
-        let mut dx_a = Vec::with_capacity(N);
-        let mut dy_a = Vec::with_capacity(N);
-        let mut dz_a = Vec::with_capacity(N);
-        let mut eps2_a = Vec::with_capacity(N);
-        let mut mass_a = Vec::with_capacity(N);
-        let mut s = 0x9E3779B97F4A7C15_u64;
-        let mut next = || {
-            s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
-            ((s >> 11) as f64 / (1u64 << 53) as f64) * 2.0 - 1.0
-        };
-        for _ in 0..N {
-            let dx = next() * 10.0;
-            let dy = next() * 10.0;
-            let dz = next() * 10.0;
-            let eps2 = 1.0e-3 + next().abs() * 1.0e-2;
-            let m = 0.5 + next().abs() * 0.5;
-            tuples.push((dx, dy, dz, eps2, m));
-            dx_a.push(dx);
-            dy_a.push(dy);
-            dz_a.push(dz);
-            eps2_a.push(eps2);
-            mass_a.push(m);
-        }
-
-        let mut acc_scalar = Vec3::ZERO;
-        let mut acc_avx512 = Vec3::ZERO;
-
-        super::super::simd::plummer_kernel_scalar_micro(&mut acc_scalar, &tuples);
-        unsafe {
-            super::super::simd::plummer_kernel_avx512_micro(
-                &mut acc_avx512,
-                &dx_a,
-                &dy_a,
-                &dz_a,
-                &eps2_a,
-                &mass_a,
-            )
-        };
-        acc_scalar = Vec3::ZERO;
-        acc_avx512 = Vec3::ZERO;
-
-        let measured = 5;
-        let start_scalar = std::time::Instant::now();
-        for _ in 0..measured {
-            super::super::simd::plummer_kernel_scalar_micro(&mut acc_scalar, &tuples);
-        }
-        let t_scalar_ns = start_scalar.elapsed().as_nanos() as f64 / measured as f64;
-
-        let start_avx512 = std::time::Instant::now();
-        for _ in 0..measured {
-            unsafe {
-                super::super::simd::plummer_kernel_avx512_micro(
-                    &mut acc_avx512,
-                    &dx_a,
-                    &dy_a,
-                    &dz_a,
-                    &eps2_a,
-                    &mass_a,
-                )
-            };
-        }
-        let t_avx512_ns = start_avx512.elapsed().as_nanos() as f64 / measured as f64;
-
-        let speedup = t_scalar_ns / t_avx512_ns;
-        eprintln!(
-            "[simd-tier2a] AVX-512 Plummer kernel N={N}  t_scalar={t_scalar_ns:.0}ns  \
-             t_avx512={t_avx512_ns:.0}ns  speedup={speedup:.2}×",
-        );
-
-        let scalar_mag =
-            (acc_scalar.x.powi(2) + acc_scalar.y.powi(2) + acc_scalar.z.powi(2)).sqrt();
-        let avx512_mag =
-            (acc_avx512.x.powi(2) + acc_avx512.y.powi(2) + acc_avx512.z.powi(2)).sqrt();
-        let rel_diff = (scalar_mag - avx512_mag).abs() / scalar_mag.max(1e-300);
-        assert!(rel_diff < 1e-2, "scalar and AVX-512 micro disagree by {rel_diff:.2e} > 1%");
-
-        assert!(
-            (2.5..=3.5).contains(&speedup),
-            "AVX-512 microkernel speedup {speedup:.2}× outside [2.5, 3.5]× — \
-             see SIMD lab notebook §A-priori bounds; do not retune the bound"
-        );
-    }
-
-    /// Sanity — `LeafPairKernel::select` honours preference order on a
-    /// host with both AVX2 and AVX-512. Skipped on hosts that have
-    /// neither (the scalar branch is exercised by the default path).
-    #[test]
-    #[cfg(target_arch = "x86_64")]
-    fn dispatch_picks_avx512_over_avx2_when_both_available() {
+    fn dispatch_picks_avx2_when_plummer_and_avx2_fma_available() {
         let kernel = PlummerKernel::new();
         let picked = LeafPairKernel::select(&kernel);
         match picked {
-            LeafPairKernel::Avx512 => {
-                assert!(std::is_x86_feature_detected!("avx512f"));
-            },
             LeafPairKernel::Avx2 => {
-                assert!(!std::is_x86_feature_detected!("avx512f"));
                 assert!(
                     std::is_x86_feature_detected!("avx2") && std::is_x86_feature_detected!("fma")
                 );
             },
             LeafPairKernel::Scalar => {
                 assert!(
-                    !(std::is_x86_feature_detected!("avx512f")
-                        || std::is_x86_feature_detected!("avx2")
-                            && std::is_x86_feature_detected!("fma"))
+                    !(std::is_x86_feature_detected!("avx2")
+                        && std::is_x86_feature_detected!("fma"))
                 );
             },
         }
     }
 
-    /// Non-Plummer kernel must never be routed to a SIMD path — the SIMD
-    /// kernels inline the Plummer formula directly and would silently
-    /// produce wrong forces against e.g. `TruncatedPlummerKernel`.
+    /// Non-Plummer kernel must never be routed to the AVX2 SIMD path —
+    /// the AVX2 kernel inlines the Plummer formula directly and would
+    /// silently produce wrong forces against e.g. `TruncatedPlummerKernel`.
     #[test]
     fn dispatch_falls_back_to_scalar_for_non_plummer_kernel() {
         use crate::physics::gravity::kernel::TruncatedPlummerKernel;
