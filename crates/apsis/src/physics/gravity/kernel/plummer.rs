@@ -93,6 +93,11 @@ impl Kernel for PlummerKernel {
             continuity: Continuity::Smooth,
         }
     }
+
+    #[inline]
+    fn is_plummer(&self) -> bool {
+        true
+    }
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────── //
