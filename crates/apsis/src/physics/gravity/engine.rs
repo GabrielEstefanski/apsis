@@ -231,20 +231,12 @@ impl BarnesHutEngine {
     ///
     /// Smart-default companion to [`build`](Self::build) for the per-step
     /// integrator path: walks the per-body cell back-reference to find
-    /// migrants and re-inserts only those, then recomputes multipoles.
-    /// Falls back to a full [`build`] when the body count has changed,
-    /// any body has migrated outside the root, or no prior tree state
-    /// exists.
+    /// migrants and re-inserts only those, derefines emptied cells, then
+    /// recomputes multipoles. Falls back to a full [`build`] when the body
+    /// count has changed, any body has migrated outside the root, or no
+    /// prior tree state exists.
     pub fn maintain(&mut self, arrays: &BodyArrays) {
         self.tree.maintain(arrays);
-    }
-
-    /// Snapshot of the per-body cell back-reference, intended for diagnostic
-    /// use by the perf-tree harness (counting migrants per step). Production
-    /// code should not rely on the layout of this vector.
-    #[cfg(test)]
-    pub(crate) fn tree_cell_idx_snapshot(&self) -> Vec<u32> {
-        self.tree.cell_idx.clone()
     }
 
     /// Compute gravitational accelerations and return total potential energy.
