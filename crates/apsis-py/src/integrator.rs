@@ -61,6 +61,14 @@ pub(crate) enum IntegratorKind {
     /// drift + numerical perturbation kick.
     #[pyo3(name = "WISDOM_HOLMAN")]
     WisdomHolman,
+
+    /// Hybrid symplectic close-encounter integrator (Rein et al. 2019).
+    /// Wisdom-Holman outer step with a K-weighted planet-planet kick;
+    /// IAS15 sub-integrates the (1−K)-weighted residual on the
+    /// encountering subset over the same outer interval. Requires a
+    /// hierarchical mass distribution.
+    #[pyo3(name = "MERCURIUS")]
+    Mercurius,
 }
 
 #[pymethods]
@@ -81,6 +89,7 @@ impl IntegratorKind {
             Self::Yoshida4 => "YOSHIDA4",
             Self::VelocityVerlet => "VELOCITY_VERLET",
             Self::WisdomHolman => "WISDOM_HOLMAN",
+            Self::Mercurius => "MERCURIUS",
         }
     }
 
@@ -93,6 +102,7 @@ impl IntegratorKind {
             Self::Yoshida4 => "yoshida4",
             Self::VelocityVerlet => "velocity_verlet",
             Self::WisdomHolman => "wisdom_holman",
+            Self::Mercurius => "mercurius",
         }
     }
 }
@@ -104,6 +114,7 @@ impl IntegratorKind {
             CoreIntegratorKind::Yoshida4 => Self::Yoshida4,
             CoreIntegratorKind::VelocityVerlet => Self::VelocityVerlet,
             CoreIntegratorKind::WisdomHolman => Self::WisdomHolman,
+            CoreIntegratorKind::Mercurius => Self::Mercurius,
         }
     }
 
@@ -113,6 +124,7 @@ impl IntegratorKind {
             Self::Yoshida4 => CoreIntegratorKind::Yoshida4,
             Self::VelocityVerlet => CoreIntegratorKind::VelocityVerlet,
             Self::WisdomHolman => CoreIntegratorKind::WisdomHolman,
+            Self::Mercurius => CoreIntegratorKind::Mercurius,
         }
     }
 }
