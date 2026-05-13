@@ -48,8 +48,8 @@ pub fn detect_belts(bodies: &[Body], dom_idx: usize, hints: &mut [BodyRenderHint
         .enumerate()
         .filter(|(i, _)| !hints[*i].show_trail)
         .map(|(i, b)| {
-            let dx = b.x - dom.x;
-            let dy = b.y - dom.y;
+            let dx = b.pos_x - dom.pos_x;
+            let dy = b.pos_y - dom.pos_y;
             (i, (dx * dx + dy * dy).sqrt())
         })
         .collect();

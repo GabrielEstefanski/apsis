@@ -92,12 +92,12 @@ impl RadiationField {
             }
 
             let source = RadiationSource {
-                x: src_body.x,
-                y: src_body.y,
-                z: src_body.z,
-                vx: src_body.vx,
-                vy: src_body.vy,
-                vz: src_body.vz,
+                x: src_body.pos_x,
+                y: src_body.pos_y,
+                z: src_body.pos_z,
+                vx: src_body.vel_x,
+                vy: src_body.vel_y,
+                vz: src_body.vel_z,
                 luminosity,
                 c,
             };
@@ -136,8 +136,8 @@ impl PerturbationForce for RadiationField {
                 continue;
             };
 
-            let pos = Vec3::new(body.x, body.y, body.z);
-            let vel = Vec3::new(body.vx, body.vy, body.vz);
+            let pos = Vec3::new(body.pos_x, body.pos_y, body.pos_z);
+            let vel = Vec3::new(body.vel_x, body.vel_y, body.vel_z);
 
             let a = if self.include_pr_drag {
                 pr_drag_acceleration(pos, vel, params, &self.source)

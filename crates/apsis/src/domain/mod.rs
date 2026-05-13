@@ -5,5 +5,6 @@
 //! Nothing here depends on runtime state, the physics thread, or persistence.
 
 pub mod body;
+pub mod body_arrays;
 pub mod body_preset;
 pub mod field;

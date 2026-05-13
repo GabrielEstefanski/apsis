@@ -11,6 +11,7 @@
 use std::sync::Arc;
 
 use crate::domain::body::Body;
+use crate::domain::body_arrays::BodyArrays;
 use crate::math::Vec3;
 use crate::physics::gravity::{BarnesHutEngine, Kernel, PlummerKernel};
 
@@ -118,9 +119,20 @@ pub trait ForceModel: Send {
 
 /// Default force model: Barnes-Hut / exact O(N²) gravity with Plummer
 /// softening, parameterised by the opening angle θ.
+///
+/// Owns the per-`compute()` SoA snapshot buffer
+/// ([`BodyArrays`](crate::domain::body_arrays::BodyArrays)). Each call to
+/// [`compute`](Self::compute) re-packs the buffer from the integrator's
+/// `Vec<Body>` and passes it to the engine. See
+/// `docs/experiments/2026-05-10-soa-layout.md` §Design constraint for the
+/// lifecycle contract.
 pub struct GravityForceModel {
     engine: BarnesHutEngine,
     theta: f64,
+    /// Per-`compute()` SoA snapshot. Reused across calls (allocator
+    /// hits zero after warmup); written by `pack_from`, read by the
+    /// engine, conceptually discarded when `compute` returns.
+    body_arrays: BodyArrays,
 }
 
 impl GravityForceModel {
@@ -130,7 +142,7 @@ impl GravityForceModel {
     /// - `max_depth`: Maximum octree depth (16 is sufficient for all
     ///   practical particle counts).
     pub fn new(theta: f64, max_depth: usize) -> Self {
-        Self { engine: BarnesHutEngine::new(max_depth), theta }
+        Self { engine: BarnesHutEngine::new(max_depth), theta, body_arrays: BodyArrays::new() }
     }
 }
 
@@ -144,6 +156,14 @@ impl ForceModel for GravityForceModel {
     }
 
     fn compute(&mut self, bodies: &[Body], acc: &mut [Vec3]) -> f64 {
+        // Pack the SoA snapshot for this compute() call. Body positions
+        // mutate between integrator substeps (IAS15's Picard iterations,
+        // VV's drift), so the snapshot is rebuilt each call from the
+        // authoritative AoS state. `pack_from` reuses buffer capacity;
+        // allocations occur only when N grows past a previous high-water
+        // mark.
+        self.body_arrays.pack_from(bodies);
+
         // Phase-split instrumentation for the IAS15 diagnostic harness:
         // separate the tree-build half from the traversal half of the
         // evaluate work so an optimisation that caches the tree across
@@ -152,13 +172,13 @@ impl ForceModel for GravityForceModel {
         // off; accesses thread-local storage owned by `ias15::profile`.
         #[cfg(feature = "ias15-profile")]
         let build_start = std::time::Instant::now();
-        self.engine.build(bodies);
+        self.engine.build(&self.body_arrays);
         #[cfg(feature = "ias15-profile")]
         crate::physics::integrator::ias15::profile::record_tree_build(build_start.elapsed());
 
         #[cfg(feature = "ias15-profile")]
         let traverse_start = std::time::Instant::now();
-        let pe = self.engine.evaluate(bodies, self.theta, acc);
+        let pe = self.engine.evaluate(&self.body_arrays, self.theta, acc);
         #[cfg(feature = "ias15-profile")]
         crate::physics::integrator::ias15::profile::record_tree_traverse(traverse_start.elapsed());
 

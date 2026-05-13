@@ -994,10 +994,10 @@ impl Ias15 {
         debug_assert_eq!(self.snap_x.len(), bodies.len(), "snapshot buffer size mismatch");
 
         for (dst, src) in self.snap_x.iter_mut().zip(bodies.iter()) {
-            *dst = Vec3::new(src.x, src.y, src.z);
+            *dst = Vec3::new(src.pos_x, src.pos_y, src.pos_z);
         }
         for (dst, src) in self.snap_v.iter_mut().zip(bodies.iter()) {
-            *dst = Vec3::new(src.vx, src.vy, src.vz);
+            *dst = Vec3::new(src.vel_x, src.vel_y, src.vel_z);
         }
         self.snap_b.copy_from_slice(&self.b);
         self.snap_e.copy_from_slice(&self.e);
@@ -1025,14 +1025,14 @@ impl Ias15 {
         debug_assert_eq!(self.snap_x.len(), bodies.len(), "snapshot buffer size mismatch");
 
         for (b, src) in bodies.iter_mut().zip(self.snap_x.iter()) {
-            b.x = src.x;
-            b.y = src.y;
-            b.z = src.z;
+            b.pos_x = src.x;
+            b.pos_y = src.y;
+            b.pos_z = src.z;
         }
         for (b, src) in bodies.iter_mut().zip(self.snap_v.iter()) {
-            b.vx = src.x;
-            b.vy = src.y;
-            b.vz = src.z;
+            b.vel_x = src.x;
+            b.vel_y = src.y;
+            b.vel_z = src.z;
         }
         self.b.copy_from_slice(&self.snap_b);
         self.e.copy_from_slice(&self.snap_e);
@@ -1069,12 +1069,12 @@ impl Integrator for Ias15 {
         // buffers without producing a usable signal at any controller
         // level. Cheap to assert in debug, free in release.
         debug_assert!(
-            bodies.iter().all(|b| b.x.is_finite()
-                && b.y.is_finite()
-                && b.z.is_finite()
-                && b.vx.is_finite()
-                && b.vy.is_finite()
-                && b.vz.is_finite()),
+            bodies.iter().all(|b| b.pos_x.is_finite()
+                && b.pos_y.is_finite()
+                && b.pos_z.is_finite()
+                && b.vel_x.is_finite()
+                && b.vel_y.is_finite()
+                && b.vel_z.is_finite()),
             "IAS15: non-finite input state — NaN/inf in body kinematics"
         );
 
@@ -1431,7 +1431,7 @@ impl Integrator for Ias15 {
     /// `(body.x_new, csx_new)` is the extended-precision continuation
     /// of `(body.x_old, csx_old) − (dx, dy)`.
     ///
-    /// A bare subtraction (`body.x -= dx`) without touching `csx`
+    /// A bare subtraction (`body.pos_x -= dx`) without touching `csx`
     /// would silently drop the compensation history accumulated up to
     /// the recentering call: the next `add_cs` invocation
     /// (`y = inp − csx_old`) consumes the stale `csx` entry and the
@@ -1449,8 +1449,8 @@ impl Integrator for Ias15 {
         // subtraction that the trait default would have done.
         if self.csx.len() != bodies.len() {
             for b in bodies.iter_mut() {
-                b.x -= dx;
-                b.y -= dy;
+                b.pos_x -= dx;
+                b.pos_y -= dy;
             }
             // FSAL cache invalidation: `acc` was at the pre-shift
             // body positions, which are no longer where `bodies` are.
@@ -1458,8 +1458,8 @@ impl Integrator for Ias15 {
             return;
         }
         for (i, b) in bodies.iter_mut().enumerate() {
-            add_cs(&mut b.x, &mut self.csx[i].x, -dx);
-            add_cs(&mut b.y, &mut self.csx[i].y, -dy);
+            add_cs(&mut b.pos_x, &mut self.csx[i].x, -dx);
+            add_cs(&mut b.pos_y, &mut self.csx[i].y, -dy);
         }
         // FSAL cache invalidation (same reason as the early-return
         // branch above): even with the compensation-aware shift, body
@@ -1557,9 +1557,9 @@ impl Ias15 {
         // once and the rest reuse. In steady-state (constant body count)
         // these loops are zero-alloc.
         x0.clear();
-        x0.extend(bodies.iter().map(|b| Vec3::new(b.x, b.y, b.z)));
+        x0.extend(bodies.iter().map(|b| Vec3::new(b.pos_x, b.pos_y, b.pos_z)));
         v0.clear();
-        v0.extend(bodies.iter().map(|b| Vec3::new(b.vx, b.vy, b.vz)));
+        v0.extend(bodies.iter().map(|b| Vec3::new(b.vel_x, b.vel_y, b.vel_z)));
 
         let mut last_residual = f64::INFINITY;
         let mut no_improve: u32 = 0;
@@ -1584,12 +1584,12 @@ impl Ias15 {
                 for i in 0..n {
                     let p = predict_ias15(x0[i], v0[i], a0[i], &self.b[i], s, dt_try);
                     let v = predict_v_ias15(v0[i], a0[i], &self.b[i], s, dt_try);
-                    bodies[i].x = p.x;
-                    bodies[i].y = p.y;
-                    bodies[i].z = p.z;
-                    bodies[i].vx = v.x;
-                    bodies[i].vy = v.y;
-                    bodies[i].vz = v.z;
+                    bodies[i].pos_x = p.x;
+                    bodies[i].pos_y = p.y;
+                    bodies[i].pos_z = p.z;
+                    bodies[i].vel_x = v.x;
+                    bodies[i].vel_y = v.y;
+                    bodies[i].vel_z = v.z;
                 }
 
                 // Evaluate acceleration at predicted (x, v).
@@ -1796,20 +1796,20 @@ impl Ias15 {
                     + a0[i].z);
 
             // First integrate the v·dt contribution to position.
-            let vdt_x = bodies[i].vx * dt;
-            let vdt_y = bodies[i].vy * dt;
-            let vdt_z = bodies[i].vz * dt;
+            let vdt_x = bodies[i].vel_x * dt;
+            let vdt_y = bodies[i].vel_y * dt;
+            let vdt_z = bodies[i].vel_z * dt;
 
-            add_cs(&mut bodies[i].x, &mut self.csx[i].x, vdt_x);
-            add_cs(&mut bodies[i].y, &mut self.csx[i].y, vdt_y);
-            add_cs(&mut bodies[i].z, &mut self.csx[i].z, vdt_z);
-            add_cs(&mut bodies[i].x, &mut self.csx[i].x, dx);
-            add_cs(&mut bodies[i].y, &mut self.csx[i].y, dy);
-            add_cs(&mut bodies[i].z, &mut self.csx[i].z, dz);
+            add_cs(&mut bodies[i].pos_x, &mut self.csx[i].x, vdt_x);
+            add_cs(&mut bodies[i].pos_y, &mut self.csx[i].y, vdt_y);
+            add_cs(&mut bodies[i].pos_z, &mut self.csx[i].z, vdt_z);
+            add_cs(&mut bodies[i].pos_x, &mut self.csx[i].x, dx);
+            add_cs(&mut bodies[i].pos_y, &mut self.csx[i].y, dy);
+            add_cs(&mut bodies[i].pos_z, &mut self.csx[i].z, dz);
 
-            add_cs(&mut bodies[i].vx, &mut self.csv[i].x, dvx);
-            add_cs(&mut bodies[i].vy, &mut self.csv[i].y, dvy);
-            add_cs(&mut bodies[i].vz, &mut self.csv[i].z, dvz);
+            add_cs(&mut bodies[i].vel_x, &mut self.csv[i].x, dvx);
+            add_cs(&mut bodies[i].vel_y, &mut self.csv[i].y, dvy);
+            add_cs(&mut bodies[i].vel_z, &mut self.csv[i].z, dvz);
         }
     }
 
@@ -2138,12 +2138,12 @@ fn add_cs(p: &mut f64, csp: &mut f64, inp: f64) {
 
 fn restore_xv(bodies: &mut [Body], x: &[Vec3], v: &[Vec3]) {
     for (i, b) in bodies.iter_mut().enumerate() {
-        b.x = x[i].x;
-        b.y = x[i].y;
-        b.z = x[i].z;
-        b.vx = v[i].x;
-        b.vy = v[i].y;
-        b.vz = v[i].z;
+        b.pos_x = x[i].x;
+        b.pos_y = x[i].y;
+        b.pos_z = x[i].z;
+        b.vel_x = v[i].x;
+        b.vel_y = v[i].y;
+        b.vel_z = v[i].z;
     }
 }
 
@@ -2928,8 +2928,8 @@ mod tests {
         let inclined_bodies: Vec<Body> = planar_bodies
             .iter()
             .map(|b| {
-                let pos = rotate_around_x(Vec3::new(b.x, b.y, b.z), INCLINATION);
-                let vel = rotate_around_x(Vec3::new(b.vx, b.vy, b.vz), INCLINATION);
+                let pos = rotate_around_x(Vec3::new(b.pos_x, b.pos_y, b.pos_z), INCLINATION);
+                let vel = rotate_around_x(Vec3::new(b.vel_x, b.vel_y, b.vel_z), INCLINATION);
                 Body::rocky(b.mass)
                     .at_3d(pos.x, pos.y, pos.z)
                     .with_velocity_3d(vel.x, vel.y, vel.z)
@@ -3003,8 +3003,8 @@ mod tests {
         let inclined_bodies: Vec<Body> = planar_bodies
             .iter()
             .map(|b| {
-                let pos = rotate_around_x(Vec3::new(b.x, b.y, b.z), INCLINATION);
-                let vel = rotate_around_x(Vec3::new(b.vx, b.vy, b.vz), INCLINATION);
+                let pos = rotate_around_x(Vec3::new(b.pos_x, b.pos_y, b.pos_z), INCLINATION);
+                let vel = rotate_around_x(Vec3::new(b.vel_x, b.vel_y, b.vel_z), INCLINATION);
                 Body::rocky(b.mass)
                     .at_3d(pos.x, pos.y, pos.z)
                     .with_velocity_3d(vel.x, vel.y, vel.z)
@@ -3089,8 +3089,8 @@ mod tests {
         let bodies: Vec<Body> = planar_bodies
             .iter()
             .map(|b| {
-                let pos = rotate_around_x(Vec3::new(b.x, b.y, b.z), INCLINATION);
-                let vel = rotate_around_x(Vec3::new(b.vx, b.vy, b.vz), INCLINATION);
+                let pos = rotate_around_x(Vec3::new(b.pos_x, b.pos_y, b.pos_z), INCLINATION);
+                let vel = rotate_around_x(Vec3::new(b.vel_x, b.vel_y, b.vel_z), INCLINATION);
                 Body::rocky(b.mass)
                     .at_3d(pos.x, pos.y, pos.z)
                     .with_velocity_3d(vel.x, vel.y, vel.z)

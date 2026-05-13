@@ -20,17 +20,17 @@ use crate::math::Vec3;
 /// Yoshida sub-steps (including negative w for the middle sub-step).
 pub fn kick(bodies: &mut [Body], acc: &[Vec3], dt: f64) {
     for (body, a) in bodies.iter_mut().zip(acc.iter()) {
-        body.vx += a.x * dt;
-        body.vy += a.y * dt;
-        body.vz += a.z * dt;
+        body.vel_x += a.x * dt;
+        body.vel_y += a.y * dt;
+        body.vel_z += a.z * dt;
     }
 }
 
 /// Advance all positions using the current velocities: `x += v · dt`.
 pub fn drift(bodies: &mut [Body], dt: f64) {
     for body in bodies.iter_mut() {
-        body.x += body.vx * dt;
-        body.y += body.vy * dt;
-        body.z += body.vz * dt;
+        body.pos_x += body.vel_x * dt;
+        body.pos_y += body.vel_y * dt;
+        body.pos_z += body.vel_z * dt;
     }
 }

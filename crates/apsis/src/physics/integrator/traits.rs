@@ -466,16 +466,16 @@ pub trait Integrator: Send {
     /// IAS15 carries a Neumaier-style compensation buffer (`csx`) that
     /// pairs with each body's stored position. The pair `(x, csx)`
     /// represents an extended-precision running sum: every accepted
-    /// substep updates `x` via `add_cs(p = body.x, csp = csx, inp =
+    /// substep updates `x` via `add_cs(p = body.pos_x, csp = csx, inp =
     /// position increment)`, which preserves low-order bits across the
     /// long integration horizons IAS15 advertises (~10⁹ orbits at f64
     /// machine precision, per Rein & Spiegel 2015 §3).
     ///
     /// External translations of body position — most commonly the
     /// periodic COM-recentering applied by `System::step` — disrupt this
-    /// invariant when written as a bare `body.x -= dx`. The compensation
+    /// invariant when written as a bare `body.pos_x -= dx`. The compensation
     /// `csx` then references the rounding history of the *pre-shift*
-    /// running sum, but `body.x` has been arbitrarily perturbed; the next
+    /// running sum, but `body.pos_x` has been arbitrarily perturbed; the next
     /// `add_cs` call wipes the prior compensation rather than continuing
     /// to track it. For a single sub-ULP shift this loss is negligible,
     /// but it accumulates into a bit-reproducibility gap on long runs and
@@ -490,8 +490,8 @@ pub trait Integrator: Send {
     /// overrides to use its own buffers.
     fn recenter_bodies(&mut self, bodies: &mut [Body], dx: f64, dy: f64) {
         for b in bodies.iter_mut() {
-            b.x -= dx;
-            b.y -= dy;
+            b.pos_x -= dx;
+            b.pos_y -= dy;
         }
     }
 

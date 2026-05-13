@@ -200,12 +200,12 @@ fn body_centroid(bodies: &[apsis::domain::body::Body]) -> glam::DVec3 {
     let (mut min_y, mut max_y) = (f64::INFINITY, f64::NEG_INFINITY);
     let (mut min_z, mut max_z) = (f64::INFINITY, f64::NEG_INFINITY);
     for b in bodies {
-        min_x = min_x.min(b.x);
-        max_x = max_x.max(b.x);
-        min_y = min_y.min(b.y);
-        max_y = max_y.max(b.y);
-        min_z = min_z.min(b.z);
-        max_z = max_z.max(b.z);
+        min_x = min_x.min(b.pos_x);
+        max_x = max_x.max(b.pos_x);
+        min_y = min_y.min(b.pos_y);
+        max_y = max_y.max(b.pos_y);
+        min_z = min_z.min(b.pos_z);
+        max_z = max_z.max(b.pos_z);
     }
     glam::DVec3::new((min_x + max_x) * 0.5, (min_y + max_y) * 0.5, (min_z + max_z) * 0.5)
 }
@@ -217,9 +217,9 @@ fn bounding_sphere_distance(bodies: &[apsis::domain::body::Body], centroid: glam
     let mut extent: f64 = 0.0;
     for b in bodies {
         extent = extent
-            .max((b.x - centroid.x).abs())
-            .max((b.y - centroid.y).abs())
-            .max((b.z - centroid.z).abs());
+            .max((b.pos_x - centroid.x).abs())
+            .max((b.pos_y - centroid.y).abs())
+            .max((b.pos_z - centroid.z).abs());
     }
     let extent = extent.max(1e-9);
     let half_fov = (crate::app::camera::FOV_Y_RAD as f64) * 0.5;

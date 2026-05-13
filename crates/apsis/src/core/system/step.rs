@@ -7,6 +7,7 @@ use crate::core::hooks::{
 };
 use crate::core::system::System;
 use crate::core::system::helpers::compute_closeness;
+use crate::domain::body_arrays::BodyArrays;
 use crate::math::Vec3;
 use crate::physics::energy::{angular_momentum_z, kinetic_energy, total_energy};
 use crate::physics::integrator::IntegratorContext;
@@ -53,8 +54,8 @@ impl System {
             && self.integrator.kind() != IntegratorKind::Ias15
             && self.scratch_acc.len() == self.bodies.len();
         if need_order2 {
-            pre_x0 = self.bodies.iter().map(|b| Vec3::new(b.x, b.y, b.z)).collect();
-            pre_v0 = self.bodies.iter().map(|b| Vec3::new(b.vx, b.vy, b.vz)).collect();
+            pre_x0 = self.bodies.iter().map(|b| Vec3::new(b.pos_x, b.pos_y, b.pos_z)).collect();
+            pre_v0 = self.bodies.iter().map(|b| Vec3::new(b.vel_x, b.vel_y, b.vel_z)).collect();
             pre_a0 = self.scratch_acc.clone();
         } else {
             pre_x0 = Vec::new();
@@ -145,8 +146,15 @@ impl System {
 
         if self.adaptive_theta && !self.bodies.is_empty() {
             if let Some(engine) = self.force_model.bh_engine() {
+                // theta_error_proxy reads body 0's pos / softening from
+                // the SoA snapshot. Pack a transient buffer for this one
+                // call (~40 µs at N = 10⁴; called once per step) — the
+                // ForceModel's own snapshot was packed at the previous
+                // compute() and may be stale relative to current bodies.
                 let theta = self.force_model.theta();
-                let e_theta = engine.theta_error_proxy(0, &self.bodies, theta);
+                let mut probe_arrays = BodyArrays::with_capacity(self.bodies.len());
+                probe_arrays.pack_from(&self.bodies);
+                let e_theta = engine.theta_error_proxy(0, &probe_arrays, theta);
                 let new_theta = self.theta_ctrl.update(e_theta, self.current_dt);
                 self.force_model.set_theta(new_theta);
             }
