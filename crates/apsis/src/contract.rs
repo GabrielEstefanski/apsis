@@ -24,39 +24,6 @@
 //! the quantitative gates for those two; the tests below carry the
 //! generic gates that any federated extension can rely on.
 //!
-//! ## What this contract is, and why it exists
-//!
-//! N-body simulators routinely accept user-defined non-gravitational
-//! forces (radiation pressure, J2 oblateness, atmospheric drag, custom
-//! research perturbations). The accepted way of integrating them — pass
-//! a callback, hope for the best — is informal. There is no statement of
-//! what the simulator promises about the environment in which the
-//! callback runs, no statement of what the callback may rely on across
-//! multiple registrations, no machine-checkable record of what counts as
-//! a valid configuration. The thesis APSIS advances is that this can be
-//! made formal: perturbations are first-class scientific artifacts under
-//! a written, versioned, executable contract.
-//!
-//! Concretely, against the comparable surface in REBOUND/REBOUNDx:
-//!
-//! ```text
-//! | Aspect            | REBOUND   | APSIS         |
-//! |-------------------|-----------|---------------|
-//! | formal contract   | implicit  | explicit      |
-//! | validation        | partial   | systematic    |
-//! | composition       | ad hoc    | specified     |
-//! | verifiability     | limited   | executable    |
-//! ```
-//!
-//! "Systematic" here is **not** a claim of broader test coverage — REBOUND
-//! has a wider validation portfolio measured by problem count. It is a
-//! claim of **shape**: every guarantee in this module has a named test
-//! gated in CI, every locked baseline lives in `docs/experiments/`, every
-//! warning the simulator can emit is asserted to fire under exactly one
-//! known configuration. The property that distinguishes APSIS is that a
-//! reviewer can **mechanically check** the claims, not that the claims
-//! are quantitatively stronger.
-//!
 //! ## Scope and counter-scope
 //!
 //! Two layers of guarantee live below — read both before writing a
