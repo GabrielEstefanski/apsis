@@ -89,18 +89,23 @@ impl PySystem {
     ///   used by IAS15. `None` (default) keeps the integrator's
     ///   built-in default ($10^{-9}$, per Rein & Spiegel 2015).
     ///   Ignored by fixed-step integrators.
+    /// - `mercurius_alpha`: Hill-radius multiplier for the Mercurius
+    ///   close-encounter changeover. `None` (default) keeps the
+    ///   integrator's built-in $\alpha = 3$, matching REBOUND. Ignored
+    ///   by non-Mercurius integrators.
     /// - `exact_gravity`: drop the Plummer softening on every body in
     ///   one call. Equivalent to building the bodies with
     ///   `Body.<material>(...).unsoftened()` but applies system-wide
     ///   without per-body chaining. Default `False`.
     #[new]
-    #[pyo3(signature = (*, bodies, units, integrator, dt, epsilon=None, exact_gravity=false))]
+    #[pyo3(signature = (*, bodies, units, integrator, dt, epsilon=None, mercurius_alpha=None, exact_gravity=false))]
     fn new(
         bodies: Vec<PyBody>,
         units: PyUnitSystem,
         integrator: &Bound<'_, PyAny>,
         dt: f64,
         epsilon: Option<f64>,
+        mercurius_alpha: Option<f64>,
         exact_gravity: bool,
     ) -> PyResult<Self> {
         if !dt.is_finite() || dt <= 0.0 {
@@ -117,6 +122,14 @@ impl PySystem {
                 format!("expected a strictly positive finite float, got {eps}"),
             ));
         }
+        if let Some(alpha) = mercurius_alpha
+            && (!alpha.is_finite() || alpha < 0.0)
+        {
+            return Err(value_error(
+                "mercurius_alpha",
+                format!("expected a non-negative finite float, got {alpha}"),
+            ));
+        }
 
         let kind: CoreIntegratorKind = resolve_integrator(integrator)?;
         let body_vec = bodies.into_iter().map(|b| b.inner).collect::<Vec<_>>();
@@ -127,6 +140,9 @@ impl PySystem {
         }
         if let Some(eps) = epsilon {
             sys.set_ias15_epsilon(eps);
+        }
+        if let Some(alpha) = mercurius_alpha {
+            sys.set_mercurius_alpha(alpha);
         }
 
         Ok(Self { inner: sys })
