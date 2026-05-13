@@ -201,9 +201,9 @@ impl System {
             let bi = &self.bodies[i];
             for j in (i + 1)..self.bodies.len() {
                 let bj = &self.bodies[j];
-                let dx = bi.x - bj.x;
-                let dy = bi.y - bj.y;
-                let dz = bi.z - bj.z;
+                let dx = bi.pos_x - bj.pos_x;
+                let dy = bi.pos_y - bj.pos_y;
+                let dz = bi.pos_z - bj.pos_z;
                 let r2 = dx * dx + dy * dy + dz * dz;
                 if r2 < 1e-60 {
                     continue;
@@ -247,9 +247,9 @@ mod tests {
         let mut min_period = f64::MAX;
         for i in 0..bodies.len() {
             for j in (i + 1)..bodies.len() {
-                let dx = bodies[i].x - bodies[j].x;
-                let dy = bodies[i].y - bodies[j].y;
-                let dz = bodies[i].z - bodies[j].z;
+                let dx = bodies[i].pos_x - bodies[j].pos_x;
+                let dy = bodies[i].pos_y - bodies[j].pos_y;
+                let dz = bodies[i].pos_z - bodies[j].pos_z;
                 let r2 = dx * dx + dy * dy + dz * dz;
                 let r = r2.sqrt();
                 let mu = g * (bodies[i].mass + bodies[j].mass);
@@ -314,7 +314,8 @@ mod tests {
         // not the {0, body_at_10} or {1, body_at_10} pairs whose periods
         // are an order of magnitude longer.
         let bodies_now = sys.bodies();
-        let r_close = (bodies_now[1].x - bodies_now[0].x).hypot(bodies_now[1].y - bodies_now[0].y);
+        let r_close = (bodies_now[1].pos_x - bodies_now[0].pos_x)
+            .hypot(bodies_now[1].pos_y - bodies_now[0].pos_y);
         assert!(r_close < 2.0, "closest pair must remain close after one step");
     }
 

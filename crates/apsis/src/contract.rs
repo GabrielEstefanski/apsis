@@ -278,9 +278,9 @@ mod tests {
     impl PerturbationForce for LinearDrag {
         fn accumulate(&self, bodies: &[Body], acc: &mut [Vec3]) {
             for (b, a) in bodies.iter().zip(acc.iter_mut()) {
-                a.x -= self.0 * b.vx;
-                a.y -= self.0 * b.vy;
-                a.z -= self.0 * b.vz;
+                a.x -= self.0 * b.vel_x;
+                a.y -= self.0 * b.vel_y;
+                a.z -= self.0 * b.vel_z;
             }
         }
     }
@@ -304,9 +304,9 @@ mod tests {
     impl PerturbationForce for RadialPull {
         fn accumulate(&self, bodies: &[Body], acc: &mut [Vec3]) {
             for (b, a) in bodies.iter().zip(acc.iter_mut()) {
-                a.x -= self.0 * b.x;
-                a.y -= self.0 * b.y;
-                a.z -= self.0 * b.z;
+                a.x -= self.0 * b.pos_x;
+                a.y -= self.0 * b.pos_y;
+                a.z -= self.0 * b.pos_z;
             }
         }
     }
@@ -359,18 +359,25 @@ mod tests {
     /// of every f64 field.
     #[derive(Clone, PartialEq, Debug)]
     struct BodyState {
-        x: f64,
-        y: f64,
-        z: f64,
-        vx: f64,
-        vy: f64,
-        vz: f64,
+        pos_x: f64,
+        pos_y: f64,
+        pos_z: f64,
+        vel_x: f64,
+        vel_y: f64,
+        vel_z: f64,
     }
 
     fn snapshot(sys: &System) -> Vec<BodyState> {
         sys.bodies()
             .iter()
-            .map(|b| BodyState { x: b.x, y: b.y, z: b.z, vx: b.vx, vy: b.vy, vz: b.vz })
+            .map(|b| BodyState {
+                pos_x: b.pos_x,
+                pos_y: b.pos_y,
+                pos_z: b.pos_z,
+                vel_x: b.vel_x,
+                vel_y: b.vel_y,
+                vel_z: b.vel_z,
+            })
             .collect()
     }
 

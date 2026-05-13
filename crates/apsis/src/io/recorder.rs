@@ -166,7 +166,7 @@ impl SimRecorder {
 
         // ── Body rows ──────────────────────────────────────────────────────
         for (i, body) in bodies.iter().enumerate() {
-            let ke = 0.5 * body.mass * (body.vx * body.vx + body.vy * body.vy);
+            let ke = 0.5 * body.mass * (body.vel_x * body.vel_x + body.vel_y * body.vel_y);
             let pe = pe_per_body.get(i).copied().unwrap_or(f64::NAN);
 
             let orb = orbital.get(i).and_then(|e| *e);
@@ -190,10 +190,10 @@ impl SimRecorder {
                 self.bodies_writer,
                 "{t:.6e},{i},{:.6e},{:.6e},{:.6e},{:.6e},{:.6e},{:.6e},{:.6e},\
                  {},{},{},{},{},{:.4},{},{}",
-                body.x,
-                body.y,
-                body.vx,
-                body.vy,
+                body.pos_x,
+                body.pos_y,
+                body.vel_x,
+                body.vel_y,
                 body.mass,
                 ke,
                 pe,

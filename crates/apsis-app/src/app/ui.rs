@@ -243,10 +243,10 @@ impl SelectionForm {
     pub fn from_body(b: &Body, name: &str) -> Self {
         Self {
             name: name.to_owned(),
-            x: format!("{:.6}", b.x),
-            y: format!("{:.6}", b.y),
-            vx: format!("{:.6}", b.vx),
-            vy: format!("{:.6}", b.vy),
+            x: format!("{:.6}", b.pos_x),
+            y: format!("{:.6}", b.pos_y),
+            vx: format!("{:.6}", b.vel_x),
+            vy: format!("{:.6}", b.vel_y),
             mass: format!("{:.6}", b.mass),
             density: format!("{:.6e}", b.density),
             error: None,

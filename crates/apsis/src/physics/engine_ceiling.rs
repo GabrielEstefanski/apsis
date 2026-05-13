@@ -49,6 +49,7 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use crate::domain::body::Body;
+use crate::domain::body_arrays::BodyArrays;
 use crate::math::Vec3;
 use crate::physics::gravity::BarnesHutEngine;
 use crate::physics::integrator::force_model::GravityForceModel;
@@ -132,12 +133,13 @@ fn measure_v(n: usize, trail_on: bool) -> RowV {
     let mut bodies = sphere_distribution_lognormal(n, SEED);
     let mut engine = BarnesHutEngine::new(16);
     let mut acc = vec![Vec3::ZERO; n];
+    let mut arrays = BodyArrays::with_capacity(n);
     let mut trail: Vec<Vec3> =
         if trail_on { Vec::with_capacity(n * MEASURED_STEPS) } else { Vec::new() };
 
     // Warmup
     for _ in 0..WARMUP_STEPS {
-        vv_step_untimed(&mut engine, &mut bodies, &mut acc, &mut trail, trail_on);
+        vv_step_untimed(&mut engine, &mut bodies, &mut arrays, &mut acc, &mut trail, trail_on);
     }
 
     // Measured
@@ -155,7 +157,15 @@ fn measure_v(n: usize, trail_on: bool) -> RowV {
     };
     let total_start = Instant::now();
     for _ in 0..MEASURED_STEPS {
-        vv_step_timed(&mut engine, &mut bodies, &mut acc, &mut trail, trail_on, &mut row);
+        vv_step_timed(
+            &mut engine,
+            &mut bodies,
+            &mut arrays,
+            &mut acc,
+            &mut trail,
+            trail_on,
+            &mut row,
+        );
     }
     row.t_total_ns = total_start.elapsed().as_nanos() as u64;
     row
@@ -166,22 +176,29 @@ fn measure_v(n: usize, trail_on: bool) -> RowV {
 /// Each phase timed; counters merged from `evaluate_profile`. Trail push
 /// timed inside the same step boundary so the trail variant correctly
 /// includes all per-step trail cost.
+///
+/// The SoA snapshot is repacked before each force eval (twice per step,
+/// matching `GravityForceModel::compute`'s per-call pack pattern in
+/// production). Pack cost lands inside `t_tree_build_ns` so the engine-
+/// ceiling profile keeps a single tree-prep accounting bucket.
 #[inline(always)]
 fn vv_step_timed(
     engine: &mut BarnesHutEngine,
     bodies: &mut [Body],
+    arrays: &mut BodyArrays,
     acc: &mut [Vec3],
     trail: &mut Vec<Vec3>,
     trail_on: bool,
     row: &mut RowV,
 ) {
-    // Force(t): build + walk
+    // Force(t): pack + build + walk
     let t = Instant::now();
-    engine.build(bodies);
+    arrays.pack_from(bodies);
+    engine.build(arrays);
     row.t_tree_build_ns += t.elapsed().as_nanos() as u64;
 
     let t = Instant::now();
-    let (_, c) = engine.evaluate_profile(bodies, THETA, acc);
+    let (_, c) = engine.evaluate_profile(arrays, THETA, acc);
     row.t_bh_walk_ns += t.elapsed().as_nanos() as u64;
     row.n_node_visits += c.n_node_visits;
     row.n_bh_accepted += c.n_bh_accepted;
@@ -193,13 +210,14 @@ fn vv_step_timed(
     drift(bodies, DT);
     row.t_integrator_ns += t.elapsed().as_nanos() as u64;
 
-    // Force(t+dt): build + walk
+    // Force(t+dt): pack + build + walk
     let t = Instant::now();
-    engine.build(bodies);
+    arrays.pack_from(bodies);
+    engine.build(arrays);
     row.t_tree_build_ns += t.elapsed().as_nanos() as u64;
 
     let t = Instant::now();
-    let (_, c) = engine.evaluate_profile(bodies, THETA, acc);
+    let (_, c) = engine.evaluate_profile(arrays, THETA, acc);
     row.t_bh_walk_ns += t.elapsed().as_nanos() as u64;
     row.n_node_visits += c.n_node_visits;
     row.n_bh_accepted += c.n_bh_accepted;
@@ -213,7 +231,7 @@ fn vv_step_timed(
     if trail_on {
         let t = Instant::now();
         for b in bodies.iter() {
-            trail.push(Vec3::new(b.x, b.y, b.z));
+            trail.push(Vec3::new(b.pos_x, b.pos_y, b.pos_z));
         }
         row.t_trail_ns += t.elapsed().as_nanos() as u64;
     }
@@ -223,20 +241,23 @@ fn vv_step_timed(
 fn vv_step_untimed(
     engine: &mut BarnesHutEngine,
     bodies: &mut [Body],
+    arrays: &mut BodyArrays,
     acc: &mut [Vec3],
     trail: &mut Vec<Vec3>,
     trail_on: bool,
 ) {
-    engine.build(bodies);
-    let (_, _) = engine.evaluate_profile(bodies, THETA, acc);
+    arrays.pack_from(bodies);
+    engine.build(arrays);
+    let (_, _) = engine.evaluate_profile(arrays, THETA, acc);
     kick(bodies, acc, 0.5 * DT);
     drift(bodies, DT);
-    engine.build(bodies);
-    let (_, _) = engine.evaluate_profile(bodies, THETA, acc);
+    arrays.pack_from(bodies);
+    engine.build(arrays);
+    let (_, _) = engine.evaluate_profile(arrays, THETA, acc);
     kick(bodies, acc, 0.5 * DT);
     if trail_on {
         for b in bodies.iter() {
-            trail.push(Vec3::new(b.x, b.y, b.z));
+            trail.push(Vec3::new(b.pos_x, b.pos_y, b.pos_z));
         }
     }
 }
@@ -244,18 +265,18 @@ fn vv_step_untimed(
 #[inline(always)]
 fn kick(bodies: &mut [Body], acc: &[Vec3], half_dt: f64) {
     for (b, a) in bodies.iter_mut().zip(acc.iter()) {
-        b.vx += a.x * half_dt;
-        b.vy += a.y * half_dt;
-        b.vz += a.z * half_dt;
+        b.vel_x += a.x * half_dt;
+        b.vel_y += a.y * half_dt;
+        b.vel_z += a.z * half_dt;
     }
 }
 
 #[inline(always)]
 fn drift(bodies: &mut [Body], dt: f64) {
     for b in bodies.iter_mut() {
-        b.x += b.vx * dt;
-        b.y += b.vy * dt;
-        b.z += b.vz * dt;
+        b.pos_x += b.vel_x * dt;
+        b.pos_y += b.vel_y * dt;
+        b.pos_z += b.vel_z * dt;
     }
 }
 
@@ -447,7 +468,7 @@ fn sphere_distribution_lognormal(n: usize, seed: u64) -> Vec<Body> {
         let normal = (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos();
         let mass = normal.exp();
         let mut b = Body::rocky(mass).at(x, y).with_velocity(0.0, 0.0);
-        b.z = z;
+        b.pos_z = z;
         bodies.push(b);
     }
     bodies

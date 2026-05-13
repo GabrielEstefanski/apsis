@@ -20,7 +20,7 @@ impl BodyField for KineticEnergyField {
         // For planar input `vz = 0` the trailing `+ vz²` is an
         // IEEE-754-exact zero addition.
         let b = &ctx.bodies[i];
-        0.5 * b.mass * (b.vx * b.vx + b.vy * b.vy + b.vz * b.vz)
+        0.5 * b.mass * (b.vel_x * b.vel_x + b.vel_y * b.vel_y + b.vel_z * b.vel_z)
     }
     fn prefers_log(&self) -> bool {
         true

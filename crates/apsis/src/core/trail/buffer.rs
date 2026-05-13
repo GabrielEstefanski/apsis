@@ -182,7 +182,7 @@ impl TrailBuffer {
         let base = col * n;
 
         for (i, b) in bodies.iter().enumerate() {
-            self.positions[base + i] = [b.x as f32, b.y as f32, b.z as f32, 0.0];
+            self.positions[base + i] = [b.pos_x as f32, b.pos_y as f32, b.pos_z as f32, 0.0];
         }
 
         // Dirty tracking — escalate to Full after too many incremental columns.

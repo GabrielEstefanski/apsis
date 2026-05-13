@@ -169,9 +169,9 @@ fn write_sample(w: &mut BufWriter<File>, sample: u64, sys: &System) {
         w,
         "{sample},{t:.18e},{x0:.18e},{y0:.18e},{vx0:.18e},{vy0:.18e},{x1:.18e},{y1:.18e},{vx1:.18e},{vy1:.18e},{x2:.18e},{y2:.18e},{vx2:.18e},{vy2:.18e},{e:.18e}",
         t = sys.t(),
-        x0 = b0.x, y0 = b0.y, vx0 = b0.vx, vy0 = b0.vy,
-        x1 = b1.x, y1 = b1.y, vx1 = b1.vx, vy1 = b1.vy,
-        x2 = b2.x, y2 = b2.y, vx2 = b2.vx, vy2 = b2.vy,
+        x0 = b0.pos_x, y0 = b0.pos_y, vx0 = b0.vel_x, vy0 = b0.vel_y,
+        x1 = b1.pos_x, y1 = b1.pos_y, vx1 = b1.vel_x, vy1 = b1.vel_y,
+        x2 = b2.pos_x, y2 = b2.pos_y, vx2 = b2.vel_x, vy2 = b2.vel_y,
         e = e_total,
     )
     .unwrap();
@@ -185,12 +185,13 @@ fn write_sample(w: &mut BufWriter<File>, sample: u64, sys: &System) {
 /// so the same code works for the Pythagorean (3, 4, 5) and the figure-8
 /// (1, 1, 1) configurations without modification.
 fn total_energy(bodies: &[Body]) -> f64 {
-    let ke: f64 = bodies.iter().map(|b| 0.5 * b.mass * (b.vx * b.vx + b.vy * b.vy)).sum();
+    let ke: f64 =
+        bodies.iter().map(|b| 0.5 * b.mass * (b.vel_x * b.vel_x + b.vel_y * b.vel_y)).sum();
     let mut pe = 0.0;
     for i in 0..bodies.len() {
         for j in (i + 1)..bodies.len() {
-            let dx = bodies[i].x - bodies[j].x;
-            let dy = bodies[i].y - bodies[j].y;
+            let dx = bodies[i].pos_x - bodies[j].pos_x;
+            let dy = bodies[i].pos_y - bodies[j].pos_y;
             let r = (dx * dx + dy * dy).sqrt();
             pe -= bodies[i].mass * bodies[j].mass / r;
         }

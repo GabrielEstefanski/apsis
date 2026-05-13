@@ -22,16 +22,16 @@ pub fn zero_com_velocity(bodies: &mut [Body], total_mass: f64) {
         return;
     }
 
-    let vx_cm = bodies.iter().map(|b| b.mass * b.vx).sum::<f64>() / total_mass;
-    let vy_cm = bodies.iter().map(|b| b.mass * b.vy).sum::<f64>() / total_mass;
+    let vx_cm = bodies.iter().map(|b| b.mass * b.vel_x).sum::<f64>() / total_mass;
+    let vy_cm = bodies.iter().map(|b| b.mass * b.vel_y).sum::<f64>() / total_mass;
 
     if vx_cm.hypot(vy_cm) < 1e-15 {
         return;
     }
 
     for b in bodies.iter_mut() {
-        b.vx -= vx_cm;
-        b.vy -= vy_cm;
+        b.vel_x -= vx_cm;
+        b.vel_y -= vy_cm;
     }
 }
 
@@ -43,16 +43,16 @@ pub fn recenter_com(bodies: &mut [Body], trails: &mut [VecDeque<(f64, f64)>], to
         return;
     }
 
-    let x_cm = bodies.iter().map(|b| b.mass * b.x).sum::<f64>() / total_mass;
-    let y_cm = bodies.iter().map(|b| b.mass * b.y).sum::<f64>() / total_mass;
+    let x_cm = bodies.iter().map(|b| b.mass * b.pos_x).sum::<f64>() / total_mass;
+    let y_cm = bodies.iter().map(|b| b.mass * b.pos_y).sum::<f64>() / total_mass;
 
     if x_cm.hypot(y_cm) < 1e-14 {
         return;
     }
 
     for b in bodies.iter_mut() {
-        b.x -= x_cm;
-        b.y -= y_cm;
+        b.pos_x -= x_cm;
+        b.pos_y -= y_cm;
     }
 
     for trail in trails.iter_mut() {
@@ -72,8 +72,8 @@ pub fn com_offset(bodies: &[Body], total_mass: f64) -> Option<(f64, f64)> {
     if total_mass <= 0.0 || bodies.is_empty() {
         return None;
     }
-    let x_cm = bodies.iter().map(|b| b.mass * b.x).sum::<f64>() / total_mass;
-    let y_cm = bodies.iter().map(|b| b.mass * b.y).sum::<f64>() / total_mass;
+    let x_cm = bodies.iter().map(|b| b.mass * b.pos_x).sum::<f64>() / total_mass;
+    let y_cm = bodies.iter().map(|b| b.mass * b.pos_y).sum::<f64>() / total_mass;
     if x_cm.hypot(y_cm) < 1e-14 {
         return None;
     }
@@ -86,8 +86,8 @@ pub fn com_offset(bodies: &[Body], total_mass: f64) -> Option<(f64, f64)> {
 /// for translating any associated trail data by the same vector.
 pub fn apply_body_shift(bodies: &mut [Body], dx: f64, dy: f64) {
     for b in bodies.iter_mut() {
-        b.x -= dx;
-        b.y -= dy;
+        b.pos_x -= dx;
+        b.pos_y -= dy;
     }
 }
 
@@ -111,8 +111,8 @@ mod tests {
         let m: f64 = bodies.iter().map(|b| b.mass).sum();
         zero_com_velocity(&mut bodies, m);
 
-        let vcm_x: f64 = bodies.iter().map(|b| b.mass * b.vx).sum::<f64>() / m;
-        let vcm_y: f64 = bodies.iter().map(|b| b.mass * b.vy).sum::<f64>() / m;
+        let vcm_x: f64 = bodies.iter().map(|b| b.mass * b.vel_x).sum::<f64>() / m;
+        let vcm_y: f64 = bodies.iter().map(|b| b.mass * b.vel_y).sum::<f64>() / m;
         assert!(vcm_x.abs() < 1e-12, "vx_cm must be 0 after correction");
         assert!(vcm_y.abs() < 1e-12, "vy_cm must be 0 after correction");
     }
@@ -121,9 +121,9 @@ mod tests {
     fn zero_com_velocity_preserves_relative_velocity() {
         let mut bodies = vec![body(0.0, 0.0, 1.0, 0.0, 1.0), body(1.0, 0.0, 3.0, 0.0, 1.0)];
         let m = 2.0;
-        let dv_before = bodies[1].vx - bodies[0].vx;
+        let dv_before = bodies[1].vel_x - bodies[0].vel_x;
         zero_com_velocity(&mut bodies, m);
-        let dv_after = bodies[1].vx - bodies[0].vx;
+        let dv_after = bodies[1].vel_x - bodies[0].vel_x;
         assert!(
             (dv_after - dv_before).abs() < 1e-12,
             "relative velocity must not change: only the bulk frame shifts"
@@ -139,8 +139,8 @@ mod tests {
         let mut trails: Vec<VecDeque<(f64, f64)>> = vec![VecDeque::new(), VecDeque::new()];
         recenter_com(&mut bodies, &mut trails, m);
 
-        let cx: f64 = bodies.iter().map(|b| b.mass * b.x).sum::<f64>() / m;
-        let cy: f64 = bodies.iter().map(|b| b.mass * b.y).sum::<f64>() / m;
+        let cx: f64 = bodies.iter().map(|b| b.mass * b.pos_x).sum::<f64>() / m;
+        let cy: f64 = bodies.iter().map(|b| b.mass * b.pos_y).sum::<f64>() / m;
         assert!(cx.abs() < 1e-12, "x_cm must be 0 after recentering");
         assert!(cy.abs() < 1e-12, "y_cm must be 0 after recentering");
     }
@@ -150,9 +150,9 @@ mod tests {
         let mut bodies = vec![body(100.0, 0.0, 0.0, 0.0, 2.0), body(104.0, 0.0, 0.0, 0.0, 1.0)];
         let m = 3.0;
         let mut trails = vec![VecDeque::new(), VecDeque::new()];
-        let dx_before = bodies[1].x - bodies[0].x;
+        let dx_before = bodies[1].pos_x - bodies[0].pos_x;
         recenter_com(&mut bodies, &mut trails, m);
-        let dx_after = bodies[1].x - bodies[0].x;
+        let dx_after = bodies[1].pos_x - bodies[0].pos_x;
         assert!(
             (dx_after - dx_before).abs() < 1e-12,
             "separation must not change: recentering is a rigid translation"

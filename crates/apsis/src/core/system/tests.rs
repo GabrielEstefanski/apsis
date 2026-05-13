@@ -86,10 +86,10 @@ fn two_body_deterministic_system() -> System {
 fn assert_bodies_bit_equal(a: &[Body], b: &[Body], context: &str) {
     assert_eq!(a.len(), b.len(), "{context}: body count differs");
     for (i, (ba, bb)) in a.iter().zip(b.iter()).enumerate() {
-        assert_eq!(ba.x.to_bits(), bb.x.to_bits(), "{context}: body {i} x differs");
-        assert_eq!(ba.y.to_bits(), bb.y.to_bits(), "{context}: body {i} y differs");
-        assert_eq!(ba.vx.to_bits(), bb.vx.to_bits(), "{context}: body {i} vx differs");
-        assert_eq!(ba.vy.to_bits(), bb.vy.to_bits(), "{context}: body {i} vy differs");
+        assert_eq!(ba.pos_x.to_bits(), bb.pos_x.to_bits(), "{context}: body {i} x differs");
+        assert_eq!(ba.pos_y.to_bits(), bb.pos_y.to_bits(), "{context}: body {i} y differs");
+        assert_eq!(ba.vel_x.to_bits(), bb.vel_x.to_bits(), "{context}: body {i} vx differs");
+        assert_eq!(ba.vel_y.to_bits(), bb.vel_y.to_bits(), "{context}: body {i} vy differs");
     }
 }
 
@@ -343,8 +343,8 @@ mod wh_guard {
             sys.step();
         }
         for b in sys.bodies() {
-            assert!(b.x.is_finite() && b.y.is_finite(), "body left finite domain");
-            assert!(b.vx.is_finite() && b.vy.is_finite(), "velocity left finite domain");
+            assert!(b.pos_x.is_finite() && b.pos_y.is_finite(), "body left finite domain");
+            assert!(b.vel_x.is_finite() && b.vel_y.is_finite(), "velocity left finite domain");
         }
     }
 
@@ -497,8 +497,8 @@ mod wh_guard {
         let kin = wh.interpolate_kinematics(0.0, snap.dt);
 
         for (i, b) in bodies_initial.iter().enumerate() {
-            let dr = (kin.positions[i] - Vec3::new(b.x, b.y, b.z)).length();
-            let dv = (kin.velocities[i] - Vec3::new(b.vx, b.vy, b.vz)).length();
+            let dr = (kin.positions[i] - Vec3::new(b.pos_x, b.pos_y, b.pos_z)).length();
+            let dv = (kin.velocities[i] - Vec3::new(b.vel_x, b.vel_y, b.vel_z)).length();
             assert!(dr < 1e-12, "body {i} position drift at h=0: {dr}");
             assert!(dv < 1e-12, "body {i} velocity drift at h=0: {dv}");
         }
@@ -526,7 +526,7 @@ mod wh_guard {
         let post_step: Vec<(Vec3, Vec3)> = sys
             .bodies()
             .iter()
-            .map(|b| (Vec3::new(b.x, b.y, b.z), Vec3::new(b.vx, b.vy, b.vz)))
+            .map(|b| (Vec3::new(b.pos_x, b.pos_y, b.pos_z), Vec3::new(b.vel_x, b.vel_y, b.vel_z)))
             .collect();
         let snap = sys.last_dense_snapshot.as_ref().unwrap();
         let wh = snap.wh_data.as_ref().unwrap();
@@ -563,8 +563,9 @@ mod wh_guard {
             .with_max_depth(10);
         sys.set_integrator(IntegratorKind::WisdomHolman);
         sys.step();
-        let p_initial: Vec3 =
-            bodies_initial.iter().fold(Vec3::ZERO, |s, b| s + b.mass * Vec3::new(b.vx, b.vy, b.vz));
+        let p_initial: Vec3 = bodies_initial
+            .iter()
+            .fold(Vec3::ZERO, |s, b| s + b.mass * Vec3::new(b.vel_x, b.vel_y, b.vel_z));
         let snap = sys.last_dense_snapshot.as_ref().unwrap();
         let wh = snap.wh_data.as_ref().unwrap();
 
@@ -635,29 +636,31 @@ mod wh_refactor_regression {
     use crate::math::Vec3;
 
     fn total_inertial_momentum(bodies: &[Body]) -> Vec3 {
-        bodies.iter().fold(Vec3::ZERO, |s, b| s + b.mass * Vec3::new(b.vx, b.vy, b.vz))
+        bodies.iter().fold(Vec3::ZERO, |s, b| s + b.mass * Vec3::new(b.vel_x, b.vel_y, b.vel_z))
     }
 
     fn total_angular_momentum(bodies: &[Body]) -> Vec3 {
         bodies.iter().fold(Vec3::ZERO, |s, b| {
             s + b.mass
                 * Vec3::new(
-                    b.y * b.vz - b.z * b.vy,
-                    b.z * b.vx - b.x * b.vz,
-                    b.x * b.vy - b.y * b.vx,
+                    b.pos_y * b.vel_z - b.pos_z * b.vel_y,
+                    b.pos_z * b.vel_x - b.pos_x * b.vel_z,
+                    b.pos_x * b.vel_y - b.pos_y * b.vel_x,
                 )
         })
     }
 
     fn total_energy(bodies: &[Body], g_factor: f64) -> f64 {
-        let kinetic: f64 =
-            bodies.iter().map(|b| 0.5 * b.mass * (b.vx * b.vx + b.vy * b.vy + b.vz * b.vz)).sum();
+        let kinetic: f64 = bodies
+            .iter()
+            .map(|b| 0.5 * b.mass * (b.vel_x * b.vel_x + b.vel_y * b.vel_y + b.vel_z * b.vel_z))
+            .sum();
         let mut potential = 0.0;
         for i in 0..bodies.len() {
             for j in (i + 1)..bodies.len() {
-                let dx = bodies[i].x - bodies[j].x;
-                let dy = bodies[i].y - bodies[j].y;
-                let dz = bodies[i].z - bodies[j].z;
+                let dx = bodies[i].pos_x - bodies[j].pos_x;
+                let dy = bodies[i].pos_y - bodies[j].pos_y;
+                let dz = bodies[i].pos_z - bodies[j].pos_z;
                 let r = (dx * dx + dy * dy + dz * dz).sqrt().max(1e-30);
                 potential -= g_factor * bodies[i].mass * bodies[j].mass / r;
             }
@@ -687,8 +690,8 @@ mod wh_refactor_regression {
                 .with_velocity(v_com.x, v_peri + v_com.y)
                 .unsoftened(),
         ];
-        bodies[0].vz = v_com.z;
-        bodies[1].vz = v_com.z;
+        bodies[0].vel_z = v_com.z;
+        bodies[1].vel_z = v_com.z;
 
         let p_initial = total_inertial_momentum(&bodies);
         let period = 2.0 * std::f64::consts::PI * (a.powi(3) / (m_central + m_planet)).sqrt();
@@ -780,7 +783,7 @@ mod wh_refactor_regression {
                 .with_velocity(0.0, v_peri * inclination.cos())
                 .unsoftened(),
         ];
-        bodies[1].vz = v_peri * inclination.sin();
+        bodies[1].vel_z = v_peri * inclination.sin();
 
         let l_initial = total_angular_momentum(&bodies);
         let l0_norm = l_initial.length();
@@ -798,7 +801,7 @@ mod wh_refactor_regression {
             let l = total_angular_momentum(sys.bodies());
             max_dl_rel = max_dl_rel.max((l - l_initial).length() / l0_norm);
             for b in sys.bodies().iter().skip(1) {
-                max_z = max_z.max(b.z.abs());
+                max_z = max_z.max(b.pos_z.abs());
             }
         }
 
@@ -1019,7 +1022,7 @@ mod benchmarks {
         }
         let t = n_steps as f64 * dt;
         let bodies = sys.bodies();
-        let (rx, ry) = (bodies[1].x - bodies[0].x, bodies[1].y - bodies[0].y);
+        let (rx, ry) = (bodies[1].pos_x - bodies[0].pos_x, bodies[1].pos_y - bodies[0].pos_y);
         let (ex, ey) = kepler_relative_pos(t, MU, A, E);
         ((rx - ex).powi(2) + (ry - ey).powi(2)).sqrt()
     }
@@ -1089,7 +1092,7 @@ mod benchmarks {
         let max_err = FIGURE8_IC
             .iter()
             .zip(sys.bodies().iter())
-            .map(|(&(x0, y0, _, _), b)| ((b.x - x0).powi(2) + (b.y - y0).powi(2)).sqrt())
+            .map(|(&(x0, y0, _, _), b)| ((b.pos_x - x0).powi(2) + (b.pos_y - y0).powi(2)).sqrt())
             .fold(0.0_f64, f64::max);
 
         assert!(
@@ -1129,7 +1132,7 @@ mod benchmarks {
             println!("{label}  t={:.6}  T={FIGURE8_T:.6}", steps as f64 * dt);
             for (i, (&(x0, y0, _, _), b)) in FIGURE8_IC.iter().zip(sys.bodies().iter()).enumerate()
             {
-                let err = ((b.x - x0).powi(2) + (b.y - y0).powi(2)).sqrt();
+                let err = ((b.pos_x - x0).powi(2) + (b.pos_y - y0).powi(2)).sqrt();
                 println!("  body {i}: |Δr| = {err:.3e}");
             }
         }
@@ -1230,7 +1233,7 @@ mod benchmarks {
             .bodies()
             .iter()
             .zip(sys.bodies().iter())
-            .map(|(r, t)| ((r.x - t.x).powi(2) + (r.y - t.y).powi(2)).sqrt())
+            .map(|(r, t)| ((r.pos_x - t.pos_x).powi(2) + (r.pos_y - t.pos_y).powi(2)).sqrt())
             .fold(0.0_f64, f64::max);
 
         assert!(max_dr < TOL, "Y4 max |Δr| = {max_dr:.3e} > {TOL:.0e} at t=1 (dt=1e-3 vs dt=1e-4)");
@@ -1261,7 +1264,7 @@ mod benchmarks {
             for (i, b) in sys.bodies().iter().enumerate() {
                 println!(
                     "  body{i} m={:.0}:  x={:+.10e}  y={:+.10e}  vx={:+.10e}  vy={:+.10e}",
-                    b.mass, b.x, b.y, b.vx, b.vy,
+                    b.mass, b.pos_x, b.pos_y, b.vel_x, b.vel_y,
                 );
             }
         }
@@ -1340,10 +1343,10 @@ mod replay {
         assert_eq!(loaded.sim_name, snap.sim_name, "sim_name");
         assert_eq!(loaded.bodies.len(), snap.bodies.len(), "body count");
         for (i, (l, s)) in loaded.bodies.iter().zip(snap.bodies.iter()).enumerate() {
-            assert_eq!(l.x.to_bits(), s.x.to_bits(), "body {i} x roundtrip");
-            assert_eq!(l.y.to_bits(), s.y.to_bits(), "body {i} y roundtrip");
-            assert_eq!(l.vx.to_bits(), s.vx.to_bits(), "body {i} vx roundtrip");
-            assert_eq!(l.vy.to_bits(), s.vy.to_bits(), "body {i} vy roundtrip");
+            assert_eq!(l.pos_x.to_bits(), s.pos_x.to_bits(), "body {i} x roundtrip");
+            assert_eq!(l.pos_y.to_bits(), s.pos_y.to_bits(), "body {i} y roundtrip");
+            assert_eq!(l.vel_x.to_bits(), s.vel_x.to_bits(), "body {i} vx roundtrip");
+            assert_eq!(l.vel_y.to_bits(), s.vel_y.to_bits(), "body {i} vy roundtrip");
             assert_eq!(l.mass.to_bits(), s.mass.to_bits(), "body {i} mass roundtrip");
         }
     }
