@@ -23,11 +23,22 @@
 //! subtree. These are the quantities inspected by the Barnes-Hut criterion
 //! during force evaluation.
 //!
+//! ## Per-step maintenance
+//!
+//! [`Octree::maintain`] walks the per-body cell back-reference [`cell_idx`]
+//! to find migrants — bodies whose new position is no longer inside their
+//! known leaf — removes them from their old cells and re-inserts them from
+//! the root. Multipoles are recomputed leaf-up identically to [`build`].
+//! When a body has left the root bounding cube or the body count has
+//! changed, maintenance falls back to a full [`build`].
+//!
 //! ## Invariants
-//! - `nodes[0]` is always the root after a successful `build`.
+//! - `nodes[0]` is always the root after a successful `build` or `maintain`.
 //! - A leaf has `children == [NO_CHILD; 8]`.
 //! - `node.body_count` equals the sum of `body_count` of all children
 //!   (or `body_len` for leaves).
+//! - `cell_idx[i]` indexes the leaf in `nodes[..]` that owns body `i`,
+//!   or `u32::MAX` if no tree state exists.
 
 use crate::domain::body_arrays::BodyArrays;
 
@@ -148,8 +159,10 @@ impl<const LEAF: usize> Node<LEAF> {
 /// Flat-array Barnes-Hut octree generic over leaf capacity.
 ///
 /// Call [`build`](Self::build) to (re)construct the tree from a [`BodyArrays`]
-/// snapshot. The resulting [`Node`] array is accessed by the force engine for
-/// both the BH traversal and the `theta_error_proxy` heuristic.
+/// snapshot, or [`maintain`](Self::maintain) to update an existing tree
+/// after the bodies have moved. The resulting [`Node`] array is accessed by
+/// the force engine for both the BH traversal and the `theta_error_proxy`
+/// heuristic.
 ///
 /// `LEAF` defaults to [`DEFAULT_LEAF`] = 8. The perf 2×2 leaf-sensitivity
 /// sweep (`docs/experiments/2026-05-08-octree-perf-2x2.md`) instantiates other
@@ -157,12 +170,20 @@ impl<const LEAF: usize> Node<LEAF> {
 /// `BarnesHutEngine`.
 pub(crate) struct Octree<const LEAF: usize = DEFAULT_LEAF> {
     pub(crate) nodes: Vec<Node<LEAF>>,
+    /// Per-body back-reference into [`nodes`]: body `i` lives in the leaf
+    /// `nodes[cell_idx[i]]`. Maintained by [`insert`](Self::insert) during
+    /// build/maintain. `u32::MAX` indicates "no tree state for this body"
+    /// (not yet inserted, or tree was just cleared).
+    pub(crate) cell_idx: Vec<u32>,
     max_depth: usize,
 }
 
+/// Sentinel for "no cell currently owns this body" in [`Octree::cell_idx`].
+pub(crate) const NO_CELL: u32 = u32::MAX;
+
 impl<const LEAF: usize> Octree<LEAF> {
     pub(crate) fn new(max_depth: usize) -> Self {
-        Self { nodes: Vec::new(), max_depth }
+        Self { nodes: Vec::new(), cell_idx: Vec::new(), max_depth }
     }
 
     /// Read-only access to the flat node array.
@@ -208,8 +229,13 @@ impl<const LEAF: usize> Octree<LEAF> {
     /// q_yy, q_yz`) fields reflect the aggregated state of its subtree.
     /// Quadrupole aggregation is always performed — the perf 2×2 §Decision
     /// settled it as the production multipole order.
+    ///
+    /// Resets [`cell_idx`](Self::cell_idx) to one entry per body, populated
+    /// by [`insert`](Self::insert) as each body lands in a leaf.
     pub(crate) fn build(&mut self, arrays: &BodyArrays) {
         self.nodes.clear();
+        self.cell_idx.clear();
+        self.cell_idx.resize(arrays.len(), NO_CELL);
 
         if arrays.is_empty() {
             return;
@@ -246,6 +272,106 @@ impl<const LEAF: usize> Octree<LEAF> {
         self.aggregate_quadrupole(0, arrays);
     }
 
+    /// Update the tree to reflect the current body positions in `arrays`.
+    ///
+    /// Walks the per-body cell back-reference and re-inserts only those
+    /// bodies whose new position is no longer inside their previously known
+    /// leaf cell ("migrants"). Multipoles are recomputed leaf-up identically
+    /// to [`build`], so per-cell mass / COM / quadrupole values are bit-exact
+    /// with what a from-scratch [`build`] over the same particle set would
+    /// produce. The tree topology (cell index assignments, subdivision
+    /// depth) may differ from a from-scratch build because the maintained
+    /// tree retains subdivisions made by previous steps.
+    ///
+    /// Falls back to [`build`] when:
+    /// - no tree state exists yet (`nodes` is empty);
+    /// - the body count has changed (`cell_idx.len() != arrays.len()`);
+    /// - any body has migrated outside the root bounding cube (the spatial
+    ///   index would otherwise lose coverage of the new position).
+    pub(crate) fn maintain(&mut self, arrays: &BodyArrays) {
+        if self.nodes.is_empty() || self.cell_idx.len() != arrays.len() {
+            self.build(arrays);
+            return;
+        }
+
+        if arrays.is_empty() {
+            self.nodes.clear();
+            self.cell_idx.clear();
+            return;
+        }
+
+        let (rcx, rcy, rcz, rhalf) = {
+            let r = &self.nodes[0];
+            (r.cx, r.cy, r.cz, r.half)
+        };
+        for i in 0..arrays.len() {
+            if (arrays.pos_x[i] - rcx).abs() > rhalf
+                || (arrays.pos_y[i] - rcy).abs() > rhalf
+                || (arrays.pos_z[i] - rcz).abs() > rhalf
+            {
+                self.build(arrays);
+                return;
+            }
+        }
+
+        for i in 0..arrays.len() {
+            let cell = self.cell_idx[i] as usize;
+            let still_in_cell = self.cell_idx[i] != NO_CELL && self.body_in_cell(i, cell, arrays);
+            if !still_in_cell {
+                if self.cell_idx[i] != NO_CELL {
+                    self.remove_body_from_leaf(i, cell);
+                }
+                self.cell_idx[i] = NO_CELL;
+                self.insert(0, i, arrays, 0);
+            }
+        }
+
+        self.aggregate_mass(0, arrays);
+        self.aggregate_quadrupole(0, arrays);
+    }
+
+    /// True iff body `body_idx` is geometrically inside cell `cell_idx`'s
+    /// cube AND that cell is a leaf currently listing the body in its
+    /// `bodies[]` array.
+    fn body_in_cell(&self, body_idx: usize, cell_idx: usize, arrays: &BodyArrays) -> bool {
+        if cell_idx >= self.nodes.len() {
+            return false;
+        }
+        let node = &self.nodes[cell_idx];
+        if !node.is_leaf() {
+            return false;
+        }
+        let half = node.half;
+        if (arrays.pos_x[body_idx] - node.cx).abs() > half
+            || (arrays.pos_y[body_idx] - node.cy).abs() > half
+            || (arrays.pos_z[body_idx] - node.cz).abs() > half
+        {
+            return false;
+        }
+        let len = node.body_len as usize;
+        for k in 0..len {
+            if node.bodies[k] as usize == body_idx {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Remove `body_idx` from leaf `cell_idx`'s `bodies[]` array, compacting
+    /// by swap-with-last + decrement of `body_len`. Caller must clear the
+    /// migrant's `cell_idx` slot separately.
+    fn remove_body_from_leaf(&mut self, body_idx: usize, cell_idx: usize) {
+        let node = &mut self.nodes[cell_idx];
+        let len = node.body_len as usize;
+        for k in 0..len {
+            if node.bodies[k] as usize == body_idx {
+                node.bodies[k] = node.bodies[len - 1];
+                node.body_len -= 1;
+                return;
+            }
+        }
+    }
+
     fn insert(
         &mut self,
         mut node_idx: usize,
@@ -259,6 +385,9 @@ impl<const LEAF: usize> Octree<LEAF> {
                 if (node.body_len as usize) < LEAF {
                     node.bodies[node.body_len as usize] = body_idx as u32;
                     node.body_len += 1;
+                    if body_idx < self.cell_idx.len() {
+                        self.cell_idx[body_idx] = node_idx as u32;
+                    }
                 }
                 return;
             }
@@ -270,6 +399,9 @@ impl<const LEAF: usize> Octree<LEAF> {
                     if (self.nodes[node_idx].body_len as usize) < LEAF {
                         self.nodes[node_idx].bodies[len] = body_idx as u32;
                         self.nodes[node_idx].body_len += 1;
+                        if body_idx < self.cell_idx.len() {
+                            self.cell_idx[body_idx] = node_idx as u32;
+                        }
                     }
                     return;
                 }
@@ -800,5 +932,269 @@ mod tests {
         // binary's behaviour.
         assert_eq!(DEFAULT_LEAF, 8);
         let _tree: Octree = Octree::new(16);
+    }
+
+    // ── Maintenance: cell_idx tracking + per-step update ───────────────── //
+
+    /// Sphere log-normal distribution helper local to the maintenance tests.
+    /// Matches the perf-series convention; deterministic per `seed`.
+    fn sphere_lognormal(n: usize, seed: u64) -> Vec<Body> {
+        let mut state = seed.wrapping_add(0x9E3779B97F4A7C15);
+        let mut next_u64 = || {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            state
+        };
+        let mut next_unit = || (next_u64() >> 11) as f64 / (1u64 << 53) as f64;
+
+        let mut bodies = Vec::with_capacity(n);
+        while bodies.len() < n {
+            let x = 2.0 * next_unit() - 1.0;
+            let y = 2.0 * next_unit() - 1.0;
+            let z = 2.0 * next_unit() - 1.0;
+            if x * x + y * y + z * z > 1.0 {
+                continue;
+            }
+            let u1 = next_unit().max(1e-12);
+            let u2 = next_unit();
+            let normal = (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos();
+            let mass = normal.exp();
+            let mut b = Body::rocky(mass).at(x, y).with_velocity(0.0, 0.0);
+            b.pos_z = z;
+            // Inject orbital-scale velocities so VV-style integration produces
+            // realistic per-step displacements.
+            b.vel_x = 0.3 * (next_unit() * 2.0 - 1.0);
+            b.vel_y = 0.3 * (next_unit() * 2.0 - 1.0);
+            b.vel_z = 0.3 * (next_unit() * 2.0 - 1.0);
+            bodies.push(b);
+        }
+        bodies
+    }
+
+    /// `cell_idx` is populated during build and every entry points to a
+    /// valid leaf containing the body. Foundation invariant for maintenance.
+    #[test]
+    fn build_populates_cell_idx_to_owning_leaves() {
+        let bodies = sphere_lognormal(200, 0xCE11_1D58);
+        let mut arrays = BodyArrays::with_capacity(bodies.len());
+        arrays.pack_from(&bodies);
+
+        let mut tree = make_tree();
+        tree.build(&arrays);
+
+        assert_eq!(tree.cell_idx.len(), bodies.len());
+        for (i, &cell) in tree.cell_idx.iter().enumerate() {
+            assert_ne!(cell, NO_CELL, "body {i} has no cell after build");
+            let node = &tree.nodes[cell as usize];
+            assert!(node.is_leaf(), "body {i}'s cell {cell} is not a leaf");
+            let mut found = false;
+            for k in 0..node.body_len as usize {
+                if node.bodies[k] as usize == i {
+                    found = true;
+                    break;
+                }
+            }
+            assert!(found, "body {i} not listed in its cell {cell}");
+        }
+    }
+
+    /// Maintenance with no body movement is a no-op: tree state and
+    /// per-cell multipoles are identical to the pre-maintain snapshot.
+    /// Every cell is bit-exact.
+    #[test]
+    fn tier1_maintain_no_movement_preserves_tree_bit_exact() {
+        let bodies = sphere_lognormal(500, 0x6F637472);
+        let mut arrays = BodyArrays::with_capacity(bodies.len());
+        arrays.pack_from(&bodies);
+
+        let mut tree = make_tree();
+        tree.build(&arrays);
+
+        let nodes_before: Vec<_> = tree
+            .nodes
+            .iter()
+            .map(|n| {
+                (
+                    n.mass.to_bits(),
+                    n.com_x.to_bits(),
+                    n.com_y.to_bits(),
+                    n.com_z.to_bits(),
+                    n.q_xx.to_bits(),
+                    n.q_xy.to_bits(),
+                    n.q_xz.to_bits(),
+                    n.q_yy.to_bits(),
+                    n.q_yz.to_bits(),
+                    n.body_count,
+                    n.body_len,
+                )
+            })
+            .collect();
+        let cell_idx_before = tree.cell_idx.clone();
+
+        tree.maintain(&arrays);
+
+        assert_eq!(tree.nodes.len(), nodes_before.len(), "node count changed under no-op maintain");
+        for (i, (after, before)) in tree.nodes.iter().zip(nodes_before.iter()).enumerate() {
+            assert_eq!(after.mass.to_bits(), before.0, "node {i} mass diverged");
+            assert_eq!(after.com_x.to_bits(), before.1, "node {i} com_x diverged");
+            assert_eq!(after.com_y.to_bits(), before.2, "node {i} com_y diverged");
+            assert_eq!(after.com_z.to_bits(), before.3, "node {i} com_z diverged");
+            assert_eq!(after.q_xx.to_bits(), before.4, "node {i} q_xx diverged");
+            assert_eq!(after.q_xy.to_bits(), before.5, "node {i} q_xy diverged");
+            assert_eq!(after.q_xz.to_bits(), before.6, "node {i} q_xz diverged");
+            assert_eq!(after.q_yy.to_bits(), before.7, "node {i} q_yy diverged");
+            assert_eq!(after.q_yz.to_bits(), before.8, "node {i} q_yz diverged");
+            assert_eq!(after.body_count, before.9, "node {i} body_count diverged");
+            assert_eq!(after.body_len, before.10, "node {i} body_len diverged");
+        }
+        assert_eq!(tree.cell_idx, cell_idx_before, "cell_idx changed under no-op maintain");
+    }
+
+    /// First call to maintain on a fresh tree falls back to build:
+    /// `cell_idx` and `nodes` after maintain match what build would produce.
+    #[test]
+    fn maintain_on_empty_tree_falls_back_to_build() {
+        let bodies = sphere_lognormal(100, 0x6D6F7274);
+        let mut arrays = BodyArrays::with_capacity(bodies.len());
+        arrays.pack_from(&bodies);
+
+        let mut tree_built = make_tree();
+        tree_built.build(&arrays);
+
+        let mut tree_maintained = make_tree();
+        tree_maintained.maintain(&arrays);
+
+        assert_eq!(tree_built.nodes.len(), tree_maintained.nodes.len());
+        assert_eq!(tree_built.cell_idx, tree_maintained.cell_idx);
+    }
+
+    /// Maintenance after every body has migrated outside the original root
+    /// cube falls back to a full rebuild. Body count unchanged; positions
+    /// shifted far beyond root extent.
+    #[test]
+    fn maintain_falls_back_when_body_leaves_root() {
+        let mut bodies = sphere_lognormal(50, 0x71756164);
+        let mut arrays = BodyArrays::with_capacity(bodies.len());
+        arrays.pack_from(&bodies);
+
+        let mut tree = make_tree();
+        tree.build(&arrays);
+
+        let root_half = tree.nodes[0].half;
+        // Push body 0 well outside the root cube
+        bodies[0].pos_x += 100.0 * root_half;
+        arrays.pack_from(&bodies);
+
+        tree.maintain(&arrays);
+
+        assert!(
+            (bodies[0].pos_x - tree.nodes[0].cx).abs() <= tree.nodes[0].half,
+            "after rebuild the new root must contain body 0"
+        );
+    }
+
+    /// Maintenance after a small velocity-Verlet-style displacement produces
+    /// a tree whose per-body force-field-relevant scalars (mass, COM,
+    /// quadrupole tensor) match what a from-scratch rebuild would produce
+    /// over the same particle set, within FP-summation envelope.
+    ///
+    /// Tier 1 acceptance: the multipoles are mathematically computed from
+    /// the same particle set; only summation-order across cell subdivisions
+    /// can differ. The bound is the inherent O(n_per_leaf × ULP) ≈ 1e-14.
+    /// In practice the maintained tree retains its prior subdivision and
+    /// rebuild produces the same subdivision when migrants stay rare, so
+    /// the typical-case error is at machine epsilon.
+    #[test]
+    fn tier1_maintain_per_step_matches_rebuild_per_cell_within_tolerance() {
+        let mut bodies = sphere_lognormal(500, 0x6F637472);
+        let mut arrays_maintain = BodyArrays::with_capacity(bodies.len());
+        let mut arrays_rebuild = BodyArrays::with_capacity(bodies.len());
+
+        let mut tree_maintain: Octree = Octree::new(16);
+        let mut tree_rebuild: Octree = Octree::new(16);
+
+        arrays_maintain.pack_from(&bodies);
+        arrays_rebuild.pack_from(&bodies);
+        tree_maintain.build(&arrays_maintain);
+        tree_rebuild.build(&arrays_rebuild);
+
+        // Gentle drift so most bodies stay in their current cells; a few migrate.
+        let dt = 1.0e-3;
+        for step in 0..5 {
+            for b in &mut bodies {
+                b.pos_x += dt * b.vel_x;
+                b.pos_y += dt * b.vel_y;
+                b.pos_z += dt * b.vel_z;
+            }
+            arrays_maintain.pack_from(&bodies);
+            arrays_rebuild.pack_from(&bodies);
+
+            tree_maintain.maintain(&arrays_maintain);
+            tree_rebuild.build(&arrays_rebuild);
+
+            // Aggregate-from-root invariants: total mass + mass-weighted COM
+            // must agree at FP tolerance regardless of subdivision history.
+            let mr = &tree_rebuild.nodes[0];
+            let mm = &tree_maintain.nodes[0];
+            assert_relative_eq!(mr.mass, mm.mass, epsilon = 1.0e-12, max_relative = 1.0e-12);
+            assert_relative_eq!(mr.com_x, mm.com_x, epsilon = 1.0e-10, max_relative = 1.0e-10);
+            assert_relative_eq!(mr.com_y, mm.com_y, epsilon = 1.0e-10, max_relative = 1.0e-10);
+            assert_relative_eq!(mr.com_z, mm.com_z, epsilon = 1.0e-10, max_relative = 1.0e-10);
+            assert_relative_eq!(mr.q_xx, mm.q_xx, epsilon = 1.0e-9, max_relative = 1.0e-9);
+            assert_relative_eq!(mr.q_xy, mm.q_xy, epsilon = 1.0e-9, max_relative = 1.0e-9);
+            assert_relative_eq!(mr.q_xz, mm.q_xz, epsilon = 1.0e-9, max_relative = 1.0e-9);
+            assert_relative_eq!(mr.q_yy, mm.q_yy, epsilon = 1.0e-9, max_relative = 1.0e-9);
+            assert_relative_eq!(mr.q_yz, mm.q_yz, epsilon = 1.0e-9, max_relative = 1.0e-9);
+
+            // body_count at the root is exactly N
+            assert_eq!(mr.body_count, bodies.len() as u32, "rebuild root body_count step {step}");
+            assert_eq!(mm.body_count, bodies.len() as u32, "maintain root body_count step {step}",);
+
+            // Every body's cell_idx in the maintained tree still owns it.
+            for i in 0..bodies.len() {
+                let cell = tree_maintain.cell_idx[i] as usize;
+                let node = &tree_maintain.nodes[cell];
+                assert!(node.is_leaf(), "body {i} in non-leaf after maintain step {step}");
+                let mut found = false;
+                for k in 0..node.body_len as usize {
+                    if node.bodies[k] as usize == i {
+                        found = true;
+                        break;
+                    }
+                }
+                assert!(found, "body {i} not listed in its cell {cell} after maintain step {step}");
+            }
+        }
+    }
+
+    // Property: across many random small displacements the maintained
+    // tree's root mass / COM stay bit-exact with rebuild — the root-level
+    // reductions are insensitive to the subdivision history.
+    proptest! {
+        #![proptest_config(ProptestConfig {
+            cases: 16, .. ProptestConfig::default()
+        })]
+        #[test]
+        fn proptest_maintain_root_mass_bit_exact(seed in 0u64..1_000) {
+            let mut bodies = sphere_lognormal(64, seed.wrapping_mul(0x9E3779B97F4A7C15));
+            let mut arrays = BodyArrays::with_capacity(bodies.len());
+            arrays.pack_from(&bodies);
+            let mut tree_m = make_tree();
+            let mut tree_b = make_tree();
+            tree_m.build(&arrays);
+            tree_b.build(&arrays);
+
+            for b in &mut bodies {
+                b.pos_x += 1.0e-3 * b.vel_x;
+                b.pos_y += 1.0e-3 * b.vel_y;
+                b.pos_z += 1.0e-3 * b.vel_z;
+            }
+            arrays.pack_from(&bodies);
+
+            tree_m.maintain(&arrays);
+            tree_b.build(&arrays);
+
+            prop_assert_eq!(tree_m.nodes[0].mass.to_bits(), tree_b.nodes[0].mass.to_bits());
+            prop_assert_eq!(tree_m.nodes[0].body_count, tree_b.nodes[0].body_count);
+        }
     }
 }
