@@ -157,10 +157,31 @@
 //! [`crate::core::system::System::add_hamiltonian_perturbation`]
 //! (and the non-conservative / observer counterparts) compare the
 //! operator's declared units against the `System`'s own units and
-//! **panic** on mismatch — silent unit-system confusion is structurally
-//! impossible. Operators that are genuinely unit-agnostic (a constant
-//! push expressed as a dimensionless multiplier, e.g.) leave
-//! `declared_units` at its default `None` and skip the check.
+//! return [`Err(UnitSystemMismatch)`](crate::physics::integrator::UnitSystemMismatch)
+//! on mismatch. Silent unit-system confusion is structurally
+//! impossible — the operator is **not** registered when the units
+//! disagree, and the caller chooses the policy (propagate with `?`,
+//! log and skip, swap the operator, fall back, or `.expect(...)` for
+//! end-of-line scripts). Operators that are genuinely unit-agnostic
+//! (a constant push expressed as a dimensionless multiplier, e.g.)
+//! leave `declared_units` at its default `None` and the registration
+//! returns `Ok(())` regardless of the System's unit system.
+//!
+//! Two-tier registration semantics:
+//!
+//! - **Hard** — `UnitSystemMismatch` is `Err`. Integration would
+//!   silently produce wrong physics with the wrong dimensional
+//!   constant; the operator is refused and the caller decides.
+//! - **Soft** — kernel-precondition violations and regime-of-validity
+//!   bounds emit `warn_diag` events on the structured log bus.
+//!   Integration continues with the user's choice; the bus carries
+//!   the audit trail.
+//!
+//! The Python binding maps the `Err` variant to the typed
+//! [`apsis.UnitSystemMismatchError`](crate::physics::integrator::UnitSystemMismatch)
+//! exception, with the same `operator` / `operator_units` /
+//! `system_units` fields available as Python attributes for
+//! programmatic recovery.
 //!
 //! The constructor shapes below all carry `UnitSystem` (explicitly or
 //! through a named regime) for any operator whose physics is
@@ -276,6 +297,45 @@
 //! precondition surface: numerical (kernel) checked at registration,
 //! physical (regime) checked statically AND dynamically. An operator
 //! that survives both is on its derivation's footing for the run.
+//!
+//! ## Citation provenance
+//!
+//! Each registered operator publishes a
+//! [`Citation`](crate::physics::integrator::Citation) carrying the BibTeX
+//! entry of the paper it implements, the DOI when available, and the
+//! implementing crate's `crate_name` / `crate_version` /
+//! `commit_hash` captured at the operator's crate compile site (not
+//! apsis core's). The `commit_hash` field is populated by the operator
+//! crate's `build.rs` via `cargo:rustc-env=`; consumer code never
+//! constructs a citation by hand.
+//!
+//! [`crate::core::system::System::citations`] aggregates them across
+//! Hamiltonian + non-conservative + observer stacks in registration
+//! order; [`crate::core::system::System::provenance`] renders a
+//! human-readable block suitable for paper supplementary material or
+//! for embedding into a snapshot file. Both are deterministic given the
+//! same operator stack — diff two outputs to confirm the dependency
+//! graph stayed bit-equal.
+//!
+//! Operators with no canonical reference (test fakes, internal tooling)
+//! inherit the default `None` and are silently skipped by the
+//! aggregator. The citation surface is opt-in for operators but
+//! opt-out for the federation: every published perturbation crate
+//! should override
+//! [`Operator::citation`](crate::physics::integrator::Operator::citation)
+//! so the run's full reference list reads off the operator stack
+//! automatically.
+//!
+//! - test: [`crate::physics::integrator::citation`] module tests
+//! - test: `tests::citations_skip_operators_without_citation`
+//! - test: `tests::citations_preserve_registration_order`
+//! - test: `tests::provenance_renders_every_registered_citation`
+//!
+//! `crate_version` + `commit_hash` together pin the implementation to a
+//! specific source state and are sufficient (modulo platform-level f64
+//! variance) to reproduce the operator's behaviour bit-for-bit on a
+//! single platform. The reproducibility envelope is the same one the
+//! "What this contract does NOT guarantee" section names below.
 //!
 //! ## What this contract does NOT guarantee
 //!
@@ -548,8 +608,10 @@ mod tests {
 
         let run = || {
             let mut sys = fixture_system();
-            sys.add_non_conservative_perturbation(Box::new(LinearDrag(1e-4)));
-            sys.add_hamiltonian_perturbation(Box::new(ConstantPush(Vec3::new(0.0, 0.0, 1e-6))));
+            sys.add_non_conservative_perturbation(Box::new(LinearDrag(1e-4)))
+                .expect("contract test fixture: matched UnitSystem");
+            sys.add_hamiltonian_perturbation(Box::new(ConstantPush(Vec3::new(0.0, 0.0, 1e-6))))
+                .expect("contract test fixture: matched UnitSystem");
             for _ in 0..N_STEPS {
                 sys.step();
             }
@@ -587,7 +649,8 @@ mod tests {
             let mut sys = System::new(vec![primary, satellite], UnitSystem::canonical())
                 .with_integrator(IntegratorKind::Ias15)
                 .with_dt(1e-3);
-            sys.add_non_conservative_perturbation(Box::new(LinearDrag(1e-4)));
+            sys.add_non_conservative_perturbation(Box::new(LinearDrag(1e-4)))
+                .expect("contract test fixture: matched UnitSystem");
             for _ in 0..N_STEPS {
                 sys.step();
             }
@@ -625,7 +688,9 @@ mod tests {
 
         // Same setup, with a no-op perturbation registered.
         let mut with_null = fixture_system();
-        with_null.add_hamiltonian_perturbation(Box::new(NullPerturbation));
+        with_null
+            .add_hamiltonian_perturbation(Box::new(NullPerturbation))
+            .expect("contract test fixture: matched UnitSystem");
         for _ in 0..N_STEPS {
             with_null.step();
         }
@@ -692,11 +757,15 @@ mod tests {
         let run = |order_swapped: bool| {
             let mut sys = fixture_system();
             if order_swapped {
-                sys.add_hamiltonian_perturbation(Box::new(ConstantPush(Vec3::new(0.0, 0.0, 1e-6))));
-                sys.add_non_conservative_perturbation(Box::new(LinearDrag(1e-4)));
+                sys.add_hamiltonian_perturbation(Box::new(ConstantPush(Vec3::new(0.0, 0.0, 1e-6))))
+                    .expect("contract test fixture: matched UnitSystem");
+                sys.add_non_conservative_perturbation(Box::new(LinearDrag(1e-4)))
+                    .expect("contract test fixture: matched UnitSystem");
             } else {
-                sys.add_non_conservative_perturbation(Box::new(LinearDrag(1e-4)));
-                sys.add_hamiltonian_perturbation(Box::new(ConstantPush(Vec3::new(0.0, 0.0, 1e-6))));
+                sys.add_non_conservative_perturbation(Box::new(LinearDrag(1e-4)))
+                    .expect("contract test fixture: matched UnitSystem");
+                sys.add_hamiltonian_perturbation(Box::new(ConstantPush(Vec3::new(0.0, 0.0, 1e-6))))
+                    .expect("contract test fixture: matched UnitSystem");
             }
             for _ in 0..N_STEPS {
                 sys.step();
@@ -828,8 +897,10 @@ mod tests {
         let invariants = capture_violation_invariants(|| {
             let kernel = Arc::new(TruncatedPlummerKernel::new(1.0));
             let mut sys = fixture_system().with_kernel(kernel);
-            sys.add_hamiltonian_perturbation(Box::new(DeclaresExactnessRequirement));
-            sys.add_hamiltonian_perturbation(Box::new(DeclaresContinuityRequirement));
+            sys.add_hamiltonian_perturbation(Box::new(DeclaresExactnessRequirement))
+                .expect("contract test fixture: matched UnitSystem");
+            sys.add_hamiltonian_perturbation(Box::new(DeclaresContinuityRequirement))
+                .expect("contract test fixture: matched UnitSystem");
         });
 
         let exactness_count = invariants.iter().filter(|s| *s == "Exactness").count();
@@ -938,7 +1009,8 @@ mod tests {
             let mut sys = System::new(vec![primary, satellite], UnitSystem::canonical())
                 .with_integrator(IntegratorKind::Ias15)
                 .with_dt(1e-3);
-            sys.add_hamiltonian_perturbation(Box::new(DeclaresExactnessRequirement));
+            sys.add_hamiltonian_perturbation(Box::new(DeclaresExactnessRequirement))
+                .expect("contract test fixture: matched UnitSystem");
         });
 
         assert_eq!(
@@ -960,7 +1032,8 @@ mod tests {
         let invariants = capture_violation_invariants(|| {
             let kernel = Arc::new(TruncatedPlummerKernel::new(1.0));
             let mut sys = fixture_system().with_kernel(kernel);
-            sys.add_hamiltonian_perturbation(Box::new(DeclaresContinuityRequirement));
+            sys.add_hamiltonian_perturbation(Box::new(DeclaresContinuityRequirement))
+                .expect("contract test fixture: matched UnitSystem");
         });
 
         assert_eq!(
@@ -991,7 +1064,8 @@ mod tests {
             let kernel = Arc::new(TruncatedPlummerKernel::new(1.0));
             let mut sys = fixture_system().with_kernel(kernel);
             for _ in 0..N_REGISTRATIONS {
-                sys.add_hamiltonian_perturbation(Box::new(DeclaresContinuityRequirement));
+                sys.add_hamiltonian_perturbation(Box::new(DeclaresContinuityRequirement))
+                    .expect("contract test fixture: matched UnitSystem");
             }
         });
 
@@ -1043,7 +1117,8 @@ mod tests {
         // (1) and (2): registration with no subscriber attached must
         // not panic and must actually register.
         let pre_count = sys.perturbation_count();
-        sys.add_hamiltonian_perturbation(Box::new(DeclaresContinuityRequirement));
+        sys.add_hamiltonian_perturbation(Box::new(DeclaresContinuityRequirement))
+            .expect("contract test fixture: matched UnitSystem");
         assert_eq!(
             sys.perturbation_count(),
             pre_count + 1,
@@ -1069,7 +1144,8 @@ mod tests {
             }
         });
 
-        sys.add_hamiltonian_perturbation(Box::new(DeclaresContinuityRequirement));
+        sys.add_hamiltonian_perturbation(Box::new(DeclaresContinuityRequirement))
+            .expect("contract test fixture: matched UnitSystem");
 
         let events = captured.lock().unwrap().clone();
         unsubscribe(id);

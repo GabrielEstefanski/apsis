@@ -79,7 +79,8 @@ fn mercury_precession_matches_gr_within_100ppm() {
     sys.add_hamiltonian_perturbation(Box::new(PostNewtonian1PN::from_raw_c(
         C_SOLAR_UNITS,
         UnitSystem::solar_canonical(),
-    )));
+    )))
+    .expect("Mercury gate: System and operator share UnitSystem::solar_canonical()");
 
     let el0 = compute_elements(sys.bodies(), 1, 0, 1.0).unwrap();
     sys.integrate_for(el0.period * (N_ORBITS as f64));
@@ -134,7 +135,8 @@ fn softened_system_triggers_diagnostic() {
     sys.add_hamiltonian_perturbation(Box::new(PostNewtonian1PN::from_raw_c(
         C_SOLAR_UNITS,
         UnitSystem::solar_canonical(),
-    )));
+    )))
+    .expect("Mercury gate: System and operator share UnitSystem::solar_canonical()");
 
     let events = captured.lock().unwrap().clone();
     unsubscribe(id);
@@ -173,7 +175,8 @@ fn exact_gravity_system_stays_silent() {
     sys.add_hamiltonian_perturbation(Box::new(PostNewtonian1PN::from_raw_c(
         C_SOLAR_UNITS,
         UnitSystem::solar_canonical(),
-    )));
+    )))
+    .expect("Mercury gate: System and operator share UnitSystem::solar_canonical()");
 
     let events = captured.lock().unwrap().clone();
     unsubscribe(id);
@@ -277,7 +280,8 @@ fn mercury_precession_3d_inclined_matches_gr_within_100ppm() {
     sys.add_hamiltonian_perturbation(Box::new(PostNewtonian1PN::from_raw_c(
         C_SOLAR_UNITS,
         UnitSystem::solar_canonical(),
-    )));
+    )))
+    .expect("Mercury gate: System and operator share UnitSystem::solar_canonical()");
 
     let el0 = compute_elements(sys.bodies(), 1, 0, 1.0).unwrap();
 

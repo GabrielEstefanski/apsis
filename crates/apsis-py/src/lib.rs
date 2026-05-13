@@ -52,6 +52,7 @@ use pyo3::prelude::*;
 
 mod body;
 mod convert;
+mod errors;
 mod integrator;
 mod perturbation;
 mod stats;
@@ -70,6 +71,7 @@ mod units;
 fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     body::register(m)?;
+    errors::register(m)?;
     integrator::register(m)?;
     stats::register(m)?;
     system::register(m)?;

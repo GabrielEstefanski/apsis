@@ -508,18 +508,75 @@ impl PySystem {
     /// `Perturbation` instance cannot be attached twice; build a fresh
     /// one for each system.
     ///
-    /// The kernel-requirement check inside the core fires here: if the
-    /// perturbation declares `Exactness::Exact` and the active kernel
-    /// reports `Softened`, a structured warning is emitted naming the
-    /// violated invariant. Use `System(..., exact_gravity=True)` or
-    /// `Body.<material>(...).unsoftened()` to silence it.
+    /// Raises ``apsis.UnitSystemMismatchError`` when the perturbation
+    /// was constructed for a different ``UnitSystem`` than the
+    /// ``System``'s own. The exception carries ``operator``,
+    /// ``operator_units``, and ``system_units`` attributes so callers
+    /// can decide policy (log, skip, swap, fall back).
+    ///
+    /// Kernel-requirement violations (e.g. attaching a 1PN correction
+    /// to a softened-gravity system) emit structured warnings on
+    /// ``stderr`` — they are non-fatal and do not raise. Use
+    /// ``System(..., exact_gravity=True)`` or
+    /// ``Body.<material>(...).unsoftened()`` to silence.
     ///
     /// Non-conservative operators (drag, radiation reaction) travel in a
     /// separate capsule; the Python wrapper for them is not yet exposed.
     fn add_hamiltonian_perturbation(&mut self, perturbation: &Bound<'_, PyAny>) -> PyResult<()> {
         let boxed = take_perturbation_from_python(perturbation)?;
-        self.inner.add_hamiltonian_perturbation(boxed);
-        Ok(())
+        // Result error variant is `Box<UnitSystemMismatch>` to keep
+        // the Result enum small per clippy::result_large_err; deref
+        // before passing to the PyErr converter.
+        self.inner
+            .add_hamiltonian_perturbation(boxed)
+            .map_err(|e| crate::errors::unit_system_mismatch_to_pyerr(*e))
+    }
+
+    // ── Provenance ───────────────────────────────────────────────────────
+
+    /// Reference list for the registered operator stack. Returns one
+    /// dictionary per citation, in registration order, with keys:
+    ///
+    /// - ``crate_name`` (str)
+    /// - ``crate_version`` (str)
+    /// - ``commit_hash`` (str | None) — full SHA when the implementing
+    ///   crate was built from a git checkout, ``None`` otherwise
+    /// - ``doi`` (str | None) — bare DOI suffix (e.g. ``10.1086/153180``)
+    /// - ``bibtex`` (str) — full BibTeX entry / entries for the
+    ///   underlying paper(s)
+    ///
+    /// Operators that don't publish a citation (test fakes, internal
+    /// tooling, default ``None``) are silently skipped. The returned
+    /// list is empty when no operators are registered, or when none of
+    /// them publish a citation.
+    ///
+    /// Stable across runs given the same operator stack — diff two
+    /// outputs to confirm the dependency graph stayed bit-equal.
+    fn citations(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let cites = self.inner.citations();
+        let list = pyo3::types::PyList::empty(py);
+        for c in cites {
+            let dict = pyo3::types::PyDict::new(py);
+            dict.set_item("crate_name", c.crate_name)?;
+            dict.set_item("crate_version", c.crate_version)?;
+            dict.set_item("commit_hash", c.commit_hash)?;
+            dict.set_item("doi", c.doi)?;
+            dict.set_item("bibtex", c.bibtex)?;
+            list.append(dict)?;
+        }
+        Ok(list.into())
+    }
+
+    /// Render the registered operator stack's citations as a
+    /// human-readable provenance block. Suitable for paper supplementary
+    /// material or for embedding in a snapshot file.
+    ///
+    /// The layout is identical to the Rust ``System::provenance()``
+    /// renderer — call sites can diff two outputs (across runs, across
+    /// machines, across language bindings) to confirm the dependency
+    /// graph stayed bit-equal.
+    fn provenance(&self) -> String {
+        self.inner.provenance()
     }
 
     fn __repr__(&self) -> String {

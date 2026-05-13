@@ -158,7 +158,8 @@ fn truncated_kernel_plus_1pn_fires_both_exactness_and_continuity_warnings() {
         .with_integrator(IntegratorKind::Yoshida4);
     sys.add_hamiltonian_perturbation(Box::new(PostNewtonian1PN::for_units(
         UnitSystem::solar_canonical(),
-    )));
+    )))
+    .expect("kernel-continuity test: matched UnitSystem");
 
     let events = captured.lock().unwrap().clone();
     unsubscribe(id);
@@ -261,9 +262,11 @@ fn truncated_kernel_energy_spikes_are_in_bijection_with_r_cut_crossings() {
         .with_kernel(kernel)
         .with_integrator(IntegratorKind::Yoshida4)
         .with_dt(DT);
-    sys_trunc.add_hamiltonian_perturbation(Box::new(PostNewtonian1PN::for_units(
-        UnitSystem::solar_canonical(),
-    )));
+    sys_trunc
+        .add_hamiltonian_perturbation(Box::new(PostNewtonian1PN::for_units(
+            UnitSystem::solar_canonical(),
+        )))
+        .expect("kernel-continuity test: matched UnitSystem");
     sys_trunc.step();
 
     let mut samples: Vec<Sample> = Vec::with_capacity(N_STEPS);
