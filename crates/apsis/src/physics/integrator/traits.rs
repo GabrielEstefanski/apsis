@@ -37,6 +37,7 @@ pub enum IntegratorKind {
     Yoshida4,
     WisdomHolman,
     Ias15,
+    Mercurius,
 }
 
 impl IntegratorKind {
@@ -47,6 +48,7 @@ impl IntegratorKind {
             Self::Yoshida4 => "Yoshida 4th-order",
             Self::WisdomHolman => "Wisdom–Holman (2nd, Keplerian)",
             Self::Ias15 => "IAS15 (15th, adaptive)",
+            Self::Mercurius => "Mercurius (hybrid, WH + IAS15)",
         }
     }
 
@@ -60,7 +62,7 @@ impl IntegratorKind {
     pub fn execution_profile(self) -> ExecutionProfile {
         match self {
             Self::Ias15 => ExecutionProfile::Precision,
-            Self::VelocityVerlet | Self::Yoshida4 | Self::WisdomHolman => {
+            Self::VelocityVerlet | Self::Yoshida4 | Self::WisdomHolman | Self::Mercurius => {
                 ExecutionProfile::Realtime
             },
         }
@@ -73,6 +75,7 @@ impl IntegratorKind {
             Self::Yoshida4 => 4,
             Self::WisdomHolman => 2,
             Self::Ias15 => 15,
+            Self::Mercurius => 2,
         }
     }
 
@@ -87,6 +90,11 @@ impl IntegratorKind {
             Self::Yoshida4 => 4,
             Self::WisdomHolman => 1,
             Self::Ias15 => 14,
+            // Mercurius: 2 K-weighted half-kicks + analytical Kepler drift +
+            // an IAS15 sub-integration whose cost is data-dependent. The
+            // quoted number is an amortised lower bound assuming no pair
+            // is in close encounter; engaging encounters add IAS15 substeps.
+            Self::Mercurius => 2,
         }
     }
 
@@ -116,12 +124,21 @@ impl IntegratorKind {
                  and high eccentricities without artefacts. Default choice \
                  for long-term, publication-quality integration."
             },
+            Self::Mercurius => {
+                "Hybrid symplectic integrator (Rein et al. 2019). Wisdom-Holman \
+                 outer step with K-weighted planet-planet kicks; IAS15 \
+                 sub-integrates the (1-K)-weighted close-encounter residual \
+                 over the same outer interval. Localises encounter cost to \
+                 the encountering pair while preserving secular stability \
+                 elsewhere. Requires a hierarchical mass distribution."
+            },
         }
     }
 
     /// All known variants, in the order shown in the UI combo-box.
-    pub const ALL: [IntegratorKind; 4] = [
+    pub const ALL: [IntegratorKind; 5] = [
         IntegratorKind::Ias15,
+        IntegratorKind::Mercurius,
         IntegratorKind::Yoshida4,
         IntegratorKind::VelocityVerlet,
         IntegratorKind::WisdomHolman,
@@ -134,6 +151,7 @@ impl IntegratorKind {
             Self::Yoshida4 => "yoshida4",
             Self::WisdomHolman => "wisdom_holman",
             Self::Ias15 => "ias15",
+            Self::Mercurius => "mercurius",
         }
     }
 }
@@ -147,6 +165,7 @@ impl std::str::FromStr for IntegratorKind {
             "yoshida4" => Ok(Self::Yoshida4),
             "wisdom_holman" => Ok(Self::WisdomHolman),
             "ias15" => Ok(Self::Ias15),
+            "mercurius" => Ok(Self::Mercurius),
             _ => Err(format!(
                 "unknown integrator {:?}; valid slugs: {}",
                 s,
@@ -501,6 +520,16 @@ pub trait Integrator: Send {
 
     /// Return the current error tolerance, if applicable.
     fn epsilon(&self) -> Option<f64> {
+        None
+    }
+
+    /// Set the Hill-radius multiplier for hybrid close-encounter
+    /// integrators (Mercurius). No-op for integrators without a
+    /// changeover-based encounter trigger.
+    fn set_hill_factor(&mut self, _alpha: f64) {}
+
+    /// Return the active Hill-radius multiplier, if applicable.
+    fn hill_factor(&self) -> Option<f64> {
         None
     }
 

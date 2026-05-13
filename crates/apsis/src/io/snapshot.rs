@@ -334,12 +334,14 @@ fn rf64(r: &mut impl Read) -> io::Result<f64> {
 /// | 1    | `Yoshida4` |
 /// | 2    | `WisdomHolman` (v5+) |
 /// | 3    | `Ias15` (v6+)     |
+/// | 4    | `Mercurius` (v15+) |
 fn integrator_to_u8(i: IntegratorKind) -> u8 {
     match i {
         IntegratorKind::VelocityVerlet => 0,
         IntegratorKind::Yoshida4 => 1,
         IntegratorKind::WisdomHolman => 2,
         IntegratorKind::Ias15 => 3,
+        IntegratorKind::Mercurius => 4,
     }
 }
 
@@ -351,6 +353,7 @@ fn u8_to_integrator(v: u8) -> IntegratorKind {
         1 => IntegratorKind::Yoshida4,
         2 => IntegratorKind::WisdomHolman,
         3 => IntegratorKind::Ias15,
+        4 => IntegratorKind::Mercurius,
         _ => IntegratorKind::VelocityVerlet,
     }
 }
