@@ -2,17 +2,20 @@
 //! the interactive shell.
 //!
 //! Each downstream perturbation crate publishes a
-//! [`PerturbationDescriptor`] value; this module exposes the static
-//! list of descriptors compiled into the current build. Adding a new
-//! plugin (e.g. `apsis-j2`, `apsis-tidal`) requires:
+//! [`HamiltonianOperatorDescriptor`] value; this module exposes the
+//! static list of descriptors compiled into the current build. Adding
+//! a new plugin (e.g. `apsis-j2`, `apsis-tidal`) requires:
 //!
 //! 1. A `Cargo.toml` dependency on the plugin crate.
 //! 2. One entry in [`bundled_descriptors`].
 //!
 //! No `match` arms, no enum variants, no string-typed dispatch — the
-//! shell never names a concrete perturbation type.
+//! shell never names a concrete operator type.
+//!
+//! Non-conservative descriptors (radiation, drag) are not yet exposed
+//! through the catalog; the v0.1 surface is Hamiltonian-only.
 
-use apsis::physics::integrator::PerturbationDescriptor;
+use apsis::physics::integrator::HamiltonianOperatorDescriptor;
 
 /// One slot in the user-facing perturbation registry.
 ///
@@ -20,7 +23,7 @@ use apsis::physics::integrator::PerturbationDescriptor;
 /// preconditions, builder); `enabled` reflects the user's checkbox state
 /// in the Config tab.
 pub struct PerturbationCatalogEntry {
-    pub descriptor: Box<dyn PerturbationDescriptor>,
+    pub descriptor: Box<dyn HamiltonianOperatorDescriptor>,
     pub enabled: bool,
 }
 
@@ -28,7 +31,7 @@ pub struct PerturbationCatalogEntry {
 /// `apsis-app` build. The list is whitelisted at compile time — runtime
 /// plugin loading remains a separate, optional feature (Issue #30
 /// federation path 1).
-pub fn bundled_descriptors() -> Vec<Box<dyn PerturbationDescriptor>> {
+pub fn bundled_descriptors() -> Vec<Box<dyn HamiltonianOperatorDescriptor>> {
     vec![Box::new(apsis_1pn::Descriptor)]
 }
 

@@ -363,33 +363,24 @@ impl Mercurius {
         }
     }
 
-    /// Apply `interaction_step(dt)` — K-weighted velocity update on
-    /// every planet, using the freshly-computed `acc_int`.
-    ///
-    /// Registered perturbations are accumulated into `acc_int` *after*
-    /// the K-weighted gravity contribution. Each perturbation thus sees
-    /// the post-DH-transform body state and contributes its full
-    /// acceleration; the kick over `dt` then advances each planet's
-    /// velocity by `dt · (a_K + a_pert)`. Two interaction half-kicks
-    /// per outer Mercurius step total to one full `dt` of perturbation
-    /// strength applied symmetrically around the Kepler drift — the
-    /// canonical Strang-split position for a smooth perturbation in a
-    /// WH-class integrator.
-    ///
-    /// The encounter-step `CloseFieldForceModel` deliberately omits
-    /// perturbations: they have already been folded into the kick
-    /// portion of the outer split, and applying them again inside the
-    /// IAS15 sub-integration would double-count.
+    /// K-weighted half-kick + perturbation accumulation. The encounter
+    /// step's `CloseFieldForceModel` deliberately skips perturbations
+    /// to avoid double-counting the contribution already folded in
+    /// here.
     fn interaction_step(
         &mut self,
         bodies: &mut [Body],
         g_factor: f64,
         dt: f64,
-        perturbations: &[Box<dyn crate::physics::integrator::PerturbationForce>],
+        hamiltonian: &[Box<dyn crate::physics::integrator::HamiltonianOperator>],
+        non_conservative: &[Box<dyn crate::physics::integrator::NonConservativeOperator>],
     ) {
         self.evaluate_interaction(bodies, g_factor);
-        for p in perturbations {
-            p.accumulate(bodies, &mut self.acc_int);
+        for op in hamiltonian {
+            op.accumulate_force(bodies, &mut self.acc_int);
+        }
+        for op in non_conservative {
+            op.accumulate_force(bodies, &mut self.acc_int);
         }
         for (i, b) in bodies.iter_mut().enumerate().skip(1) {
             let kick = self.acc_int[i] * dt;
@@ -562,19 +553,23 @@ impl Mercurius {
         bodies[0].vel_y = 0.0;
         bodies[0].vel_z = 0.0;
 
-        // Empty perturbations vector for the close-field IAS15 sub-context.
-        // The outer interaction half-kicks have already applied the full
-        // perturbation contribution (one full `dt` of perturbation
-        // strength split symmetrically across the two τ/2 kicks). Passing
-        // the outer `ctx.perturbations` through here would double-count
-        // the perturbation by `dt` worth on every encountering particle.
-        let perturbations: Vec<Box<dyn crate::physics::integrator::PerturbationForce>> = Vec::new();
+        // Sub-context with empty operator slices — the outer
+        // interaction half-kicks have already folded the perturbation
+        // contribution; passing it through here would double-count.
+        let hamiltonian_empty: Vec<Box<dyn crate::physics::integrator::HamiltonianOperator>> =
+            Vec::new();
+        let non_conservative_empty: Vec<
+            Box<dyn crate::physics::integrator::NonConservativeOperator>,
+        > = Vec::new();
+        let mut observers_empty: Vec<Box<dyn crate::physics::integrator::Operator>> = Vec::new();
         let mut close_force =
             CloseFieldForceModel { dcrit: &self.dcrit, encounter_map: &self.encounter_map };
         let mut ctx_close = IntegratorContext {
             force: &mut close_force,
             g_factor,
-            perturbations: &perturbations,
+            hamiltonian_perturbations: &hamiltonian_empty,
+            non_conservative_perturbations: &non_conservative_empty,
+            observers: &mut observers_empty,
             deadline,
         };
 
@@ -682,7 +677,13 @@ impl Integrator for Mercurius {
         self.rebuild_dcrit(bodies, dt);
 
         // ── 1. interaction(τ/2) ────────────────────────────────────────
-        self.interaction_step(bodies, g_factor, 0.5 * dt, ctx.perturbations);
+        self.interaction_step(
+            bodies,
+            g_factor,
+            0.5 * dt,
+            ctx.hamiltonian_perturbations,
+            ctx.non_conservative_perturbations,
+        );
 
         // ── 2. jump(τ/2) ───────────────────────────────────────────────
         self.jump_step(bodies, 0.5 * dt);
@@ -709,7 +710,13 @@ impl Integrator for Mercurius {
         // dcrit may have grown / shrunk because particle positions and
         // velocities have changed; recompute before the closing kick.
         self.rebuild_dcrit(bodies, dt);
-        self.interaction_step(bodies, g_factor, 0.5 * dt, ctx.perturbations);
+        self.interaction_step(
+            bodies,
+            g_factor,
+            0.5 * dt,
+            ctx.hamiltonian_perturbations,
+            ctx.non_conservative_perturbations,
+        );
 
         // ── Convert DH → inertial ──────────────────────────────────────
         self.dh_to_inertial(bodies);
@@ -875,12 +882,17 @@ mod tests {
     fn step_via(integrator: &mut dyn Integrator, bodies: &mut [Body], dt: f64, n_steps: usize) {
         let mut force = GravityForceModel::new(0.5, 16);
         let mut acc: Vec<Vec3> = vec![Vec3::ZERO; bodies.len()];
-        let perturbations: Vec<Box<dyn crate::physics::integrator::PerturbationForce>> = Vec::new();
+        let hamiltonian: Vec<Box<dyn crate::physics::integrator::HamiltonianOperator>> = Vec::new();
+        let non_conservative: Vec<Box<dyn crate::physics::integrator::NonConservativeOperator>> =
+            Vec::new();
+        let mut observers: Vec<Box<dyn crate::physics::integrator::Operator>> = Vec::new();
         for _ in 0..n_steps {
             let mut ctx = IntegratorContext {
                 force: &mut force,
                 g_factor: 1.0,
-                perturbations: &perturbations,
+                hamiltonian_perturbations: &hamiltonian,
+                non_conservative_perturbations: &non_conservative,
+                observers: &mut observers,
                 deadline: None,
             };
             integrator.step(bodies, &mut ctx, dt, &mut acc);
@@ -934,11 +946,16 @@ mod tests {
         ];
         let mut force = GravityForceModel::new(0.5, 16);
         let mut acc: Vec<Vec3> = vec![Vec3::ZERO; bodies.len()];
-        let perturbations: Vec<Box<dyn crate::physics::integrator::PerturbationForce>> = Vec::new();
+        let hamiltonian: Vec<Box<dyn crate::physics::integrator::HamiltonianOperator>> = Vec::new();
+        let non_conservative: Vec<Box<dyn crate::physics::integrator::NonConservativeOperator>> =
+            Vec::new();
+        let mut observers: Vec<Box<dyn crate::physics::integrator::Operator>> = Vec::new();
         let mut ctx = IntegratorContext {
             force: &mut force,
             g_factor: 1.0,
-            perturbations: &perturbations,
+            hamiltonian_perturbations: &hamiltonian,
+            non_conservative_perturbations: &non_conservative,
+            observers: &mut observers,
             deadline: None,
         };
         let mut merc = Mercurius::new();
@@ -1074,29 +1091,27 @@ mod tests {
         );
     }
 
-    /// Probe perturbation that adds a constant `+y` acceleration to
-    /// every planet (skipping the Sun at index 0). Used to verify that
-    /// `ctx.perturbations` is honored by Mercurius's interaction step.
     struct ConstantYKickOnPlanets {
         a_y: f64,
     }
 
-    impl crate::physics::integrator::PerturbationForce for ConstantYKickOnPlanets {
-        fn accumulate(&self, bodies: &[crate::domain::body::Body], scratch_acc: &mut [Vec3]) {
+    impl crate::physics::integrator::Operator for ConstantYKickOnPlanets {}
+
+    impl crate::physics::integrator::HamiltonianOperator for ConstantYKickOnPlanets {
+        fn accumulate_force(&self, bodies: &[crate::domain::body::Body], acc: &mut [Vec3]) {
             for i in 1..bodies.len() {
-                scratch_acc[i].y += self.a_y;
+                acc[i].y += self.a_y;
             }
+        }
+
+        fn energy_contribution(&self, bodies: &[crate::domain::body::Body]) -> f64 {
+            // V = -a_y * Σ y_i so that −∂V/∂y_i = a_y.
+            -self.a_y * bodies.iter().skip(1).map(|b| b.pos_y).sum::<f64>()
         }
     }
 
     #[test]
-    fn ctx_perturbations_are_honored_by_interaction_step() {
-        // Constant `a_y = 1e-6` on every planet over `n_steps · dt = 0.1`
-        // simulated time should accumulate a velocity kick of `1e-7`
-        // y-component on every planet (modulo the small Kepler-coupled
-        // motion). Without the fix, ctx.perturbations is silently
-        // dropped by Mercurius and the velocity stays identical to the
-        // perturbation-free baseline.
+    fn registered_perturbations_are_honored_by_interaction_step() {
         let dt = 1.0e-3;
         let n_steps = 100;
         let a_y = 1.0e-6;
@@ -1110,9 +1125,12 @@ mod tests {
         let mut force_a = GravityForceModel::new(0.5, 16);
         let mut force_b = GravityForceModel::new(0.5, 16);
 
-        let no_pert: Vec<Box<dyn crate::physics::integrator::PerturbationForce>> = Vec::new();
-        let with_pert: Vec<Box<dyn crate::physics::integrator::PerturbationForce>> =
+        let no_h: Vec<Box<dyn crate::physics::integrator::HamiltonianOperator>> = Vec::new();
+        let with_h: Vec<Box<dyn crate::physics::integrator::HamiltonianOperator>> =
             vec![Box::new(ConstantYKickOnPlanets { a_y })];
+        let nc: Vec<Box<dyn crate::physics::integrator::NonConservativeOperator>> = Vec::new();
+        let mut obs_a: Vec<Box<dyn crate::physics::integrator::Operator>> = Vec::new();
+        let mut obs_b: Vec<Box<dyn crate::physics::integrator::Operator>> = Vec::new();
 
         let mut acc_a: Vec<Vec3> = vec![Vec3::ZERO; 3];
         let mut acc_b: Vec<Vec3> = vec![Vec3::ZERO; 3];
@@ -1121,7 +1139,9 @@ mod tests {
             let mut ctx_a = IntegratorContext {
                 force: &mut force_a,
                 g_factor: 1.0,
-                perturbations: &no_pert,
+                hamiltonian_perturbations: &no_h,
+                non_conservative_perturbations: &nc,
+                observers: &mut obs_a,
                 deadline: None,
             };
             merc_a.step(&mut bodies_no_pert, &mut ctx_a, dt, &mut acc_a);
@@ -1129,24 +1149,21 @@ mod tests {
             let mut ctx_b = IntegratorContext {
                 force: &mut force_b,
                 g_factor: 1.0,
-                perturbations: &with_pert,
+                hamiltonian_perturbations: &with_h,
+                non_conservative_perturbations: &nc,
+                observers: &mut obs_b,
                 deadline: None,
             };
             merc_b.step(&mut bodies_with_pert, &mut ctx_b, dt, &mut acc_b);
         }
 
-        // Expected impulse on each planet: a_y · n_steps · dt = 1e-7.
-        // Allow a few percent slack for the Kepler-coupled dynamics
-        // (the kick affects subsequent Kepler drifts in a way the
-        // simple impulse estimate does not capture).
         let total_t = (n_steps as f64) * dt;
         let expected_dvy = a_y * total_t;
         for i in 1..bodies_no_pert.len() {
             let dvy = bodies_with_pert[i].vel_y - bodies_no_pert[i].vel_y;
             assert!(
                 (dvy - expected_dvy).abs() / expected_dvy < 5.0e-2,
-                "planet {i}: Δvy = {dvy:.6e}, expected ~{expected_dvy:.6e} \
-                 (within 5%); ctx.perturbations is being silently dropped",
+                "planet {i}: Δvy = {dvy:.6e}, expected ~{expected_dvy:.6e} (within 5%)",
             );
         }
     }

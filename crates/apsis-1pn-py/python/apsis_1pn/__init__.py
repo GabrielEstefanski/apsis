@@ -21,8 +21,8 @@ wrong.
 
 Pass ``exact_gravity=True`` to ``apsis.System(...)`` or call
 ``Body.<material>(...).unsoftened()`` on every body. A violation emits
-a structured warning at ``add_perturbation`` time naming the failed
-invariant.
+a structured warning at ``add_hamiltonian_perturbation`` time naming
+the failed invariant.
 
 Quick start
 -----------
@@ -49,7 +49,7 @@ Quick start
         dt=1e-3,
         exact_gravity=True,
     )
-    sys.add_perturbation(apsis_1pn.PostNewtonian1PN.solar_units())
+    sys.add_hamiltonian_perturbation(apsis_1pn.PostNewtonian1PN.solar_units())
     sys.integrate_for(100.0)
 
 ``PostNewtonian1PN`` is the only export. Use :meth:`solar_units` for

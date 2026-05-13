@@ -12,7 +12,7 @@
 //! |---|---|---|
 //! | Force engine | [`ForceModel`] | [`GravityForceModel`] (Barnes-Hut) |
 //! | Integrator | [`Integrator`] | [`VelocityVerlet`] |
-//! | Extra forces | [`PerturbationForce`] | none |
+//! | Extra forces | [`HamiltonianOperator`] / [`NonConservativeOperator`] | none |
 //!
 //! ## Module layout
 //!
@@ -45,7 +45,8 @@ use crate::core::hooks::HookRegistry;
 use crate::domain::body::Body;
 use crate::math::Vec3;
 use crate::physics::integrator::{
-    ForceModel, GravityForceModel, Integrator, IntegratorKind, PerturbationForce, make_integrator,
+    ForceModel, GravityForceModel, HamiltonianOperator, Integrator, IntegratorKind,
+    NonConservativeOperator, Operator, make_integrator,
 };
 use crate::physics::orbital::OrbitalElements;
 use crate::templates::instantiate::instantiate;
@@ -184,8 +185,23 @@ pub struct System {
     /// steps.
     pub(crate) last_encounter_flag: crate::physics::encounter::EncounterFlag,
 
-    /// Registered non-gravitational perturbation forces.
-    pub(crate) perturbations: Vec<Box<dyn PerturbationForce>>,
+    /// Hamiltonian-class perturbations (force = −∇V derivable, with
+    /// energy contribution summed into [`total_energy`](Self::total_energy)).
+    /// Symplectic integrators preserve invariants when only operators
+    /// of this class are registered.
+    pub(crate) hamiltonian_perturbations: Vec<Box<dyn HamiltonianOperator>>,
+
+    /// Non-conservative perturbations (force without a Hamiltonian:
+    /// drag, radiation reaction, dissipative coupling). Symplectic
+    /// integrators degrade silently when one of these is registered;
+    /// the registration site emits a `warn_diag` so the broken
+    /// invariant is documented.
+    pub(crate) non_conservative_perturbations: Vec<Box<dyn NonConservativeOperator>>,
+
+    /// Pure observers — read-only operators called at synchronized
+    /// step boundaries (Shadow Hamiltonian tracker, audit trail
+    /// emitters). Contribute no force, no energy.
+    pub(crate) observers: Vec<Box<dyn Operator>>,
 
     /// Reproducibility seed. Consumed by preset builders and cluster spawners.
     /// Persisted in snapshots so a run can be replayed exactly.
@@ -390,7 +406,9 @@ impl System {
             softening_max,
             close_encounter_threshold: None,
             last_encounter_flag: crate::physics::encounter::EncounterFlag::Far,
-            perturbations: Vec::new(),
+            hamiltonian_perturbations: Vec::new(),
+            non_conservative_perturbations: Vec::new(),
+            observers: Vec::new(),
             seed: 0,
             hooks: HookRegistry::new(),
             stop_requested: false,

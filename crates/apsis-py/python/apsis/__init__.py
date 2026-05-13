@@ -53,12 +53,11 @@ from apsis._native import units
 
 
 class Perturbation:
-    """User-facing wrapper for a non-gravitational force plugin.
+    """User-facing wrapper for a Hamiltonian-class perturbation plugin.
 
     Researchers never construct ``Perturbation`` directly. Each
-    perturbation crate (``apsis_1pn``, future radiation / drag /
-    multipole packages) provides factory methods that return a fully
-    formed instance:
+    perturbation crate (``apsis_1pn``, future J2 / tidal packages)
+    provides factory methods that return a fully formed instance:
 
     .. code-block:: python
 
@@ -66,17 +65,23 @@ class Perturbation:
         import apsis_1pn
 
         sys = apsis.System(bodies=[...], units=apsis.units.SOLAR, ...)
-        sys.add_perturbation(apsis_1pn.PostNewtonian1PN.solar_units())
+        sys.add_hamiltonian_perturbation(apsis_1pn.PostNewtonian1PN.solar_units())
 
-    Why a pure-Python class rather than a PyO3 ``#[pyclass]``: cross-extension
-    type identity in PyO3 is unreliable (each ``cdylib`` registers its own
-    Python class object even when the underlying Rust type is shared via an
-    ``rlib``). Defining the user-facing class once, here, gives every
-    perturbation crate the same ``apsis.Perturbation`` to pass into
-    ``System.add_perturbation``. The boxed Rust trait object travels in the
-    ``_capsule`` attribute (an opaque ``PyCapsule``) which the
-    ``System.add_perturbation`` boundary unwraps via the shared helpers in
-    the ``apsis-py-core`` Rust crate.
+    Non-conservative operators (drag, radiation reaction) travel in a
+    separate capsule type with its own registration entry point; that
+    surface is not yet exposed across the FFI.
+
+    Why a pure-Python class rather than a PyO3 ``#[pyclass]``:
+    cross-extension type identity in PyO3 is unreliable (each
+    ``cdylib`` registers its own Python class object even when the
+    underlying Rust type is shared via an ``rlib``). Defining the
+    user-facing class once, here, gives every perturbation crate the
+    same ``apsis.Perturbation`` to pass into
+    ``System.add_hamiltonian_perturbation``. The boxed Rust trait
+    object travels in the ``_capsule`` attribute (an opaque
+    ``PyCapsule``) which the
+    ``System.add_hamiltonian_perturbation`` boundary unwraps via the
+    shared helpers in the ``apsis-py-core`` Rust crate.
     """
 
     __slots__ = ("_capsule", "_label")

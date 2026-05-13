@@ -85,7 +85,8 @@
 use crate::domain::body::Body;
 use crate::math::Vec3;
 use crate::physics::integrator::dense::{DenseSnapshot, predict_ias15, predict_v_ias15};
-use crate::physics::integrator::helpers::{apply_perturbations, evaluate, scale_acc_and_pe};
+use crate::physics::integrator::helpers::{evaluate, scale_acc_and_pe};
+use crate::physics::integrator::operator_dispatch::accumulate_perturbation_forces;
 use crate::physics::integrator::traits::{
     Integrator, IntegratorContext, IntegratorKind, StepResult,
 };
@@ -1139,16 +1140,23 @@ impl Integrator for Ias15 {
         // sub-step — the canonical FSAL property of any explicit /
         // implicit method whose stage-0 evaluation coincides with the
         // previous step's stage-end.
+        let pert_count =
+            ctx.hamiltonian_perturbations.len() + ctx.non_conservative_perturbations.len();
         let fsal_valid = self.has_valid_post_acc
             && acc.len() == n
             && self.cached_g_factor == ctx.g_factor
-            && self.cached_perturbation_count == ctx.perturbations.len();
+            && self.cached_perturbation_count == pert_count;
         let a0: Vec<Vec3> = if fsal_valid {
             time_phase!(a0_clone, { acc.clone() })
         } else {
             let raw_pe = time_phase!(evaluate, { evaluate(bodies, ctx.force, acc) });
             scale_acc_and_pe(acc, ctx.g_factor, raw_pe);
-            apply_perturbations(bodies, acc, ctx.perturbations);
+            accumulate_perturbation_forces(
+                bodies,
+                acc,
+                ctx.hamiltonian_perturbations,
+                ctx.non_conservative_perturbations,
+            );
             time_phase!(a0_clone, { acc.clone() })
         };
 
@@ -1317,11 +1325,17 @@ impl Integrator for Ias15 {
                     // top of `step()`).
                     let raw_pe = time_phase!(evaluate, { evaluate(bodies, ctx.force, acc) });
                     let pe = scale_acc_and_pe(acc, ctx.g_factor, raw_pe);
-                    apply_perturbations(bodies, acc, ctx.perturbations);
+                    accumulate_perturbation_forces(
+                        bodies,
+                        acc,
+                        ctx.hamiltonian_perturbations,
+                        ctx.non_conservative_perturbations,
+                    );
 
                     self.has_valid_post_acc = true;
                     self.cached_g_factor = ctx.g_factor;
-                    self.cached_perturbation_count = ctx.perturbations.len();
+                    self.cached_perturbation_count = ctx.hamiltonian_perturbations.len()
+                        + ctx.non_conservative_perturbations.len();
 
                     self.update_warmstart_record();
                     self.dt_last_accepted = dt_try;
@@ -1623,7 +1637,12 @@ impl Ias15 {
                 // Evaluate acceleration at predicted (x, v).
                 let raw_pe = time_phase!(evaluate, { evaluate(bodies, ctx.force, acc) });
                 let _ = scale_acc_and_pe(acc, ctx.g_factor, raw_pe);
-                apply_perturbations(bodies, acc, ctx.perturbations);
+                accumulate_perturbation_forces(
+                    bodies,
+                    acc,
+                    ctx.hamiltonian_perturbations,
+                    ctx.non_conservative_perturbations,
+                );
 
                 // Update divided-difference g and then b via c-coeffs.
                 time_phase!(update_g_and_b, {

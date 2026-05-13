@@ -296,7 +296,10 @@ fn measure_i(n: usize) -> RowI {
     let mut bodies = bodies_init.clone();
 
     let mut force = GravityForceModel::new(THETA, 16);
-    let mut perturbations: Vec<Box<dyn crate::physics::integrator::PerturbationForce>> = Vec::new();
+    let hamiltonian: Vec<Box<dyn crate::physics::integrator::HamiltonianOperator>> = Vec::new();
+    let non_conservative: Vec<Box<dyn crate::physics::integrator::NonConservativeOperator>> =
+        Vec::new();
+    let mut observers: Vec<Box<dyn crate::physics::integrator::Operator>> = Vec::new();
     let mut acc: Vec<Vec3> = vec![Vec3::ZERO; n];
     let mut ias = Ias15::new();
 
@@ -306,7 +309,9 @@ fn measure_i(n: usize) -> RowI {
         let mut ctx = IntegratorContext {
             force: &mut force,
             g_factor: 1.0,
-            perturbations: &perturbations,
+            hamiltonian_perturbations: &hamiltonian,
+            non_conservative_perturbations: &non_conservative,
+            observers: &mut observers,
             deadline: None,
         };
         for _ in 0..warmup {
@@ -331,7 +336,9 @@ fn measure_i(n: usize) -> RowI {
         let mut ctx = IntegratorContext {
             force: &mut force,
             g_factor: 1.0,
-            perturbations: &mut perturbations,
+            hamiltonian_perturbations: &hamiltonian,
+            non_conservative_perturbations: &non_conservative,
+            observers: &mut observers,
             deadline: None,
         };
         for _ in 0..measured {

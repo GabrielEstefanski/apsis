@@ -4,10 +4,10 @@ Two layers:
 
 - Boundary checks (fast): the binding exposes ``PostNewtonian1PN``,
   ``C_SOLAR_UNITS``, and the factories return objects compatible with
-  ``apsis.System.add_perturbation``.
+  ``apsis.System.add_hamiltonian_perturbation``.
 - Behaviour checks (also fast): a fresh ``Perturbation`` consumed by
-  ``add_perturbation`` cannot be reused; the integration with 1PN
-  attached actually advances time without raising.
+  ``add_hamiltonian_perturbation`` cannot be reused; the integration
+  with 1PN attached actually advances time without raising.
 
 The Mercury perihelion precession-rate is *not* re-validated here —
 that's the parent crate's job (``crates/apsis-1pn/tests/mercury_precession_gate.rs``)
@@ -102,7 +102,7 @@ def test_attach_to_system_advances_time() -> None:
     crate's gate, not this binding's."""
     sys, p = _mercury_two_body_with_1pn()
 
-    sys.add_perturbation(p)
+    sys.add_hamiltonian_perturbation(p)
     sys.integrate_for(1.0)
 
     assert sys.t >= 1.0
@@ -113,10 +113,10 @@ def test_double_attach_raises_a_clear_error() -> None:
     """The single-consume contract surfaces a precise error message
     rather than a use-after-free or silent double-attach."""
     sys, p = _mercury_two_body_with_1pn()
-    sys.add_perturbation(p)
+    sys.add_hamiltonian_perturbation(p)
 
     with pytest.raises(ValueError, match="already been attached"):
-        sys.add_perturbation(p)
+        sys.add_hamiltonian_perturbation(p)
 
 
 def test_two_systems_need_two_perturbations() -> None:
@@ -124,8 +124,8 @@ def test_two_systems_need_two_perturbations() -> None:
     sys_a, p_a = _mercury_two_body_with_1pn()
     sys_b, p_b = _mercury_two_body_with_1pn()
 
-    sys_a.add_perturbation(p_a)
-    sys_b.add_perturbation(p_b)
+    sys_a.add_hamiltonian_perturbation(p_a)
+    sys_b.add_hamiltonian_perturbation(p_b)
 
     sys_a.integrate_for(0.5)
     sys_b.integrate_for(0.5)
@@ -136,8 +136,9 @@ def test_two_systems_need_two_perturbations() -> None:
 
 def test_attach_without_exact_gravity_emits_warning_but_still_runs() -> None:
     """Kernel-requirement violation (1PN on softened gravity) emits a
-    structured warning at ``add_perturbation`` time but does not raise —
-    the run proceeds with the user's choice, just flagged."""
+    structured warning at ``add_hamiltonian_perturbation`` time but
+    does not raise — the run proceeds with the user's choice, just
+    flagged."""
     sun = apsis.Body.star(mass=1.0)  # softened by default
     mercury = (
         apsis.Body.rocky(mass=1.66e-7)
@@ -153,6 +154,6 @@ def test_attach_without_exact_gravity_emits_warning_but_still_runs() -> None:
         # warning fires here.
     )
     p = apsis_1pn.PostNewtonian1PN.solar_units()
-    sys.add_perturbation(p)  # warning expected on stderr; not an exception
+    sys.add_hamiltonian_perturbation(p)  # warning expected on stderr; not an exception
     sys.integrate_for(0.1)
     assert sys.t >= 0.1
