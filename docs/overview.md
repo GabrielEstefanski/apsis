@@ -30,8 +30,10 @@ first-post-Newtonian correction supplied by an out-of-tree plugin.
 - Universal gravitation (Newton's law of gravitation, `G = 1` in
   simulation units).
 - Isolated system boundary: no external forces beyond those registered
-  explicitly via the [`PerturbationForce`](../crates/apsis/src/physics/integrator/perturbation.rs)
-  extension point.
+  explicitly via the operator extension point — see
+  [`crates/apsis/src/physics/integrator/operator.rs`](../crates/apsis/src/physics/integrator/operator.rs)
+  for the three-trait split (`Operator`, `HamiltonianOperator`,
+  `NonConservativeOperator`).
 - Plummer-softened pairwise forces with per-body material-scaled
   softening length — see [`softening.md`](softening.md) for the
   derivation and the published convention this follows.
@@ -60,7 +62,7 @@ The project is a Cargo workspace of six crates, split by role:
 | [`apsis`](../crates/apsis/) | The library: domain types, physics, integrators, `apsis::contract` formalisation, public API. Resolves no UI dependency — enforced in CI. |
 | [`apsis-1pn`](../crates/apsis-1pn/) | First downstream force crate: Einstein-Infeld-Hoffmann (Schwarzschild limit) 1PN correction. Reference implementation of the federation contract. Depends only on `apsis` through the public API. |
 | [`apsis-py`](../crates/apsis-py/) | Python binding (PyO3, abi3-py39). Researcher-first kwargs API exposing `Body`, `IntegratorKind`, `System`, `Trajectory`, and adaptive-controller diagnostics. |
-| [`apsis-py-core`](../crates/apsis-py-core/) | Cross-extension transport (rlib): `Box<dyn PerturbationForce>` ↔ `PyCapsule`. Allows out-of-tree force crates to expose Python bindings without re-implementing physics. |
+| [`apsis-py-core`](../crates/apsis-py-core/) | Cross-extension transport (rlib): `Box<dyn HamiltonianOperator>` ↔ `PyCapsule`. Allows out-of-tree force crates to expose Python bindings without re-implementing physics. |
 | [`apsis-1pn-py`](../crates/apsis-1pn-py/) | Python binding for `apsis-1pn`. Reference implementation of the federation contract at the Rust/Python boundary. |
 | [`apsis-app`](../crates/apsis-app/) | Optional interactive shell: egui/wgpu event loop, camera, panels, and GPU-side rendering. Not part of the validated surface. |
 
@@ -81,8 +83,9 @@ Inside `apsis`, the code is organised by responsibility:
 - [`physics/`](../crates/apsis/src/physics/) — force
   models (Barnes-Hut + Plummer kernel), integrators (Velocity
   Verlet, Yoshida 4, Wisdom-Holman, IAS15), orbital elements,
-  energy and angular-momentum diagnostics, and the
-  `PerturbationForce` extension trait.
+  energy and angular-momentum diagnostics, and the operator
+  extension traits (`HamiltonianOperator`,
+  `NonConservativeOperator`).
 - [`core/`](../crates/apsis/src/core/) — the `System`
   orchestrator, adaptive dt/θ controllers, hook registry,
   structured diagnostic event bus, trail ring buffer, and

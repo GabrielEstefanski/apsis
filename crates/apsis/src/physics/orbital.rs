@@ -62,10 +62,9 @@
 //! bit-equivalent across the 3D port.
 //!
 //! Apsis-specific surface (kernel `Exactness`/`Continuity` invariants,
-//! per-perturbation `KernelRequirements`, federated extension crates)
+//! per-operator `KernelRequirements`, federated extension crates)
 //! lives in `physics::gravity::kernel` and
-//! `physics::integrator::PerturbationForce`. This module is
-//! intentionally vanilla.
+//! `physics::integrator::operator`. This module is intentionally vanilla.
 //!
 //! ## Singularity contracts
 //!

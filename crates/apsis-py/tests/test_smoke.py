@@ -607,21 +607,21 @@ def test_perturbation_class_is_a_pure_python_wrapper() -> None:
     assert apsis.Perturbation.__module__ == "apsis"
 
 
-def test_add_perturbation_rejects_non_perturbation_objects() -> None:
+def test_add_hamiltonian_perturbation_rejects_non_perturbation_objects() -> None:
     """Anything without a ``_capsule`` attribute is rejected at the boundary."""
     sys = _two_body_kepler_system()
     with pytest.raises(ValueError, match="perturbation"):
-        sys.add_perturbation("not a perturbation")  # type: ignore[arg-type]
+        sys.add_hamiltonian_perturbation("not a perturbation")  # type: ignore[arg-type]
     with pytest.raises(ValueError, match="perturbation"):
-        sys.add_perturbation(42)  # type: ignore[arg-type]
+        sys.add_hamiltonian_perturbation(42)  # type: ignore[arg-type]
 
 
-def test_add_perturbation_rejects_perturbation_with_non_capsule_attribute() -> None:
+def test_add_hamiltonian_perturbation_rejects_perturbation_with_non_capsule_attribute() -> None:
     """A ``Perturbation``-shaped object with a non-capsule ``_capsule`` is rejected."""
     sys = _two_body_kepler_system()
     fake = apsis.Perturbation(_capsule="not a capsule", _label="fake")
     with pytest.raises(ValueError, match="PyCapsule"):
-        sys.add_perturbation(fake)
+        sys.add_hamiltonian_perturbation(fake)
 
 
 # ── Diagnostics: Stats / AdaptiveStats / Trajectory parallel arrays ──────────

@@ -39,9 +39,9 @@
 //!
 //! - [`body`] — `Body` class with the nine material factories and fluent builder
 //! - [`integrator`] — `IntegratorKind` enum + slug parser
-//! - [`perturbation`] — `add_perturbation` boundary helper that pulls a
-//!   `Box<dyn PerturbationForce>` out of the user-facing pure-Python
-//!   `apsis.Perturbation` wrapper (see `python/apsis/__init__.py`)
+//! - [`perturbation`] — `add_hamiltonian_perturbation` boundary helper
+//!   that pulls a `Box<dyn HamiltonianOperator>` out of the user-facing
+//!   pure-Python `apsis.Perturbation` wrapper (see `python/apsis/__init__.py`)
 //! - [`stats`] — `Stats` and `AdaptiveStats` frozen diagnostic snapshots
 //! - [`system`] — `System` orchestrator (constructor, run loop, diagnostics)
 //! - [`trajectory`] — `Trajectory` NumPy-backed return value of `System.sample`

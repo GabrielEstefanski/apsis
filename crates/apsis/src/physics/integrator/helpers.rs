@@ -1,12 +1,13 @@
 //! Shared helper functions used by integrator implementations.
 //!
 //! These operate on raw acceleration buffers and are independent of any
-//! specific integrator or force model.
+//! specific integrator or force model. Perturbation dispatch lives in
+//! [`crate::physics::integrator::operator_dispatch`] under the
+//! operator-trait-aware helpers.
 
 use crate::domain::body::Body;
 use crate::math::Vec3;
 use crate::physics::integrator::force_model::ForceModel;
-use crate::physics::integrator::perturbation::PerturbationForce;
 
 /// Ensure `acc` has the correct length, then evaluate forces via the model.
 ///
@@ -28,33 +29,4 @@ pub fn scale_acc_and_pe(acc: &mut [Vec3], g_factor: f64, raw_pe: f64) -> f64 {
         }
     }
     raw_pe * g_factor
-}
-
-/// Accumulate all registered perturbation forces into `acc`.
-///
-/// Perturbations are independent of `g_factor` — call this **after**
-/// [`scale_acc_and_pe`].
-pub fn apply_perturbations(
-    bodies: &[Body],
-    acc: &mut [Vec3],
-    perturbations: &[Box<dyn PerturbationForce>],
-) {
-    for p in perturbations {
-        p.accumulate(bodies, acc);
-    }
-}
-
-/// Variant of [`apply_perturbations`] for Wisdom–Holman sub-steps.
-///
-/// During WH the force tree is built from `bodies[1..]` only, so `acc`
-/// has length `N − 1`.  This helper passes `bodies_planets` (= `bodies[1..]`)
-/// and the correct `offset` to each perturbation.
-pub fn apply_perturbations_planets(
-    bodies_planets: &[Body],
-    acc: &mut [Vec3],
-    perturbations: &[Box<dyn PerturbationForce>],
-) {
-    for p in perturbations {
-        p.accumulate_offset(bodies_planets, acc, 1);
-    }
 }
