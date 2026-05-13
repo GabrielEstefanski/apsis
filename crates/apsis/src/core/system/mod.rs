@@ -203,6 +203,16 @@ pub struct System {
     /// emitters). Contribute no force, no energy.
     pub(crate) observers: Vec<Box<dyn Operator>>,
 
+    /// Set of `(operator, bound)` pairs already reported via
+    /// `warn_diag` for regime-of-validity violations. The dedup state
+    /// is per-`System`-instance, lifetime-of-process: a violation that
+    /// is true at registration AND persists through dynamic checks
+    /// emits exactly one warning. Cleared by
+    /// [`reset_regime_warnings`](Self::reset_regime_warnings) when the
+    /// caller wants to re-arm the bus (e.g. after a deliberate
+    /// scenario change).
+    pub(crate) regime_warnings_emitted: std::collections::HashSet<(&'static str, &'static str)>,
+
     /// Reproducibility seed. Consumed by preset builders and cluster spawners.
     /// Persisted in snapshots so a run can be replayed exactly.
     pub(crate) seed: u64,
@@ -409,6 +419,7 @@ impl System {
             hamiltonian_perturbations: Vec::new(),
             non_conservative_perturbations: Vec::new(),
             observers: Vec::new(),
+            regime_warnings_emitted: std::collections::HashSet::new(),
             seed: 0,
             hooks: HookRegistry::new(),
             stop_requested: false,

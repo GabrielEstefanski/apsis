@@ -86,8 +86,21 @@
 use apsis::domain::body::Body;
 use apsis::math::Vec3;
 use apsis::physics::gravity::kernel::KernelRequirements;
-use apsis::physics::integrator::{HamiltonianOperator, Operator};
+use apsis::physics::integrator::regime::{classify_mass_ratio, mass_ratio};
+use apsis::physics::integrator::{HamiltonianOperator, Operator, RegimeViolation, Severity};
 use apsis::units::UnitSystem;
+
+/// Mass ratio above which the test-particle pairwise 1PN approximation
+/// starts losing accuracy noticeably (warn level). Calibrated so that
+/// the Sun–Jupiter case (m_J/m_Sun ≈ 9.5e-4) sits inside the regime,
+/// while equal-mass binaries are well outside.
+const PN1_MASS_RATIO_WARN: f64 = 1.0e-2;
+
+/// Mass ratio above which the test-particle pairwise 1PN approximation
+/// is fundamentally inappropriate (hard level). The full Einstein–
+/// Infeld–Hoffmann N-body Hamiltonian is the rigorous form for
+/// comparable masses.
+const PN1_MASS_RATIO_HARD: f64 = 1.0e-1;
 
 /// Speed of light in m/s — CODATA exact by SI definition.
 const C_SI: f64 = 299_792_458.0;
@@ -234,6 +247,67 @@ impl Operator for PostNewtonian1PN {
     ///   of integrator order.
     fn kernel_requirements(&self) -> KernelRequirements {
         KernelRequirements::exact_and_smooth()
+    }
+
+    /// Test-particle pairwise 1PN assumes `m_secondary ≪ m_primary`
+    /// for every secondary in the system (treating `bodies[0]` as the
+    /// primary). Beyond ~1 % the leading-order error from the
+    /// dropped EIH cross-terms becomes comparable to the 1PN signal
+    /// itself; beyond ~10 % the operator's output is no longer
+    /// physics — the full EIH N-body Hamiltonian is required.
+    ///
+    /// `bodies[0]` is treated as the primary by convention (consistent
+    /// with the rest of the apsis solar-system fixtures: Sun first,
+    /// planets following).
+    fn check_regime(&self, bodies: &[Body], _t: f64) -> Vec<RegimeViolation> {
+        let mut violations = Vec::new();
+        if bodies.len() < 2 {
+            return violations;
+        }
+        for i in 1..bodies.len() {
+            let Some(ratio) = mass_ratio(bodies, 0, i) else {
+                continue;
+            };
+            let Some((severity, threshold)) =
+                classify_mass_ratio(ratio, PN1_MASS_RATIO_WARN, PN1_MASS_RATIO_HARD)
+            else {
+                continue;
+            };
+            // One bound key per severity tier: the dedup state in
+            // `System` would otherwise suppress an Approaching → Hard
+            // escalation if both fire across two cadences.
+            let bound = match severity {
+                Severity::Approaching => "max_secondary_to_primary_mass_ratio.approaching",
+                Severity::Exceeded => "max_secondary_to_primary_mass_ratio.exceeded",
+                Severity::Hard => "max_secondary_to_primary_mass_ratio.hard",
+                // `Severity` is non_exhaustive; future variants degrade
+                // safely into the generic key rather than silently
+                // suppressing the warning.
+                _ => "max_secondary_to_primary_mass_ratio.unknown_severity",
+            };
+            violations.push(RegimeViolation {
+                operator: self.name(),
+                bound,
+                value: ratio,
+                threshold,
+                severity,
+                body_index: Some(i),
+                message: "test-particle pairwise 1PN derivation assumes \
+                          m_secondary / m_primary ≪ 1; the full Einstein–\
+                          Infeld–Hoffmann N-body Hamiltonian is the rigorous \
+                          form for comparable masses",
+            });
+        }
+        violations
+    }
+
+    /// 1PN's only declared regime bound is the mass ratio, which is
+    /// static for any sane simulation (masses do not change). Check
+    /// once per Mercury orbit's worth of steps — about 15 000 IAS15
+    /// substeps for the 500-orbit gate. Effectively a no-op in the
+    /// hot loop.
+    fn regime_check_cadence(&self) -> usize {
+        15_000
     }
 }
 
@@ -441,6 +515,56 @@ mod tests {
         let pn = PostNewtonian1PN::from_raw_c(1.234e5, UnitSystem::canonical());
         assert_eq!(pn.c(), 1.234e5);
         assert_eq!(pn.units(), UnitSystem::canonical());
+    }
+
+    /// Test-particle pairwise 1PN regime: Sun + Mercury sits well
+    /// inside the regime (m_M / m_S ≈ 1.7e-7); `check_regime` returns
+    /// no violations. Locks in that the validation portfolio's
+    /// canonical scenario does not spuriously trigger the bound.
+    #[test]
+    fn check_regime_silent_for_sun_mercury() {
+        let pn = PostNewtonian1PN::for_units(UnitSystem::solar_canonical());
+        let bodies = vec![
+            Body::star(1.0).unsoftened(),
+            Body::rocky(1.66e-7).at(0.387, 0.0).with_velocity(0.0, 1.61).unsoftened(),
+        ];
+        let violations = pn.check_regime(&bodies, 0.0);
+        assert!(
+            violations.is_empty(),
+            "Sun + Mercury should be inside 1PN regime; got {violations:?}"
+        );
+    }
+
+    /// Test-particle 1PN regime: equal-mass binary is far outside the
+    /// envelope. `check_regime` must return a `Hard` violation
+    /// referencing the offending body and the mass-ratio bound.
+    #[test]
+    fn check_regime_flags_equal_mass_binary_as_hard() {
+        let pn = PostNewtonian1PN::for_units(UnitSystem::solar_canonical());
+        let bodies = vec![Body::star(1.0).unsoftened(), Body::star(1.0).unsoftened()];
+        let violations = pn.check_regime(&bodies, 0.0);
+        assert_eq!(violations.len(), 1, "expected exactly one violation for equal-mass binary");
+        let v = &violations[0];
+        assert_eq!(v.severity, Severity::Hard);
+        assert_eq!(v.body_index, Some(1));
+        assert_eq!(v.value, 1.0);
+        assert!(v.bound.starts_with("max_secondary_to_primary_mass_ratio"));
+    }
+
+    /// Sun + Jupiter (m_J / m_S ≈ 9.5e-4) sits just inside the warn
+    /// threshold (1e-2). Documents the calibration: realistic solar-
+    /// system 1PN runs do not trigger the bound. If this test fails
+    /// because Jupiter's mass-ratio crosses the warn threshold, the
+    /// threshold itself is wrong (Jupiter is a known good test case).
+    #[test]
+    fn check_regime_silent_for_sun_jupiter() {
+        let pn = PostNewtonian1PN::for_units(UnitSystem::solar_canonical());
+        let bodies = vec![Body::star(1.0).unsoftened(), Body::gas_giant(9.547e-4).unsoftened()];
+        let violations = pn.check_regime(&bodies, 0.0);
+        assert!(
+            violations.is_empty(),
+            "Sun + Jupiter should be inside 1PN regime; got {violations:?}"
+        );
     }
 
     /// `declared_units` returns `Some(units)` matching what the
