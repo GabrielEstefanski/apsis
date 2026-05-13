@@ -365,8 +365,32 @@ impl Mercurius {
 
     /// Apply `interaction_step(dt)` — K-weighted velocity update on
     /// every planet, using the freshly-computed `acc_int`.
-    fn interaction_step(&mut self, bodies: &mut [Body], g_factor: f64, dt: f64) {
+    ///
+    /// Registered perturbations are accumulated into `acc_int` *after*
+    /// the K-weighted gravity contribution. Each perturbation thus sees
+    /// the post-DH-transform body state and contributes its full
+    /// acceleration; the kick over `dt` then advances each planet's
+    /// velocity by `dt · (a_K + a_pert)`. Two interaction half-kicks
+    /// per outer Mercurius step total to one full `dt` of perturbation
+    /// strength applied symmetrically around the Kepler drift — the
+    /// canonical Strang-split position for a smooth perturbation in a
+    /// WH-class integrator.
+    ///
+    /// The encounter-step `CloseFieldForceModel` deliberately omits
+    /// perturbations: they have already been folded into the kick
+    /// portion of the outer split, and applying them again inside the
+    /// IAS15 sub-integration would double-count.
+    fn interaction_step(
+        &mut self,
+        bodies: &mut [Body],
+        g_factor: f64,
+        dt: f64,
+        perturbations: &[Box<dyn crate::physics::integrator::PerturbationForce>],
+    ) {
         self.evaluate_interaction(bodies, g_factor);
+        for p in perturbations {
+            p.accumulate(bodies, &mut self.acc_int);
+        }
         for (i, b) in bodies.iter_mut().enumerate().skip(1) {
             let kick = self.acc_int[i] * dt;
             b.vel_x += kick.x;
@@ -538,6 +562,12 @@ impl Mercurius {
         bodies[0].vel_y = 0.0;
         bodies[0].vel_z = 0.0;
 
+        // Empty perturbations vector for the close-field IAS15 sub-context.
+        // The outer interaction half-kicks have already applied the full
+        // perturbation contribution (one full `dt` of perturbation
+        // strength split symmetrically across the two τ/2 kicks). Passing
+        // the outer `ctx.perturbations` through here would double-count
+        // the perturbation by `dt` worth on every encountering particle.
         let perturbations: Vec<Box<dyn crate::physics::integrator::PerturbationForce>> = Vec::new();
         let mut close_force =
             CloseFieldForceModel { dcrit: &self.dcrit, encounter_map: &self.encounter_map };
@@ -652,7 +682,7 @@ impl Integrator for Mercurius {
         self.rebuild_dcrit(bodies, dt);
 
         // ── 1. interaction(τ/2) ────────────────────────────────────────
-        self.interaction_step(bodies, g_factor, 0.5 * dt);
+        self.interaction_step(bodies, g_factor, 0.5 * dt, ctx.perturbations);
 
         // ── 2. jump(τ/2) ───────────────────────────────────────────────
         self.jump_step(bodies, 0.5 * dt);
@@ -679,7 +709,7 @@ impl Integrator for Mercurius {
         // dcrit may have grown / shrunk because particle positions and
         // velocities have changed; recompute before the closing kick.
         self.rebuild_dcrit(bodies, dt);
-        self.interaction_step(bodies, g_factor, 0.5 * dt);
+        self.interaction_step(bodies, g_factor, 0.5 * dt, ctx.perturbations);
 
         // ── Convert DH → inertial ──────────────────────────────────────
         self.dh_to_inertial(bodies);
@@ -1042,5 +1072,82 @@ mod tests {
             drift < 1.0e-8,
             "1000 quiet steps: |ΔE/E0| = {drift:.3e}, expected < 1e-8 (symplectic)"
         );
+    }
+
+    /// Probe perturbation that adds a constant `+y` acceleration to
+    /// every planet (skipping the Sun at index 0). Used to verify that
+    /// `ctx.perturbations` is honored by Mercurius's interaction step.
+    struct ConstantYKickOnPlanets {
+        a_y: f64,
+    }
+
+    impl crate::physics::integrator::PerturbationForce for ConstantYKickOnPlanets {
+        fn accumulate(&self, bodies: &[crate::domain::body::Body], scratch_acc: &mut [Vec3]) {
+            for i in 1..bodies.len() {
+                scratch_acc[i].y += self.a_y;
+            }
+        }
+    }
+
+    #[test]
+    fn ctx_perturbations_are_honored_by_interaction_step() {
+        // Constant `a_y = 1e-6` on every planet over `n_steps · dt = 0.1`
+        // simulated time should accumulate a velocity kick of `1e-7`
+        // y-component on every planet (modulo the small Kepler-coupled
+        // motion). Without the fix, ctx.perturbations is silently
+        // dropped by Mercurius and the velocity stays identical to the
+        // perturbation-free baseline.
+        let dt = 1.0e-3;
+        let n_steps = 100;
+        let a_y = 1.0e-6;
+
+        let baseline_bodies = quiet_planetary();
+        let mut bodies_no_pert = baseline_bodies.clone();
+        let mut bodies_with_pert = baseline_bodies;
+
+        let mut merc_a = Mercurius::with_alpha(0.0);
+        let mut merc_b = Mercurius::with_alpha(0.0);
+        let mut force_a = GravityForceModel::new(0.5, 16);
+        let mut force_b = GravityForceModel::new(0.5, 16);
+
+        let no_pert: Vec<Box<dyn crate::physics::integrator::PerturbationForce>> = Vec::new();
+        let with_pert: Vec<Box<dyn crate::physics::integrator::PerturbationForce>> =
+            vec![Box::new(ConstantYKickOnPlanets { a_y })];
+
+        let mut acc_a: Vec<Vec3> = vec![Vec3::ZERO; 3];
+        let mut acc_b: Vec<Vec3> = vec![Vec3::ZERO; 3];
+
+        for _ in 0..n_steps {
+            let mut ctx_a = IntegratorContext {
+                force: &mut force_a,
+                g_factor: 1.0,
+                perturbations: &no_pert,
+                deadline: None,
+            };
+            merc_a.step(&mut bodies_no_pert, &mut ctx_a, dt, &mut acc_a);
+
+            let mut ctx_b = IntegratorContext {
+                force: &mut force_b,
+                g_factor: 1.0,
+                perturbations: &with_pert,
+                deadline: None,
+            };
+            merc_b.step(&mut bodies_with_pert, &mut ctx_b, dt, &mut acc_b);
+        }
+
+        // Expected impulse on each planet: a_y · n_steps · dt = 1e-7.
+        // Allow a few percent slack for the Kepler-coupled dynamics
+        // (the kick affects subsequent Kepler drifts in a way the
+        // simple impulse estimate does not capture).
+        let total_t = (n_steps as f64) * dt;
+        let expected_dvy = a_y * total_t;
+        for i in 1..bodies_no_pert.len() {
+            let dvy = bodies_with_pert[i].vel_y - bodies_no_pert[i].vel_y;
+            assert!(
+                (dvy - expected_dvy).abs() / expected_dvy < 5.0e-2,
+                "planet {i}: Δvy = {dvy:.6e}, expected ~{expected_dvy:.6e} \
+                 (within 5%); ctx.perturbations is being silently dropped",
+            );
+        }
     }
 }
