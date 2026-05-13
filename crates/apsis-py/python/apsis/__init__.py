@@ -47,6 +47,7 @@ from apsis._native import (
     System,
     Trajectory,
     UnitSystem,
+    UnitSystemMismatchError,
     __version__,
 )
 from apsis._native import units
@@ -110,6 +111,7 @@ __all__ = [
     "System",
     "Trajectory",
     "UnitSystem",
+    "UnitSystemMismatchError",
     "units",
     "__version__",
 ]

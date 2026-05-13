@@ -44,6 +44,7 @@
 use crate::domain::body::Body;
 use crate::math::Vec3;
 use crate::physics::gravity::kernel::KernelRequirements;
+use crate::physics::integrator::citation::Citation;
 use crate::physics::integrator::regime::RegimeViolation;
 use crate::units::UnitSystem;
 
@@ -163,6 +164,27 @@ pub trait Operator: Send + Sync {
     fn regime_check_cadence(&self) -> usize {
         100
     }
+
+    /// Reference card for the operator: BibTeX entry of the paper
+    /// implementing this physics, DOI when available, and the
+    /// implementing crate's name + version + build commit. Default:
+    /// `None` — operator has no canonical citation (test fakes,
+    /// internal tooling).
+    ///
+    /// Federation-thesis-aligned: every published perturbation crate
+    /// should override this so [`crate::core::system::System::citations`]
+    /// produces a complete reference list automatically. The
+    /// `crate_name` / `crate_version` / `commit_hash` fields use
+    /// `env!("CARGO_PKG_NAME")` / `env!("CARGO_PKG_VERSION")` /
+    /// `option_env!(...)` so the captured values are the **operator's
+    /// crate** state, not apsis core's.
+    ///
+    /// See [`Citation`](crate::physics::integrator::Citation) for the
+    /// field contract and [`crate::physics::integrator::render_provenance`]
+    /// for the standard rendering.
+    fn citation(&self) -> Option<Citation> {
+        None
+    }
 }
 
 // ── Hamiltonian operator ─────────────────────────────────────────────────────
@@ -222,6 +244,54 @@ pub trait NonConservativeOperator: Operator {
     fn accumulate_force(&self, bodies: &[Body], acc: &mut [Vec3]);
 }
 
+// ── Registration error ───────────────────────────────────────────────────────
+
+/// Operator registration refused — the operator's
+/// [`declared_units`](Operator::declared_units) disagree with the
+/// `System`'s [`UnitSystem`].
+///
+/// Returned by [`crate::core::system::System::add_hamiltonian_perturbation`]
+/// (and the non-conservative / observer counterparts) instead of panicking.
+/// Caller decides the policy: propagate with `?`, log and skip, swap
+/// the operator, fall back to a different unit system, etc. Two-tier
+/// semantics on registration:
+///
+/// - **Hard** (`Result::Err(UnitSystemMismatch)`) — the operator's `c`
+///   (or other dimensional parameter) would be interpreted in the
+///   wrong frame; integration would silently produce wrong physics.
+/// - **Soft** (`warn_diag`) — kernel-precondition violations,
+///   regime-of-validity bounds, NC-on-symplectic. Integration can
+///   continue with the user's choice; the bus carries the audit trail.
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub struct UnitSystemMismatch {
+    /// Operator identifier from
+    /// [`Operator::name`].
+    pub operator: &'static str,
+    /// `UnitSystem` the operator was constructed for (its
+    /// `declared_units`).
+    pub operator_units: UnitSystem,
+    /// `UnitSystem` the `System` was constructed for.
+    pub system_units: UnitSystem,
+}
+
+impl std::fmt::Display for UnitSystemMismatch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Unit-system mismatch on operator registration:\n  \
+             operator '{}' was constructed for {}\n  \
+             System was constructed for {}\n\
+             Construct the operator with the same UnitSystem passed to \
+             System::new(), or omit `declared_units` if the operator is \
+             unit-system-agnostic.",
+            self.operator, self.operator_units, self.system_units
+        )
+    }
+}
+
+impl std::error::Error for UnitSystemMismatch {}
+
 // ── Descriptor for federation seam ───────────────────────────────────────────
 
 /// Plugin metadata for downstream perturbation crates (`apsis-1pn`
@@ -231,8 +301,8 @@ pub trait NonConservativeOperator: Operator {
 /// `build` takes the target `UnitSystem` so the produced operator
 /// carries the same units as the `System` that will register it —
 /// the registration-time `declared_units` check then succeeds rather
-/// than panicking on the consumer. UI catalogs query the active
-/// `System`'s units and pass them through.
+/// than returning [`UnitSystemMismatch`] on the consumer. UI catalogs
+/// query the active `System`'s units and pass them through.
 pub trait HamiltonianOperatorDescriptor: Send + Sync {
     fn name(&self) -> &str;
     fn description(&self) -> &str;
