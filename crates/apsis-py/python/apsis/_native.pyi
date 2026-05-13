@@ -225,6 +225,36 @@ class Body:
 
     def __repr__(self) -> str: ...
 
+# ── Errors ────────────────────────────────────────────────────────────────────
+
+class UnitSystemMismatchError(Exception):
+    """Raised by ``System.add_*_perturbation`` when the operator's
+    declared :class:`UnitSystem` disagrees with the System's own.
+
+    Attributes (set by the Rust binding for programmatic recovery):
+      - ``operator``: ``str`` — operator identifier (e.g.
+        ``"apsis_1pn::PostNewtonian1PN"``).
+      - ``operator_units``: ``str`` — Display of the operator's
+        :class:`UnitSystem`.
+      - ``system_units``: ``str`` — Display of the System's
+        :class:`UnitSystem`.
+
+    The string message itself includes both unit systems and a hint;
+    catching by class is the recommended path:
+
+    .. code-block:: python
+
+        try:
+            sys.add_hamiltonian_perturbation(p)
+        except apsis.UnitSystemMismatchError as e:
+            log(f"{e.operator}: {e.operator_units} vs {e.system_units}")
+    """
+
+    operator: str
+    operator_units: str
+    system_units: str
+
+
 # ── System ────────────────────────────────────────────────────────────────────
 
 class System:

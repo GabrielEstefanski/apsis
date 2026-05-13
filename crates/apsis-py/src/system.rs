@@ -508,18 +508,28 @@ impl PySystem {
     /// `Perturbation` instance cannot be attached twice; build a fresh
     /// one for each system.
     ///
-    /// The kernel-requirement check inside the core fires here: if the
-    /// perturbation declares `Exactness::Exact` and the active kernel
-    /// reports `Softened`, a structured warning is emitted naming the
-    /// violated invariant. Use `System(..., exact_gravity=True)` or
-    /// `Body.<material>(...).unsoftened()` to silence it.
+    /// Raises ``apsis.UnitSystemMismatchError`` when the perturbation
+    /// was constructed for a different ``UnitSystem`` than the
+    /// ``System``'s own. The exception carries ``operator``,
+    /// ``operator_units``, and ``system_units`` attributes so callers
+    /// can decide policy (log, skip, swap, fall back).
+    ///
+    /// Kernel-requirement violations (e.g. attaching a 1PN correction
+    /// to a softened-gravity system) emit structured warnings on
+    /// ``stderr`` — they are non-fatal and do not raise. Use
+    /// ``System(..., exact_gravity=True)`` or
+    /// ``Body.<material>(...).unsoftened()`` to silence.
     ///
     /// Non-conservative operators (drag, radiation reaction) travel in a
     /// separate capsule; the Python wrapper for them is not yet exposed.
     fn add_hamiltonian_perturbation(&mut self, perturbation: &Bound<'_, PyAny>) -> PyResult<()> {
         let boxed = take_perturbation_from_python(perturbation)?;
-        self.inner.add_hamiltonian_perturbation(boxed);
-        Ok(())
+        // Result error variant is `Box<UnitSystemMismatch>` to keep
+        // the Result enum small per clippy::result_large_err; deref
+        // before passing to the PyErr converter.
+        self.inner
+            .add_hamiltonian_perturbation(boxed)
+            .map_err(|e| crate::errors::unit_system_mismatch_to_pyerr(*e))
     }
 
     fn __repr__(&self) -> String {

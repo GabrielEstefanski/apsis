@@ -92,7 +92,8 @@ fn main() {
     // reports Exactness::Exact dynamically and the check stays silent.
     sys.add_hamiltonian_perturbation(Box::new(PostNewtonian1PN::for_units(
         UnitSystem::solar_canonical(),
-    )));
+    )))
+    .expect("System and operator must share UnitSystem::solar_canonical()");
 
     // ── Reference state at t = 0 ────────────────────────────────────────────
     let el0 = compute_elements(sys.bodies(), 1, 0, 1.0)

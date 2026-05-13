@@ -87,7 +87,8 @@ fn main() {
         .with_dt(DT0);
     sys.add_hamiltonian_perturbation(Box::new(PostNewtonian1PN::for_units(
         UnitSystem::solar_canonical(),
-    )));
+    )))
+    .expect("System and operator must share UnitSystem::solar_canonical()");
 
     // Snapshot the t=0 osculating state so the output schema can include
     // the initial sample (orbit = 0) before any integration takes place.

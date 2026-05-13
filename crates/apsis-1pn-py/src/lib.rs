@@ -98,11 +98,15 @@ pub struct PyPostNewtonian1PN;
 /// Duck-type extraction of an `apsis.UnitSystem` Python object into the
 /// Rust [`apsis::units::UnitSystem`]. apsis-1pn-py does not depend on
 /// apsis-py directly (each is its own cdylib), so we reach the L/T/M
-/// scales through method calls and reconstruct via `UnitSystem::custom`.
+/// scales through attribute access and reconstruct via
+/// `UnitSystem::custom`. The scales are exposed as `#[getter]`
+/// properties (apsis-py/src/units.rs:107-125), not methods —
+/// `getattr` reads the float, `call_method0` would try to call the
+/// float and fail (mirrors PR #91).
 fn unit_system_from_python(units: &Bound<'_, PyAny>) -> PyResult<apsis::units::UnitSystem> {
-    let l = units.call_method0("length_scale_si")?.extract::<f64>()?;
-    let t = units.call_method0("time_scale_si")?.extract::<f64>()?;
-    let m = units.call_method0("mass_scale_si")?.extract::<f64>()?;
+    let l = units.getattr("length_scale_si")?.extract::<f64>()?;
+    let t = units.getattr("time_scale_si")?.extract::<f64>()?;
+    let m = units.getattr("mass_scale_si")?.extract::<f64>()?;
     apsis::units::UnitSystem::custom(l, t, m).map_err(|e| {
         PyValueError::new_err(format!(
             "units: failed to construct UnitSystem from the supplied object: {e}"
