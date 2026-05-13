@@ -66,8 +66,7 @@ fn main() {
     let sun = Body::star(1.0).unsoftened();
     let r_peri = A * (1.0 - E);
     let v_peri = (2.0 / r_peri - 1.0 / A).sqrt();
-    let mercury =
-        Body::rocky(M_MERCURY).at(r_peri, 0.0).with_velocity(0.0, v_peri).unsoftened();
+    let mercury = Body::rocky(M_MERCURY).at(r_peri, 0.0).with_velocity(0.0, v_peri).unsoftened();
 
     // ── System setup ────────────────────────────────────────────────────── //
     let mut sys = System::new(vec![sun, mercury], UnitSystem::canonical())
@@ -85,7 +84,8 @@ fn main() {
 
     writeln!(w, "# Long-horizon Mercury 1PN — apsis Mercurius side").unwrap();
     writeln!(w, "# protocol: docs/experiments/2026-05-13-mercury-1pn-long-horizon.md").unwrap();
-    writeln!(w, "# integrator: Mercurius (apsis), perturbation: PostNewtonian1PN::solar_units()").unwrap();
+    writeln!(w, "# integrator: Mercurius (apsis), perturbation: PostNewtonian1PN::solar_units()")
+        .unwrap();
     writeln!(w, "# units: canonical Hénon (G = 1)").unwrap();
     writeln!(w, "# a={A}, e={E}, m_mercury={M_MERCURY:e}").unwrap();
     writeln!(w, "# period={period:.18e}, dt={DT:.18e}, n_orbits={N_ORBITS}").unwrap();
