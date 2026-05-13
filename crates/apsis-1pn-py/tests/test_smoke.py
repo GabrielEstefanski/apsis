@@ -73,24 +73,51 @@ def test_solar_units_factory_returns_apsis_perturbation() -> None:
     assert "solar_units" in p.label
 
 
-def test_with_c_factory_accepts_explicit_speed_of_light() -> None:
-    """``with_c`` produces a perturbation calibrated for non-canonical units."""
-    p = apsis_1pn.PostNewtonian1PN.with_c(c=10000.0)
+def test_from_raw_c_factory_accepts_explicit_speed_of_light() -> None:
+    """``from_raw_c`` produces a perturbation calibrated for non-canonical units."""
+    p = apsis_1pn.PostNewtonian1PN.from_raw_c(c=10000.0)
     assert isinstance(p, apsis.Perturbation)
     assert "c=10000" in p.label
 
 
-def test_with_c_rejects_invalid_speed_of_light() -> None:
+def test_from_raw_c_rejects_invalid_speed_of_light() -> None:
     """Zero, negative, infinite, and NaN values for ``c`` are rejected."""
     for bad in (0.0, -1.0, float("inf"), float("nan")):
         with pytest.raises(ValueError, match="c"):
-            apsis_1pn.PostNewtonian1PN.with_c(c=bad)
+            apsis_1pn.PostNewtonian1PN.from_raw_c(c=bad)
 
 
-def test_with_c_requires_keyword_only_argument() -> None:
+def test_from_raw_c_requires_keyword_only_argument() -> None:
     """``c`` is kwarg-only — passing it positionally is a contract violation."""
     with pytest.raises(TypeError):
-        apsis_1pn.PostNewtonian1PN.with_c(10000.0)  # type: ignore[misc]
+        apsis_1pn.PostNewtonian1PN.from_raw_c(10000.0)  # type: ignore[misc]
+
+
+def test_for_units_constructor_derives_c_from_unit_system() -> None:
+    """``for_units`` derives ``c`` from the supplied UnitSystem, avoiding
+    raw numeric input. Pattern A (named-regime) of the observable
+    constructor convention."""
+    p = apsis_1pn.PostNewtonian1PN.for_units(units=apsis.units.SOLAR)
+    assert isinstance(p, apsis.Perturbation)
+    assert "for_units" in p.label
+
+
+def test_from_raw_c_validated_accepts_matching_c() -> None:
+    """``from_raw_c_validated`` succeeds when the raw ``c`` matches the
+    ``c`` derived from the supplied UnitSystem. Use canonical units
+    where ``c_expected = c_SI`` exactly to keep the test independent of
+    the IAU-vs-Hénon "solar" distinction."""
+    c_si = 299_792_458.0
+    p = apsis_1pn.PostNewtonian1PN.from_raw_c_validated(c=c_si, units=apsis.units.CANONICAL)
+    assert isinstance(p, apsis.Perturbation)
+    assert "validated" in p.label
+
+
+def test_from_raw_c_validated_rejects_mismatched_c() -> None:
+    """``from_raw_c_validated`` raises when the raw ``c`` disagrees with
+    the supplied UnitSystem — the silent unit-mismatch guard."""
+    with pytest.raises(ValueError, match="PostNewtonian1PN::c"):
+        apsis_1pn.PostNewtonian1PN.from_raw_c_validated(c=1.0, units=apsis.units.CANONICAL)
 
 
 # ── Integration with apsis.System ────────────────────────────────────────────

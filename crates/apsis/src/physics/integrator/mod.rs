@@ -51,6 +51,7 @@ pub mod operator;
 pub mod operator_dispatch;
 pub mod primitives;
 pub mod traits;
+pub mod validation;
 pub mod velocity_verlet;
 pub mod wisdom_holman;
 pub mod yoshida4;
@@ -74,6 +75,7 @@ pub use operator::{
 };
 pub use primitives::{drift, kick};
 pub use traits::{AdaptiveStats, Integrator, IntegratorContext, IntegratorKind, StepResult};
+pub use validation::ParameterValidationError;
 pub use velocity_verlet::VelocityVerlet;
 pub use wisdom_holman::WisdomHolman;
 pub use yoshida4::Yoshida4;

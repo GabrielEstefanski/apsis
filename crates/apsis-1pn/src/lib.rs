@@ -82,7 +82,18 @@
 use apsis::domain::body::Body;
 use apsis::math::Vec3;
 use apsis::physics::gravity::kernel::KernelRequirements;
-use apsis::physics::integrator::{HamiltonianOperator, Operator};
+use apsis::physics::integrator::{HamiltonianOperator, Operator, ParameterValidationError};
+use apsis::units::UnitSystem;
+
+/// Speed of light in m/s — CODATA exact by SI definition.
+const C_SI: f64 = 299_792_458.0;
+
+/// Relative tolerance for `from_raw_c_validated`. A bit looser than the
+/// f64 round-off floor because the validator derives `c_expected` via
+/// floating-point conversion from SI, which itself carries ~3 ULP of
+/// noise. 1e-9 catches unit-mismatch errors (typical relative error
+/// 1e-2 to 1e+8) without flagging legitimate truncation.
+const C_VALIDATION_TOLERANCE: f64 = 1.0e-9;
 
 /// Speed of light expressed in the simulator's canonical solar-system units:
 ///
@@ -102,7 +113,6 @@ use apsis::physics::integrator::{HamiltonianOperator, Operator};
 ///
 /// Current value: approximately `10_065.130` AU per (year / 2π).
 pub const C_SOLAR_UNITS: f64 = {
-    const C_SI: f64 = 299_792_458.0; // m/s, exact by SI definition
     const AU_SI: f64 = 149_597_870_700.0; // m, IAU 2012
     const YEAR_S: f64 = 365.25 * 86_400.0;
     const TWO_PI: f64 = 2.0 * std::f64::consts::PI;
@@ -144,18 +154,69 @@ pub struct PostNewtonian1PN {
 }
 
 impl PostNewtonian1PN {
-    /// Construct with an explicit speed of light.
+    // ── Named-regime constructors (Pattern A) ─────────────────────────────────
+
+    /// Construct for the apsis-1pn historical solar convention
+    /// ([`C_SOLAR_UNITS`]): G = 1, length = AU, mass = M☉, time =
+    /// year/(2π). This is the unit system the Mercury perihelion gate
+    /// and the rest of the 1PN validation portfolio run in.
     ///
-    /// Use this when the simulation runs in a unit system other than the
-    /// canonical solar one — e.g. geometric units (c = 1), or SI.
-    pub const fn with_c(c: f64) -> Self {
+    /// **Distinct from [`apsis::units::UnitSystem::solar`]**, which
+    /// uses the IAU convention (G ≈ 4π², length = AU, mass = M☉,
+    /// time = 1 year). Use [`for_units`](Self::for_units) with
+    /// [`UnitSystem::solar`] for the IAU convention; use this
+    /// constructor for the G = 1 convention.
+    pub const fn solar_units() -> Self {
+        Self { c: C_SOLAR_UNITS }
+    }
+
+    /// Construct for an arbitrary [`UnitSystem`], deriving `c` from the
+    /// SI definition of the speed of light in the chosen L/T scaling.
+    /// The recommended path for any non-canonical unit choice — the
+    /// user picks the units, `c` is computed exactly so the relativistic
+    /// correction stays consistent with the rest of the integration.
+    pub fn for_units(units: UnitSystem) -> Self {
+        Self { c: C_SI * units.time_scale_si() / units.length_scale_si() }
+    }
+
+    // ── Raw escape (with optional validation) ─────────────────────────────────
+
+    /// Construct from a raw `c` value in the caller's unit system. No
+    /// validation that the value is consistent with any known unit
+    /// system — use [`from_raw_c_validated`](Self::from_raw_c_validated)
+    /// for cross-checked construction, or [`for_units`](Self::for_units)
+    /// to skip raw input entirely.
+    pub const fn from_raw_c(c: f64) -> Self {
         Self { c }
     }
 
-    /// Construct for the simulator's canonical solar-system units
-    /// ([`C_SOLAR_UNITS`]).
-    pub const fn solar_units() -> Self {
-        Self::with_c(C_SOLAR_UNITS)
+    /// Construct from a raw `c` value, cross-checking against the `c`
+    /// derived from the given [`UnitSystem`]. Returns
+    /// [`ParameterValidationError`] when the relative error between the
+    /// supplied and derived values exceeds `1e-9`. Typical use case:
+    /// reading `c` from an external config or another simulator and
+    /// confirming it matches before attaching the perturbation.
+    pub fn from_raw_c_validated(
+        c: f64,
+        units: UnitSystem,
+    ) -> Result<Self, ParameterValidationError> {
+        let expected = C_SI * units.time_scale_si() / units.length_scale_si();
+        let rel_err = (c - expected).abs() / expected.abs();
+        if rel_err > C_VALIDATION_TOLERANCE {
+            return Err(ParameterValidationError {
+                operator: "PostNewtonian1PN",
+                parameter: "c",
+                got: c,
+                expected,
+                tolerance: C_VALIDATION_TOLERANCE,
+                message: format!(
+                    "speed of light {c:.6e} disagrees with the value derived from the \
+                     supplied UnitSystem ({expected:.6e}); check that the UnitSystem L/T \
+                     scaling matches the unit system the `c` value was originally measured in"
+                ),
+            });
+        }
+        Ok(Self { c })
     }
 
     /// Speed of light this instance was configured with.
@@ -312,6 +373,94 @@ mod tests {
         );
     }
 
+    /// In Hénon canonical units (L = 1 m, T = 1 s, mass adjusted for
+    /// G = 1) the speed of light numerically equals its SI value. The
+    /// derivation chain is `c = c_SI · T_scale / L_scale`; both scales
+    /// are 1 here. Cleanest verification of the derivation.
+    #[test]
+    fn for_units_canonical_gives_si_c() {
+        let pn = PostNewtonian1PN::for_units(UnitSystem::canonical());
+        assert!(
+            (pn.c() - 299_792_458.0).abs() < 1.0,
+            "canonical units expect c_SI = 299_792_458, got {}",
+            pn.c(),
+        );
+    }
+
+    /// `for_units(UnitSystem::solar())` returns `c` in the IAU solar
+    /// convention (L = 1 AU, T = 1 year, M = 1 M☉ → G ≈ 4π²). This
+    /// is **distinct** from `PostNewtonian1PN::solar_units()`, which
+    /// pins `c` to [`C_SOLAR_UNITS`] in the apsis-1pn historical
+    /// convention (G = 1, L = AU, T = yr/(2π), M = M☉). The two
+    /// "solar" names refer to different unit systems by design — IAU
+    /// is what [`apsis::units::UnitSystem::solar`] exposes, while
+    /// [`C_SOLAR_UNITS`] is the G=1 reference baked into apsis-1pn.
+    #[test]
+    fn for_units_solar_uses_iau_convention() {
+        let pn = PostNewtonian1PN::for_units(UnitSystem::solar());
+        let c_si: f64 = 299_792_458.0;
+        let year_s: f64 = 365.25 * 86_400.0;
+        let au_m: f64 = 1.495_978_707e11;
+        let expected = c_si * year_s / au_m;
+        assert!(
+            (pn.c() - expected).abs() / expected < 1e-12,
+            "for_units(solar) c={} disagrees with derived IAU c={}",
+            pn.c(),
+            expected,
+        );
+    }
+
+    /// `solar_units()` returns `C_SOLAR_UNITS` unchanged — locks the
+    /// public constant against accidental drift inside the constructor.
+    #[test]
+    fn solar_units_returns_c_solar_units() {
+        assert_eq!(PostNewtonian1PN::solar_units().c(), C_SOLAR_UNITS);
+    }
+
+    /// Raw escape constructor accepts any numeric value with no
+    /// validation. The whole point of the escape is to make
+    /// unvalidated construction syntactically obvious through the
+    /// `from_raw_` prefix.
+    #[test]
+    fn from_raw_c_accepts_arbitrary_value() {
+        let pn = PostNewtonian1PN::from_raw_c(1.234e5);
+        assert_eq!(pn.c(), 1.234e5);
+    }
+
+    /// Validated escape accepts the `c` derived from the same
+    /// `UnitSystem` it validates against — self-consistency of the
+    /// derivation chain `for_units → from_raw_c_validated`. Mirrors
+    /// the case where a user reads `c` from an external source and
+    /// wants the simulator to confirm it.
+    #[test]
+    fn from_raw_c_validated_accepts_matching_c() {
+        let units = UnitSystem::canonical();
+        let c_derived = PostNewtonian1PN::for_units(units).c();
+        let pn = PostNewtonian1PN::from_raw_c_validated(c_derived, units)
+            .expect("c derived from for_units must validate against the same UnitSystem");
+        assert_eq!(pn.c(), c_derived);
+    }
+
+    /// Validated escape rejects a `c` value inconsistent with the
+    /// supplied unit system — the protection against unit-mismatch
+    /// errors that would silently distort the relativistic correction.
+    /// Passing `c = 1.0` (geometric-units value) against
+    /// `UnitSystem::canonical()` (which expects `c_SI ≈ 3e8`) must
+    /// fail with `parameter == "c"` and `expected ≈ c_SI`.
+    #[test]
+    fn from_raw_c_validated_rejects_mismatched_c() {
+        let err = PostNewtonian1PN::from_raw_c_validated(1.0, UnitSystem::canonical())
+            .expect_err("c=1 against canonical units must not validate");
+        assert_eq!(err.operator, "PostNewtonian1PN");
+        assert_eq!(err.parameter, "c");
+        assert_eq!(err.got, 1.0);
+        assert!(
+            (err.expected - 299_792_458.0).abs() < 1.0,
+            "expected ≈ c_SI, got {}",
+            err.expected,
+        );
+    }
+
     /// Acceleration on a lone body must be zero — no self-interaction.
     #[test]
     fn isolated_body_feels_no_pn_force() {
@@ -349,7 +498,7 @@ mod tests {
     fn infinite_c_gives_zero_correction() {
         let bodies =
             vec![Body::star(1.0), Body::rocky(1e-6).at(0.387, 0.0).with_velocity(0.0, 2.07)];
-        let pn = PostNewtonian1PN::with_c(1e20);
+        let pn = PostNewtonian1PN::from_raw_c(1e20);
         let mut acc = vec![Vec3::ZERO; 2];
         pn.accumulate_force(&bodies, &mut acc);
         for a in acc {

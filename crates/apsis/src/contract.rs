@@ -140,6 +140,82 @@
 //!     on a subscriber being present at any specific moment.
 //!     - test: `tests::failure_silent_acceptance_is_impossible`
 //!
+//! ## Observable constructor convention
+//!
+//! Perturbations parametrise physical processes. Parameters come from
+//! physics — fundamental constants, observations, regime choices — not
+//! from raw numerical input pasted from another simulator without
+//! checking. The convention below makes that load-bearing at the API
+//! surface so a contributor cannot ship a perturbation that silently
+//! invites unit-mismatch errors.
+//!
+//! Three constructor shapes coexist on every perturbation:
+//!
+//! ### Pattern A — Named regime (`for_xxx`, `solar_units`, …)
+//!
+//! Encodes a physical regime in the constructor name. No raw parameter
+//! is exposed; the regime *is* the parameter source.
+//!
+//! ```text
+//! PostNewtonian1PN::solar_units()
+//! PostNewtonian1PN::for_units(UnitSystem::solar())
+//! J2::for_earth()              // future
+//! Drag::for_iss_altitude_km(400.0)   // future
+//! ```
+//!
+//! Includes regime-named factories (`for_earth`) and parametrised
+//! named factories that derive the operator coefficients from a
+//! supplied [`crate::units::UnitSystem`] or comparable canonical input.
+//!
+//! ### Pattern B — Observable inversion (`from_<observable>`)
+//!
+//! Inverts a desired observable to compute the operator's coefficient.
+//! The user names what they measure; the constructor solves for the
+//! parameter.
+//!
+//! ```text
+//! CentralForce::from_precession_rate(rate, gamma, &primary)   // future
+//! Drag::from_orbital_decay_rate(rate, &body)                   // future
+//! ```
+//!
+//! The pattern eliminates a class of silent error: the user works in
+//! the space they measure (precession rate, decay rate) instead of the
+//! space the model uses (Acentral coefficient, drag constant).
+//!
+//! ### Raw escape (`from_raw_xxx`, `from_raw_xxx_validated`)
+//!
+//! The `from_raw_` prefix marks the constructor as accepting the
+//! parameter without inversion. Two variants:
+//!
+//! - **Unvalidated** (`from_raw_xxx`) — accepts the value as given.
+//!   The most explicit form a numeric parameter can take. Use when
+//!   the value is known correct (e.g. computed by neighbouring code,
+//!   not transcribed from a paper).
+//! - **Validated** (`from_raw_xxx_validated`) — accepts the value plus
+//!   a reference object (typically a [`crate::units::UnitSystem`] or a
+//!   representative [`crate::domain::body::Body`]), cross-checks the
+//!   value against what the reference implies, returns
+//!   [`crate::physics::integrator::ParameterValidationError`] on
+//!   mismatch.
+//!
+//! ```text
+//! PostNewtonian1PN::from_raw_c(c)                       // no check
+//! PostNewtonian1PN::from_raw_c_validated(c, units)?     // checked
+//! ```
+//!
+//! ### Implementor checklist
+//!
+//! When adding a new perturbation crate:
+//!
+//! 1. Provide at least one Pattern A or Pattern B constructor — the
+//!    default path for users should not require raw numeric input.
+//! 2. If a raw constructor is exposed, name it with the `from_raw_`
+//!    prefix and consider whether a `_validated` companion is feasible.
+//!    Add it unless validation is structurally impossible.
+//! 3. The default constructor in user-facing examples and downstream
+//!    bindings (`apsis-1pn-py`, future Python crates) should be the
+//!    Pattern A or Pattern B form, not the raw form.
+//!
 //! ## What this contract does NOT guarantee
 //!
 //! Reviewers who hold the federation thesis to a stronger standard need
