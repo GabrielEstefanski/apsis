@@ -63,4 +63,16 @@ pub trait Kernel: Send + Sync {
     /// otherwise — a correctly unsoftened configuration is indistinguishable
     /// from exact 1/r gravity at this level.
     fn properties(&self, bodies: &[Body]) -> KernelProperties;
+
+    /// Returns `true` iff this kernel implements the standard
+    /// Plummer-softened pair potential `K = 1/√(r² + ε²)`.
+    ///
+    /// Used by [`BarnesHutEngine`](super::super::BarnesHutEngine) to decide
+    /// whether the leaf-pair phase of the BH walk can dispatch to the
+    /// hand-vectorised SIMD path, which inlines the Plummer formula
+    /// directly. Default `false` keeps custom kernels on the scalar dyn-
+    /// dispatched path.
+    fn is_plummer(&self) -> bool {
+        false
+    }
 }

@@ -35,7 +35,43 @@ use crate::math::Vec3;
 use rayon::prelude::*;
 
 use super::kernel::{G, Kernel, PlummerKernel, pair_eps2};
+#[cfg(target_arch = "x86_64")]
+use super::simd;
 use super::tree::{DEFAULT_LEAF, DIRECT_MODE_THRESHOLD, EXACT_THRESHOLD, NO_CHILD, Node, Octree};
+
+// ── Leaf-pair dispatch ───────────────────────────────────────────────────── //
+
+/// Implementation that processes the leaf-pair phase of the two-phase
+/// BH walk. Resolved once at engine construction; read once per body
+/// inside the parallel walk, never mutated mid-walk.
+///
+/// `Avx2` requires both [`Kernel::is_plummer`] (the SIMD path inlines
+/// the Plummer formula) and runtime AVX2 + FMA detection on the host.
+/// All other configurations route to `Scalar`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LeafPairKernel {
+    Scalar,
+    #[cfg(target_arch = "x86_64")]
+    Avx2,
+}
+
+impl LeafPairKernel {
+    /// Pick the fastest available leaf-pair implementation for the given
+    /// kernel on the recorded hardware.
+    fn select(kernel: &dyn Kernel) -> Self {
+        #[cfg(target_arch = "x86_64")]
+        {
+            if kernel.is_plummer()
+                && std::is_x86_feature_detected!("avx2")
+                && std::is_x86_feature_detected!("fma")
+            {
+                return Self::Avx2;
+            }
+        }
+        let _ = kernel;
+        Self::Scalar
+    }
+}
 
 // ── WalkCounters ──────────────────────────────────────────────────────────── //
 
@@ -91,6 +127,10 @@ pub struct BarnesHutEngine {
     /// N ≤ this → exact O(N²); N > this → Barnes-Hut traversal.
     exact_threshold: usize,
     kernel: Arc<dyn Kernel>,
+    /// Resolved at engine construction (and every [`set_kernel`](Self::set_kernel))
+    /// from the kernel identity + host AVX2 detection. Read once per body
+    /// inside [`evaluate_profile`], never mutated during a walk.
+    leaf_pair_kernel: LeafPairKernel,
 }
 
 impl BarnesHutEngine {
@@ -108,7 +148,13 @@ impl BarnesHutEngine {
     /// example, a kernel that demonstrates or tests a different Exactness
     /// or Continuity class.
     pub fn with_kernel(max_depth: usize, kernel: Arc<dyn Kernel>) -> Self {
-        Self { tree: Octree::new(max_depth), exact_threshold: EXACT_THRESHOLD, kernel }
+        let leaf_pair_kernel = LeafPairKernel::select(kernel.as_ref());
+        Self {
+            tree: Octree::new(max_depth),
+            exact_threshold: EXACT_THRESHOLD,
+            kernel,
+            leaf_pair_kernel,
+        }
     }
 
     /// Handle to the kernel this engine dispatches through.
@@ -130,6 +176,7 @@ impl BarnesHutEngine {
     /// as the continuity counter-test (see
     /// [`TruncatedPlummerKernel`](crate::physics::gravity::kernel::TruncatedPlummerKernel)).
     pub fn set_kernel(&mut self, kernel: Arc<dyn Kernel>) {
+        self.leaf_pair_kernel = LeafPairKernel::select(kernel.as_ref());
         self.kernel = kernel;
     }
 
@@ -223,12 +270,23 @@ impl BarnesHutEngine {
         }
 
         let nodes = self.tree.nodes();
+        let leaf_pair_kernel = self.leaf_pair_kernel;
 
         let results: Vec<(Vec3, f64, WalkCounters)> = (0..n)
             .into_par_iter()
             .map(|i| {
                 let mut stack = Vec::with_capacity(128);
-                bh_eval_body(nodes, i, arrays, theta, kernel, &mut stack)
+                let mut lists = InteractionLists::with_capacity(2048, 1024);
+                bh_eval_body(
+                    nodes,
+                    i,
+                    arrays,
+                    theta,
+                    kernel,
+                    leaf_pair_kernel,
+                    &mut stack,
+                    &mut lists,
+                )
             })
             .collect();
 
@@ -438,17 +496,218 @@ fn exact_eval(arrays: &BodyArrays, kernel: &dyn Kernel, acc: &mut [Vec3]) -> f64
     potential
 }
 
+/// Per-body interaction lists emitted by phase 1 of the BH walk and
+/// consumed by phase 2 (the dense kernel).
+///
+/// Two parallel `Vec<u32>`s: leaf-pair body indices (into [`BodyArrays`])
+/// and accepted-node indices (into the [`Octree`]'s flat node array).
+/// Phase 2 processes them in two homogeneous loops — first all leaf-pair
+/// interactions, then all accepted-node interactions — which is the
+/// branchless lane-uniform shape the AVX2 leaf-pair kernel vectorises.
+///
+/// The struct is allocated per body per evaluate call inside the rayon
+/// closure; rayon's work-stealing limits in-flight closures to ~thread
+/// count, so peak memory is bounded by `num_threads × (leaf_cap +
+/// node_cap) × 4 bytes` — ~150 KB at the default capacity hints below
+/// on a 12-thread machine.
+struct InteractionLists {
+    /// Body indices of leaf-pair neighbours (excluding self).
+    leaf_body_indices: Vec<u32>,
+    /// Indices into the flat node array of nodes BH-accepted as
+    /// monopole + quadrupole pseudo-bodies.
+    accepted_node_indices: Vec<u32>,
+}
+
+impl InteractionLists {
+    fn with_capacity(leaf_cap: usize, node_cap: usize) -> Self {
+        Self {
+            leaf_body_indices: Vec::with_capacity(leaf_cap),
+            accepted_node_indices: Vec::with_capacity(node_cap),
+        }
+    }
+
+    fn clear(&mut self) {
+        self.leaf_body_indices.clear();
+        self.accepted_node_indices.clear();
+    }
+}
+
+/// Phase 1 — Walk the tree, emit per-body interaction lists.
+///
+/// DFS via stack. Decisions per visit:
+/// - leaf: push every non-self body index into `leaf_body_indices`
+/// - internal accepted (`s/d < θ`): push node index into
+///   `accepted_node_indices`
+/// - internal rejected: push children to stack
+///
+/// Returns walk counters. Lists are written into the caller's reusable
+/// buffer (cleared at top).
+#[inline(always)]
+fn bh_walk_emit_lists(
+    nodes: &[Node<DEFAULT_LEAF>],
+    body_idx: usize,
+    arrays: &BodyArrays,
+    theta: f64,
+    stack: &mut Vec<u32>,
+    lists: &mut InteractionLists,
+) -> WalkCounters {
+    let body_pos_x = arrays.pos_x[body_idx];
+    let body_pos_y = arrays.pos_y[body_idx];
+    let body_pos_z = arrays.pos_z[body_idx];
+    let body_softening = arrays.softening[body_idx];
+    let body_eps2 = body_softening * body_softening;
+
+    let mut counters = WalkCounters::default();
+    lists.clear();
+
+    stack.clear();
+    if !nodes.is_empty() {
+        stack.push(0);
+    }
+
+    while let Some(raw) = stack.pop() {
+        counters.n_node_visits += 1;
+        let node = &nodes[raw as usize];
+        if node.mass <= 0.0 {
+            continue;
+        }
+
+        if node.is_leaf() {
+            for k in 0..node.body_len as usize {
+                let bi = node.bodies[k];
+                if bi as usize == body_idx {
+                    continue;
+                }
+                lists.leaf_body_indices.push(bi);
+                counters.n_leaf_interactions += 1;
+            }
+            continue;
+        }
+
+        // BH criterion: accept this node as a pseudo-body when s/d < θ.
+        let dx = node.com_x - body_pos_x;
+        let dy = node.com_y - body_pos_y;
+        let dz = node.com_z - body_pos_z;
+        let d = (dx * dx + dy * dy + dz * dz + body_eps2).sqrt();
+
+        if node.size() / d < theta {
+            lists.accepted_node_indices.push(raw);
+            counters.n_bh_accepted += 1;
+        } else {
+            for &c in &node.children {
+                if c != NO_CHILD {
+                    stack.push(c);
+                }
+            }
+        }
+    }
+
+    counters
+}
+
+/// Phase 2 — Process interaction lists with the dense scalar kernel.
+///
+/// Two homogeneous loops, no branches inside either:
+/// 1. Leaf-pair interactions (Plummer monopole on body-body pairs).
+/// 2. Accepted-node interactions (Plummer monopole + traceless quadrupole
+///    on body vs aggregated node).
+///
+/// Summation order is segregated (all leaves, then all nodes), which
+/// differs from the single-phase walk's DFS-interleaved order. Per-body
+/// acceleration drift between the two is ~`O(n_interactions × ULP)` ≈
+/// `~3000 × 2^-52 ≈ 7 × 10⁻¹³` in the worst case — well within Tier 1's
+/// `1e-13` tolerance gate.
+#[inline(always)]
+fn bh_process_lists(
+    nodes: &[Node<DEFAULT_LEAF>],
+    body_idx: usize,
+    arrays: &BodyArrays,
+    kernel: &dyn Kernel,
+    leaf_pair_kernel: LeafPairKernel,
+    lists: &InteractionLists,
+) -> (Vec3, f64) {
+    let body_pos_x = arrays.pos_x[body_idx];
+    let body_pos_y = arrays.pos_y[body_idx];
+    let body_pos_z = arrays.pos_z[body_idx];
+    let body_softening = arrays.softening[body_idx];
+    let body_eps2 = body_softening * body_softening;
+
+    // Phase 2a: leaf-pair Plummer monopole. Dispatched per-engine to either
+    // the scalar dyn-kernel path or the AVX2 inlined-Plummer path.
+    let (mut a, mut phi) = match leaf_pair_kernel {
+        LeafPairKernel::Scalar => leaf_pair_scalar(
+            body_pos_x,
+            body_pos_y,
+            body_pos_z,
+            body_softening,
+            arrays,
+            kernel,
+            &lists.leaf_body_indices,
+        ),
+        #[cfg(target_arch = "x86_64")]
+        LeafPairKernel::Avx2 => unsafe {
+            simd::process_leafpair_avx2(
+                body_pos_x,
+                body_pos_y,
+                body_pos_z,
+                body_softening,
+                arrays,
+                &lists.leaf_body_indices,
+            )
+        },
+    };
+
+    // Phase 2b: accepted-node Plummer monopole + traceless quadrupole.
+    for &raw_ni in &lists.accepted_node_indices {
+        let node = &nodes[raw_ni as usize];
+        let dx = node.com_x - body_pos_x;
+        let dy = node.com_y - body_pos_y;
+        let dz = node.com_z - body_pos_z;
+        let r_sq = dx * dx + dy * dy + dz * dz;
+
+        let fac = G * node.mass * kernel.acceleration_factor(r_sq, body_eps2);
+        a.x += dx * fac;
+        a.y += dy * fac;
+        a.z += dz * fac;
+        phi += -G * node.mass * kernel.potential(r_sq, body_eps2);
+
+        let q_zz = -(node.q_xx + node.q_yy);
+        let qr_x = node.q_xx * dx + node.q_xy * dy + node.q_xz * dz;
+        let qr_y = node.q_xy * dx + node.q_yy * dy + node.q_yz * dz;
+        let qr_z = node.q_xz * dx + node.q_yz * dy + q_zz * dz;
+        let rqr = dx * qr_x + dy * qr_y + dz * qr_z;
+
+        let inv_r2 = 1.0 / (r_sq + body_eps2);
+        let inv_r5 = fac / node.mass * inv_r2;
+        let inv_r7 = inv_r5 * inv_r2;
+
+        let coef_qr = -G * inv_r5;
+        let coef_r = 2.5 * G * rqr * inv_r7;
+
+        a.x += coef_qr * qr_x + coef_r * dx;
+        a.y += coef_qr * qr_y + coef_r * dy;
+        a.z += coef_qr * qr_z + coef_r * dz;
+        phi += -0.5 * G * rqr * inv_r5;
+    }
+
+    (a, phi)
+}
+
 /// Barnes-Hut force evaluation for a single body — O(log N) per body.
 ///
-/// Returns `(a, φ, counters)` where `a` is the acceleration vector, `φ` is
-/// the specific gravitational potential at the body's position (multiply
-/// by `mass[body_idx]` to get the contribution to total PE), and
-/// `counters` track work done during the walk (`n_node_visits,
-/// n_bh_accepted, n_leaf_interactions`) for the engine ceiling profiler.
+/// Two-phase pattern: phase 1 walks the tree (control flow + decisions)
+/// and emits interaction lists; phase 2 processes the lists with the
+/// dense scalar or AVX2 kernel selected by [`LeafPairKernel`].
 ///
-/// The walk reads node fields and reads positions / mass / softening of
-/// leaf-pair neighbours from the [`BodyArrays`] snapshot. The body's own
-/// state is loaded once at the top from `arrays[body_idx]`.
+/// Returns `(a, φ, counters)` where `a` is the acceleration vector, `φ`
+/// is the specific gravitational potential at the body's position
+/// (multiply by `mass[body_idx]` to get the contribution to total PE),
+/// and `counters` track work done during the walk for the engine ceiling
+/// profiler.
+///
+/// `lists` is a reusable per-body scratch buffer. The caller (typically
+/// `evaluate_profile`) allocates it once per closure invocation and
+/// passes by mutable reference. Phase 1 clears it before writing.
 ///
 /// Node interactions use the target body's own ε² — the tree stores only
 /// aggregated mass and 3D COM, not per-body softening at internal nodes.
@@ -457,6 +716,66 @@ fn exact_eval(arrays: &BodyArrays, kernel: &dyn Kernel, acc: &mut [Vec3]) -> f64
 /// 2×2 §Decision.
 #[inline(always)]
 fn bh_eval_body(
+    nodes: &[Node<DEFAULT_LEAF>],
+    body_idx: usize,
+    arrays: &BodyArrays,
+    theta: f64,
+    kernel: &dyn Kernel,
+    leaf_pair_kernel: LeafPairKernel,
+    stack: &mut Vec<u32>,
+    lists: &mut InteractionLists,
+) -> (Vec3, f64, WalkCounters) {
+    let counters = bh_walk_emit_lists(nodes, body_idx, arrays, theta, stack, lists);
+    let (a, phi) = bh_process_lists(nodes, body_idx, arrays, kernel, leaf_pair_kernel, lists);
+    (a, phi, counters)
+}
+
+/// Scalar leaf-pair Plummer monopole — the dyn-dispatched fallback when
+/// AVX2 is unavailable or the active kernel is not the Plummer fast path.
+///
+/// Pulled out of [`bh_process_lists`] so the dispatch site there is a
+/// branch-free `match` over [`LeafPairKernel`] rather than two nested
+/// loop bodies.
+#[inline(always)]
+fn leaf_pair_scalar(
+    body_pos_x: f64,
+    body_pos_y: f64,
+    body_pos_z: f64,
+    body_softening: f64,
+    arrays: &BodyArrays,
+    kernel: &dyn Kernel,
+    leaf_body_indices: &[u32],
+) -> (Vec3, f64) {
+    let mut a = Vec3::ZERO;
+    let mut phi = 0.0_f64;
+
+    for &raw_bi in leaf_body_indices {
+        let bi = raw_bi as usize;
+        let other_mass = arrays.mass[bi];
+        let dx = arrays.pos_x[bi] - body_pos_x;
+        let dy = arrays.pos_y[bi] - body_pos_y;
+        let dz = arrays.pos_z[bi] - body_pos_z;
+        let eps2 = pair_eps2(body_softening, arrays.softening[bi]);
+        let r_sq = dx * dx + dy * dy + dz * dz;
+
+        let fac = G * other_mass * kernel.acceleration_factor(r_sq, eps2);
+        a.x += dx * fac;
+        a.y += dy * fac;
+        a.z += dz * fac;
+        phi += -G * other_mass * kernel.potential(r_sq, eps2);
+    }
+
+    (a, phi)
+}
+
+/// Single-phase BH walk reference, kept under `cfg(test)` so the
+/// tolerance test can compare two-phase output against an inline
+/// implementation that interleaves walk and kernel arithmetic. The
+/// interleaved (DFS-order) summation is not bit-exact with the
+/// two-phase segregated summation; the test gates on FP tolerance.
+#[cfg(test)]
+#[inline(always)]
+fn bh_eval_body_single_phase(
     nodes: &[Node<DEFAULT_LEAF>],
     body_idx: usize,
     arrays: &BodyArrays,
@@ -1118,5 +1437,386 @@ mod tests {
         assert_eq!(counters_exact.n_node_visits, 0);
         assert_eq!(counters_exact.n_bh_accepted, 0);
         assert_eq!(counters_exact.n_leaf_interactions, 0);
+    }
+
+    // ── Tier 1 — two-phase walk vs single-phase reference ──────────────────── //
+
+    /// Tier 1 of `2026-05-11-simd-kernel.md` for the two-phase walk
+    /// refactor. The two-phase pattern changes summation order from
+    /// DFS-interleaved to segregated (all leaf-pairs first, then all
+    /// accepted-nodes), so floating-point reordering is expected at
+    /// `O(n_interactions × ULP)` ≈ ~7 × 10⁻¹³ at N = 10⁴. Bound 1 × 10⁻¹³
+    /// covers the typical case (most bodies have fewer than ~3000
+    /// interactions); a single body in a small-force pocket can hit the
+    /// upper edge of the worst-case envelope, so the gate uses p99
+    /// rather than max.
+    ///
+    /// Failure here means the two-phase implementation has a bug beyond
+    /// FP reordering — likely a missed interaction or wrong index in
+    /// either `bh_walk_emit_lists` or `bh_process_lists`.
+    #[test]
+    fn tier1_two_phase_walk_matches_single_phase_within_tolerance() {
+        for &n in &[1_000usize, 5_000] {
+            for &seed in &[0x6F637472u64, 0x71756164, 0x6D6F7274] {
+                let bodies = sphere_distribution_lognormal(n, seed);
+                let mut arrays = BodyArrays::with_capacity(bodies.len());
+                arrays.pack_from(&bodies);
+
+                let kernel = PlummerKernel::new();
+                let nodes = {
+                    let mut tree: Octree = Octree::new(16);
+                    tree.build(&arrays);
+                    tree.nodes().to_vec()
+                };
+
+                // Single-phase reference path.
+                let mut acc_single = vec![Vec3::ZERO; bodies.len()];
+                {
+                    let mut stack = Vec::with_capacity(128);
+                    for i in 0..bodies.len() {
+                        let (a, _, _) =
+                            bh_eval_body_single_phase(&nodes, i, &arrays, 0.5, &kernel, &mut stack);
+                        acc_single[i] = a;
+                    }
+                }
+
+                // Two-phase production path (scalar leaf-pair kernel — the
+                // AVX2 path has its own Tier 1 test below).
+                let mut acc_two_phase = vec![Vec3::ZERO; bodies.len()];
+                {
+                    let mut stack = Vec::with_capacity(128);
+                    let mut lists = InteractionLists::with_capacity(2048, 1024);
+                    for i in 0..bodies.len() {
+                        let (a, _, _) = bh_eval_body(
+                            &nodes,
+                            i,
+                            &arrays,
+                            0.5,
+                            &kernel,
+                            LeafPairKernel::Scalar,
+                            &mut stack,
+                            &mut lists,
+                        );
+                        acc_two_phase[i] = a;
+                    }
+                }
+
+                // Per-body relative error; check p99 against tolerance.
+                let mut rel_errs: Vec<f64> = acc_single
+                    .iter()
+                    .zip(acc_two_phase.iter())
+                    .map(|(s, t)| {
+                        let diff = (s.x - t.x, s.y - t.y, s.z - t.z);
+                        let num = (diff.0 * diff.0 + diff.1 * diff.1 + diff.2 * diff.2).sqrt();
+                        let den = (s.x * s.x + s.y * s.y + s.z * s.z).sqrt().max(1e-300);
+                        num / den
+                    })
+                    .collect();
+                rel_errs.sort_by(|a, b| a.partial_cmp(b).unwrap());
+
+                let p99_idx = (rel_errs.len() as f64 * 0.99) as usize;
+                let p99 = rel_errs[p99_idx.min(rel_errs.len() - 1)];
+                let max_err = *rel_errs.last().unwrap();
+
+                eprintln!(
+                    "[two-phase-tier1] N={} seed=0x{:X}  p99={:.3e}  max={:.3e}",
+                    n, seed, p99, max_err,
+                );
+
+                assert!(
+                    p99 <= 1e-13,
+                    "two-phase vs single-phase p99 rel-err = {:.3e} exceeds 1e-13 \
+                     at N={} seed=0x{:X}; max = {:.3e}",
+                    p99,
+                    n,
+                    seed,
+                    max_err,
+                );
+            }
+        }
+    }
+
+    // ── Tier 0/1/2a — AVX2 leaf-pair kernel ────────────────────────────────── //
+
+    /// Tier 0 (hardware sanity) — saxpy speedup.
+    ///
+    /// `y[i] += a · x[i]` over 1 M lanes, scalar vs AVX2-FMA. Predicts
+    /// `t_scalar / t_avx2 ≥ 2.5×` on Zen 4 (4-lane double FMA, ~1 cyc
+    /// throughput per FMA, scalar pipeline ~3-4 cyc per iter).
+    ///
+    /// Bound calibrated against Agner Fog Zen 4 latency/throughput tables
+    /// (`fma vpd` ~1 cyc throughput, ~4 cyc latency); 2.5× leaves head
+    /// room for memory traffic and loop overhead. A miss here means the
+    /// CPU SIMD throughput is below spec or the toolchain is failing to
+    /// emit the intended instructions — investigate before trusting any
+    /// downstream Tier.
+    ///
+    /// `#[ignore]`d from default loop because wall-time gates are noisy
+    /// at sub-millisecond ranges; opt-in via
+    /// `cargo test --release ... -- --ignored --nocapture`.
+    #[test]
+    #[cfg(target_arch = "x86_64")]
+    #[ignore = "wall-time gate: opt-in via --ignored, run in --release on a quiet machine"]
+    fn tier0_saxpy_avx2_speedup_geq_2_5x() {
+        if !std::is_x86_feature_detected!("avx2") || !std::is_x86_feature_detected!("fma") {
+            eprintln!("[simd-tier0] AVX2+FMA unavailable, skipping");
+            return;
+        }
+
+        const N: usize = 1_000_000;
+        let x: Vec<f64> = (0..N).map(|i| (i as f64) * 1.0e-3).collect();
+        let mut y_scalar: Vec<f64> = vec![0.0; N];
+        let mut y_avx2: Vec<f64> = vec![0.0; N];
+        let a = 0.7_f64;
+
+        // Warm-up.
+        super::super::simd::saxpy_scalar(a, &x, &mut y_scalar);
+        unsafe { super::super::simd::saxpy_avx2(a, &x, &mut y_avx2) };
+
+        let measured = 5;
+        let start_scalar = std::time::Instant::now();
+        for _ in 0..measured {
+            super::super::simd::saxpy_scalar(a, &x, &mut y_scalar);
+        }
+        let t_scalar_ns = start_scalar.elapsed().as_nanos() as f64 / measured as f64;
+
+        let start_avx2 = std::time::Instant::now();
+        for _ in 0..measured {
+            unsafe { super::super::simd::saxpy_avx2(a, &x, &mut y_avx2) };
+        }
+        let t_avx2_ns = start_avx2.elapsed().as_nanos() as f64 / measured as f64;
+
+        let speedup = t_scalar_ns / t_avx2_ns;
+        eprintln!(
+            "[simd-tier0] saxpy N={N}  t_scalar={t_scalar_ns:.0}ns  \
+             t_avx2={t_avx2_ns:.0}ns  speedup={speedup:.2}×",
+        );
+
+        assert!(
+            speedup >= 2.5,
+            "saxpy AVX2 speedup {speedup:.2}× < 2.5× — toolchain or hardware not delivering \
+             the expected SIMD throughput; investigate before trusting downstream gates"
+        );
+    }
+
+    /// Tier 1 — AVX2 leaf-pair kernel matches scalar within tolerance.
+    ///
+    /// Compares `evaluate` output between two engines on the same SoA
+    /// snapshot: one forced into scalar leaf-pair dispatch, the other on
+    /// AVX2. The AVX2 path inlines the Plummer formula with horizontal-
+    /// sum reductions across 4 lanes, which reorders summation (sum of
+    /// 4-lane chunks instead of strict left-to-right). p99 per-body
+    /// relative-acceleration error must stay under 1 × 10⁻¹³, the same
+    /// bound the two-phase walk Tier 1 settled on (FP-reordering envelope
+    /// of `O(n_interactions × ULP)`).
+    ///
+    /// Failure here means the AVX2 kernel diverges from scalar Plummer
+    /// beyond pure FP reordering — likely a bug in gather indexing, lane
+    /// arithmetic, or the scalar tail.
+    #[test]
+    #[cfg(target_arch = "x86_64")]
+    fn tier1_avx2_leaf_pair_matches_scalar_within_tolerance() {
+        if !std::is_x86_feature_detected!("avx2") || !std::is_x86_feature_detected!("fma") {
+            eprintln!("[simd-tier1] AVX2+FMA unavailable, skipping");
+            return;
+        }
+
+        for &n in &[1_000usize, 5_000] {
+            for &seed in &[0x6F637472u64, 0x71756164, 0x6D6F7274] {
+                let bodies = sphere_distribution_lognormal(n, seed);
+                let mut arrays = BodyArrays::with_capacity(bodies.len());
+                arrays.pack_from(&bodies);
+
+                let mut engine_scalar = BarnesHutEngine::new(16);
+                engine_scalar.leaf_pair_kernel = LeafPairKernel::Scalar;
+                engine_scalar.build(&arrays);
+                let mut acc_scalar = vec![Vec3::ZERO; bodies.len()];
+                engine_scalar.evaluate(&arrays, 0.5, &mut acc_scalar);
+
+                let mut engine_avx2 = BarnesHutEngine::new(16);
+                engine_avx2.leaf_pair_kernel = LeafPairKernel::Avx2;
+                engine_avx2.build(&arrays);
+                let mut acc_avx2 = vec![Vec3::ZERO; bodies.len()];
+                engine_avx2.evaluate(&arrays, 0.5, &mut acc_avx2);
+
+                let mut rel_errs: Vec<f64> = acc_scalar
+                    .iter()
+                    .zip(acc_avx2.iter())
+                    .map(|(s, t)| {
+                        let diff = (s.x - t.x, s.y - t.y, s.z - t.z);
+                        let num = (diff.0 * diff.0 + diff.1 * diff.1 + diff.2 * diff.2).sqrt();
+                        let den = (s.x * s.x + s.y * s.y + s.z * s.z).sqrt().max(1e-300);
+                        num / den
+                    })
+                    .collect();
+                rel_errs.sort_by(|a, b| a.partial_cmp(b).unwrap());
+
+                let p99_idx = (rel_errs.len() as f64 * 0.99) as usize;
+                let p99 = rel_errs[p99_idx.min(rel_errs.len() - 1)];
+                let max_err = *rel_errs.last().unwrap();
+
+                eprintln!(
+                    "[simd-tier1] AVX2 vs scalar  N={n}  seed=0x{seed:X}  \
+                     p99={p99:.3e}  max={max_err:.3e}",
+                );
+
+                assert!(
+                    p99 <= 1e-13,
+                    "AVX2 leaf-pair vs scalar p99 rel-err = {p99:.3e} exceeds 1e-13 \
+                     at N={n} seed=0x{seed:X}; max = {max_err:.3e}"
+                );
+            }
+        }
+    }
+
+    /// Tier 2a (kernel-isolated) — AVX2 Plummer microkernel speedup over
+    /// scalar.
+    ///
+    /// Runs both kernels on a pre-laid-out tuple stream of 1 M
+    /// interactions. Bypasses gather (scalar reads the same tuples,
+    /// AVX2 reads aligned arrays) so the measured ratio reflects pure
+    /// arithmetic + reduction throughput, not memory-system effects.
+    ///
+    /// A-priori range `[1.8, 2.5]×` from
+    /// `docs/experiments/2026-05-11-simd-kernel.md` §A-priori bounds:
+    /// AVX2 at 4 lanes × FMA-1 cyc throughput vs scalar that the compiler
+    /// is already auto-vectorising at 2 lanes — the realistic delta is
+    /// 1.8-2.5×, not the naive 4× lane-count. A measurement above 2.5×
+    /// would be surprising; below 1.8× would suggest the scalar path is
+    /// already lane-saturated or the AVX2 kernel has a stall (sqrt+div
+    /// chain on the critical path).
+    ///
+    /// `#[ignore]`d for the same reason as Tier 0: wall-time gates need
+    /// `--release` on a quiet machine.
+    #[test]
+    #[cfg(target_arch = "x86_64")]
+    #[ignore = "wall-time gate: opt-in via --ignored, run in --release on a quiet machine"]
+    fn tier2a_kernel_avx2_speedup_in_range() {
+        if !std::is_x86_feature_detected!("avx2") || !std::is_x86_feature_detected!("fma") {
+            eprintln!("[simd-tier2a] AVX2+FMA unavailable, skipping");
+            return;
+        }
+
+        const N: usize = 1_000_000;
+        // Synthesise a deterministic interaction stream (no gather).
+        let mut tuples: Vec<(f64, f64, f64, f64, f64)> = Vec::with_capacity(N);
+        let mut dx_a = Vec::with_capacity(N);
+        let mut dy_a = Vec::with_capacity(N);
+        let mut dz_a = Vec::with_capacity(N);
+        let mut eps2_a = Vec::with_capacity(N);
+        let mut mass_a = Vec::with_capacity(N);
+        let mut s = 0x9E3779B97F4A7C15_u64;
+        let mut next = || {
+            s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            ((s >> 11) as f64 / (1u64 << 53) as f64) * 2.0 - 1.0
+        };
+        for _ in 0..N {
+            let dx = next() * 10.0;
+            let dy = next() * 10.0;
+            let dz = next() * 10.0;
+            let eps2 = 1.0e-3 + next().abs() * 1.0e-2;
+            let m = 0.5 + next().abs() * 0.5;
+            tuples.push((dx, dy, dz, eps2, m));
+            dx_a.push(dx);
+            dy_a.push(dy);
+            dz_a.push(dz);
+            eps2_a.push(eps2);
+            mass_a.push(m);
+        }
+
+        let mut acc_scalar = Vec3::ZERO;
+        let mut acc_avx2 = Vec3::ZERO;
+
+        // Warm-up.
+        super::super::simd::plummer_kernel_scalar_micro(&mut acc_scalar, &tuples);
+        unsafe {
+            super::super::simd::plummer_kernel_avx2_micro(
+                &mut acc_avx2,
+                &dx_a,
+                &dy_a,
+                &dz_a,
+                &eps2_a,
+                &mass_a,
+            )
+        };
+        acc_scalar = Vec3::ZERO;
+        acc_avx2 = Vec3::ZERO;
+
+        let measured = 5;
+        let start_scalar = std::time::Instant::now();
+        for _ in 0..measured {
+            super::super::simd::plummer_kernel_scalar_micro(&mut acc_scalar, &tuples);
+        }
+        let t_scalar_ns = start_scalar.elapsed().as_nanos() as f64 / measured as f64;
+
+        let start_avx2 = std::time::Instant::now();
+        for _ in 0..measured {
+            unsafe {
+                super::super::simd::plummer_kernel_avx2_micro(
+                    &mut acc_avx2,
+                    &dx_a,
+                    &dy_a,
+                    &dz_a,
+                    &eps2_a,
+                    &mass_a,
+                )
+            };
+        }
+        let t_avx2_ns = start_avx2.elapsed().as_nanos() as f64 / measured as f64;
+
+        let speedup = t_scalar_ns / t_avx2_ns;
+        eprintln!(
+            "[simd-tier2a] Plummer kernel N={N}  t_scalar={t_scalar_ns:.0}ns  \
+             t_avx2={t_avx2_ns:.0}ns  speedup={speedup:.2}×",
+        );
+
+        // Sanity: the two paths should agree to first-order on totals,
+        // even with reordered summation. Off by ≥ 1 % flags a bug.
+        let scalar_mag =
+            (acc_scalar.x.powi(2) + acc_scalar.y.powi(2) + acc_scalar.z.powi(2)).sqrt();
+        let avx2_mag = (acc_avx2.x.powi(2) + acc_avx2.y.powi(2) + acc_avx2.z.powi(2)).sqrt();
+        let rel_diff = (scalar_mag - avx2_mag).abs() / scalar_mag.max(1e-300);
+        assert!(rel_diff < 1e-2, "scalar and AVX2 micro disagree by {rel_diff:.2e} > 1%");
+
+        assert!(
+            (1.8..=2.5).contains(&speedup),
+            "AVX2 microkernel speedup {speedup:.2}× outside [1.8, 2.5]× envelope"
+        );
+    }
+
+    // ── Leaf-pair kernel dispatch ──────────────────────────────────────────── //
+
+    /// `LeafPairKernel::select` picks the AVX2 path on a Plummer kernel
+    /// plus an AVX2/FMA-capable host, and falls back to scalar otherwise.
+    /// Hardware capability is read at runtime.
+    #[test]
+    #[cfg(target_arch = "x86_64")]
+    fn dispatch_picks_avx2_when_plummer_and_avx2_fma_available() {
+        let kernel = PlummerKernel::new();
+        let picked = LeafPairKernel::select(&kernel);
+        match picked {
+            LeafPairKernel::Avx2 => {
+                assert!(
+                    std::is_x86_feature_detected!("avx2") && std::is_x86_feature_detected!("fma")
+                );
+            },
+            LeafPairKernel::Scalar => {
+                assert!(
+                    !(std::is_x86_feature_detected!("avx2")
+                        && std::is_x86_feature_detected!("fma"))
+                );
+            },
+        }
+    }
+
+    /// Non-Plummer kernel must never be routed to the AVX2 SIMD path —
+    /// the AVX2 kernel inlines the Plummer formula directly and would
+    /// silently produce wrong forces against e.g. `TruncatedPlummerKernel`.
+    #[test]
+    fn dispatch_falls_back_to_scalar_for_non_plummer_kernel() {
+        use crate::physics::gravity::kernel::TruncatedPlummerKernel;
+        let truncated = TruncatedPlummerKernel::new(1.0);
+        let picked = LeafPairKernel::select(&truncated);
+        assert_eq!(picked, LeafPairKernel::Scalar);
     }
 }

@@ -100,10 +100,10 @@ impl SimRecorder {
         let system_path = Self::suffixed(base_path, "_system.csv");
 
         // Create parent directory if needed
-        if let Some(parent) = base_path.parent() {
-            if !parent.as_os_str().is_empty() {
-                std::fs::create_dir_all(parent)?;
-            }
+        if let Some(parent) = base_path.parent()
+            && !parent.as_os_str().is_empty()
+        {
+            std::fs::create_dir_all(parent)?;
         }
 
         let mut bw = BufWriter::new(File::create(&bodies_path)?);
@@ -234,7 +234,7 @@ impl SimRecorder {
         self.records_written += 1;
 
         // Flush every 500 records to protect against crashes
-        if self.records_written % 500 == 0 {
+        if self.records_written.is_multiple_of(500) {
             self.bodies_writer.flush()?;
             self.system_writer.flush()?;
         }
