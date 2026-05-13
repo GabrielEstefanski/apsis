@@ -171,6 +171,19 @@ pub struct System {
     /// Maximum effective pairwise softening length from the most recent step.
     pub(crate) softening_max: f64,
 
+    /// Optional close-encounter advisory threshold. When `Some(t)`, the
+    /// step loop classifies `r_min` against `t` via
+    /// [`crate::physics::encounter::EncounterFlag`] and emits a
+    /// `warn_diag!` event on the `Far`/`Approaching` → `Close`
+    /// transition. `None` (the default) disables the diagnostic.
+    pub(crate) close_encounter_threshold: Option<f64>,
+
+    /// Encounter flag from the most recent step. Tracked across steps so
+    /// the warn-on-transition rule fires exactly once per descent into
+    /// the `Close` band; stays observable to external readers between
+    /// steps.
+    pub(crate) last_encounter_flag: crate::physics::encounter::EncounterFlag,
+
     /// Registered non-gravitational perturbation forces.
     pub(crate) perturbations: Vec<Box<dyn PerturbationForce>>,
 
@@ -375,6 +388,8 @@ impl System {
             names,
             r_min,
             softening_max,
+            close_encounter_threshold: None,
+            last_encounter_flag: crate::physics::encounter::EncounterFlag::Far,
             perturbations: Vec::new(),
             seed: 0,
             hooks: HookRegistry::new(),

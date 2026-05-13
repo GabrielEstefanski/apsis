@@ -339,6 +339,33 @@ impl System {
         self.force_model.set_exact_threshold(n);
     }
 
+    // ── Close-encounter advisory ─────────────────────────────────────────────
+
+    /// Set the close-encounter advisory threshold.
+    ///
+    /// `Some(t)` enables the [`EncounterFlag`](crate::physics::encounter::EncounterFlag)
+    /// classification of the system-wide minimum pairwise separation;
+    /// `None` (the default) disables the diagnostic. Setting a new
+    /// threshold also resets the per-step transition tracker so the
+    /// next descent into the `Close` band emits a warning event.
+    pub fn set_close_encounter_threshold(&mut self, threshold: Option<f64>) {
+        self.close_encounter_threshold = threshold;
+        self.last_encounter_flag = crate::physics::encounter::EncounterFlag::Far;
+    }
+
+    /// Current close-encounter advisory threshold.
+    pub fn close_encounter_threshold(&self) -> Option<f64> {
+        self.close_encounter_threshold
+    }
+
+    /// Most recent [`EncounterFlag`](crate::physics::encounter::EncounterFlag)
+    /// classification of the system-wide minimum separation. Always
+    /// [`Far`](crate::physics::encounter::EncounterFlag::Far) when the
+    /// threshold is unset.
+    pub fn last_encounter_flag(&self) -> crate::physics::encounter::EncounterFlag {
+        self.last_encounter_flag
+    }
+
     // ── Softening ─────────────────────────────────────────────────────────────
 
     pub fn softening_scale(&self) -> f64 {
