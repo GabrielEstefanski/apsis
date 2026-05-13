@@ -35,6 +35,9 @@ pub(crate) fn resolved_name(
 ///
 /// Skipped (returns sentinels) when N < 2 or N > `N_CLOSENESS_THRESHOLD`,
 /// to keep overhead bounded for large asteroid-belt simulations.
+///
+/// Distances are 3D (`dx² + dy² + dz²`); a previous 2D-only implementation
+/// silently understated `r_min` for any inclined or out-of-plane pair.
 pub(crate) fn compute_closeness(bodies: &[Body]) -> (f64, f64) {
     const N_CLOSENESS_THRESHOLD: usize = 512;
 
@@ -49,7 +52,8 @@ pub(crate) fn compute_closeness(bodies: &[Body]) -> (f64, f64) {
         for j in (i + 1)..bodies.len() {
             let dx = bodies[i].pos_x - bodies[j].pos_x;
             let dy = bodies[i].pos_y - bodies[j].pos_y;
-            let r = (dx * dx + dy * dy).sqrt();
+            let dz = bodies[i].pos_z - bodies[j].pos_z;
+            let r = (dx * dx + dy * dy + dz * dz).sqrt();
             if r < r_min {
                 r_min = r;
             }

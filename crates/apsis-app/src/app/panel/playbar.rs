@@ -316,6 +316,7 @@ fn integrator_short_label(k: IntegratorKind) -> &'static str {
         IntegratorKind::Yoshida4 => "Yoshida-4",
         IntegratorKind::WisdomHolman => "W–H",
         IntegratorKind::Ias15 => "IAS15",
+        IntegratorKind::Mercurius => "Mercurius",
     }
 }
 

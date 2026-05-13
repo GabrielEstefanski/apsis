@@ -1499,6 +1499,34 @@ impl Integrator for Ias15 {
 }
 
 impl Ias15 {
+    /// Drop the FSAL cache. The next [`Self::step`] call will re-evaluate
+    /// the start-of-sub-step acceleration from scratch instead of cloning
+    /// the previous accept's end-of-step `acc`.
+    ///
+    /// Required when an external operator (e.g. a hybrid integrator
+    /// driving IAS15 as a sub-integrator after applying its own drifts /
+    /// kicks) has mutated body positions or velocities since the last
+    /// IAS15 call. Without this, the cached `acc` references the wrong
+    /// configuration and contaminates the next sub-step's `a₀`.
+    pub fn invalidate_force_cache(&mut self) {
+        self.has_valid_post_acc = false;
+    }
+
+    /// Cap the controller's proposed next sub-step at `cap`. No-op when
+    /// the current proposal is already at or below `cap`; otherwise
+    /// clips `dt_next` so the next [`Self::step`] call cannot consume
+    /// more than `cap` time units.
+    ///
+    /// Used by hybrid integrators (Mercurius) that drive IAS15 over a
+    /// fixed outer window: the controller's natural growth between
+    /// sub-steps would otherwise overshoot the window boundary on the
+    /// last sub-step and break the outer Hamiltonian split.
+    pub fn cap_proposed_dt(&mut self, cap: f64) {
+        if cap > 0.0 && self.dt_next > cap {
+            self.dt_next = cap;
+        }
+    }
+
     /// Inner predictor-corrector iteration. Given `a0` (acceleration at
     /// the start of the attempt) and a target `dt_try`, iteratively
     /// refines `b` until max|Δb₆|/max|a₀| < `PICARD_TOL` or we hit the

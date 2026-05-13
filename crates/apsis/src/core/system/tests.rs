@@ -1559,4 +1559,117 @@ mod integrator_force_compat {
             "IAS15 must leave the engine in direct mode even at small N"
         );
     }
+
+    #[test]
+    fn mercurius_does_not_force_direct_mode() {
+        // Mercurius computes its own K-weighted forces internally and
+        // does not rely on the outer `ctx.force` being deterministic
+        // (`requires_deterministic_force = false`). It must NOT raise
+        // the BH exact_threshold at selection time.
+        let mut sys = many_body_system();
+        sys.set_integrator(IntegratorKind::VelocityVerlet);
+        let threshold_before = sys.exact_threshold();
+
+        sys.set_integrator(IntegratorKind::Mercurius);
+
+        assert_eq!(
+            sys.exact_threshold(),
+            threshold_before,
+            "Mercurius does not require determinism; force-model configuration must not change"
+        );
+    }
+}
+
+#[cfg(test)]
+mod encounter_diagnostic {
+    use super::*;
+    use crate::physics::encounter::EncounterFlag;
+
+    fn approaching_pair_system(initial_separation: f64, approach_velocity: f64) -> System {
+        // Two equal-mass bodies on a head-on closing trajectory along x.
+        // The negative `vel_x` on body 1 closes the gap at rate `2 ·
+        // approach_velocity` (both bodies move toward the midpoint).
+        let bodies = vec![
+            Body::rocky(1.0)
+                .at(-initial_separation * 0.5, 0.0)
+                .with_velocity(approach_velocity, 0.0),
+            Body::rocky(1.0)
+                .at(initial_separation * 0.5, 0.0)
+                .with_velocity(-approach_velocity, 0.0),
+        ];
+        System::new(bodies, UnitSystem::canonical()).with_dt(0.01)
+    }
+
+    #[test]
+    fn unconfigured_threshold_keeps_flag_far() {
+        let mut sys = approaching_pair_system(2.0, 0.5);
+        for _ in 0..50 {
+            sys.step();
+            assert_eq!(sys.last_encounter_flag(), EncounterFlag::Far);
+        }
+    }
+
+    #[test]
+    fn flag_escalates_as_pair_closes() {
+        // Threshold at 1.0; bodies start at separation 2.0 closing at
+        // 1.0/t.u. → far → approaching → close as the gap shrinks past
+        // the threshold and then past the half-threshold.
+        let mut sys = approaching_pair_system(2.0, 0.5);
+        sys.set_close_encounter_threshold(Some(1.0));
+
+        let mut saw_far = false;
+        let mut saw_approaching = false;
+        let mut saw_close = false;
+
+        for _ in 0..200 {
+            sys.step();
+            match sys.last_encounter_flag() {
+                EncounterFlag::Far => saw_far = true,
+                EncounterFlag::Approaching => saw_approaching = true,
+                EncounterFlag::Close => {
+                    saw_close = true;
+                    break;
+                },
+            }
+        }
+
+        assert!(saw_far, "should observe Far before bodies close");
+        assert!(saw_approaching, "should pass through Approaching band");
+        assert!(saw_close, "should reach Close before 200 steps");
+    }
+
+    #[test]
+    fn three_d_separation_is_used() {
+        // Two bodies coincident in xy but separated in z. The pre-fix
+        // 2D `compute_closeness` would report `r_min == 0` and trigger
+        // a spurious Close flag; the 3D fix sees the true separation.
+        let bodies = vec![
+            Body::rocky(1.0).at(0.0, 0.0).with_velocity(0.0, 0.0),
+            Body::rocky(1.0).at_3d(0.0, 0.0, 1.0).with_velocity_3d(0.0, 0.0, 0.0),
+        ];
+        let mut sys = System::new(bodies, UnitSystem::canonical()).with_dt(0.01);
+        sys.set_close_encounter_threshold(Some(0.1));
+
+        sys.step();
+        assert!(sys.r_min >= 0.99, "3D separation should be ~1.0, got r_min = {}", sys.r_min);
+        assert_eq!(
+            sys.last_encounter_flag(),
+            EncounterFlag::Far,
+            "z-separated bodies must not register a 2D-projected close encounter"
+        );
+    }
+
+    #[test]
+    fn updating_threshold_resets_transition_tracker() {
+        let mut sys = approaching_pair_system(0.3, 0.0);
+        sys.set_close_encounter_threshold(Some(1.0));
+        sys.step();
+        assert_eq!(sys.last_encounter_flag(), EncounterFlag::Close);
+
+        sys.set_close_encounter_threshold(Some(0.1));
+        // Tracker reset to Far; the pair is far above the new threshold.
+        assert_eq!(sys.last_encounter_flag(), EncounterFlag::Far);
+        sys.step();
+        assert_eq!(sys.last_encounter_flag(), EncounterFlag::Far);
+    }
 }
