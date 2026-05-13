@@ -65,7 +65,9 @@ class Perturbation:
         import apsis_1pn
 
         sys = apsis.System(bodies=[...], units=apsis.units.SOLAR, ...)
-        sys.add_hamiltonian_perturbation(apsis_1pn.PostNewtonian1PN.solar_units())
+        sys.add_hamiltonian_perturbation(
+            apsis_1pn.PostNewtonian1PN.for_units(units=apsis.units.SOLAR_CANONICAL),
+        )
 
     Non-conservative operators (drag, radiation reaction) travel in a
     separate capsule type with its own registration entry point; that

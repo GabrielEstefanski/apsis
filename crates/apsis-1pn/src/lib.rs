@@ -62,15 +62,19 @@
 //! use apsis::core::system::System;
 //! use apsis::domain::body::Body;
 //! use apsis::physics::integrator::IntegratorKind;
+//! use apsis::units::UnitSystem;
 //! use apsis_1pn::PostNewtonian1PN;
 //!
-//! let sun     = Body::star(1.0);
-//! let mercury = Body::rocky(1.66e-7).at(0.307, 0.0).with_velocity(0.0, 2.078);
-//! let mut sys = System::new(vec![sun, mercury], UnitSystem::canonical())
+//! let units   = UnitSystem::solar_canonical();
+//! let sun     = Body::star(1.0).unsoftened();
+//! let mercury = Body::rocky(1.66e-7).at(0.307, 0.0).with_velocity(0.0, 2.078).unsoftened();
+//! let mut sys = System::new(vec![sun, mercury], units)
 //!     .with_integrator(IntegratorKind::Ias15)
 //!     .with_dt(1e-4);
 //!
-//! sys.add_hamiltonian_perturbation(Box::new(PostNewtonian1PN::solar_units()));
+//! // The same `units` flows through System and operator. The
+//! // registration check panics on mismatch.
+//! sys.add_hamiltonian_perturbation(Box::new(PostNewtonian1PN::for_units(units)));
 //!
 //! sys.integrate_for(200.0 * std::f64::consts::PI);
 //! println!("dE/E = {:.3e}", sys.energy_delta());
@@ -83,6 +87,10 @@ use apsis::domain::body::Body;
 use apsis::math::Vec3;
 use apsis::physics::gravity::kernel::KernelRequirements;
 use apsis::physics::integrator::{HamiltonianOperator, Operator};
+use apsis::units::UnitSystem;
+
+/// Speed of light in m/s — CODATA exact by SI definition.
+const C_SI: f64 = 299_792_458.0;
 
 /// Speed of light expressed in the simulator's canonical solar-system units:
 ///
@@ -102,7 +110,6 @@ use apsis::physics::integrator::{HamiltonianOperator, Operator};
 ///
 /// Current value: approximately `10_065.130` AU per (year / 2π).
 pub const C_SOLAR_UNITS: f64 = {
-    const C_SI: f64 = 299_792_458.0; // m/s, exact by SI definition
     const AU_SI: f64 = 149_597_870_700.0; // m, IAU 2012
     const YEAR_S: f64 = 365.25 * 86_400.0;
     const TWO_PI: f64 = 2.0 * std::f64::consts::PI;
@@ -116,8 +123,19 @@ pub const C_SOLAR_UNITS: f64 = {
 /// [`System::add_hamiltonian_perturbation`](apsis::core::system::System::add_hamiltonian_perturbation):
 ///
 /// ```ignore
-/// sys.add_hamiltonian_perturbation(Box::new(PostNewtonian1PN::solar_units()));
+/// use apsis::units::UnitSystem;
+/// let units = UnitSystem::solar_canonical();
+/// let mut sys = System::new(bodies, units).with_integrator(IntegratorKind::Ias15);
+/// sys.add_hamiltonian_perturbation(Box::new(PostNewtonian1PN::for_units(units)));
 /// ```
+///
+/// The operator carries the [`UnitSystem`] it was constructed for; the
+/// `System`'s registration check panics on mismatch (see
+/// [`Operator::declared_units`](apsis::physics::integrator::Operator::declared_units)).
+/// Constructing with `UnitSystem::solar_canonical()` and registering
+/// against a `System` built with `UnitSystem::solar()` (IAU convention)
+/// will panic — the two are different unit systems despite the shared
+/// "solar" label.
 ///
 /// Stateless. Safe to share across threads.
 ///
@@ -139,32 +157,68 @@ pub const C_SOLAR_UNITS: f64 = {
 /// agreement reported in [`docs/experiments/2026-05-13-mercury-1pn-long-horizon.md`].
 #[derive(Debug, Clone, Copy)]
 pub struct PostNewtonian1PN {
-    /// Speed of light in the caller's unit system.
+    /// Speed of light in `units`.
     c: f64,
+    /// Unit system this instance was constructed for. Used by
+    /// [`Operator::declared_units`](apsis::physics::integrator::Operator::declared_units)
+    /// to fail loudly at registration when paired with a `System`
+    /// integrating in a different unit system.
+    units: UnitSystem,
 }
 
 impl PostNewtonian1PN {
-    /// Construct with an explicit speed of light.
+    // ── Named-regime constructor (Pattern A) ──────────────────────────────────
+
+    /// Construct for an arbitrary [`UnitSystem`], deriving `c` exactly
+    /// from `c_SI · T_scale / L_scale`. The recommended constructor —
+    /// the user picks the unit system once (typically the same one
+    /// passed to [`System::new`]), `c` is computed so the relativistic
+    /// correction stays consistent with the rest of the integration.
     ///
-    /// Use this when the simulation runs in a unit system other than the
-    /// canonical solar one — e.g. geometric units (c = 1), or SI.
-    pub const fn with_c(c: f64) -> Self {
-        Self { c }
+    /// The most common solar-physics choice is
+    /// [`UnitSystem::solar_canonical`] (G = 1, AU, year/(2π), M☉),
+    /// matching the apsis-1pn validation portfolio; for IAU
+    /// compatibility (G ≈ 4π², AU, year, M☉) use [`UnitSystem::solar`].
+    ///
+    /// [`System::new`]: apsis::core::system::System::new
+    pub fn for_units(units: UnitSystem) -> Self {
+        Self { c: C_SI * units.time_scale_si() / units.length_scale_si(), units }
     }
 
-    /// Construct for the simulator's canonical solar-system units
-    /// ([`C_SOLAR_UNITS`]).
-    pub const fn solar_units() -> Self {
-        Self::with_c(C_SOLAR_UNITS)
+    // ── Raw escape ────────────────────────────────────────────────────────────
+
+    /// Construct from a raw `c` value with the operator pinned to the
+    /// supplied [`UnitSystem`]. No cross-check between `c` and `units`
+    /// — `c` is taken as given. The `System` registration check still
+    /// validates that `units` matches the `System`'s own `UnitSystem`,
+    /// so the value cannot land silently in the wrong frame.
+    ///
+    /// Use when `c` is computed by neighbouring code (so cross-checking
+    /// against `units` is redundant), or for hypothetical experiments
+    /// where `c` is intentionally non-physical (e.g. "what if `c` were
+    /// 5 % larger?"). Prefer [`for_units`](Self::for_units) for normal
+    /// physics — it derives `c` from the unit system, eliminating the
+    /// raw value entirely.
+    pub const fn from_raw_c(c: f64, units: UnitSystem) -> Self {
+        Self { c, units }
     }
 
     /// Speed of light this instance was configured with.
     pub const fn c(&self) -> f64 {
         self.c
     }
+
+    /// Unit system this instance was configured with.
+    pub const fn units(&self) -> UnitSystem {
+        self.units
+    }
 }
 
 impl Operator for PostNewtonian1PN {
+    fn declared_units(&self) -> Option<UnitSystem> {
+        Some(self.units)
+    }
+
     /// The 1PN correction is derived by expanding the geodesic equation
     /// around the Newtonian Hamiltonian `H_N = p²/2m − GMm/r`. The
     /// expansion therefore requires:
@@ -280,11 +334,15 @@ impl apsis::physics::integrator::HamiltonianOperatorDescriptor for Descriptor {
     }
 
     fn kernel_requirements(&self) -> KernelRequirements {
-        <PostNewtonian1PN as Operator>::kernel_requirements(&PostNewtonian1PN::solar_units())
+        // Kernel requirements are unit-system-independent; pick any
+        // UnitSystem to satisfy the constructor signature.
+        <PostNewtonian1PN as Operator>::kernel_requirements(&PostNewtonian1PN::for_units(
+            UnitSystem::solar_canonical(),
+        ))
     }
 
-    fn build(&self) -> Box<dyn HamiltonianOperator> {
-        Box::new(PostNewtonian1PN::solar_units())
+    fn build(&self, units: UnitSystem) -> Box<dyn HamiltonianOperator> {
+        Box::new(PostNewtonian1PN::for_units(units))
     }
 }
 
@@ -312,12 +370,98 @@ mod tests {
         );
     }
 
+    /// In Hénon canonical units (L = 1 m, T = 1 s, mass adjusted for
+    /// G = 1) the speed of light numerically equals its SI value. The
+    /// derivation chain is `c = c_SI · T_scale / L_scale`; both scales
+    /// are 1 here. Cleanest verification of the derivation.
+    #[test]
+    fn for_units_canonical_gives_si_c() {
+        let pn = PostNewtonian1PN::for_units(UnitSystem::canonical());
+        assert!(
+            (pn.c() - 299_792_458.0).abs() < 1.0,
+            "canonical units expect c_SI = 299_792_458, got {}",
+            pn.c(),
+        );
+    }
+
+    /// `for_units(UnitSystem::solar())` returns `c` in the IAU solar
+    /// convention (L = 1 AU, T = 1 year, M = 1 M☉ → G ≈ 4π²).
+    #[test]
+    fn for_units_solar_uses_iau_convention() {
+        let pn = PostNewtonian1PN::for_units(UnitSystem::solar());
+        let c_si: f64 = 299_792_458.0;
+        let year_s: f64 = 365.25 * 86_400.0;
+        let au_m: f64 = 1.495_978_707e11;
+        let expected = c_si * year_s / au_m;
+        assert!(
+            (pn.c() - expected).abs() / expected < 1e-12,
+            "for_units(solar) c={} disagrees with derived IAU c={}",
+            pn.c(),
+            expected,
+        );
+    }
+
+    /// `for_units(UnitSystem::solar_canonical())` returns `c` in the
+    /// G=1 solar convention (L = AU, T = Gaussian time, M = M☉) — the
+    /// apsis-1pn validation portfolio baseline. The Gaussian time
+    /// scale (`sqrt(AU³/(G·M))`) is what makes `G_code = 1` exactly;
+    /// it differs from the IAU `year/(2π)` by ~0.009 % (the historical
+    /// astrodynamics gap between the Gaussian and IAU definitions).
+    /// `C_SOLAR_UNITS` is therefore close to but not bit-equal to
+    /// `for_units(solar_canonical).c()` — the constant uses the IAU
+    /// year for backwards compatibility, the constructor uses the
+    /// Gaussian time so the integrator sees `G = 1` exactly.
+    #[test]
+    fn for_units_solar_canonical_close_to_c_solar_units() {
+        let pn = PostNewtonian1PN::for_units(UnitSystem::solar_canonical());
+        let rel_diff = (pn.c() - C_SOLAR_UNITS).abs() / C_SOLAR_UNITS;
+        // ~0.009 % gap between Gaussian and IAU year definitions.
+        assert!(
+            rel_diff < 1e-3,
+            "for_units(solar_canonical) c={} differs from C_SOLAR_UNITS={} by {:.3e}, \
+             expected gap < 0.1 %",
+            pn.c(),
+            C_SOLAR_UNITS,
+            rel_diff,
+        );
+        // But it's NOT bit-equal — the IAU/Gaussian mismatch is the
+        // whole point of using Gaussian time. Lock that.
+        assert!(
+            pn.c() != C_SOLAR_UNITS,
+            "for_units should produce Gaussian-time c, not the IAU C_SOLAR_UNITS literal",
+        );
+    }
+
+    /// `from_raw_c` accepts any value but pins the operator to the
+    /// supplied `UnitSystem`. The unit-system binding is what protects
+    /// against silent unit-mismatch at registration; the raw `c` value
+    /// itself is unchecked at construction.
+    #[test]
+    fn from_raw_c_accepts_arbitrary_value_with_units() {
+        let pn = PostNewtonian1PN::from_raw_c(1.234e5, UnitSystem::canonical());
+        assert_eq!(pn.c(), 1.234e5);
+        assert_eq!(pn.units(), UnitSystem::canonical());
+    }
+
+    /// `declared_units` returns `Some(units)` matching what the
+    /// operator was constructed with. The `System` registration check
+    /// reads this to detect unit-system mismatch.
+    #[test]
+    fn declared_units_returns_constructor_units() {
+        let pn = PostNewtonian1PN::for_units(UnitSystem::solar_canonical());
+        assert_eq!(pn.declared_units(), Some(UnitSystem::solar_canonical()));
+
+        let pn_iau = PostNewtonian1PN::for_units(UnitSystem::solar());
+        assert_eq!(pn_iau.declared_units(), Some(UnitSystem::solar()));
+    }
+
     /// Acceleration on a lone body must be zero — no self-interaction.
     #[test]
     fn isolated_body_feels_no_pn_force() {
         let bodies = vec![Body::star(1.0)];
         let mut acc = vec![Vec3::ZERO];
-        PostNewtonian1PN::solar_units().accumulate_force(&bodies, &mut acc);
+        PostNewtonian1PN::for_units(UnitSystem::solar_canonical())
+            .accumulate_force(&bodies, &mut acc);
         assert_eq!(acc[0], Vec3::ZERO);
     }
 
@@ -327,7 +471,7 @@ mod tests {
     fn accumulate_is_additive() {
         let bodies =
             vec![Body::star(1.0), Body::rocky(1e-6).at(0.5, 0.0).with_velocity(0.0, 1.414)];
-        let pn = PostNewtonian1PN::solar_units();
+        let pn = PostNewtonian1PN::for_units(UnitSystem::solar_canonical());
 
         let mut once = vec![Vec3::ZERO; 2];
         pn.accumulate_force(&bodies, &mut once);
@@ -349,7 +493,7 @@ mod tests {
     fn infinite_c_gives_zero_correction() {
         let bodies =
             vec![Body::star(1.0), Body::rocky(1e-6).at(0.387, 0.0).with_velocity(0.0, 2.07)];
-        let pn = PostNewtonian1PN::with_c(1e20);
+        let pn = PostNewtonian1PN::from_raw_c(1e20, UnitSystem::solar_canonical());
         let mut acc = vec![Vec3::ZERO; 2];
         pn.accumulate_force(&bodies, &mut acc);
         for a in acc {
@@ -378,7 +522,8 @@ mod tests {
 
         let bodies = vec![sun, mercury];
         let mut acc = vec![Vec3::ZERO; 2];
-        PostNewtonian1PN::solar_units().accumulate_force(&bodies, &mut acc);
+        PostNewtonian1PN::for_units(UnitSystem::solar_canonical())
+            .accumulate_force(&bodies, &mut acc);
 
         // Mercury is at (+r_peri, 0); "outward from Sun" = +x direction.
         assert!(
@@ -408,8 +553,8 @@ mod tests {
     #[test]
     fn kernel_requirements_are_exact_and_smooth() {
         use apsis::physics::gravity::kernel::{Continuity, Exactness, KernelRequirements};
-        let req =
-            <PostNewtonian1PN as Operator>::kernel_requirements(&PostNewtonian1PN::solar_units());
+        let pn = PostNewtonian1PN::for_units(UnitSystem::solar_canonical());
+        let req = <PostNewtonian1PN as Operator>::kernel_requirements(&pn);
         assert_eq!(req, KernelRequirements::exact_and_smooth());
         assert_eq!(req.required_exactness, Some(Exactness::Exact));
         assert_eq!(req.min_continuity, Some(Continuity::Smooth));
@@ -432,7 +577,8 @@ mod tests {
 
         let bodies = vec![sun, mercury];
         let mut acc = vec![Vec3::ZERO; 2];
-        PostNewtonian1PN::solar_units().accumulate_force(&bodies, &mut acc);
+        PostNewtonian1PN::for_units(UnitSystem::solar_canonical())
+            .accumulate_force(&bodies, &mut acc);
 
         let a_pn = acc[1].length();
         let a_newt = 1.0 / (r_peri * r_peri); // G M / r²

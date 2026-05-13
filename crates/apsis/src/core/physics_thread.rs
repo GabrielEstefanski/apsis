@@ -174,6 +174,13 @@ pub struct PhysicsHandle {
     /// the UI thread on [`sync`] and fed to the [`TrailRecorder`].
     pending_trail_samples: Vec<Vec<[f32; 3]>>,
 
+    /// `UnitSystem` the underlying `System` was constructed with.
+    /// Captured at spawn time and immutable thereafter — `UnitSystem`
+    /// is a closed contract on the `System` and cannot be mutated
+    /// after construction. Exposed to UI consumers that need to build
+    /// operators (descriptors) in the same unit system.
+    units: crate::units::UnitSystem,
+
     /// Latest dense-output snapshot, used by [`advance_render_time`](Self::advance_render_time).
     step_snapshot: Option<crate::physics::integrator::DenseSnapshot>,
 
@@ -413,6 +420,14 @@ impl PhysicsHandle {
     pub fn softening_scale(&self) -> f64 {
         self.softening_scale
     }
+    /// `UnitSystem` of the underlying `System`. Captured at spawn time
+    /// and immutable thereafter; safe to call from the UI thread without
+    /// blocking on the physics thread. Use when constructing operators
+    /// for the physics-thread protocol so they share the same unit
+    /// system and pass the registration check.
+    pub fn units(&self) -> crate::units::UnitSystem {
+        self.units
+    }
     pub fn g_factor(&self) -> f64 {
         self.metrics.g_factor
     }
@@ -574,6 +589,7 @@ impl PhysicsHandle {
 /// [`PhysicsHandle::set_paused`].
 pub fn spawn(mut system: System, paused: bool) -> PhysicsHandle {
     let (cmd_tx, cmd_rx) = mpsc::channel();
+    let units = *system.units();
 
     // Snapshot initial state before moving system into the thread.
     system.update_orbital_elements();
@@ -628,6 +644,7 @@ pub fn spawn(mut system: System, paused: bool) -> PhysicsHandle {
         accelerations: initial.accelerations.clone(),
         pending_com_shift: (0.0, 0.0),
         pending_trail_samples: Vec::new(),
+        units,
         step_snapshot: None,
         t_render: 0.0,
         precision,

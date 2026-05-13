@@ -140,6 +140,93 @@
 //!     on a subscriber being present at any specific moment.
 //!     - test: `tests::failure_silent_acceptance_is_impossible`
 //!
+//! ## Observable constructor convention
+//!
+//! Perturbations parametrise physical processes. Parameters come from
+//! physics — fundamental constants, observations, regime choices — not
+//! from raw numerical input pasted from another simulator without
+//! checking. The convention below makes that load-bearing at the API
+//! surface so a contributor cannot ship a perturbation that silently
+//! invites unit-mismatch errors.
+//!
+//! ### Mandatory unit-system binding
+//!
+//! Every dimensional perturbation **must** carry the
+//! [`crate::units::UnitSystem`] it was constructed for and surface it
+//! through [`crate::physics::integrator::Operator::declared_units`].
+//! [`crate::core::system::System::add_hamiltonian_perturbation`]
+//! (and the non-conservative / observer counterparts) compare the
+//! operator's declared units against the `System`'s own units and
+//! **panic** on mismatch — silent unit-system confusion is structurally
+//! impossible. Operators that are genuinely unit-agnostic (a constant
+//! push expressed as a dimensionless multiplier, e.g.) leave
+//! `declared_units` at its default `None` and skip the check.
+//!
+//! The constructor shapes below all carry `UnitSystem` (explicitly or
+//! through a named regime) for any operator whose physics is
+//! dimensional. There is no constructor path that produces a
+//! dimensional operator without a `UnitSystem` attached.
+//!
+//! ### Pattern A — Named regime (`for_units`, `for_<regime>`)
+//!
+//! Encodes a unit system or physical regime in the constructor name.
+//! `for_units` derives parameters from a supplied `UnitSystem`;
+//! regime-named factories (`for_earth`, `for_iss_altitude_km`) embed
+//! the unit choice in the name itself.
+//!
+//! ```text
+//! PostNewtonian1PN::for_units(UnitSystem::solar_canonical())
+//! PostNewtonian1PN::for_units(UnitSystem::solar())
+//! J2::for_earth()                         // future
+//! Drag::for_iss_altitude_km(400.0)        // future
+//! ```
+//!
+//! ### Pattern B — Observable inversion (`from_<observable>`)
+//!
+//! Inverts a desired observable to compute the operator's coefficient.
+//! The user names what they measure; the constructor solves for the
+//! parameter. Always takes a `UnitSystem` so the produced operator
+//! survives the registration check.
+//!
+//! ```text
+//! CentralForce::from_precession_rate(rate, gamma, &primary, units)   // future
+//! Drag::from_orbital_decay_rate(rate, &body, units)                  // future
+//! ```
+//!
+//! Eliminates a class of silent error: the user works in the space
+//! they measure (precession rate, decay rate) instead of the space the
+//! model uses (`Acentral` coefficient, drag constant).
+//!
+//! ### Raw escape (`from_raw_xxx`)
+//!
+//! The `from_raw_` prefix marks the constructor as accepting the
+//! parameter without inversion or unit-derived computation. The
+//! `UnitSystem` argument is still mandatory so the registration check
+//! at `System` level remains load-bearing.
+//!
+//! ```text
+//! PostNewtonian1PN::from_raw_c(c, units)
+//! ```
+//!
+//! Use when the value is known-correct from neighbouring code (so
+//! cross-checking against `units` would be redundant) or for
+//! hypothetical experiments where the parameter is intentionally
+//! non-physical. Pattern A remains the default path in user-facing
+//! examples and downstream bindings.
+//!
+//! ### Implementor checklist
+//!
+//! When adding a new perturbation crate:
+//!
+//! 1. Carry `UnitSystem` on every dimensional operator and override
+//!    `declared_units` to return `Some(units)` so the registration
+//!    panic catches mismatches.
+//! 2. Provide at least one Pattern A or Pattern B constructor — the
+//!    default path for users should not require raw numeric input.
+//! 3. If a raw constructor is exposed, name it with the `from_raw_`
+//!    prefix and require a `UnitSystem` argument.
+//! 4. Default downstream binding examples use Pattern A or Pattern B.
+//!
 //! ## What this contract does NOT guarantee
 //!
 //! Reviewers who hold the federation thesis to a stronger standard need
