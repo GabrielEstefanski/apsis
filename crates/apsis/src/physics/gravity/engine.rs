@@ -239,6 +239,14 @@ impl BarnesHutEngine {
         self.tree.maintain(arrays);
     }
 
+    /// Snapshot of the per-body cell back-reference, intended for diagnostic
+    /// use by the perf-tree harness (counting migrants per step). Production
+    /// code should not rely on the layout of this vector.
+    #[cfg(test)]
+    pub(crate) fn tree_cell_idx_snapshot(&self) -> Vec<u32> {
+        self.tree.cell_idx.clone()
+    }
+
     /// Compute gravitational accelerations and return total potential energy.
     ///
     /// Fills `acc[i] = (aₓ, aᵧ, a_z)` for each body in `arrays`.
