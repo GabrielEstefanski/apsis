@@ -450,8 +450,10 @@ pub fn predict_v_order2(v0: Vec3, a0: Vec3, h: f64, dt: f64) -> Vec3 {
 ///
 /// Required at every Gauss–Radau substep node when forces are evaluated
 /// inside Picard predictor–corrector iteration: any velocity-dependent
-/// perturbation registered through
-/// [`PerturbationForce::accumulate`](crate::physics::integrator::PerturbationForce::accumulate)
+/// operator registered through
+/// [`HamiltonianOperator::accumulate_force`](crate::physics::integrator::HamiltonianOperator::accumulate_force)
+/// or
+/// [`NonConservativeOperator::accumulate_force`](crate::physics::integrator::NonConservativeOperator::accumulate_force)
 /// reads `body.(vx, vy, vz)` directly, so leaving the body velocities at
 /// their start-of-step values biases every node evaluation by `O(a · dt)`.
 /// On a Mercury 1PN integration the bias accumulates linearly to

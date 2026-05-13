@@ -2,11 +2,11 @@
 
 Python bindings for [`apsis-1pn`](../apsis-1pn).
 
-**This crate proves that the apsis perturbation extension model is preserved across both Rust and Python boundaries** — without duplicating physics, breaking ownership semantics, or requiring kernel modification. The cross-extension transport (a typed [`PyCapsule`](https://docs.python.org/3/c-api/capsule.html) carrying a `Box<dyn PerturbationForce>`) is provided by [`apsis-py-core`](../apsis-py-core) and consumed once here. New Python perturbation crates copy this shape verbatim.
+**This crate proves that the apsis perturbation extension model is preserved across both Rust and Python boundaries** — without duplicating physics, breaking ownership semantics, or requiring kernel modification. The cross-extension transport (a typed [`PyCapsule`](https://docs.python.org/3/c-api/capsule.html) carrying a `Box<dyn HamiltonianOperator>`) is provided by [`apsis-py-core`](../apsis-py-core) and consumed once here. New Python perturbation crates copy this shape verbatim.
 
 ## Extension contract
 
-Perturbations registered through `apsis.System.add_perturbation` must:
+Perturbations registered through `apsis.System.add_hamiltonian_perturbation` must:
 
 - **operate on the exact Newtonian kernel** when their derivation requires it (declared via `kernel_requirements()`);
 - **be additive** — accumulate into the scratch buffer, never modify the base Hamiltonian;
@@ -22,7 +22,7 @@ For Mercury-like orbits, the numerical apsidal precession induced by Plummer sof
 
 **This is not a numerical error — it is a model violation.**
 
-Pass `exact_gravity=True` to `apsis.System(...)` or call `Body.<material>(...).unsoftened()` on every body. The kernel-vs-perturbation contract is enforced once, in the core: a violation emits a structured warning at `add_perturbation` time naming the failed invariant. The warning is the deliberate behaviour — apsis does not silently correct invalid physical configurations. Surfacing the violation is the contract; auto-fixing would erase it.
+Pass `exact_gravity=True` to `apsis.System(...)` or call `Body.<material>(...).unsoftened()` on every body. The kernel-vs-perturbation contract is enforced once, in the core: a violation emits a structured warning at `add_hamiltonian_perturbation` time naming the failed invariant. The warning is the deliberate behaviour — apsis does not silently correct invalid physical configurations. Surfacing the violation is the contract; auto-fixing would erase it.
 
 ## Why this matters
 
@@ -51,7 +51,7 @@ sys = apsis.System(
     dt=1e-3,
     exact_gravity=True,
 )
-sys.add_perturbation(apsis_1pn.PostNewtonian1PN.solar_units())
+sys.add_hamiltonian_perturbation(apsis_1pn.PostNewtonian1PN.solar_units())
 sys.integrate_for(100.0)
 ```
 

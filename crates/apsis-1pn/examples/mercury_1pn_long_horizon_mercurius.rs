@@ -72,7 +72,7 @@ fn main() {
     let mut sys = System::new(vec![sun, mercury], UnitSystem::canonical())
         .with_integrator(IntegratorKind::Mercurius)
         .with_dt(dt);
-    sys.add_perturbation(Box::new(PostNewtonian1PN::solar_units()));
+    sys.add_hamiltonian_perturbation(Box::new(PostNewtonian1PN::solar_units()));
 
     let el0 = compute_elements(sys.bodies(), 1, 0, 1.0)
         .expect("Mercury IC must produce a bound Keplerian orbit");

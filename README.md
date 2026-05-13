@@ -53,9 +53,10 @@ the `KernelRequirements` type — the 1PN crate declares
 `exact_and_smooth()`; future crates declare a different combination
 of exactness and continuity invariants depending on the physics. The
 core matches the declared requirements against the active kernel at
-`System::add_perturbation` and emits a structured diagnostic for each
-violated invariant. Forgetting a precondition surfaces as a
-registration warning, not as a wrong number in a paper.
+`System::add_hamiltonian_perturbation` (or the non-conservative
+counterpart) and emits a structured diagnostic for each violated
+invariant. Forgetting a precondition surfaces as a registration
+warning, not as a wrong number in a paper.
 
 Operationally: `Cargo.toml` declares the forces a paper uses,
 `Cargo.lock` pins them bit-precisely, and a follow-up paper extending
@@ -139,7 +140,7 @@ sys = apsis.System(
     bodies=[sun, mercury], units=apsis.units.SOLAR,
     integrator="ias15", dt=1e-3, exact_gravity=True,
 )
-sys.add_perturbation(apsis_1pn.PostNewtonian1PN.solar_units())
+sys.add_hamiltonian_perturbation(apsis_1pn.PostNewtonian1PN.solar_units())
 sys.integrate_for(100.0)
 
 print(sys)
@@ -233,7 +234,7 @@ enforces the separation.
 |---|---|---|
 | [`apsis`](crates/apsis/) | The library. Physics, integrators, public extension API. | Zero UI: `cargo tree -p apsis` resolves no `egui`/`wgpu`/`eframe`. |
 | [`apsis-py`](crates/apsis-py/) | Python binding (PyO3, abi3-py39). Façade-only. | `apsis`, `pyo3`, `numpy`. |
-| [`apsis-py-core`](crates/apsis-py-core/) | Cross-extension transport (rlib): `Box<dyn PerturbationForce>` ↔ `PyCapsule`. | `apsis`, `pyo3`. |
+| [`apsis-py-core`](crates/apsis-py-core/) | Cross-extension transport (rlib): `Box<dyn HamiltonianOperator>` ↔ `PyCapsule`. | `apsis`, `pyo3`. |
 | [`apsis-1pn`](crates/apsis-1pn/) | First downstream force crate: 1PN Schwarzschild correction. Reference implementation of the federation contract. | **Only** `apsis`. |
 | [`apsis-1pn-py`](crates/apsis-1pn-py/) | Python binding for `apsis-1pn`. Reference implementation of the contract at the Rust/Python boundary. | `apsis-1pn`, `apsis-py-core`. |
 | [`apsis-app`](crates/apsis-app/) | Optional interactive egui/wgpu shell. Not part of the library's validated surface. | `apsis`, `egui`, `wgpu`, `eframe`. |
@@ -267,10 +268,10 @@ fn kernel_requirements(&self) -> KernelRequirements {
 }
 ```
 
-on the `PerturbationForce` trait. Registering such a perturbation into
-a system with softened bodies emits a `warn_diag!` diagnostic at
-registration time, with per-body softening statistics naming the
-violated invariant. Dismiss by
+on the `Operator` trait. Registering such an operator into a system
+with softened bodies emits a `warn_diag!` diagnostic at registration
+time, with per-body softening statistics naming the violated
+invariant. Dismiss by
 
 ```rust
 let sun = Body::star(1.0).unsoftened();             // per body

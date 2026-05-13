@@ -41,11 +41,12 @@
 //!   `r ≥ R_c` regardless of softening.
 //! - [`Continuity::C0`]: K is continuous, the force `−dK/dr` is not.
 //!
-//! Registering this kernel into a system with a perturbation declaring
+//! Registering this kernel into a system with an operator declaring
 //! [`KernelRequirements::exact_and_smooth`] — the 1PN Schwarzschild
 //! correction does — therefore triggers both an Exactness and a
-//! Continuity violation on the single `System::add_perturbation` call,
-//! demonstrating that the match is compositional.
+//! Continuity violation on the single
+//! `System::add_hamiltonian_perturbation` call, demonstrating that
+//! the match is compositional.
 //!
 //! [`Kernel::properties`]: super::Kernel::properties
 //! [`KernelRequirements::exact_and_smooth`]: super::KernelRequirements::exact_and_smooth

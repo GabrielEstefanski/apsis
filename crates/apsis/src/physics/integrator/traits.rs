@@ -23,7 +23,9 @@
 use crate::domain::body::Body;
 use crate::math::Vec3;
 use crate::physics::integrator::force_model::ForceModel;
-use crate::physics::integrator::perturbation::PerturbationForce;
+use crate::physics::integrator::operator::{
+    HamiltonianOperator, NonConservativeOperator, Operator,
+};
 
 // ── IntegratorKind (serialisable enum) ────────────────────────────────────────
 
@@ -194,8 +196,25 @@ pub struct IntegratorContext<'a> {
     /// Gravitational scaling factor: `G_eff = G₀ · g_factor`.
     pub g_factor: f64,
 
-    /// Non-gravitational perturbation forces (radiation, drag, …).
-    pub perturbations: &'a [Box<dyn PerturbationForce>],
+    /// Hamiltonian operators registered on the system. Each contributes
+    /// a force (via `accumulate_force`) and an energy term (via
+    /// `energy_contribution`). 1PN GR correction is the canonical
+    /// example. Symplectic integrators preserve their conservation
+    /// invariants when *only* operators of this class are registered.
+    pub hamiltonian_perturbations: &'a [Box<dyn HamiltonianOperator>],
+
+    /// Non-conservative operators registered on the system. Each
+    /// contributes a force but no Hamiltonian (drag, radiation
+    /// reaction, dissipative coupling). Symplectic integrators degrade
+    /// silently with these registered; the system emits a `warn_diag`
+    /// at registration time so the broken invariant is documented.
+    pub non_conservative_perturbations: &'a [Box<dyn NonConservativeOperator>],
+
+    /// Pure observers registered on the system. No force, no energy,
+    /// just step-boundary `observe` calls (Shadow Hamiltonian tracker,
+    /// audit trail emitters, etc.). Dispatched at synchronized state
+    /// after the integrator has fully resolved the outer step.
+    pub observers: &'a mut [Box<dyn Operator>],
 
     /// Optional cooperative wall-clock deadline. Adaptive integrators
     /// (IAS15) check this after each rejection in the retry loop; when

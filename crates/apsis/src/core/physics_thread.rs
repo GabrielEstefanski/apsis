@@ -34,7 +34,7 @@ use crate::core::trail::{TrailSampler, TrailSamplerKind};
 use crate::domain::body::{Body, NamedBody};
 use crate::io::snapshot::SimSnapshot;
 use crate::math::Vec3;
-use crate::physics::integrator::{IntegratorKind, PerturbationForce};
+use crate::physics::integrator::{HamiltonianOperator, IntegratorKind};
 use crate::physics::orbital::OrbitalElements;
 
 // ── Render state ──────────────────────────────────────────────────────────────
@@ -131,9 +131,15 @@ pub enum PhysicsCmd {
     /// Swap the trail-sampler strategy. Anchors (if any) are discarded; the
     /// next step restores them and records an initial sample.
     SetTrailSampler(TrailSamplerKind),
-    /// Replace the full perturbation stack atomically. Clears all previously
-    /// registered forces, then registers each entry in order.
-    SetPerturbations(Vec<Box<dyn PerturbationForce>>),
+    /// Atomically replace the Hamiltonian-perturbation stack. Clears
+    /// previously-registered Hamiltonian operators and registers each
+    /// entry in order. **Non-conservative perturbations and observers
+    /// registered separately are not touched.**
+    ///
+    /// Non-conservative and observer registration through the
+    /// physics-thread protocol is not yet exposed; the UI catalog is
+    /// Hamiltonian-only as of v0.1.
+    SetHamiltonianPerturbations(Vec<Box<dyn HamiltonianOperator>>),
     Shutdown,
 }
 
@@ -520,8 +526,8 @@ impl PhysicsHandle {
     pub fn set_trail_sampler(&self, kind: TrailSamplerKind) {
         self.send(PhysicsCmd::SetTrailSampler(kind));
     }
-    pub fn set_perturbations(&self, ps: Vec<Box<dyn PerturbationForce>>) {
-        self.send(PhysicsCmd::SetPerturbations(ps));
+    pub fn set_hamiltonian_perturbations(&self, ps: Vec<Box<dyn HamiltonianOperator>>) {
+        self.send(PhysicsCmd::SetHamiltonianPerturbations(ps));
     }
 
     pub fn restore_from_snapshot(&self, snap: &SimSnapshot) {
@@ -701,7 +707,7 @@ fn cmd_blocks_during_precision(cmd: &PhysicsCmd) -> bool {
         | PhysicsCmd::LoadNamedBodies(_)
         | PhysicsCmd::ZeroComVelocity
         | PhysicsCmd::RestoreSnapshot(_)
-        | PhysicsCmd::SetPerturbations(_) => true,
+        | PhysicsCmd::SetHamiltonianPerturbations(_) => true,
 
         PhysicsCmd::SetPaused(_)
         | PhysicsCmd::SetSimRateTarget(_)
@@ -823,10 +829,10 @@ fn apply_cmd(
         PhysicsCmd::SetTrailSampler(kind) => {
             *trail_sampler = kind.build();
         },
-        PhysicsCmd::SetPerturbations(ps) => {
-            system.clear_perturbations();
+        PhysicsCmd::SetHamiltonianPerturbations(ps) => {
+            system.clear_hamiltonian_perturbations();
             for p in ps {
-                system.add_perturbation(p);
+                system.add_hamiltonian_perturbation(p);
             }
             *needs_full_publish = true;
         },

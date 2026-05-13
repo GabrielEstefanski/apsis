@@ -13,7 +13,7 @@
 //! [`TruncatedPlummerKernel`] with cutoff `R_c = 1`. The truncated kernel
 //! provides `Exactness::Modified + Continuity::C0`; 1PN requires
 //! `Exact + Smooth`. Two invariant violations are therefore expected on
-//! the single `add_perturbation` call.
+//! the single `add_hamiltonian_perturbation` call.
 //!
 //! With the orbit bound (outside scale α = 0.5 is the maximum-range
 //! case that keeps the orbit finite for these parameters) the trajectory
@@ -150,7 +150,7 @@ fn truncated_kernel_plus_1pn_fires_both_exactness_and_continuity_warnings() {
     let mut sys = System::new(two_body_eccentric(), UnitSystem::canonical())
         .with_kernel(kernel)
         .with_integrator(IntegratorKind::Yoshida4);
-    sys.add_perturbation(Box::new(PostNewtonian1PN::solar_units()));
+    sys.add_hamiltonian_perturbation(Box::new(PostNewtonian1PN::solar_units()));
 
     let events = captured.lock().unwrap().clone();
     unsubscribe(id);
@@ -253,7 +253,7 @@ fn truncated_kernel_energy_spikes_are_in_bijection_with_r_cut_crossings() {
         .with_kernel(kernel)
         .with_integrator(IntegratorKind::Yoshida4)
         .with_dt(DT);
-    sys_trunc.add_perturbation(Box::new(PostNewtonian1PN::solar_units()));
+    sys_trunc.add_hamiltonian_perturbation(Box::new(PostNewtonian1PN::solar_units()));
     sys_trunc.step();
 
     let mut samples: Vec<Sample> = Vec::with_capacity(N_STEPS);

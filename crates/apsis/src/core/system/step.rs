@@ -12,6 +12,7 @@ use crate::math::Vec3;
 use crate::physics::encounter::EncounterFlag;
 use crate::physics::energy::{angular_momentum_z, kinetic_energy, total_energy};
 use crate::physics::integrator::IntegratorContext;
+use crate::physics::integrator::operator_dispatch::dispatch_observers;
 use crate::physics::integrator::{DenseSnapshot, IntegratorKind};
 
 impl System {
@@ -67,7 +68,9 @@ impl System {
         let mut ctx = IntegratorContext {
             force: &mut *self.force_model,
             g_factor,
-            perturbations: &self.perturbations,
+            hamiltonian_perturbations: &self.hamiltonian_perturbations,
+            non_conservative_perturbations: &self.non_conservative_perturbations,
+            observers: &mut self.observers,
             deadline: self.step_deadline,
         };
         let result = self.integrator.step(&mut self.bodies, &mut ctx, dt, &mut self.scratch_acc);
@@ -84,6 +87,18 @@ impl System {
         let consumed_dt = result.consumed_dt;
         self.steps += 1;
         self.t += consumed_dt;
+
+        // Operator boundary observation. Bodies are at synchronised
+        // post-step state and `t` is post-advance; observers see the
+        // canonical step boundary.
+        dispatch_observers(
+            &self.bodies,
+            self.t,
+            consumed_dt,
+            &mut self.hamiltonian_perturbations,
+            &mut self.non_conservative_perturbations,
+            &mut self.observers,
+        );
 
         // Produce the dense-output snapshot.  t0 = system.t() - snapshot.dt
         // works for both cases: IAS15 sub-steps use their own dt, Order-2 uses

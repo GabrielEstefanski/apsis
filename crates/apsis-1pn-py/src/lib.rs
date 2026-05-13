@@ -3,13 +3,13 @@
 //! **This crate proves that the apsis perturbation extension model is
 //! preserved across both Rust and Python boundaries** — without
 //! duplicating physics, breaking ownership semantics, or requiring
-//! kernel modification. A `Box<dyn PerturbationForce>` constructed in
-//! [`apsis_1pn`] crosses into Python via a typed
+//! kernel modification. A `Box<dyn HamiltonianOperator>` constructed
+//! in [`apsis_1pn`] crosses into Python via a typed
 //! [`PyCapsule`](pyo3::types::PyCapsule) (transport defined in
 //! [`apsis_py_core`]), travels in the pure-Python `apsis.Perturbation`
-//! wrapper, and is unwrapped at `System.add_perturbation` back into
-//! Rust. The 1PN formula itself is implemented exactly once, in
-//! [`apsis_1pn`]; this crate is plumbing only.
+//! wrapper, and is unwrapped at `System.add_hamiltonian_perturbation`
+//! back into Rust. The 1PN formula itself is implemented exactly once,
+//! in [`apsis_1pn`]; this crate is plumbing only.
 //!
 //! Treat this crate as the **template** when writing Python bindings
 //! for new perturbation crates: every factory below is a one-liner
@@ -50,7 +50,7 @@
 //!     dt=1e-3,
 //!     exact_gravity=True,
 //! )
-//! sys.add_perturbation(apsis_1pn.PostNewtonian1PN.solar_units())
+//! sys.add_hamiltonian_perturbation(apsis_1pn.PostNewtonian1PN.solar_units())
 //! ```
 
 use apsis_1pn::PostNewtonian1PN;
@@ -59,11 +59,11 @@ use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
 /// Construct an `apsis.Perturbation` instance from a freshly-built
-/// boxed perturbation. Imports `apsis.Perturbation` once per call;
-/// the cost is negligible compared to the enclosing simulation work.
+/// boxed operator. Imports `apsis.Perturbation` once per call; the
+/// cost is negligible compared to the enclosing simulation work.
 fn wrap_in_apsis_perturbation(
     py: Python<'_>,
-    inner: Box<dyn apsis::physics::integrator::PerturbationForce>,
+    inner: Box<dyn apsis::physics::integrator::HamiltonianOperator>,
     label: &str,
 ) -> PyResult<PyObject> {
     let capsule = box_into_capsule(py, inner)?;
@@ -78,7 +78,7 @@ fn wrap_in_apsis_perturbation(
 ///
 /// Use the named factories to construct an instance in the appropriate
 /// unit system; the result is a fully-formed `apsis.Perturbation` ready
-/// to attach via `System.add_perturbation(...)`.
+/// to attach via `System.add_hamiltonian_perturbation(...)`.
 ///
 /// # Kernel preconditions
 ///
