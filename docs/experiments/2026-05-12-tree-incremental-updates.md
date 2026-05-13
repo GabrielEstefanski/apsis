@@ -202,31 +202,18 @@ Cell V (single-thread tree build). Median over 20 measured runs after 5 warmup r
 
 | System | N | seed=0x6F637472 | seed=0x71756164 | seed=0x6D6F7274 |
 | --- | ---: | ---: | ---: | ---: |
-| Stable | 1 000 | 0.486× | 0.429× | 0.473× |
-| Stable | 5 000 | 0.442× | 0.480× | 0.410× |
-| Stable | 10 000 | **0.353×** | **0.360×** | **0.356×** |
-| Stable | 50 000 | 0.545× | 0.518× | 0.391× |
-| Chaotic | 1 000 | 0.449× | 0.435× | 0.461× |
-| Chaotic | 5 000 | 0.317× | 0.354× | 0.345× |
-| Chaotic | 10 000 | **0.297×** | **0.334×** | **0.315×** |
-| Chaotic | 50 000 | 0.443× | 0.565× | 0.399× |
+| Stable | 1 000 | 0.493× | 0.462× | 0.415× |
+| Stable | 5 000 | 0.479× | 0.422× | 0.472× |
+| Stable | 10 000 | 0.391× | 0.387× | 0.403× |
+| Stable | 50 000 | 0.479× | 0.480× | 0.381× |
+| Chaotic | 1 000 | 0.416× | 0.405× | 0.431× |
+| Chaotic | 5 000 | 0.348× | 0.357× | 0.353× |
+| Chaotic | 10 000 | 0.317× | 0.370× | 0.375× |
+| Chaotic | 50 000 | 0.444× | 0.433× | 0.472× |
 
-A-priori predicted range was `[0.10, 0.30]` for stable systems. **Stable measurements: 0.36-0.55× — outside the predicted range but in the realistic envelope after correcting the per-step fixed-cost model (see §Interpretation Mechanism 1).** Chaotic measurements at N = 10⁴ touch the predicted upper bound (0.30×) and exceed it on the lower side at small chaotic cells.
+A-priori predicted range was `[0.10, 0.30]` for stable systems. **Stable measurements: 0.38-0.49× — outside the predicted range but in the realistic envelope after correcting the per-step fixed-cost model (see §Interpretation Mechanism 1).** Chaotic measurements span 0.32-0.47×, comparably above the predicted lower bound.
 
-Maintenance is **1.8-3.4× faster than rebuild** across the grid. Absolute build wall-time at N = 10⁴ stable, median across seeds: **~568 µs rebuild → ~214 µs maintain (saves ~354 µs/step)**. At N = 5 × 10⁴: **~4.94 ms rebuild → ~2.35 ms maintain (saves ~2.6 ms/step)**. Chaotic N = 5 × 10⁴ saves ~4.5 ms/step.
-
-#### Comparison vs the pre-derefinement implementation (commit 7c8c539)
-
-| System | N | Pre-deref ratio | Post-deref ratio | Δ |
-| --- | ---: | ---: | ---: | --- |
-| Stable | 1 000 | 0.53× | 0.46× | +13 % faster |
-| Stable | 5 000 | 0.47× | 0.44× | +6 % |
-| Stable | 10 000 | 0.48× | 0.36× | **+25 % faster** |
-| Stable | 50 000 | 0.60× | 0.49× | +18 % |
-| Chaotic | 10 000 | 0.40× | 0.32× | **+20 % faster** |
-| Chaotic | 50 000 | 0.55× | 0.47× | +15 % |
-
-Derefinement contributes a 13-25 % reduction on top of the basic incremental approach.
+Maintenance is **2.0-3.2× faster than rebuild** across the grid. Absolute build wall-time at N = 10⁴ stable, median across seeds: **~574 µs rebuild → ~226 µs maintain (saves ~350 µs/step)**. At N = 5 × 10⁴: **~4.6 ms rebuild → ~2.0 ms maintain (saves ~2.6 ms/step)**. Chaotic N = 5 × 10⁴ saves ~3.4 ms/step.
 
 ### Tier 3 — Walk phase wall-time regression bound
 
@@ -234,34 +221,22 @@ Walk timed via `evaluate_profile` on the same tree state used for build/maintain
 
 | System | N | seed=0x6F637472 | seed=0x71756164 | seed=0x6D6F7274 |
 | --- | ---: | ---: | ---: | ---: |
-| Stable | 1 000 | 1.005× ✓ | 0.927× ⚠ | 0.970× ✓ |
-| Stable | 5 000 | 1.090× ⚠ | 1.009× ✓ | 1.050× ✓ |
-| Stable | 10 000 | 1.043× ✓ | 0.999× ✓ | 1.062× ⚠ |
-| Stable | 50 000 | 0.975× ✓ | 0.983× ✓ | 0.967× ✓ |
-| Chaotic | 1 000 | 0.978× ✓ | 1.068× ⚠ | 0.986× ✓ |
-| Chaotic | 5 000 | 1.071× ⚠ | 1.049× ✓ | 0.993× ✓ |
-| Chaotic | 10 000 | 1.002× ✓ | 1.037× ✓ | 0.976× ✓ |
-| Chaotic | 50 000 | 0.991× ✓ | 0.938× ⚠ | 0.993× ✓ |
+| Stable | 1 000 | 0.981× ✓ | 0.955× ✓ | 0.961× ✓ |
+| Stable | 5 000 | 1.072× ⚠ | 0.964× ✓ | 1.067× ⚠ |
+| Stable | 10 000 | 1.049× ✓ | 1.064× ⚠ | 1.012× ✓ |
+| Stable | 50 000 | 0.967× ✓ | 0.977× ✓ | 0.974× ✓ |
+| Chaotic | 1 000 | 0.998× ✓ | 0.882× ⚠ | 0.891× ⚠ |
+| Chaotic | 5 000 | 1.045× ✓ | 1.119× ⚠ | 1.056× ⚠ |
+| Chaotic | 10 000 | 0.972× ✓ | 0.999× ✓ | 1.006× ✓ |
+| Chaotic | 50 000 | 0.987× ✓ | 0.999× ✓ | 0.981× ✓ |
 
-A-priori bound: `[0.95, 1.05]`. **6 of 24 cells exceed the bound** (4 above by 0.012-0.090×, 2 below by 0.012-0.023× — the "below" cells are *faster* than rebuild, just outside the symmetric envelope). The peak above-bound regression is +9 % at Stable N = 5 × 10³ seed `0x6F637472`. All N = 5 × 10⁴ cells stay inside the bound; the regression is concentrated at small-to-mid N.
-
-#### Pre-derefinement comparison
-
-| Cell | Pre-deref worst | Post-deref worst | Δ |
-| --- | ---: | ---: | --- |
-| Stable N=1k | **1.232×** | 1.005× | **−18 % regression eliminated** |
-| Stable N=5k | 1.124× | 1.090× | −3 % |
-| Stable N=10k | 1.163× | 1.062× | **−9 % regression reduced** |
-| Chaotic N=5k | 1.138× | 1.071× | −6 % |
-| Chaotic N=10k | 1.034× | 1.037× | comparable |
-
-Derefinement closed 4 of 9 previously-out-of-bound cells; the remaining 4 above-bound cells regressed by half as much. The mechanism is identified in §Interpretation Mechanism 2.
+A-priori bound: `[0.95, 1.05]`. **7 of 24 cells exceed the bound**: 5 above by 0.012-0.119× (peak +12 % at Chaotic N = 5 × 10³ seed `0x71756164`) and 2 *below* by 0.059-0.118× (the maintained tree is faster than rebuild on chaotic small N, an unexpected positive). All N = 5 × 10⁴ cells stay inside the bound; above-bound regression is concentrated at small-to-mid N where absolute walk wall-time variance is largest relative to the regression magnitude.
 
 ### Tier 4 — Chaotic-system regression bound
 
-Asymmetric bound: `t_build_maintained / t_build_rebuild` for chaotic systems must be `≤ 1.50`. Observed range across all chaotic cells: **0.30× to 0.57×** — chaotic systems are *faster* under maintenance by 1.8-3.4×.
+Asymmetric bound: `t_build_maintained / t_build_rebuild` for chaotic systems must be `≤ 1.50`. Observed range across all chaotic cells: **0.32× to 0.47×** — chaotic systems are *faster* under maintenance by 2.1-3.1×.
 
-The fear that informed Tier 4 (high migrant rate making maintenance worse than rebuild) does not materialise. Even the chaotic system has only ~4 % migrants per step at N = 5 × 10⁴ — small enough that the residency check + targeted re-insertion stays cheaper than full rebuild, and derefinement keeps the tree compact under repeated migration.
+The fear that informed Tier 4 (high migrant rate making maintenance worse than rebuild) does not materialise. Even the chaotic system has only ~4 % migrants per step at N = 5 × 10⁴ — small enough that the residency check + targeted re-insertion stays cheaper than full rebuild, and the conservative derefinement keeps the tree compact under repeated migration.
 
 ### Migrant rate (diagnostic)
 
@@ -278,24 +253,28 @@ Build savings + walk delta combined per cell, median across seeds:
 
 | System | N | Build saved (µs) | Walk delta (µs) | Net per step |
 | --- | ---: | ---: | ---: | ---: |
-| Stable | 1 000 | ~25 | ~−10 | **−35 µs** (faster) |
-| Stable | 5 000 | ~170 | ~+280 | +110 µs (slower) |
-| Stable | 10 000 | ~380 | ~+250 | +130 µs (slower) |
-| Stable | 50 000 | ~2 240 | ~−2 460 | **−4 700 µs** (faster) |
-| Chaotic | 1 000 | ~41 | ~−15 | **−56 µs** (faster) |
-| Chaotic | 5 000 | ~280 | ~+440 | +160 µs (slower) |
-| Chaotic | 10 000 | ~830 | ~+0 | **−830 µs** (faster) |
-| Chaotic | 50 000 | ~4 460 | ~−2 200 | **−6 660 µs** (faster) |
+| Stable | 1 000 | ~22 | ~−19 | **−41 µs** (faster) |
+| Stable | 5 000 | ~158 | ~+200 | +42 µs (slower) |
+| Stable | 10 000 | ~363 | ~+400 | +37 µs (slower) |
+| Stable | 50 000 | ~2 050 | ~−2 400 | **−4 450 µs** (faster) |
+| Chaotic | 1 000 | ~38 | ~−100 | **−138 µs** (faster) |
+| Chaotic | 5 000 | ~285 | ~+800 | +515 µs (slower) |
+| Chaotic | 10 000 | ~590 | ~+30 | **−560 µs** (faster) |
+| Chaotic | 50 000 | ~3 400 | ~−2 700 | **−6 100 µs** (faster) |
 
-Net positive at six of eight cells. The two slower cells (Stable N = 5k, Stable N = 10k median, Chaotic N = 5k median) are within ±0.5 % of step time — small relative to typical noise. Large N (50 000) consistently saves milliseconds per step on both stable and chaotic distributions, the regime where this axis is structurally most valuable.
+Net positive at five of eight cells. The three slower cells (Stable N = 5k, Stable N = 10k, Chaotic N = 5k) are within 0.05 % to 5 % of step time — Chaotic N = 5k is the worst case at +5 % step time slowdown. Large N (50 000) consistently saves 4-6 ms per step on both stable and chaotic distributions, the regime where this axis is structurally most valuable.
 
 ---
 
 ## Interpretation
 
-The implementation went through two iterations: a first cut without derefinement (commit `7c8c539`, ~1.5-2× faster build but +10-23 % walk regression at small-mid N), and the production version with REBOUND-style derefinement that lands in this PR. The two-iteration record is preserved because the contrast is the load-bearing teaching of this experiment.
+The implementation went through three iterations:
 
-Three mechanisms dominate the data:
+1. **First cut without derefinement** (commit `7c8c539`): linear `O(N)` particle scan + per-migrant root re-insert. ~1.5-2× faster build, +10-23 % walk regression at small-mid N because empty leaves accumulated in the arena.
+2. **Re-implementation with REBOUND-style derefinement** (commit `5504569`): recursive subtree walk freeing empty leaves and conservatively collapsing under-LEAF cells. Numbers reported in that commit looked better but were partially based on a silent `is_leaf()` correctness bug — see Mechanism 4.
+3. **Final version with `is_leaf()` fix** (this PR): correct walk traversal exposes the true Tier 3 cost. Conservative collapse retained; build-time canonicalisation of empty leaves was attempted and reverted (measured net-negative on Tier 3 — cache fragmentation from free-list slot reuse outweighed the ~7-cell-per-overflow savings).
+
+Four mechanisms dominate the data:
 
 ### Mechanism 1 — Build savings are bounded by the per-step fixed cost, not the migrant rate
 
@@ -336,11 +315,25 @@ Without slot recycling, the `Vec<Node>` arena would grow proportional to total m
 
 The free-list is what makes derefinement *useful*: without it, freeing cells would still leak memory monotonically. Together they form the closed loop REBOUND's `tree.c` implements via `free()` + `calloc()` of heap-allocated cells; the apsis arena variant achieves the same effect with explicit slot recycling.
 
+### Mechanism 4 — `is_leaf()` correctness fix surfaces the true walk cost
+
+The first two implementations (commits `7c8c539` + `5504569`) used `is_leaf() = children[0] == NO_CHILD`. This was correct as long as the tree only got cells via [`subdivide`], which always populated all eight `children` slots. **Once derefinement could free a child at any octant, including octant 0, the check became unsound.** A parent whose octant-0 leaf had been freed would have `children[0] == NO_CHILD` while still having populated children at other octants — yet `is_leaf()` reported `true`, and the BH walk would treat the entire subtree below as having no descendants.
+
+The bug silently shortened walks: a fraction of nodes that should have been recursed into (or accepted as multipoles) were instead read as empty leaves contributing zero force. The pre-PR Tier 1 tests passed because they checked aggregated multipoles at the root (`mass`, `com_*`, `q_*`), not per-body acceleration on the maintained-tree walk; the silent shortcut left the per-cell aggregates correct but corrupted the walk's reachability.
+
+`is_leaf()` now iterates all eight `children` slots, short-circuiting on the first non-`NO_CHILD` (so internal cells, the common walk-hot-path case, still cost only one comparison; leaves cost eight). The fix is unconditionally needed for correctness regardless of any perf consideration.
+
+Post-fix Tier 3 numbers reflect the true walk cost. They are worse than the pre-fix numbers because the walk now correctly visits every populated subtree. The `proptest_total_mass_is_preserved` proptest, previously passing (because mass aggregates were correct), failed deterministically once the build path also exercised derefinement — that's how the bug was caught.
+
+A second consequence: a build-time canonicalisation pass (free empty leaves left over from overflow-driven subdivisions) was attempted on top of the fix and **measured net-negative on Tier 3**. Without canonicalisation, build's empty leaves stay at predictable contiguous arena positions (right after their populated siblings) and the walk's `mass <= 0.0` skip is essentially free. With canonicalisation, the freed slots are returned to the free-list and reused for migrant cells in subsequent steps — placing those migrant cells at scattered arena positions and degrading the walk's cache pattern. The bisect (commit history preserved) is the evidence; the production version does not canonicalise build-time empty leaves.
+
 ---
 
 ## Decision
 
-**Ship tree incremental maintenance with derefinement.** All four tiers are inside their (corrected) bounds: Tier 1 honours the precision invariant (bit-exact under no-movement, FP-summation envelope under movement); Tier 2 delivers 1.8-3.4× faster build than rebuild; Tier 3 lands inside `[0.95, 1.05]` at 18 of 24 cells, with the 6 outliers regressing by ≤ 9 % at small-mid N and recovering to inside-bound at large N; Tier 4 passes by a wide margin on chaotic systems.
+**Ship tree incremental maintenance with conservative collapse + `is_leaf` correctness fix.** Tier 1 honours the precision invariant (bit-exact under no-movement, FP-summation envelope under movement); Tier 2 delivers 2.0-3.2× faster build than rebuild; Tier 3 lands inside `[0.95, 1.05]` at 17 of 24 cells with the 7 outliers concentrated at small-mid N (peak above-bound +12 %, two cells *faster* than rebuild); Tier 4 passes by a wide margin on chaotic systems.
+
+The `is_leaf` fix is the load-bearing change of this PR — it corrects a silent walk-shortcut bug present in earlier iterations and is unconditionally required regardless of the perf trade-off.
 
 ### Net step-time outcome
 
@@ -348,23 +341,24 @@ Median across seeds:
 
 | (system, N) | Net per step | Note |
 | --- | ---: | --- |
-| Stable 1 000 | **−35 µs** | net positive |
-| Stable 5 000 | +110 µs | small net negative (~0.5 % of step) |
-| Stable 10 000 | +130 µs | small net negative (~0.4 %) |
-| Stable 50 000 | **−4 700 µs** | **−2 % of step** |
-| Chaotic 1 000 | **−56 µs** | net positive |
-| Chaotic 5 000 | +160 µs | small net negative (~1.4 %) |
-| Chaotic 10 000 | **−830 µs** | **−2.5 % of step** |
-| Chaotic 50 000 | **−6 660 µs** | **−2 % of step** |
+| Stable 1 000 | **−41 µs** | net positive |
+| Stable 5 000 | +42 µs | small net negative (~0.5 % of step) |
+| Stable 10 000 | +37 µs | small net negative (~0.1 %) |
+| Stable 50 000 | **−4 450 µs** | **−2 % of step** |
+| Chaotic 1 000 | **−138 µs** | net positive (~12 % of small step) |
+| Chaotic 5 000 | +515 µs | net negative (~5 % of step — worst case) |
+| Chaotic 10 000 | **−560 µs** | **−2 % of step** |
+| Chaotic 50 000 | **−6 100 µs** | **−2 % of step** |
 
-Six of eight cells gain. The two slower cells lose under 1.5 % of step time, well within typical per-run noise of integrated simulations. Large N (50 000) consistently saves ~5-7 ms/step on both stable and chaotic — the regime this axis was designed for.
+Five of eight cells gain. The three slower cells lose under 0.5 % to 5 % of step time; Chaotic N = 5 × 10³ is the worst case at +5 % — concentrated in a regime that's neither v0.1's planetary target (N ≤ 10³) nor v0.2's scaling target (N ≥ 10⁵). Large N (50 000) consistently saves 4-6 ms/step on both stable and chaotic — the regime this axis was designed for.
 
 ### What ships
 
+- **`Node::is_leaf()` correctness fix** — checks all eight children, short-circuiting on the first non-`NO_CHILD`. Required regardless of any perf consideration; without it, derefinement of any non-octant-0 child silently shortens the walk (Mechanism 4).
 - `Octree::cell_idx: Vec<u32>` — per-body back-reference into the node arena.
 - `Octree::free_list: Vec<u32>` — recycles slots derefined by maintenance.
 - `Octree::maintain(arrays)` — three-pass entry point (recursive subtree walk → migrant re-insertion → leaf-up multipole recompute).
-- `Octree::maintain_subtree` — recursive walk doing per-leaf residency + per-internal-node derefinement (`Empty` → free; `all-leaf-children + total ≤ LEAF + child_freed` → collapse).
+- `Octree::maintain_subtree` + `try_collapse` — recursive walk doing per-leaf residency + per-internal-node derefinement (`Empty` → free; `child_freed && all-leaf-children && total ≤ LEAF` → collapse).
 - `Octree::ensure_child` + `octant_for_body` — `insert` now creates child cells lazily, transparently reusing free-list slots.
 - `BarnesHutEngine::maintain` — public wrapper.
 - `force_model.rs` per-step path now calls `engine.maintain` instead of `engine.build`. The first call after engine construction still does a full build via the maintain → build fallback chain.
@@ -380,15 +374,23 @@ The §Results numbers above are the canonical record. CSV at `target/perf-tree/m
 
 ### Standing for the perf series
 
-Tree incremental was the highest-ROI-per-LOC candidate among the post-SIMD deferred axes (engine ceiling §Decision). The measurement shows ROI is real (1.8-3.4× build speedup, 2 % step-time savings at large N) and the precision invariant holds. The lab notebook a-priori was wrong about the magnitude of the gain (predicted 5-10×, observed 2-3×) but right about the direction; the corrected fixed-cost decomposition (Mechanism 1) is the rule for any future tree-maintenance experiment.
+Tree incremental was the highest-ROI-per-LOC candidate among the post-SIMD deferred axes (engine ceiling §Decision). The measurement shows ROI is real (2.0-3.2× build speedup, 2 % step-time savings at large N) and the precision invariant holds. The lab notebook a-priori was wrong about the magnitude of the gain (predicted 5-10×, observed 2-3×) but right about the direction; the corrected fixed-cost decomposition (Mechanism 1) is the rule for any future tree-maintenance experiment.
 
 Per the calibration doc rule: future tree-maintenance experiments must construct bounds from the per-step fixed cost (recursive walk + multipole recompute ≈ 30 % of build), not from migrant rate alone. The migrant-rate-only model overestimates savings by 2-5×.
 
 ### What this PR teaches that the next axis should respect
 
-The two-iteration record (without-derefinement → with-derefinement) demonstrates that **the load-bearing piece of incremental maintenance is the topology-cleanup pass**, not the residency check or the migrant re-insertion. Without derefinement, stale empty leaves accumulate and the walk regresses by 10-23 %. With derefinement, the walk stays inside the FP-summation envelope and the tree's working set stays bounded.
+Three lessons from the three-iteration record:
 
-This generalises: any future incremental data-structure maintenance experiment in apsis (e.g., AoSoA + Morton in PR-perf-7, neighbour lists for time-stepping) must pair "remove" with a corresponding "compact" pass. Either side alone produces an unstable structure that drifts under continuous use.
+1. **Topology-cleanup pass is necessary** (Mechanism 2): without derefinement of cells emptied by migration, stale leaves accumulate and the walk regresses by 10-23 %. With conservative derefinement (collapse only when at least one sibling was freed during the same maintain pass), the walk stays close to fresh-build cost.
+2. **Aggressive collapse is wrong for `LEAF > 1` architectures**: an internal cell with `body_count ≤ LEAF` could be collapsed to a leaf, but that cell would lose its multipole-acceptance opportunity in the BH walk. Conservative collapse, gated on `child_freed`, preserves multipole acceptance for build-created over-divided cells. REBOUND's `tree.c` collapses unconditionally because it uses LEAF=1; apsis with LEAF=8 has different optima.
+3. **Cache layout matters more than node count** (Mechanism 4): freeing build-time empty leaves and letting the free-list reuse those slots for migrant cells (a literal "compact the arena" interpretation of REBOUND's free pattern) measured *net-negative* on Tier 3 because migrants land at scattered arena positions. Predictable contiguous build-time empty leaves cost ~1 cache miss + 1 mass-zero check per visit; reuse-by-migrants costs more.
+
+This generalises: any future incremental data-structure maintenance experiment in apsis (e.g., AoSoA + Morton in PR-perf-7, neighbour lists for time-stepping) must:
+
+- pair "remove" with a corresponding "compact" pass;
+- be conservative about removing structure when downstream consumers (BH walk, kernel dispatch) benefit from over-allocation;
+- measure cache-locality effects explicitly — node count is a poor proxy for walk wall-time.
 
 ---
 
