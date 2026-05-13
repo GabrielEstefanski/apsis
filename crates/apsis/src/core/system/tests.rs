@@ -1559,6 +1559,25 @@ mod integrator_force_compat {
             "IAS15 must leave the engine in direct mode even at small N"
         );
     }
+
+    #[test]
+    fn mercurius_does_not_force_direct_mode() {
+        // Mercurius computes its own K-weighted forces internally and
+        // does not rely on the outer `ctx.force` being deterministic
+        // (`requires_deterministic_force = false`). It must NOT raise
+        // the BH exact_threshold at selection time.
+        let mut sys = many_body_system();
+        sys.set_integrator(IntegratorKind::VelocityVerlet);
+        let threshold_before = sys.exact_threshold();
+
+        sys.set_integrator(IntegratorKind::Mercurius);
+
+        assert_eq!(
+            sys.exact_threshold(),
+            threshold_before,
+            "Mercurius does not require determinism; force-model configuration must not change"
+        );
+    }
 }
 
 #[cfg(test)]

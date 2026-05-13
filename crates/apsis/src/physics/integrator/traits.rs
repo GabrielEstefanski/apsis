@@ -523,6 +523,16 @@ pub trait Integrator: Send {
         None
     }
 
+    /// Set the Hill-radius multiplier for hybrid close-encounter
+    /// integrators (Mercurius). No-op for integrators without a
+    /// changeover-based encounter trigger.
+    fn set_hill_factor(&mut self, _alpha: f64) {}
+
+    /// Return the active Hill-radius multiplier, if applicable.
+    fn hill_factor(&self) -> Option<f64> {
+        None
+    }
+
     /// Cumulative adaptive-integrator counters. `None` for fixed-step
     /// integrators (they have no sub-step / rejection / Picard notion).
     /// See [`AdaptiveStats`] for field semantics.

@@ -725,6 +725,14 @@ impl Integrator for Mercurius {
     fn requires_deterministic_force(&self) -> bool {
         false
     }
+
+    fn set_hill_factor(&mut self, alpha: f64) {
+        self.set_alpha(alpha);
+    }
+
+    fn hill_factor(&self) -> Option<f64> {
+        Some(self.alpha())
+    }
 }
 
 // ── CloseFieldForceModel ──────────────────────────────────────────────────────
