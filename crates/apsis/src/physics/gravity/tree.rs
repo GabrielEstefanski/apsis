@@ -152,10 +152,22 @@ impl<const LEAF: usize> Node<LEAF> {
         }
     }
 
-    /// True iff this node is a leaf (no child pointers set).
+    /// True iff this node is a leaf — i.e. every child pointer is
+    /// [`NO_CHILD`]. Checks all eight slots because [`Octree::maintain`]
+    /// can derefine arbitrary octants (including octant 0) while leaving
+    /// other octants populated; a `children[0]`-only check would
+    /// misclassify a partially-derefined internal cell as a leaf.
+    /// Short-circuits on the first non-`NO_CHILD` slot, so internal
+    /// cells (the common case in walk hot paths) cost only one
+    /// comparison.
     #[inline]
     pub(crate) fn is_leaf(&self) -> bool {
-        self.children[0] == NO_CHILD
+        for &c in &self.children {
+            if c != NO_CHILD {
+                return false;
+            }
+        }
+        true
     }
 
     /// Side length of this cell: `2 * half`.
@@ -314,6 +326,72 @@ impl<const LEAF: usize> Octree<LEAF> {
         self.aggregate_quadrupole(0, arrays);
     }
 
+    /// Conservative collapse: only collapses the cell when at least one
+    /// sibling was freed during the current [`maintain`] pass
+    /// (`child_freed`), and the surviving children form a set that fits
+    /// in a single leaf. The `child_freed` gate prevents removing
+    /// build-created over-divided internal cells whose
+    /// multipole-acceptance opportunity is still useful to the BH walk
+    /// (an internal cell with `body_count ≤ LEAF` would, if collapsed,
+    /// force the walk to iterate its bodies pairwise instead of
+    /// optionally accepting it as a single multipole — net-negative on
+    /// Tier 3 walk wall-time).
+    fn try_collapse(&mut self, idx: usize, child_freed: bool) -> SubtreeStatus {
+        let mut total_body_count: u32 = 0;
+        let mut surviving_children = 0usize;
+        let mut all_children_leaf = true;
+        let children = self.nodes[idx].children;
+        for o in 0..8 {
+            let child = children[o];
+            if child == NO_CHILD {
+                continue;
+            }
+            surviving_children += 1;
+            let cn = &self.nodes[child as usize];
+            total_body_count += cn.body_count;
+            if !cn.is_leaf() {
+                all_children_leaf = false;
+            }
+        }
+
+        if total_body_count == 0 {
+            return SubtreeStatus::Empty;
+        }
+
+        if child_freed
+            && all_children_leaf
+            && (total_body_count as usize) <= LEAF
+            && surviving_children > 0
+        {
+            let mut new_bodies = [0u32; LEAF];
+            let mut new_len = 0usize;
+            for o in 0..8 {
+                let child = self.nodes[idx].children[o];
+                if child == NO_CHILD {
+                    continue;
+                }
+                let child_len = self.nodes[child as usize].body_len as usize;
+                for k in 0..child_len {
+                    let bi = self.nodes[child as usize].bodies[k];
+                    new_bodies[new_len] = bi;
+                    if (bi as usize) < self.cell_idx.len() {
+                        self.cell_idx[bi as usize] = idx as u32;
+                    }
+                    new_len += 1;
+                }
+                self.free_node(child);
+                self.nodes[idx].children[o] = NO_CHILD;
+            }
+            self.nodes[idx].bodies = new_bodies;
+            self.nodes[idx].body_len = new_len as u8;
+            self.nodes[idx].body_count = new_len as u32;
+        } else {
+            self.nodes[idx].body_count = total_body_count;
+        }
+
+        SubtreeStatus::Active
+    }
+
     /// Update the tree to reflect the current body positions in `arrays`.
     ///
     /// Three passes:
@@ -416,16 +494,10 @@ impl<const LEAF: usize> Octree<LEAF> {
             }
             self.nodes[idx].body_len = new_len as u8;
             self.nodes[idx].body_count = new_len as u32;
-            // Only signal "empty" when the leaf actually lost its bodies
-            // during this maintain pass. Build leaves empty cells in place
-            // (siblings of overflow-driven subdivisions); freeing those on
-            // every maintain would change topology even with no body
-            // movement, breaking the precision invariant.
-            return if len > 0 && new_len == 0 {
-                SubtreeStatus::Empty
-            } else {
-                SubtreeStatus::Active
-            };
+            // Build canonicalises the tree (no surviving empty leaves), so
+            // any leaf reaching `body_len == 0` here lost its last body to
+            // migration and must be freed by the caller.
+            return if new_len == 0 { SubtreeStatus::Empty } else { SubtreeStatus::Active };
         }
 
         let mut child_freed = false;
@@ -435,70 +507,14 @@ impl<const LEAF: usize> Octree<LEAF> {
             if child == NO_CHILD {
                 continue;
             }
-            let status = self.maintain_subtree(child as usize, arrays, migrants);
-            if status == SubtreeStatus::Empty {
+            if self.maintain_subtree(child as usize, arrays, migrants) == SubtreeStatus::Empty {
                 self.free_node(child);
                 self.nodes[idx].children[o] = NO_CHILD;
                 child_freed = true;
             }
         }
 
-        let mut total_body_count: u32 = 0;
-        let mut surviving_children = 0usize;
-        let mut all_children_leaf = true;
-        let children_after = self.nodes[idx].children;
-        for o in 0..8 {
-            let child = children_after[o];
-            if child == NO_CHILD {
-                continue;
-            }
-            surviving_children += 1;
-            let cn = &self.nodes[child as usize];
-            total_body_count += cn.body_count;
-            if !cn.is_leaf() {
-                all_children_leaf = false;
-            }
-        }
-
-        if total_body_count == 0 {
-            return SubtreeStatus::Empty;
-        }
-
-        // Collapse to leaf only when migration has materially shrunk the
-        // subtree. `child_freed` proves a sibling derefined this pass; in
-        // its absence the cell's topology mirrors what `build` would
-        // produce and we leave it alone to keep multipole summation order
-        // bit-exact under the no-movement case.
-        if child_freed
-            && all_children_leaf
-            && (total_body_count as usize) <= LEAF
-            && surviving_children > 0
-        {
-            let mut new_bodies = [0u32; LEAF];
-            let mut new_len = 0usize;
-            for o in 0..8 {
-                let child = self.nodes[idx].children[o];
-                if child == NO_CHILD {
-                    continue;
-                }
-                let child_len = self.nodes[child as usize].body_len as usize;
-                for k in 0..child_len {
-                    let bi = self.nodes[child as usize].bodies[k];
-                    new_bodies[new_len] = bi;
-                    self.cell_idx[bi as usize] = idx as u32;
-                    new_len += 1;
-                }
-                self.free_node(child);
-                self.nodes[idx].children[o] = NO_CHILD;
-            }
-            self.nodes[idx].bodies = new_bodies;
-            self.nodes[idx].body_len = new_len as u8;
-            self.nodes[idx].body_count = new_len as u32;
-        } else {
-            self.nodes[idx].body_count = total_body_count;
-        }
-
-        SubtreeStatus::Active
+        self.try_collapse(idx, child_freed)
     }
 
     fn insert(
