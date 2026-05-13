@@ -77,7 +77,7 @@ fn main() {
     let mercury = Body::rocky(M_MERCURY).at(r_peri, 0.0).with_velocity(0.0, v_peri).unsoftened();
 
     // ── Build the simulation ────────────────────────────────────────────────
-    let mut sys = System::new(vec![sun, mercury], UnitSystem::canonical())
+    let mut sys = System::new(vec![sun, mercury], UnitSystem::solar_canonical())
         .with_integrator(IntegratorKind::Ias15)
         .with_dt(1e-4);
 
@@ -90,7 +90,9 @@ fn main() {
     // softened system would fire an Exactness-violation warning. Since
     // both bodies above are `.unsoftened()`, the active PlummerKernel
     // reports Exactness::Exact dynamically and the check stays silent.
-    sys.add_hamiltonian_perturbation(Box::new(PostNewtonian1PN::solar_units()));
+    sys.add_hamiltonian_perturbation(Box::new(PostNewtonian1PN::for_units(
+        UnitSystem::solar_canonical(),
+    )));
 
     // ── Reference state at t = 0 ────────────────────────────────────────────
     let el0 = compute_elements(sys.bodies(), 1, 0, 1.0)
@@ -128,7 +130,7 @@ fn main() {
     //
     // Schwarzschild perihelion advance per orbit:
     //     Δω = 6π G M / (c² a (1 − e²))
-    let c = PostNewtonian1PN::solar_units().c();
+    let c = PostNewtonian1PN::for_units(UnitSystem::solar_canonical()).c();
     let predicted_per_orbit =
         6.0 * PI * M_SUN / (c * c * A_MERCURY * (1.0 - E_MERCURY * E_MERCURY));
     let predicted_total = predicted_per_orbit * (N_ORBITS as f64);

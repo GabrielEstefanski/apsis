@@ -26,7 +26,13 @@ import apsis_1pn
 
 
 def _mercury_two_body_with_1pn() -> tuple[apsis.System, apsis.Perturbation]:
-    """Build the Sun + Mercury system used by every behaviour test below."""
+    """Build the Sun + Mercury system used by every behaviour test below.
+
+    Both the System and the perturbation use ``apsis.units.SOLAR_CANONICAL``
+    (G = 1 + AU + yr/(2π) + M☉) — the apsis-1pn validation portfolio
+    convention. The registration check in ``add_hamiltonian_perturbation``
+    requires the two unit systems to match exactly.
+    """
     sun = apsis.Body.star(mass=1.0).unsoftened()
     mercury = (
         apsis.Body.rocky(mass=1.66e-7)
@@ -36,12 +42,12 @@ def _mercury_two_body_with_1pn() -> tuple[apsis.System, apsis.Perturbation]:
     )
     sys = apsis.System(
         bodies=[sun, mercury],
-        units=apsis.units.CANONICAL,
+        units=apsis.units.SOLAR_CANONICAL,
         integrator="ias15",
         dt=1e-3,
         exact_gravity=True,
     )
-    p = apsis_1pn.PostNewtonian1PN.solar_units()
+    p = apsis_1pn.PostNewtonian1PN.for_units(units=apsis.units.SOLAR_CANONICAL)
     return sys, p
 
 
@@ -63,34 +69,36 @@ def test_c_solar_units_constant_exposed() -> None:
 # ── PostNewtonian1PN factories ───────────────────────────────────────────────
 
 
-def test_solar_units_factory_returns_apsis_perturbation() -> None:
+def test_for_units_constructor_returns_apsis_perturbation() -> None:
     """The factory result is an ``apsis.Perturbation`` — type identity is
     shared across the apsis and apsis_1pn extensions because the class
     is pure-Python in ``apsis/__init__.py``."""
-    p = apsis_1pn.PostNewtonian1PN.solar_units()
+    p = apsis_1pn.PostNewtonian1PN.for_units(units=apsis.units.SOLAR_CANONICAL)
     assert isinstance(p, apsis.Perturbation)
     assert "PostNewtonian1PN" in p.label
-    assert "solar_units" in p.label
+    assert "for_units" in p.label
 
 
-def test_with_c_factory_accepts_explicit_speed_of_light() -> None:
-    """``with_c`` produces a perturbation calibrated for non-canonical units."""
-    p = apsis_1pn.PostNewtonian1PN.with_c(c=10000.0)
+def test_from_raw_c_factory_accepts_explicit_speed_of_light() -> None:
+    """``from_raw_c`` accepts an explicit ``c`` and pins the operator to
+    the supplied UnitSystem for the registration-time check."""
+    p = apsis_1pn.PostNewtonian1PN.from_raw_c(c=10000.0, units=apsis.units.SOLAR_CANONICAL)
     assert isinstance(p, apsis.Perturbation)
     assert "c=10000" in p.label
 
 
-def test_with_c_rejects_invalid_speed_of_light() -> None:
+def test_from_raw_c_rejects_invalid_speed_of_light() -> None:
     """Zero, negative, infinite, and NaN values for ``c`` are rejected."""
     for bad in (0.0, -1.0, float("inf"), float("nan")):
         with pytest.raises(ValueError, match="c"):
-            apsis_1pn.PostNewtonian1PN.with_c(c=bad)
+            apsis_1pn.PostNewtonian1PN.from_raw_c(c=bad, units=apsis.units.SOLAR_CANONICAL)
 
 
-def test_with_c_requires_keyword_only_argument() -> None:
-    """``c`` is kwarg-only — passing it positionally is a contract violation."""
+def test_from_raw_c_requires_keyword_only_arguments() -> None:
+    """``c`` and ``units`` are kwarg-only — positional args are a
+    contract violation."""
     with pytest.raises(TypeError):
-        apsis_1pn.PostNewtonian1PN.with_c(10000.0)  # type: ignore[misc]
+        apsis_1pn.PostNewtonian1PN.from_raw_c(10000.0, apsis.units.SOLAR_CANONICAL)  # type: ignore[misc]
 
 
 # ── Integration with apsis.System ────────────────────────────────────────────
@@ -147,13 +155,13 @@ def test_attach_without_exact_gravity_emits_warning_but_still_runs() -> None:
     )
     sys = apsis.System(
         bodies=[sun, mercury],
-        units=apsis.units.CANONICAL,
+        units=apsis.units.SOLAR_CANONICAL,
         integrator="ias15",
         dt=1e-3,
         # Note: exact_gravity=False (default), the kernel-requirement
         # warning fires here.
     )
-    p = apsis_1pn.PostNewtonian1PN.solar_units()
+    p = apsis_1pn.PostNewtonian1PN.for_units(units=apsis.units.SOLAR_CANONICAL)
     sys.add_hamiltonian_perturbation(p)  # warning expected on stderr; not an exception
     sys.integrate_for(0.1)
     assert sys.t >= 0.1

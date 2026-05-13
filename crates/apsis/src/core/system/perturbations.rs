@@ -17,11 +17,25 @@ impl System {
     /// summed into [`System::total_energy`]. Operators whose `potential`
     /// is `NotAvailable` contribute force but not energy, and surface
     /// as `HamiltonianForceOnly` in [`Self::conservation_report`].
+    ///
+    /// # Panics
+    ///
+    /// Panics when the operator's
+    /// [`declared_units`](crate::physics::integrator::Operator::declared_units)
+    /// disagrees with the `System`'s own [`UnitSystem`]. This is the
+    /// guard against silently mixing operators built for one unit
+    /// system into a `System` integrating in another — see
+    /// [`assert_units_match`](Self::assert_units_match) for the
+    /// failure message.
+    ///
     /// Kernel-precondition violations against the active kernel emit
-    /// one structured `warn_diag` per invariant.
+    /// one structured `warn_diag` per invariant (non-fatal).
     ///
     /// [`Potential::Value`]: crate::physics::integrator::Potential::Value
+    /// [`UnitSystem`]: crate::units::UnitSystem
     pub fn add_hamiltonian_perturbation(&mut self, p: Box<dyn HamiltonianOperator>) {
+        self.assert_units_match(p.as_ref());
+
         let kernel = self.force_model.kernel();
         let props = kernel.properties(&self.bodies);
         let violations = p.kernel_requirements().check_against(&props);
@@ -37,7 +51,13 @@ impl System {
     /// reaction). Symplectic integrators lose conservation invariants
     /// with one of these registered; a `warn_diag` fires at
     /// registration time when the active integrator is symplectic-class.
+    ///
+    /// Panics on `UnitSystem` mismatch — see
+    /// [`add_hamiltonian_perturbation`](Self::add_hamiltonian_perturbation)
+    /// for details.
     pub fn add_non_conservative_perturbation(&mut self, p: Box<dyn NonConservativeOperator>) {
+        self.assert_units_match(p.as_ref());
+
         let kernel = self.force_model.kernel();
         let props = kernel.properties(&self.bodies);
         let violations = p.kernel_requirements().check_against(&props);
@@ -60,7 +80,10 @@ impl System {
     }
 
     /// Register a pure observer. Called at synchronized step boundaries.
+    /// Panics on `UnitSystem` mismatch.
     pub fn register_observer(&mut self, o: Box<dyn Operator>) {
+        self.assert_units_match(o.as_ref());
+
         let kernel = self.force_model.kernel();
         let props = kernel.properties(&self.bodies);
         let violations = o.kernel_requirements().check_against(&props);
@@ -69,6 +92,32 @@ impl System {
         }
 
         self.observers.push(o);
+    }
+
+    /// Check that the operator's
+    /// [`declared_units`](Operator::declared_units) matches the
+    /// `System`'s own `UnitSystem`. No-op when the operator returns
+    /// `None` (unit-agnostic). Panics with a structured message
+    /// otherwise.
+    fn assert_units_match(&self, op: &dyn Operator) {
+        let Some(op_units) = op.declared_units() else {
+            return;
+        };
+        if op_units == self.units {
+            return;
+        }
+        panic!(
+            "Unit-system mismatch on operator registration:\n  \
+             operator '{}' was constructed for {}\n  \
+             System was constructed for {}\n\
+             This is a physical inconsistency that would silently produce \
+             wrong dynamics. Construct the operator with the same UnitSystem \
+             passed to System::new(), or omit `declared_units` if the \
+             operator is unit-system-agnostic.",
+            op.name(),
+            op_units,
+            self.units,
+        );
     }
 
     fn emit_kernel_requirement_violation(&self, v: &RequirementViolation) {
@@ -177,10 +226,11 @@ impl System {
     /// precession that dominates the measurement.
     ///
     /// ```ignore
-    /// let mut sys = System::from_template(TemplateKind::SolarSystem)
+    /// let units = UnitSystem::solar_canonical();
+    /// let mut sys = System::from_template(TemplateKind::SolarSystem, units)
     ///     .with_exact_gravity()
     ///     .with_integrator(IntegratorKind::Ias15);
-    /// sys.add_hamiltonian_perturbation(Box::new(PostNewtonian1PN::solar_units()));
+    /// sys.add_hamiltonian_perturbation(Box::new(PostNewtonian1PN::for_units(units)));
     /// ```
     #[must_use]
     pub fn with_exact_gravity(mut self) -> Self {
@@ -274,5 +324,61 @@ mod tests {
             N_STEPS,
             "observer.observe() must fire exactly once per outer step",
         );
+    }
+
+    /// A Hamiltonian operator pinned to a fixed `UnitSystem`. Used to
+    /// exercise the registration-time unit-system check.
+    struct UnitBoundOp(UnitSystem);
+
+    impl Operator for UnitBoundOp {
+        fn declared_units(&self) -> Option<UnitSystem> {
+            Some(self.0)
+        }
+    }
+
+    impl HamiltonianOperator for UnitBoundOp {
+        fn accumulate_force(&self, _bodies: &[Body], _acc: &mut [crate::math::Vec3]) {}
+    }
+
+    /// Operator and System share the same `UnitSystem` → registration
+    /// proceeds normally.
+    #[test]
+    fn registration_succeeds_when_units_match() {
+        let mut sys = System::new(vec![Body::star(1.0)], UnitSystem::solar_canonical())
+            .with_integrator(IntegratorKind::Ias15);
+        sys.add_hamiltonian_perturbation(Box::new(UnitBoundOp(UnitSystem::solar_canonical())));
+        assert_eq!(sys.perturbation_count(), 1);
+    }
+
+    /// Operator carries a `UnitSystem` distinct from the System's →
+    /// registration must panic. Catches the silent-physics-error class
+    /// where an operator built for one unit system is registered into
+    /// a System using another.
+    #[test]
+    #[should_panic(expected = "Unit-system mismatch")]
+    fn registration_panics_on_unit_system_mismatch() {
+        let mut sys = System::new(vec![Body::star(1.0)], UnitSystem::solar_canonical())
+            .with_integrator(IntegratorKind::Ias15);
+        // Operator built for IAU solar (year, G≈4π²); System uses
+        // canonical solar (year/2π, G=1). Same length scale, different
+        // time scale — silently produces wrong dynamics if not caught.
+        sys.add_hamiltonian_perturbation(Box::new(UnitBoundOp(UnitSystem::solar())));
+    }
+
+    /// Operators that return `None` from `declared_units` are
+    /// unit-agnostic — registration must succeed regardless of the
+    /// System's own unit system.
+    #[test]
+    fn registration_succeeds_for_unit_agnostic_operator() {
+        struct AgnosticOp;
+        impl Operator for AgnosticOp {}
+        impl HamiltonianOperator for AgnosticOp {
+            fn accumulate_force(&self, _bodies: &[Body], _acc: &mut [crate::math::Vec3]) {}
+        }
+
+        let mut sys = System::new(vec![Body::star(1.0)], UnitSystem::solar_canonical())
+            .with_integrator(IntegratorKind::Ias15);
+        sys.add_hamiltonian_perturbation(Box::new(AgnosticOp));
+        assert_eq!(sys.perturbation_count(), 1);
     }
 }
