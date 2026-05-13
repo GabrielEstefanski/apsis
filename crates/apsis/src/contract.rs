@@ -226,6 +226,56 @@
 //! 3. If a raw constructor is exposed, name it with the `from_raw_`
 //!    prefix and require a `UnitSystem` argument.
 //! 4. Default downstream binding examples use Pattern A or Pattern B.
+//! 5. If the operator's derivation assumes a physical regime (mass
+//!    ratio, eccentricity, v/c, …), declare the bound via
+//!    [`crate::physics::integrator::Operator::check_regime`] — see the
+//!    "Regime-of-validity contract" section below.
+//!
+//! ## Regime-of-validity contract
+//!
+//! `KernelRequirements` is the **numerical contract** every operator
+//! places on the gravitational kernel (Exactness, Continuity).
+//! Regime-of-validity is the **physical contract** every operator
+//! places on the body state itself: a test-particle approximation
+//! assumes `m_secondary ≪ m_primary`, a 1PN expansion assumes
+//! `v ≪ c`, an averaging theory assumes small eccentricity, and so
+//! on. Crossing the bound does not break the integrator; it breaks
+//! the operator's claim to represent the physics it was derived from.
+//!
+//! Operators expose their bounds through
+//! [`crate::physics::integrator::Operator::check_regime`], which
+//! returns one [`crate::physics::integrator::RegimeViolation`] per
+//! crossed bound at the current body state. `System` invokes this:
+//!
+//! - **At registration** — once, against the initial body state.
+//!   Captures bad initial conditions before the integrator starts.
+//! - **During integration** — every
+//!   [`regime_check_cadence`](crate::physics::integrator::Operator::regime_check_cadence)
+//!   outer steps, against the current body state. Captures regime
+//!   crossings that develop dynamically (eccentricity growth,
+//!   periapse passage, mass change). Cadence is per-operator and the
+//!   system uses the minimum across registered operators.
+//!
+//! Each `(operator, bound)` pair fires exactly one `warn_diag` per
+//! `System` lifetime — a violation persisting across many checks does
+//! not respam the bus. The dedup state is reset by
+//! [`crate::core::system::System::reset_regime_warnings`] when the
+//! caller deliberately changes scenario.
+//!
+//! [`Severity`](crate::physics::integrator::Severity) carries three
+//! tiers — `Approaching` (near the bound), `Exceeded` (past it,
+//! integration continues), `Hard` (far outside the derivation
+//! envelope). Encode them at the call site so a reader can match
+//! intent to value without consulting the threshold constants.
+//!
+//! - test: `tests::regime_check_fires_at_registration_when_initial_state_violates`
+//! - test: `tests::regime_check_silent_when_initial_state_within_regime`
+//! - test: `tests::regime_check_dedups_persistent_violation_across_steps`
+//!
+//! Together with `KernelRequirements`, the regime contract closes the
+//! precondition surface: numerical (kernel) checked at registration,
+//! physical (regime) checked statically AND dynamically. An operator
+//! that survives both is on its derivation's footing for the run.
 //!
 //! ## What this contract does NOT guarantee
 //!

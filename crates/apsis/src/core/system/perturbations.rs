@@ -35,6 +35,7 @@ impl System {
     /// [`UnitSystem`]: crate::units::UnitSystem
     pub fn add_hamiltonian_perturbation(&mut self, p: Box<dyn HamiltonianOperator>) {
         self.assert_units_match(p.as_ref());
+        self.run_regime_check_on_operator(p.as_ref());
 
         let kernel = self.force_model.kernel();
         let props = kernel.properties(&self.bodies);
@@ -57,6 +58,7 @@ impl System {
     /// for details.
     pub fn add_non_conservative_perturbation(&mut self, p: Box<dyn NonConservativeOperator>) {
         self.assert_units_match(p.as_ref());
+        self.run_regime_check_on_operator(p.as_ref());
 
         let kernel = self.force_model.kernel();
         let props = kernel.properties(&self.bodies);
@@ -83,6 +85,7 @@ impl System {
     /// Panics on `UnitSystem` mismatch.
     pub fn register_observer(&mut self, o: Box<dyn Operator>) {
         self.assert_units_match(o.as_ref());
+        self.run_regime_check_on_operator(o.as_ref());
 
         let kernel = self.force_model.kernel();
         let props = kernel.properties(&self.bodies);
@@ -92,6 +95,87 @@ impl System {
         }
 
         self.observers.push(o);
+    }
+
+    /// Run an operator's [`check_regime`](Operator::check_regime)
+    /// against the current body state and emit one `warn_diag` per
+    /// new (operator, bound) violation. Idempotent — already-emitted
+    /// violations are filtered via `regime_warnings_emitted`.
+    pub(crate) fn run_regime_check_on_operator(&mut self, op: &dyn Operator) {
+        let violations = op.check_regime(&self.bodies, self.t);
+        for v in violations {
+            self.emit_regime_violation_once(v);
+        }
+    }
+
+    /// Run regime checks on every registered operator. Used by
+    /// `System::step` at the cadence-min over all operators.
+    pub(crate) fn run_regime_checks_all(&mut self) {
+        let mut violations: Vec<crate::physics::integrator::RegimeViolation> = Vec::new();
+        for op in &self.hamiltonian_perturbations {
+            violations.extend(op.check_regime(&self.bodies, self.t));
+        }
+        for op in &self.non_conservative_perturbations {
+            violations.extend(op.check_regime(&self.bodies, self.t));
+        }
+        for op in &self.observers {
+            violations.extend(op.check_regime(&self.bodies, self.t));
+        }
+        for v in violations {
+            self.emit_regime_violation_once(v);
+        }
+    }
+
+    /// Smallest cadence across all registered operators. The dynamic
+    /// regime check fires every `cadence` outer steps.
+    pub(crate) fn regime_check_cadence_min(&self) -> usize {
+        let mut min = usize::MAX;
+        for op in &self.hamiltonian_perturbations {
+            min = min.min(op.regime_check_cadence());
+        }
+        for op in &self.non_conservative_perturbations {
+            min = min.min(op.regime_check_cadence());
+        }
+        for op in &self.observers {
+            min = min.min(op.regime_check_cadence());
+        }
+        // No registered operators = no checks at all (caller short-
+        // circuits on `min == usize::MAX`).
+        min
+    }
+
+    /// Emit a `warn_diag` for the violation iff its `(operator, bound)`
+    /// pair has not already been reported in this `System`'s lifetime.
+    /// Subsequent violations of the same pair are silently dropped.
+    fn emit_regime_violation_once(&mut self, v: crate::physics::integrator::RegimeViolation) {
+        let key = v.dedup_key();
+        if !self.regime_warnings_emitted.insert(key) {
+            return;
+        }
+        let severity = format!("{:?}", v.severity);
+        let body_field = v.body_index.map(|i| i as i64).unwrap_or(-1);
+        crate::warn_diag!(
+            crate::core::log::Source::System,
+            "operator regime-of-validity bound crossed; \
+             integration continues but the operator's derivation no \
+             longer strictly applies",
+            operator = v.operator,
+            bound = v.bound,
+            value = v.value,
+            threshold = v.threshold,
+            severity = severity,
+            body_index = body_field,
+            message = v.message,
+        );
+    }
+
+    /// Clear the warn-once dedup state for regime-of-validity
+    /// diagnostics. Future violations of any `(operator, bound)`
+    /// pair will fire one fresh `warn_diag` again. Useful when the
+    /// caller deliberately changes scenario (loaded a new snapshot,
+    /// reset bodies) and wants the bus re-armed.
+    pub fn reset_regime_warnings(&mut self) {
+        self.regime_warnings_emitted.clear();
     }
 
     /// Check that the operator's
@@ -380,5 +464,161 @@ mod tests {
             .with_integrator(IntegratorKind::Ias15);
         sys.add_hamiltonian_perturbation(Box::new(AgnosticOp));
         assert_eq!(sys.perturbation_count(), 1);
+    }
+
+    // ── Regime-of-validity tests ─────────────────────────────────────────────
+
+    /// Test fake declaring a per-body mass-ratio bound. Mirrors the
+    /// 1PN check shape so the System-side dedup / cadence behaviour
+    /// can be exercised without depending on apsis-1pn.
+    struct MassRatioBound {
+        warn: f64,
+        cadence: usize,
+    }
+
+    impl Operator for MassRatioBound {
+        fn name(&self) -> &'static str {
+            "MassRatioBound"
+        }
+        fn check_regime(
+            &self,
+            bodies: &[Body],
+            _t: f64,
+        ) -> Vec<crate::physics::integrator::RegimeViolation> {
+            let mut violations = Vec::new();
+            if bodies.len() < 2 {
+                return violations;
+            }
+            let m_primary = bodies[0].mass;
+            for (i, b) in bodies.iter().enumerate().skip(1) {
+                let ratio = b.mass / m_primary;
+                if ratio >= self.warn {
+                    violations.push(crate::physics::integrator::RegimeViolation {
+                        operator: "MassRatioBound",
+                        bound: "max_secondary_to_primary_mass_ratio",
+                        value: ratio,
+                        threshold: self.warn,
+                        severity: crate::physics::integrator::Severity::Exceeded,
+                        body_index: Some(i),
+                        message: "test fake",
+                    });
+                }
+            }
+            violations
+        }
+        fn regime_check_cadence(&self) -> usize {
+            self.cadence
+        }
+    }
+
+    impl HamiltonianOperator for MassRatioBound {
+        fn accumulate_force(&self, _bodies: &[Body], _acc: &mut [crate::math::Vec3]) {}
+    }
+
+    /// Capture every `Warn` event whose `operator` field equals the
+    /// supplied name during the closure. Serialised on a per-test
+    /// basis via the bus mutex so concurrent tests cannot
+    /// cross-contaminate.
+    fn capture_regime_warnings(
+        target_operator: &'static str,
+        body: impl FnOnce(),
+    ) -> Vec<crate::core::log::Event> {
+        use crate::core::log::{Event, Level, subscribe, unsubscribe};
+        use std::sync::Mutex;
+        // Serialise across regime tests in this module — the bus is
+        // process-global.
+        static LOCK: Mutex<()> = Mutex::new(());
+        let _guard = LOCK.lock().unwrap_or_else(|p| p.into_inner());
+
+        let captured: Arc<Mutex<Vec<Event>>> = Arc::new(Mutex::new(Vec::new()));
+        let sink = captured.clone();
+        let id = subscribe(move |event: &Event| {
+            if event.level != Level::Warn {
+                return;
+            }
+            let matches_op = event
+                .fields
+                .iter()
+                .any(|(k, v)| *k == "operator" && v.trim_matches('"') == target_operator);
+            if matches_op {
+                sink.lock().unwrap().push(event.clone());
+            }
+        });
+
+        body();
+
+        let events = captured.lock().unwrap().clone();
+        unsubscribe(id);
+        events
+    }
+
+    /// Static check at registration: registering against an
+    /// out-of-regime body state fires one warning immediately.
+    #[test]
+    fn regime_check_fires_at_registration_when_initial_state_violates() {
+        let warnings = capture_regime_warnings("MassRatioBound", || {
+            let mut sys = System::new(
+                // Equal-mass binary: ratio = 1.0, way over warn = 0.01
+                vec![Body::star(1.0), Body::star(1.0)],
+                UnitSystem::solar_canonical(),
+            )
+            .with_integrator(IntegratorKind::Ias15);
+            sys.add_hamiltonian_perturbation(Box::new(MassRatioBound { warn: 0.01, cadence: 100 }));
+        });
+
+        assert_eq!(
+            warnings.len(),
+            1,
+            "expected exactly one regime warning at registration, got {}",
+            warnings.len()
+        );
+    }
+
+    /// Within-regime registration is silent — no false positives.
+    #[test]
+    fn regime_check_silent_when_initial_state_within_regime() {
+        let warnings = capture_regime_warnings("MassRatioBound", || {
+            let mut sys = System::new(
+                // Sun + Mercury: ratio ≈ 1.7e-7, well inside the regime
+                vec![Body::star(1.0), Body::rocky(1.66e-7)],
+                UnitSystem::solar_canonical(),
+            )
+            .with_integrator(IntegratorKind::Ias15);
+            sys.add_hamiltonian_perturbation(Box::new(MassRatioBound { warn: 0.01, cadence: 100 }));
+        });
+
+        assert!(
+            warnings.is_empty(),
+            "expected no regime warnings for in-regime initial state, got {}",
+            warnings.len()
+        );
+    }
+
+    /// Warn-once dedup: a violation that persists across cadence
+    /// boundaries fires exactly once, not once per check.
+    #[test]
+    fn regime_check_dedups_persistent_violation_across_steps() {
+        let warnings = capture_regime_warnings("MassRatioBound", || {
+            let mut sys =
+                System::new(vec![Body::star(1.0), Body::star(1.0)], UnitSystem::solar_canonical())
+                    .with_integrator(IntegratorKind::Ias15)
+                    .with_dt(1e-3);
+            sys.add_hamiltonian_perturbation(Box::new(MassRatioBound {
+                warn: 0.01,
+                cadence: 10, // check every 10 steps
+            }));
+            // 50 steps → 5 cadence triggers; without dedup we'd see 6
+            // warnings (1 at registration + 5 dynamic). With dedup: 1.
+            for _ in 0..50 {
+                sys.step();
+            }
+        });
+
+        assert_eq!(
+            warnings.len(),
+            1,
+            "warn-once dedup should fire exactly one warning across all checks, got {}",
+            warnings.len()
+        );
     }
 }

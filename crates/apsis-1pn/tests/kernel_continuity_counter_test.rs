@@ -139,9 +139,15 @@ fn truncated_kernel_plus_1pn_fires_both_exactness_and_continuity_warnings() {
     let captured: Arc<Mutex<Vec<Event>>> = Arc::new(Mutex::new(Vec::new()));
     let sink = captured.clone();
     let id = subscribe(move |event: &Event| {
-        // Collect every warn-level System event so we can inspect the
-        // `violated_invariant` field of each.
-        if event.level == Level::Warn {
+        // Collect only kernel-precondition warnings (carry the
+        // `violated_invariant` field). The equal-mass two-body setup
+        // also triggers a regime-of-validity warning from 1PN's
+        // mass-ratio bound (Hard severity), but that is a separate
+        // contract and tested elsewhere.
+        if event.level != Level::Warn {
+            return;
+        }
+        if event.fields.iter().any(|(k, _)| *k == "violated_invariant") {
             sink.lock().unwrap().push(event.clone());
         }
     });
@@ -177,7 +183,7 @@ fn truncated_kernel_plus_1pn_fires_both_exactness_and_continuity_warnings() {
     assert_eq!(
         events.len(),
         2,
-        "expected exactly two invariant-violation diagnostics, got {}: {:?}",
+        "expected exactly two kernel-invariant violations (Exactness + Continuity), got {}: {:?}",
         events.len(),
         invariants
     );
