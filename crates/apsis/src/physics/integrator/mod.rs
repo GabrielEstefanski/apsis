@@ -50,6 +50,7 @@ pub mod mercurius;
 pub mod operator;
 pub mod operator_dispatch;
 pub mod primitives;
+pub mod regime;
 pub mod traits;
 pub mod velocity_verlet;
 pub mod wisdom_holman;
@@ -73,6 +74,7 @@ pub use operator::{
     Potential,
 };
 pub use primitives::{drift, kick};
+pub use regime::{RegimeViolation, Severity};
 pub use traits::{AdaptiveStats, Integrator, IntegratorContext, IntegratorKind, StepResult};
 pub use velocity_verlet::VelocityVerlet;
 pub use wisdom_holman::WisdomHolman;
