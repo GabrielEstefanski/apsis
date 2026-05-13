@@ -172,7 +172,7 @@ impl ForceModel for GravityForceModel {
         // off; accesses thread-local storage owned by `ias15::profile`.
         #[cfg(feature = "ias15-profile")]
         let build_start = std::time::Instant::now();
-        self.engine.build(&self.body_arrays);
+        self.engine.maintain(&self.body_arrays);
         #[cfg(feature = "ias15-profile")]
         crate::physics::integrator::ias15::profile::record_tree_build(build_start.elapsed());
 
