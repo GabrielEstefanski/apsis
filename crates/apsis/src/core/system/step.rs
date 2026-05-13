@@ -100,6 +100,15 @@ impl System {
             &mut self.observers,
         );
 
+        // Dynamic regime-of-validity check, gated by the smallest
+        // cadence across registered operators. Each `(operator, bound)`
+        // pair fires at most once per session via the warn-once dedup
+        // in `emit_regime_violation_once`.
+        let cadence = self.regime_check_cadence_min();
+        if cadence != usize::MAX && cadence > 0 && self.steps.is_multiple_of(cadence as u64) {
+            self.run_regime_checks_all();
+        }
+
         // Produce the dense-output snapshot.  t0 = system.t() - snapshot.dt
         // works for both cases: IAS15 sub-steps use their own dt, Order-2 uses
         // the full system dt.

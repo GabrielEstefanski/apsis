@@ -44,6 +44,7 @@
 use crate::domain::body::Body;
 use crate::math::Vec3;
 use crate::physics::gravity::kernel::KernelRequirements;
+use crate::physics::integrator::regime::RegimeViolation;
 use crate::units::UnitSystem;
 
 // ── Potential return type ────────────────────────────────────────────────────
@@ -127,6 +128,40 @@ pub trait Operator: Send + Sync {
     /// `warn_diag` per invariant at registration time.
     fn kernel_requirements(&self) -> KernelRequirements {
         KernelRequirements::none()
+    }
+
+    /// Check the current body state against the operator's
+    /// regime-of-validity bounds (mass-ratio, eccentricity, v/c,
+    /// periapse, …). Returns one entry per crossed bound; an empty
+    /// vector when the system is within the operator's envelope.
+    /// Default: no check (operator is regime-agnostic, or has not yet
+    /// declared its bounds).
+    ///
+    /// `System::add_*_perturbation` invokes this once at registration
+    /// against the initial body state; `System::step` invokes it again
+    /// at the cadence returned by [`regime_check_cadence`](Self::regime_check_cadence).
+    /// One `warn_diag` is emitted per `(operator, bound)` pair per
+    /// session — the same violation persisting across multiple checks
+    /// does not respam the bus.
+    ///
+    /// See [`RegimeViolation`] for the structured fields and
+    /// [`crate::physics::integrator::regime`] for the contract.
+    fn check_regime(&self, bodies: &[Body], t: f64) -> Vec<RegimeViolation> {
+        let _ = (bodies, t);
+        Vec::new()
+    }
+
+    /// How many outer integration steps between dynamic regime checks.
+    /// Default: 100. Override to a smaller value for operators whose
+    /// regime can change rapidly (close-encounter physics, secular
+    /// growth on short timescales) or a larger value for cheap-but-
+    /// infrequent checks. The dispatcher uses the minimum cadence
+    /// across all registered operators.
+    ///
+    /// Has no effect when [`check_regime`](Self::check_regime) returns
+    /// an empty vector by default.
+    fn regime_check_cadence(&self) -> usize {
+        100
     }
 }
 
