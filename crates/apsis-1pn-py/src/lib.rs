@@ -92,8 +92,25 @@ fn wrap_in_apsis_perturbation(
 #[pyclass(module = "apsis_1pn", name = "PostNewtonian1PN")]
 pub struct PyPostNewtonian1PN;
 
+/// Duck-type extraction of an `apsis.UnitSystem` Python object into the
+/// Rust [`apsis::units::UnitSystem`]. apsis-1pn-py does not depend on
+/// apsis-py directly (each is its own cdylib), so we reach the L/T/M
+/// scales through method calls and reconstruct via `UnitSystem::custom`.
+fn unit_system_from_python(units: &Bound<'_, PyAny>) -> PyResult<apsis::units::UnitSystem> {
+    let l = units.call_method0("length_scale_si")?.extract::<f64>()?;
+    let t = units.call_method0("time_scale_si")?.extract::<f64>()?;
+    let m = units.call_method0("mass_scale_si")?.extract::<f64>()?;
+    apsis::units::UnitSystem::custom(l, t, m).map_err(|e| {
+        PyValueError::new_err(format!(
+            "units: failed to construct UnitSystem from the supplied object: {e}"
+        ))
+    })
+}
+
 #[pymethods]
 impl PyPostNewtonian1PN {
+    // ── Named-regime constructors (Pattern A) ─────────────────────────────────
+
     /// 1PN calibrated for the simulator's canonical solar-system units
     /// (`G = 1`, length = AU, mass = M_sun, time chosen so that
     /// `c = `[`apsis_1pn::C_SOLAR_UNITS`]).
@@ -106,13 +123,30 @@ impl PyPostNewtonian1PN {
         )
     }
 
+    /// 1PN with `c` derived from a supplied `apsis.UnitSystem`. The
+    /// recommended path for non-solar unit choices — the user picks
+    /// the unit system, `c` is computed exactly so the relativistic
+    /// correction stays consistent with the rest of the integration.
+    #[staticmethod]
+    #[pyo3(signature = (*, units))]
+    fn for_units(py: Python<'_>, units: &Bound<'_, PyAny>) -> PyResult<PyObject> {
+        let rust_units = unit_system_from_python(units)?;
+        wrap_in_apsis_perturbation(
+            py,
+            Box::new(PostNewtonian1PN::for_units(rust_units)),
+            "PostNewtonian1PN(for_units)",
+        )
+    }
+
+    // ── Raw escape (with optional validation) ─────────────────────────────────
+
     /// 1PN with an explicit speed of light in the caller's unit system.
-    /// Use when running outside canonical solar units — geometric units
-    /// (`c = 1`), SI, or a custom system — so the relativistic
-    /// correction matches the rest of the integration's unit choice.
+    /// No validation — use [`from_raw_c_validated`](Self::from_raw_c_validated)
+    /// for a cross-checked construction, or [`for_units`](Self::for_units)
+    /// to skip raw input entirely.
     #[staticmethod]
     #[pyo3(signature = (*, c))]
-    fn with_c(py: Python<'_>, c: f64) -> PyResult<PyObject> {
+    fn from_raw_c(py: Python<'_>, c: f64) -> PyResult<PyObject> {
         if !c.is_finite() || c <= 0.0 {
             return Err(PyValueError::new_err(format!(
                 "c: expected a strictly positive finite float, got {c}"
@@ -120,9 +154,31 @@ impl PyPostNewtonian1PN {
         }
         wrap_in_apsis_perturbation(
             py,
-            Box::new(PostNewtonian1PN::with_c(c)),
+            Box::new(PostNewtonian1PN::from_raw_c(c)),
             &format!("PostNewtonian1PN(c={c})"),
         )
+    }
+
+    /// 1PN with an explicit `c`, cross-checked against the `c` derived
+    /// from a supplied `apsis.UnitSystem`. Raises `ValueError` when the
+    /// relative error exceeds `1e-9` — the protection against silent
+    /// unit-mismatch errors when `c` comes from an external source.
+    #[staticmethod]
+    #[pyo3(signature = (*, c, units))]
+    fn from_raw_c_validated(
+        py: Python<'_>,
+        c: f64,
+        units: &Bound<'_, PyAny>,
+    ) -> PyResult<PyObject> {
+        if !c.is_finite() || c <= 0.0 {
+            return Err(PyValueError::new_err(format!(
+                "c: expected a strictly positive finite float, got {c}"
+            )));
+        }
+        let rust_units = unit_system_from_python(units)?;
+        let pn = PostNewtonian1PN::from_raw_c_validated(c, rust_units)
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        wrap_in_apsis_perturbation(py, Box::new(pn), &format!("PostNewtonian1PN(c={c} validated)"))
     }
 }
 
