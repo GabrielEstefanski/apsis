@@ -227,6 +227,18 @@ impl BarnesHutEngine {
         self.tree.build(arrays);
     }
 
+    /// Update the tree to reflect the current body positions in `arrays`.
+    ///
+    /// Smart-default companion to [`build`](Self::build) for the per-step
+    /// integrator path: walks the per-body cell back-reference to find
+    /// migrants and re-inserts only those, then recomputes multipoles.
+    /// Falls back to a full [`build`] when the body count has changed,
+    /// any body has migrated outside the root, or no prior tree state
+    /// exists.
+    pub fn maintain(&mut self, arrays: &BodyArrays) {
+        self.tree.maintain(arrays);
+    }
+
     /// Compute gravitational accelerations and return total potential energy.
     ///
     /// Fills `acc[i] = (aₓ, aᵧ, a_z)` for each body in `arrays`.
