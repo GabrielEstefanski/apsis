@@ -849,7 +849,25 @@ fn apply_cmd(
         PhysicsCmd::SetHamiltonianPerturbations(ps) => {
             system.clear_hamiltonian_perturbations();
             for p in ps {
-                system.add_hamiltonian_perturbation(p);
+                if let Err(e) = system.add_hamiltonian_perturbation(p) {
+                    // The physics thread cannot propagate Result back
+                    // to the UI synchronously; surface the mismatch on
+                    // the structured log bus so the audit trail records
+                    // it. UI catalogs that pass `descriptor.build(units)`
+                    // with the System's units (the supported flow) will
+                    // never hit this branch.
+                    let e = *e;
+                    crate::warn_diag!(
+                        crate::core::log::Source::System,
+                        "physics-thread Hamiltonian-perturbation registration refused: \
+                         operator's UnitSystem disagrees with the System's. The catalog \
+                         flow normally passes the System's units to descriptor.build(); \
+                         this error indicates a stale or mis-built descriptor.",
+                        operator = e.operator,
+                        operator_units = format!("{}", e.operator_units),
+                        system_units = format!("{}", e.system_units),
+                    );
+                }
             }
             *needs_full_publish = true;
         },

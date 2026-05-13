@@ -74,7 +74,8 @@ fn main() {
         .with_dt(dt);
     sys.add_hamiltonian_perturbation(Box::new(PostNewtonian1PN::for_units(
         UnitSystem::solar_canonical(),
-    )));
+    )))
+    .expect("System and operator must share UnitSystem::solar_canonical()");
 
     let el0 = compute_elements(sys.bodies(), 1, 0, 1.0)
         .expect("Mercury IC must produce a bound Keplerian orbit");

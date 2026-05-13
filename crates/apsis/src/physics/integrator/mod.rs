@@ -71,7 +71,7 @@ pub use kepler::kepler_step;
 pub use mercurius::Mercurius;
 pub use operator::{
     HamiltonianOperator, HamiltonianOperatorDescriptor, NonConservativeOperator, Operator,
-    Potential,
+    Potential, UnitSystemMismatch,
 };
 pub use primitives::{drift, kick};
 pub use regime::{RegimeViolation, Severity};
