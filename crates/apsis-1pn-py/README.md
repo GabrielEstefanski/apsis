@@ -46,12 +46,15 @@ mercury = (apsis.Body.rocky(mass=1.66e-7)
 
 sys = apsis.System(
     bodies=[sun, mercury],
-    units=apsis.units.SOLAR,
+    units=apsis.units.SOLAR_CANONICAL,
     integrator="ias15",
     dt=1e-3,
     exact_gravity=True,
 )
-sys.add_hamiltonian_perturbation(apsis_1pn.PostNewtonian1PN.solar_units())
+# Same UnitSystem on both sides — registration check passes.
+sys.add_hamiltonian_perturbation(
+    apsis_1pn.PostNewtonian1PN.for_units(units=apsis.units.SOLAR_CANONICAL),
+)
 sys.integrate_for(100.0)
 ```
 

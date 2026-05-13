@@ -140,7 +140,9 @@ sys = apsis.System(
     bodies=[sun, mercury], units=apsis.units.SOLAR,
     integrator="ias15", dt=1e-3, exact_gravity=True,
 )
-sys.add_hamiltonian_perturbation(apsis_1pn.PostNewtonian1PN.solar_units())
+sys.add_hamiltonian_perturbation(
+    apsis_1pn.PostNewtonian1PN.for_units(units=apsis.units.SOLAR_CANONICAL),
+)
 sys.integrate_for(100.0)
 
 print(sys)

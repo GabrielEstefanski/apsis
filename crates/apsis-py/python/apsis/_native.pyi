@@ -559,6 +559,7 @@ class _UnitsModule:
     HENON: UnitSystem
     SI: UnitSystem
     SOLAR: UnitSystem
+    SOLAR_CANONICAL: UnitSystem
     CGS: UnitSystem
 
     G_SI: float

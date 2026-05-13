@@ -1,9 +1,9 @@
 //! PyO3 wrapper for [`apsis::units::UnitSystem`].
 //!
 //! Named factories are exposed as module-level singletons
-//! (`apsis.units.SOLAR`, `SI`, `CANONICAL`, `HENON`, `CGS`); custom
-//! systems go through `UnitSystem.custom(...)`. All unit logic lives
-//! in the core; this file is a translation layer.
+//! (`apsis.units.SOLAR`, `SOLAR_CANONICAL`, `SI`, `CANONICAL`, `HENON`,
+//! `CGS`); custom systems go through `UnitSystem.custom(...)`. All
+//! unit logic lives in the core; this file is a translation layer.
 
 use apsis::units::{UnitError as CoreUnitError, UnitSystem as CoreUnitSystem};
 use pyo3::prelude::*;
@@ -62,11 +62,22 @@ impl PyUnitSystem {
         Self::from_core(CoreUnitSystem::si())
     }
 
-    /// Solar-system canonical units: AU, year, solar mass.
+    /// Solar-system IAU units: AU, year, solar mass.
     /// Derived ``G ≈ 39.478`` (the IAU approximation of ``4π²``).
+    /// Distinct from :meth:`solar_canonical`, which uses ``year/(2π)``
+    /// to make ``G = 1`` exactly.
     #[staticmethod]
     fn solar() -> Self {
         Self::from_core(CoreUnitSystem::solar())
+    }
+
+    /// Solar-system canonical (Hénon-normalised) units: AU,
+    /// ``year/(2π)``, solar mass. Derived ``G = 1`` exactly. The unit
+    /// system the apsis-1pn validation portfolio (Mercury 1PN gate,
+    /// long-horizon experiments) runs in.
+    #[staticmethod]
+    fn solar_canonical() -> Self {
+        Self::from_core(CoreUnitSystem::solar_canonical())
     }
 
     /// CGS units: centimetre, second, gram.
@@ -221,6 +232,7 @@ pub(crate) fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
     units_module.add("CANONICAL", PyUnitSystem::canonical())?;
     units_module.add("HENON", PyUnitSystem::henon())?;
+    units_module.add("SOLAR_CANONICAL", PyUnitSystem::solar_canonical())?;
     units_module.add("SI", PyUnitSystem::si())?;
     units_module.add("SOLAR", PyUnitSystem::solar())?;
     units_module.add("CGS", PyUnitSystem::cgs())?;

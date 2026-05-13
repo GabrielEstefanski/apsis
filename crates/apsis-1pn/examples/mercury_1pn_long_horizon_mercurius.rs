@@ -69,10 +69,12 @@ fn main() {
     let mercury = Body::rocky(M_MERCURY).at(r_peri, 0.0).with_velocity(0.0, v_peri).unsoftened();
 
     // ── System setup ────────────────────────────────────────────────────── //
-    let mut sys = System::new(vec![sun, mercury], UnitSystem::canonical())
+    let mut sys = System::new(vec![sun, mercury], UnitSystem::solar_canonical())
         .with_integrator(IntegratorKind::Mercurius)
         .with_dt(dt);
-    sys.add_hamiltonian_perturbation(Box::new(PostNewtonian1PN::solar_units()));
+    sys.add_hamiltonian_perturbation(Box::new(PostNewtonian1PN::for_units(
+        UnitSystem::solar_canonical(),
+    )));
 
     let el0 = compute_elements(sys.bodies(), 1, 0, 1.0)
         .expect("Mercury IC must produce a bound Keplerian orbit");
@@ -84,7 +86,7 @@ fn main() {
 
     writeln!(w, "# Long-horizon Mercury 1PN — apsis Mercurius side").unwrap();
     writeln!(w, "# protocol: docs/experiments/2026-05-13-mercury-1pn-long-horizon.md").unwrap();
-    writeln!(w, "# integrator: Mercurius (apsis), perturbation: PostNewtonian1PN::solar_units()")
+    writeln!(w, "# integrator: Mercurius (apsis), perturbation: PostNewtonian1PN::for_units(UnitSystem::solar_canonical())")
         .unwrap();
     writeln!(w, "# units: canonical Hénon (G = 1)").unwrap();
     writeln!(w, "# a={A}, e={E}, m_mercury={M_MERCURY:e}").unwrap();

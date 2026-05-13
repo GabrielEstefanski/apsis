@@ -98,10 +98,16 @@ impl UnitSystem {
         }
     }
 
-    /// Solar-system canonical units: astronomical unit, Julian year,
-    /// solar mass. The derived `G` is `≈ 39.478`, the IAU approximation
-    /// to `4π²` that satisfies Kepler's third law for Earth's orbit by
+    /// Solar-system IAU units: astronomical unit, Julian year, solar
+    /// mass. The derived `G` is `≈ 39.478`, the IAU approximation to
+    /// `4π²` that satisfies Kepler's third law for Earth's orbit by
     /// construction.
+    ///
+    /// Distinct from [`solar_canonical`](Self::solar_canonical), which
+    /// uses `T = year/(2π)` to make `G = 1` exactly. Pick `solar` for
+    /// IAU compatibility (REBOUND default with `G = 4π²`); pick
+    /// `solar_canonical` for Hénon-style normalisation (REBOUND with
+    /// `G = 1`, the apsis-1pn validation portfolio convention).
     pub const fn solar() -> Self {
         Self {
             length_m: AU_M,
@@ -109,6 +115,40 @@ impl UnitSystem {
             mass_kg: MSUN_KG,
             length_label: "AU",
             time_label: "yr",
+            mass_label: "Msun",
+        }
+    }
+
+    /// Solar-system canonical (Hénon-normalised) units: astronomical
+    /// unit, **Gaussian time** = `sqrt(AU³ / (G_SI · M_sun))`, solar
+    /// mass. The time scale is chosen so the derived `G` equals `1`
+    /// **exactly** by construction — `G_code = G_SI · M · T² / L³ = 1`.
+    /// Standard convention for stellar-dynamics literature (Aarseth)
+    /// when fixing both physical units AND `G = 1`, and the unit
+    /// system the apsis-1pn validation portfolio (Mercury 1PN gate,
+    /// long-horizon experiments) runs in.
+    ///
+    /// The Gaussian time unit numerically differs from `YR_S/(2π)`
+    /// (IAU julian year over 2π) by ~0.009 % — the historical
+    /// astrodynamics gap between the IAU-defined year and the year
+    /// implied by the Gaussian gravitational constant. The Gaussian
+    /// definition is what yields G = 1 exactly; the IAU julian
+    /// definition only approximately. Distinct from [`solar`](Self::solar),
+    /// which uses the IAU julian year directly and yields `G ≈ 4π²`.
+    ///
+    /// Not `const fn` because `f64::sqrt` is not stable in const
+    /// context; the value is otherwise immutable.
+    pub fn solar_canonical() -> Self {
+        // T = sqrt(L³ / (G · M)) so that G_code = G · M · T² / L³ = 1.
+        let l3 = AU_M * AU_M * AU_M;
+        let gm = G_SI * MSUN_KG;
+        let t_gaussian = (l3 / gm).sqrt();
+        Self {
+            length_m: AU_M,
+            time_s: t_gaussian,
+            mass_kg: MSUN_KG,
+            length_label: "AU",
+            time_label: "T_G",
             mass_label: "Msun",
         }
     }
