@@ -6,3 +6,5 @@
 # everyone who runs the test benefits from these saved cases.
 cc 63e56bb23e980046b568c8458c2c00e625ddf45b7697656dec79b0ef404ac630 # shrinks to seed = 1
 cc 6f8dcd6a710d3b90e8a4bfadbb25c58180062d06aa77317eb17a5e79f41d1364 # shrinks to seed = 763
+cc bdf51de02a649dd256bf8a6918aaf2eada094fd80d5a0ff1cc41300e31fe636b # shrinks to seed = 225
+cc ca123c464c3966962704de24be31368f10dc9aec3f842563a47c2d11cd28dee5 # shrinks to xs = [0.0, 0.0, -72.63670847742186, 0.0, 27.326249180673656, 0.0, 0.0, 0.0, 0.0], ys = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], zs = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], masses = [0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1]
