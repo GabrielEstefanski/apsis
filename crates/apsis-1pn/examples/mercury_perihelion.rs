@@ -35,8 +35,8 @@
 //! machine precision, angular momentum is still exact, nothing looks wrong.
 //! Only cross-referencing against an analytic prediction reveals it.
 //!
-//! As of this release, registering a [`PerturbationForce`] whose
-//! [`kernel_requirements()`](apsis::physics::integrator::PerturbationForce::kernel_requirements)
+//! As of this release, registering an [`Operator`] whose
+//! [`kernel_requirements()`](apsis::physics::integrator::Operator::kernel_requirements)
 //! declare Exactness or Continuity constraints that the active kernel
 //! fails to satisfy (for example, a 1PN correction on top of a
 //! Plummer-softened system) emits a [`warn_diag!`](apsis::warn_diag)
@@ -83,14 +83,14 @@ fn main() {
 
     // Attach the out-of-tree 1PN perturbation. Everything below this line
     // uses only the public API of `apsis`; `apsis-1pn` has
-    // no other dependency on the workspace. This is the Phase 3 gate.
+    // no other dependency on the workspace.
     //
     // `PostNewtonian1PN::kernel_requirements()` declares Exactness::Exact
     // plus Continuity::Smooth; registering this perturbation into a
     // softened system would fire an Exactness-violation warning. Since
     // both bodies above are `.unsoftened()`, the active PlummerKernel
     // reports Exactness::Exact dynamically and the check stays silent.
-    sys.add_perturbation(Box::new(PostNewtonian1PN::solar_units()));
+    sys.add_hamiltonian_perturbation(Box::new(PostNewtonian1PN::solar_units()));
 
     // ── Reference state at t = 0 ────────────────────────────────────────────
     let el0 = compute_elements(sys.bodies(), 1, 0, 1.0)

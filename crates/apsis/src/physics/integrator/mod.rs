@@ -21,13 +21,14 @@
 //!
 //! # Module layout
 //!
-//! - [`coefficients`]  — Yoshida-4 composition constants.
-//! - [`primitives`]    — `kick`, `drift` kernels.
-//! - [`perturbation`]  — public [`PerturbationForce`] extension trait.
-//! - [`kepler`]        — universal-variable two-body propagator (WH core).
-//! - [`force_model`]   — [`ForceModel`] trait + [`GravityForceModel`] wrapper.
-//! - [`helpers`]       — shared `evaluate`, `scale_acc_and_pe`, perturbation helpers.
-//! - [`traits`]        — [`Integrator`] trait, [`IntegratorContext`], [`StepResult`], [`IntegratorKind`].
+//! - [`coefficients`]       — Yoshida-4 composition constants.
+//! - [`primitives`]         — `kick`, `drift` kernels.
+//! - [`operator`]           — public [`Operator`] / [`HamiltonianOperator`] / [`NonConservativeOperator`] extension traits.
+//! - [`operator_dispatch`]  — helpers integrators call to apply operators at canonical positions.
+//! - [`kepler`]             — universal-variable two-body propagator (WH core).
+//! - [`force_model`]        — [`ForceModel`] trait + [`GravityForceModel`] wrapper.
+//! - [`helpers`]            — shared `evaluate`, `scale_acc_and_pe` helpers.
+//! - [`traits`]             — [`Integrator`] trait, [`IntegratorContext`], [`StepResult`], [`IntegratorKind`].
 //! - [`velocity_verlet`], [`yoshida4`], [`wisdom_holman`], [`ias15`] — integrator implementations.
 //!
 //! # References
@@ -39,13 +40,15 @@
 //! - Rein & Spiegel (2015). *MNRAS* 446, 1424–1437 (IAS15).
 
 pub mod coefficients;
+pub mod conservation;
 pub mod dense;
 pub mod force_model;
 pub mod helpers;
 pub mod ias15;
 pub mod kepler;
 pub mod mercurius;
-pub mod perturbation;
+pub mod operator;
+pub mod operator_dispatch;
 pub mod primitives;
 pub mod traits;
 pub mod velocity_verlet;
@@ -55,13 +58,20 @@ pub mod yoshida4;
 // ── Re-exports ────────────────────────────────────────────────────────────────
 
 pub use coefficients::{Y4_C, Y4_D, Y4_W0, Y4_W1};
+pub use conservation::{
+    ConservationClass, ConservationContribution, ConservationReport, EnergyImpact, OperatorRole,
+    PotentialStatus,
+};
 pub use dense::{DenseCoeffs, DenseSnapshot};
 pub use force_model::{ForceModel, GravityForceModel};
-pub use helpers::{apply_perturbations, evaluate, scale_acc_and_pe};
+pub use helpers::{evaluate, scale_acc_and_pe};
 pub use ias15::Ias15;
 pub use kepler::kepler_step;
 pub use mercurius::Mercurius;
-pub use perturbation::{PerturbationDescriptor, PerturbationForce};
+pub use operator::{
+    HamiltonianOperator, HamiltonianOperatorDescriptor, NonConservativeOperator, Operator,
+    Potential,
+};
 pub use primitives::{drift, kick};
 pub use traits::{AdaptiveStats, Integrator, IntegratorContext, IntegratorKind, StepResult};
 pub use velocity_verlet::VelocityVerlet;

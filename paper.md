@@ -101,7 +101,8 @@ physical preconditions on the gravitational kernel through the
 `exact_and_smooth()`; future crates declare a different combination
 of exactness and continuity invariants depending on the physics.
 The library matches the declared requirements against the active
-kernel at `System::add_perturbation` and emits a structured
+kernel at `System::add_hamiltonian_perturbation` (or
+`add_non_conservative_perturbation`) and emits a structured
 diagnostic for each violated invariant. Forgetting a precondition
 surfaces as a registration warning, not as a wrong number in a
 paper.
@@ -131,8 +132,8 @@ author's knowledge, combined in any existing N-body code.
 The library rests on two design commitments. First, the physical
 preconditions of an extension are part of that extension's *type*, not
 of its prose documentation. Two extension points exercise this pattern:
-a perturbation force declares, via `PerturbationForce::kernel_requirements`,
-the invariants the gravitational kernel must satisfy for the perturbation's
+an operator declares, via `Operator::kernel_requirements`, the
+invariants the gravitational kernel must satisfy for the operator's
 derivation to be meaningful; a kernel implementation declares, via
 `Kernel::properties`, the invariants it in fact satisfies for the current
 bodies. Second, the public API boundary is a *buildable* contract rather
@@ -170,11 +171,12 @@ represented within any symplectic splitting scheme, independent of
 integrator order or step control.
 
 The mechanism surfaces through the library's structured diagnostic
-channel. When `System::add_perturbation(force)` is invoked, the active
-kernel's properties are computed from the current bodies and matched
-field-by-field against `force.kernel_requirements()`; every invariant
-violation emits a `warn_diag!` event naming the specific invariant,
-the value required, and the value provided. A Plummer kernel with
+channel. When `System::add_hamiltonian_perturbation(operator)` is
+invoked (or its non-conservative counterpart), the active kernel's
+properties are computed from the current bodies and matched
+field-by-field against `operator.kernel_requirements()`; every
+invariant violation emits a `warn_diag!` event naming the specific
+invariant, the value required, and the value provided. A Plummer kernel with
 every body `.unsoftened()` reports Exactness::Exact dynamically, so
 a correctly configured run stays silent. `System::with_exact_gravity()`
 and per-body `Body::unsoftened()` are idempotent helpers safe to

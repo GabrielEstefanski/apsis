@@ -30,7 +30,9 @@ use super::properties::KernelProperties;
 ///
 /// [`properties`](Self::properties) reports the physical invariants the
 /// kernel satisfies given the current body configuration; the caller
-/// (typically [`System::add_perturbation`](crate::core::system::System::add_perturbation))
+/// (typically [`System::add_hamiltonian_perturbation`](crate::core::system::System::add_hamiltonian_perturbation)
+/// or
+/// [`System::add_non_conservative_perturbation`](crate::core::system::System::add_non_conservative_perturbation))
 /// matches these against any
 /// [`KernelRequirements`](super::properties::KernelRequirements) declared
 /// by registered extensions.

@@ -502,20 +502,23 @@ impl PySystem {
         self.inner.recenter_com();
     }
 
-    /// Attach a non-gravitational perturbation force constructed by a
-    /// downstream binding crate (`apsis_1pn`, future radiation /
-    /// drag / J2 packages). The perturbation is consumed by the call —
-    /// the same `Perturbation` instance cannot be attached twice; build
-    /// a fresh one for each system.
+    /// Attach a Hamiltonian-class perturbation constructed by a
+    /// downstream binding crate (`apsis_1pn`, future J2 / tidal
+    /// packages). The perturbation is consumed by the call — the same
+    /// `Perturbation` instance cannot be attached twice; build a fresh
+    /// one for each system.
     ///
     /// The kernel-requirement check inside the core fires here: if the
     /// perturbation declares `Exactness::Exact` and the active kernel
     /// reports `Softened`, a structured warning is emitted naming the
     /// violated invariant. Use `System(..., exact_gravity=True)` or
     /// `Body.<material>(...).unsoftened()` to silence it.
-    fn add_perturbation(&mut self, perturbation: &Bound<'_, PyAny>) -> PyResult<()> {
+    ///
+    /// Non-conservative operators (drag, radiation reaction) travel in a
+    /// separate capsule; the Python wrapper for them is not yet exposed.
+    fn add_hamiltonian_perturbation(&mut self, perturbation: &Bound<'_, PyAny>) -> PyResult<()> {
         let boxed = take_perturbation_from_python(perturbation)?;
-        self.inner.add_perturbation(boxed);
+        self.inner.add_hamiltonian_perturbation(boxed);
         Ok(())
     }
 

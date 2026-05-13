@@ -580,13 +580,13 @@ impl SimulationApp {
     /// Rebuild and push the active perturbation stack to the physics thread.
     /// Call whenever an entry in `perturbation_catalog` changes.
     pub(super) fn apply_perturbations(&mut self) {
-        let ps: Vec<Box<dyn apsis::physics::integrator::PerturbationForce>> = self
+        let ps: Vec<Box<dyn apsis::physics::integrator::HamiltonianOperator>> = self
             .perturbation_catalog
             .iter()
             .filter(|e| e.enabled)
             .map(|e| e.descriptor.build())
             .collect();
-        self.system.set_perturbations(ps);
+        self.system.set_hamiltonian_perturbations(ps);
     }
 
     pub fn new(system: System) -> Self {

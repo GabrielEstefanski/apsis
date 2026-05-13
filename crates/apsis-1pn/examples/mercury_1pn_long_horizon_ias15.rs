@@ -85,7 +85,7 @@ fn main() {
     let mut sys = System::new(vec![sun, mercury], UnitSystem::canonical())
         .with_integrator(IntegratorKind::Ias15)
         .with_dt(DT0);
-    sys.add_perturbation(Box::new(PostNewtonian1PN::solar_units()));
+    sys.add_hamiltonian_perturbation(Box::new(PostNewtonian1PN::solar_units()));
 
     // Snapshot the t=0 osculating state so the output schema can include
     // the initial sample (orbit = 0) before any integration takes place.

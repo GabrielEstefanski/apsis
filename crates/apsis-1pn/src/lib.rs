@@ -70,7 +70,7 @@
 //!     .with_integrator(IntegratorKind::Ias15)
 //!     .with_dt(1e-4);
 //!
-//! sys.add_perturbation(Box::new(PostNewtonian1PN::solar_units()));
+//! sys.add_hamiltonian_perturbation(Box::new(PostNewtonian1PN::solar_units()));
 //!
 //! sys.integrate_for(200.0 * std::f64::consts::PI);
 //! println!("dE/E = {:.3e}", sys.energy_delta());
@@ -82,7 +82,7 @@
 use apsis::domain::body::Body;
 use apsis::math::Vec3;
 use apsis::physics::gravity::kernel::KernelRequirements;
-use apsis::physics::integrator::PerturbationForce;
+use apsis::physics::integrator::{HamiltonianOperator, Operator};
 
 /// Speed of light expressed in the simulator's canonical solar-system units:
 ///
@@ -109,16 +109,34 @@ pub const C_SOLAR_UNITS: f64 = {
     C_SI * (YEAR_S / TWO_PI) / AU_SI
 };
 
-/// First post-Newtonian gravitational correction (Schwarzschild, test-particle
-/// form applied pairwise).
+/// First post-Newtonian gravitational correction (Schwarzschild,
+/// test-particle form applied pairwise).
 ///
-/// Register via [`System::add_perturbation`](apsis::core::system::System::add_perturbation):
+/// Register via
+/// [`System::add_hamiltonian_perturbation`](apsis::core::system::System::add_hamiltonian_perturbation):
 ///
 /// ```ignore
-/// sys.add_perturbation(Box::new(PostNewtonian1PN::solar_units()));
+/// sys.add_hamiltonian_perturbation(Box::new(PostNewtonian1PN::solar_units()));
 /// ```
 ///
 /// Stateless. Safe to share across threads.
+///
+/// # Cross-reference to REBOUNDx
+///
+/// This implementation corresponds to REBOUNDx's `gr` effect (Anderson
+/// et al. 1975 test-particle 1PN, velocity-dependent in `(r̂·v)·v` and
+/// `v² · r̂` terms). It is **not** the same as REBOUNDx's
+/// `gr_potential`, which is a velocity-independent effective potential
+/// (Nobili & Roxburgh 1986) that gets pericenter precession right but
+/// the mean motion wrong by `O(GM/(a·c²))`. The Nobili–Roxburgh form
+/// would be a separate operator with closed-form `potential` and
+/// WHFast-symplectic-friendly dispatch; it is not implemented here.
+///
+/// The full N-body Einstein–Infeld–Hoffmann Hamiltonian — the rigorous
+/// form when masses are comparable — is also out of scope. For the
+/// Sun–Mercury validation regime (`m_Mercury / m_Sun ≈ 2 × 10⁻⁷`) the
+/// test-particle simplification is canonical and gates the 4.4 ppm
+/// agreement reported in [`docs/experiments/2026-05-13-mercury-1pn-long-horizon.md`].
 #[derive(Debug, Clone, Copy)]
 pub struct PostNewtonian1PN {
     /// Speed of light in the caller's unit system.
@@ -146,7 +164,7 @@ impl PostNewtonian1PN {
     }
 }
 
-impl PerturbationForce for PostNewtonian1PN {
+impl Operator for PostNewtonian1PN {
     /// The 1PN correction is derived by expanding the geodesic equation
     /// around the Newtonian Hamiltonian `H_N = p²/2m − GMm/r`. The
     /// expansion therefore requires:
@@ -163,12 +181,14 @@ impl PerturbationForce for PostNewtonian1PN {
     fn kernel_requirements(&self) -> KernelRequirements {
         KernelRequirements::exact_and_smooth()
     }
+}
 
-    fn accumulate(&self, bodies: &[Body], scratch_acc: &mut [Vec3]) {
+impl HamiltonianOperator for PostNewtonian1PN {
+    fn accumulate_force(&self, bodies: &[Body], acc: &mut [Vec3]) {
         debug_assert_eq!(
             bodies.len(),
-            scratch_acc.len(),
-            "PerturbationForce contract: scratch_acc must be sized to bodies"
+            acc.len(),
+            "HamiltonianOperator contract: acc must be sized to bodies"
         );
 
         let c2 = self.c * self.c;
@@ -224,20 +244,33 @@ impl PerturbationForce for PostNewtonian1PN {
                 a.z -= pref * (scalar_rhat * rhat.z + scalar_v * v_i.z);
             }
 
-            scratch_acc[i] += a;
+            acc[i] += a;
         }
     }
+
+    // `potential` inherits the default [`Potential::NotAvailable`].
+    //
+    // Test-particle pairwise 1PN is derived as a force expansion of the
+    // geodesic equation, not from a two-body scalar Hamiltonian. The
+    // rigorous form is the full Einstein–Infeld–Hoffmann N-body
+    // Hamiltonian — out of scope for this test-particle approximation
+    // crate. `System::total_energy` therefore excludes this operator's
+    // contribution; `System::conservation_report` surfaces the exclusion
+    // by classifying the system as `HamiltonianForceOnly` whenever 1PN
+    // is the only registered Hamiltonian operator.
 }
 
-/// Federation entry point — a [`PerturbationDescriptor`] that consumers
-/// register without ever naming [`PostNewtonian1PN`] directly.
+/// Federation entry point — a [`HamiltonianOperatorDescriptor`] that
+/// consumers register without ever naming [`PostNewtonian1PN`] directly.
 ///
 /// The descriptor delegates `kernel_requirements` to the produced
-/// perturbation; metadata (`name`, `description`) is the single
-/// authoritative source for any UI surface that lists this plugin.
+/// operator; metadata (`name`, `description`) is the single authoritative
+/// source for any UI surface that lists this plugin.
+///
+/// [`HamiltonianOperatorDescriptor`]: apsis::physics::integrator::HamiltonianOperatorDescriptor
 pub struct Descriptor;
 
-impl apsis::physics::integrator::PerturbationDescriptor for Descriptor {
+impl apsis::physics::integrator::HamiltonianOperatorDescriptor for Descriptor {
     fn name(&self) -> &str {
         "General Relativity (1PN)"
     }
@@ -247,10 +280,10 @@ impl apsis::physics::integrator::PerturbationDescriptor for Descriptor {
     }
 
     fn kernel_requirements(&self) -> KernelRequirements {
-        PostNewtonian1PN::solar_units().kernel_requirements()
+        <PostNewtonian1PN as Operator>::kernel_requirements(&PostNewtonian1PN::solar_units())
     }
 
-    fn build(&self) -> Box<dyn apsis::physics::integrator::PerturbationForce> {
+    fn build(&self) -> Box<dyn HamiltonianOperator> {
         Box::new(PostNewtonian1PN::solar_units())
     }
 }
@@ -284,7 +317,7 @@ mod tests {
     fn isolated_body_feels_no_pn_force() {
         let bodies = vec![Body::star(1.0)];
         let mut acc = vec![Vec3::ZERO];
-        PostNewtonian1PN::solar_units().accumulate(&bodies, &mut acc);
+        PostNewtonian1PN::solar_units().accumulate_force(&bodies, &mut acc);
         assert_eq!(acc[0], Vec3::ZERO);
     }
 
@@ -297,11 +330,11 @@ mod tests {
         let pn = PostNewtonian1PN::solar_units();
 
         let mut once = vec![Vec3::ZERO; 2];
-        pn.accumulate(&bodies, &mut once);
+        pn.accumulate_force(&bodies, &mut once);
 
         let mut twice = vec![Vec3::ZERO; 2];
-        pn.accumulate(&bodies, &mut twice);
-        pn.accumulate(&bodies, &mut twice);
+        pn.accumulate_force(&bodies, &mut twice);
+        pn.accumulate_force(&bodies, &mut twice);
 
         for i in 0..2 {
             assert!((twice[i].x - 2.0 * once[i].x).abs() < 1e-14, "body {i} ax not additive");
@@ -318,7 +351,7 @@ mod tests {
             vec![Body::star(1.0), Body::rocky(1e-6).at(0.387, 0.0).with_velocity(0.0, 2.07)];
         let pn = PostNewtonian1PN::with_c(1e20);
         let mut acc = vec![Vec3::ZERO; 2];
-        pn.accumulate(&bodies, &mut acc);
+        pn.accumulate_force(&bodies, &mut acc);
         for a in acc {
             assert!(a.x.abs() < 1e-30, "ax={} should be ~0 at c→∞", a.x);
             assert!(a.y.abs() < 1e-30, "ay={} should be ~0 at c→∞", a.y);
@@ -345,7 +378,7 @@ mod tests {
 
         let bodies = vec![sun, mercury];
         let mut acc = vec![Vec3::ZERO; 2];
-        PostNewtonian1PN::solar_units().accumulate(&bodies, &mut acc);
+        PostNewtonian1PN::solar_units().accumulate_force(&bodies, &mut acc);
 
         // Mercury is at (+r_peri, 0); "outward from Sun" = +x direction.
         assert!(
@@ -370,12 +403,13 @@ mod tests {
     /// The 1PN perturbation must declare that it requires the exact 1/r
     /// Newtonian base (Exactness) and a smooth kernel (Continuity). This
     /// is what the kernel-requirement check inside
-    /// `System::add_perturbation` matches against the active kernel's
-    /// properties.
+    /// `System::add_hamiltonian_perturbation` matches against the active
+    /// kernel's properties.
     #[test]
     fn kernel_requirements_are_exact_and_smooth() {
         use apsis::physics::gravity::kernel::{Continuity, Exactness, KernelRequirements};
-        let req = PostNewtonian1PN::solar_units().kernel_requirements();
+        let req =
+            <PostNewtonian1PN as Operator>::kernel_requirements(&PostNewtonian1PN::solar_units());
         assert_eq!(req, KernelRequirements::exact_and_smooth());
         assert_eq!(req.required_exactness, Some(Exactness::Exact));
         assert_eq!(req.min_continuity, Some(Continuity::Smooth));
@@ -398,7 +432,7 @@ mod tests {
 
         let bodies = vec![sun, mercury];
         let mut acc = vec![Vec3::ZERO; 2];
-        PostNewtonian1PN::solar_units().accumulate(&bodies, &mut acc);
+        PostNewtonian1PN::solar_units().accumulate_force(&bodies, &mut acc);
 
         let a_pn = acc[1].length();
         let a_newt = 1.0 / (r_peri * r_peri); // G M / r²

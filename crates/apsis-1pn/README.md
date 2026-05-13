@@ -8,11 +8,11 @@ Use it as the **template** when writing new perturbation crates (radiation press
 
 ## Extension contract
 
-Perturbations registered through [`System::add_perturbation`](../apsis/src/core/system/perturbations.rs) must:
+Perturbations registered through [`System::add_hamiltonian_perturbation`](../apsis/src/core/system/perturbations.rs) (Hamiltonian-class operators like 1PN) or `System::add_non_conservative_perturbation` (drag, radiation reaction) must:
 
-- **operate on the exact Newtonian kernel** when their derivation requires it (declared via [`kernel_requirements()`](../apsis/src/physics/integrator/perturbation.rs));
-- **be additive** — accumulate into the `scratch_acc` buffer, never modify the base Hamiltonian;
-- **declare their physical preconditions at the type level** so the kernel-vs-perturbation contract can be checked at registration, not at publication time.
+- **operate on the exact Newtonian kernel** when their derivation requires it (declared via [`kernel_requirements()`](../apsis/src/physics/integrator/operator.rs));
+- **be additive** — accumulate into the supplied buffer, never overwrite or modify the base Hamiltonian;
+- **declare their physical preconditions at the type level** so the kernel-vs-operator contract can be checked at registration, not at publication time.
 
 Preconditions are expressed at the type level and surfaced at runtime, ensuring that invalid physical configurations are detectable without coupling perturbations to the kernel. This crate is the reference implementation of that contract.
 
@@ -24,7 +24,7 @@ For Mercury-like orbits, the numerical apsidal precession induced by Plummer sof
 
 **This is not a numerical error — it is a model violation.**
 
-Call `Body::unsoftened()` on every body or `System::with_exact_gravity()` system-wide. The contract is enforced once, in the core: a violation emits a structured warning at `add_perturbation` time naming the failed invariant. The warning is the deliberate behaviour — apsis does not silently correct invalid physical configurations. Surfacing the violation is the contract; auto-fixing would erase it.
+Call `Body::unsoftened()` on every body or `System::with_exact_gravity()` system-wide. The contract is enforced once, in the core: a violation emits a structured warning at `add_hamiltonian_perturbation` time naming the failed invariant. The warning is the deliberate behaviour — apsis does not silently correct invalid physical configurations. Surfacing the violation is the contract; auto-fixing would erase it.
 
 ## Validation signal
 
@@ -65,7 +65,7 @@ let mercury = Body::rocky(1.66e-7).at(0.387, 0.0).with_velocity(0.0, 1.61).unsof
 let mut sys = System::new(vec![sun, mercury], UnitSystem::canonical())
     .with_integrator(IntegratorKind::Ias15)
     .with_dt(1e-4);
-sys.add_perturbation(Box::new(PostNewtonian1PN::solar_units()));
+sys.add_hamiltonian_perturbation(Box::new(PostNewtonian1PN::solar_units()));
 sys.integrate_for(100.0);
 ```
 

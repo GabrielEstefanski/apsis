@@ -48,10 +48,9 @@
 use crate::domain::body::Body;
 use crate::math::Vec3;
 use crate::physics::integrator::dense::{DenseSnapshot, WhDenseData};
-use crate::physics::integrator::helpers::{
-    apply_perturbations_planets, evaluate, scale_acc_and_pe,
-};
+use crate::physics::integrator::helpers::{evaluate, scale_acc_and_pe};
 use crate::physics::integrator::kepler::kepler_step;
+use crate::physics::integrator::operator_dispatch::accumulate_perturbation_forces;
 use crate::physics::integrator::traits::{
     HierarchySignal, Integrator, IntegratorContext, IntegratorKind, StepResult,
 };
@@ -392,11 +391,21 @@ fn wh_kick(
     let pe_inter = scale_acc_and_pe(acc, ctx.g_factor, raw_pe);
     let pe_central = central_potential(bodies, mu);
 
-    apply_perturbations_planets(&bodies[1..], acc, ctx.perturbations);
+    // Operator forces accumulate on a full-N buffer; the planet kicks
+    // pick up entries [1..]. Operators never see the planet-only acc
+    // shape — they always work in global indexing.
+    let n = bodies.len();
+    let mut pert_acc: Vec<Vec3> = vec![Vec3::ZERO; n];
+    accumulate_perturbation_forces(
+        bodies,
+        &mut pert_acc,
+        ctx.hamiltonian_perturbations,
+        ctx.non_conservative_perturbations,
+    );
 
     let indirect = indirect_raw * ctx.g_factor;
     for (i, ai) in acc.iter().enumerate() {
-        let kick = (*ai + indirect) * dt;
+        let kick = (*ai + pert_acc[i + 1] + indirect) * dt;
         bodies[i + 1].vel_x += kick.x;
         bodies[i + 1].vel_y += kick.y;
         bodies[i + 1].vel_z += kick.z;

@@ -20,10 +20,10 @@ description = "Shared pyclass types reused across apsis Python binding crates."
 #
 # What lives here: pyclass types whose Python identity must be the same
 # across multiple extension modules. `Perturbation` is the first because
-# `apsis.System.add_perturbation(p)` and `apsis_1pn.PostNewtonian1PN.solar_units()`
-# need to agree on what a `Perturbation` is at the Python type level.
-# Other types (Body, System, UnitSystem, …) stay in `apsis-py` because
-# only that crate constructs them.
+# `apsis.System.add_hamiltonian_perturbation(p)` and
+# `apsis_1pn.PostNewtonian1PN.solar_units()` need to agree on what a
+# `Perturbation` is at the Python type level. Other types (Body, System,
+# UnitSystem, …) stay in `apsis-py` because only that crate constructs them.
 
 [lib]
 name = "apsis_py_core"

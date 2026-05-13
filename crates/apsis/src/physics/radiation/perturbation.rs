@@ -1,8 +1,8 @@
 //! System-level radiation perturbation.
 //!
-//! Bridges [`force`](super::force) and the integrator's
-//! [`PerturbationForce`] trait. This is the only file in the radiation
-//! module that depends on [`Body`] or the integrator interface.
+//! Bridges [`force`](super::force) and the integrator's operator surface.
+//! This is the only file in the radiation module that depends on
+//! [`Body`] or the integrator interface.
 //!
 //! # Responsibility boundary
 //!
@@ -11,12 +11,24 @@
 //!   bodies — and zero on emitters and large planets).
 //! - This module reads `(Body::q_pr, Body::physical_radius, Body::mass)`
 //!   and packs them into [`RadiationParams`] for the force kernels.
+//!
+//! # Operator classification
+//!
+//! `RadiationField` registers as
+//! [`NonConservativeOperator`](crate::physics::integrator::NonConservativeOperator)
+//! to accommodate the Poynting–Robertson drag branch
+//! (`include_pr_drag = true`). The pure radiation-pressure branch is
+//! Hamiltonian (`V_rad = −F_rad · x`); a future split into
+//! `RadiationPressure` + `PoyntingRobertsonDrag` would let symplectic
+//! integrators preserve invariants in the pressure-only configuration.
+//! Tracking issue: split deferred until a downstream consumer asks for
+//! the conservation guarantee.
 
 use std::f64::consts::PI;
 
 use crate::domain::body::Body;
 use crate::math::Vec3;
-use crate::physics::integrator::PerturbationForce;
+use crate::physics::integrator::{NonConservativeOperator, Operator};
 use crate::physics::radiation::force::{pr_drag_acceleration, radiation_acceleration};
 use crate::physics::radiation::params::RadiationParams;
 use crate::physics::radiation::source::RadiationSource;
@@ -115,24 +127,14 @@ impl RadiationField {
     }
 }
 
-// ── PerturbationForce impl ────────────────────────────────────────────────────
+// ── Operator impls ────────────────────────────────────────────────────────────
 
-impl PerturbationForce for RadiationField {
-    /// Accumulates radiation accelerations for the full body slice (`offset = 0`).
-    fn accumulate(&self, bodies: &[Body], scratch_acc: &mut [Vec3]) {
-        self.accumulate_offset(bodies, scratch_acc, 0);
-    }
+impl Operator for RadiationField {}
 
-    /// Accumulates radiation accelerations for a sub-slice of bodies.
-    ///
-    /// `offset` is the global index of `bodies[0]` within `System::bodies`.
-    /// Used by [`System::apply_perturbations_planets`] during the
-    /// Wisdom–Holman sub-step, where `scratch_acc` covers only `bodies[1..]`
-    /// and the global index of each planet is `local_index + 1`.
-    fn accumulate_offset(&self, bodies: &[Body], scratch_acc: &mut [Vec3], offset: usize) {
-        for (local_i, (body, acc)) in bodies.iter().zip(scratch_acc.iter_mut()).enumerate() {
-            let global_i = local_i + offset;
-            let Some(params) = self.body_params.get(global_i).and_then(|p| p.as_ref()) else {
+impl NonConservativeOperator for RadiationField {
+    fn accumulate_force(&self, bodies: &[Body], acc: &mut [Vec3]) {
+        for (i, (body, a_slot)) in bodies.iter().zip(acc.iter_mut()).enumerate() {
+            let Some(params) = self.body_params.get(i).and_then(|p| p.as_ref()) else {
                 continue;
             };
 
@@ -145,7 +147,7 @@ impl PerturbationForce for RadiationField {
                 radiation_acceleration(pos, params, &self.source)
             };
 
-            *acc += a;
+            *a_slot += a;
         }
     }
 }

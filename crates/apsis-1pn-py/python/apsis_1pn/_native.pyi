@@ -15,7 +15,8 @@ class PostNewtonian1PN:
     test-particle form, applied pairwise).
 
     Constructed via the named factories below. Each returns a fully-formed
-    :class:`apsis.Perturbation` ready for ``System.add_perturbation(...)``.
+    :class:`apsis.Perturbation` ready for
+    ``System.add_hamiltonian_perturbation(...)``.
     """
 
     @staticmethod

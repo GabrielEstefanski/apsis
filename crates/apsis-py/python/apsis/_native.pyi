@@ -346,8 +346,8 @@ class System:
     def adaptive_stats(self) -> AdaptiveStats | None:
         """Controller counters for adaptive integrators; ``None`` for fixed-step."""
 
-    def add_perturbation(self, perturbation: object) -> None:
-        """Attach a non-gravitational force built by a downstream crate.
+    def add_hamiltonian_perturbation(self, perturbation: object) -> None:
+        """Attach a Hamiltonian-class perturbation built by a downstream crate.
 
         Accepts an :class:`apsis.Perturbation` (pure-Python wrapper carrying
         an opaque capsule from a perturbation crate). The perturbation is

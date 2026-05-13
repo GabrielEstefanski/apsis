@@ -15,8 +15,8 @@
 //! If this test fails, one of four things is true:
 //!
 //! 1. Someone changed the 1PN formula and broke the sign or coefficients.
-//! 2. Someone broke the [`PerturbationForce`] contract in `apsis`
-//!    (e.g. the integrator stopped summing perturbation accelerations).
+//! 2. Someone broke the operator dispatch contract in `apsis`
+//!    (e.g. the integrator stopped summing operator accelerations).
 //! 3. Someone regressed the IAS15 substep velocity prediction
 //!    (`predict_v_ias15` in `crate::physics::integrator::dense`) —
 //!    velocity-dependent perturbations integrate against stale `v` and
@@ -51,7 +51,7 @@ fn mercury_precession_matches_gr_within_100ppm() {
     let mut sys = System::new(vec![sun, mercury], UnitSystem::canonical())
         .with_integrator(IntegratorKind::Ias15)
         .with_dt(1e-4);
-    sys.add_perturbation(Box::new(PostNewtonian1PN::solar_units()));
+    sys.add_hamiltonian_perturbation(Box::new(PostNewtonian1PN::solar_units()));
 
     let el0 = compute_elements(sys.bodies(), 1, 0, 1.0).unwrap();
     sys.integrate_for(el0.period * (N_ORBITS as f64));
@@ -103,7 +103,7 @@ fn softened_system_triggers_diagnostic() {
         UnitSystem::canonical(),
     )
     .with_integrator(IntegratorKind::Ias15);
-    sys.add_perturbation(Box::new(PostNewtonian1PN::solar_units()));
+    sys.add_hamiltonian_perturbation(Box::new(PostNewtonian1PN::solar_units()));
 
     let events = captured.lock().unwrap().clone();
     unsubscribe(id);
@@ -139,7 +139,7 @@ fn exact_gravity_system_stays_silent() {
     )
     .with_exact_gravity()
     .with_integrator(IntegratorKind::Ias15);
-    sys.add_perturbation(Box::new(PostNewtonian1PN::solar_units()));
+    sys.add_hamiltonian_perturbation(Box::new(PostNewtonian1PN::solar_units()));
 
     let events = captured.lock().unwrap().clone();
     unsubscribe(id);
@@ -240,7 +240,7 @@ fn mercury_precession_3d_inclined_matches_gr_within_100ppm() {
     let mut sys = System::new(vec![sun, mercury], UnitSystem::canonical())
         .with_integrator(IntegratorKind::Ias15)
         .with_dt(1e-4);
-    sys.add_perturbation(Box::new(PostNewtonian1PN::solar_units()));
+    sys.add_hamiltonian_perturbation(Box::new(PostNewtonian1PN::solar_units()));
 
     let el0 = compute_elements(sys.bodies(), 1, 0, 1.0).unwrap();
 

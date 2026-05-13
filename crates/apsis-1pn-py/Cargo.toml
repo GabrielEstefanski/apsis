@@ -31,9 +31,9 @@ crate-type = ["cdylib"]
 #
 # `apsis-1pn`     — the actual physics impl (PostNewtonian1PN, C_SOLAR_UNITS)
 # `apsis-py-core` — for `PyPerturbation`, the cross-extension wrapper that
-#                   `apsis.System.add_perturbation(...)` accepts. The wrapper
-#                   lives in an rlib-only crate so this crate (a cdylib) can
-#                   link it without colliding on `PyInit__native`.
+#                   `apsis.System.add_hamiltonian_perturbation(...)` accepts.
+#                   The wrapper lives in an rlib-only crate so this crate
+#                   (a cdylib) can link it without colliding on `PyInit__native`.
 # `pyo3`          — same version + features as apsis-py; abi3-py39 keeps
 #                   the wheel matrix at 1× per platform.
 
