@@ -201,6 +201,55 @@ give similar answers", but "the federation **contract** delivers the
 same physics regardless of which first-class artifact occupies each
 slot, to the precision the field admits."
 
+### Convergence experiment: what is the precision floor?
+
+Post-bake question: is the ~3-7 ppm floor f64 round-off, integrator
+truncation, or initial-condition precision? Reran Mercurius at three
+`dt` values (`mercury_1pn_long_horizon_mercurius --dt …`):
+
+| Outer dt | Mercurius Δω rel err vs GR (end) |
+| ---: | ---: |
+| `1 × 10⁻²` (locked protocol) | 6.690 × 10⁻⁶ |
+| `1 × 10⁻³` | 2.732 × 10⁻⁶ |
+| `1 × 10⁻⁴` | 3.121 × 10⁻⁶ |
+
+A 2nd-order symplectic-class scheme should converge as `O(dt²)`: each
+10× drop in `dt` should give a 100× drop in error. Observed factor
+between `1e-2` and `1e-3` is only 2.5×, and between `1e-3` and `1e-4`
+the error *increases* slightly (3.1 ppm > 2.7 ppm). Truncation is
+not the dominant floor at `dt = 1e-2`, and at `dt = 1e-4` f64
+round-off in the perturbation accumulator (now `~63 × 10⁶` outer
+steps × 2 half-kicks = `~126 × 10⁶` 1PN evaluations, random-walking
+as `ε · √N ≈ 2.5 × 10⁻¹²` absolute) becomes visible.
+
+The dominant precision floor is **initial-condition precision**.
+`E = 0.20563` carries 5 significant figures. The GR formula has
+`Δω ∝ 1 / (1 - e²)`, so a relative IC uncertainty `δe/e = 10⁻⁵`
+propagates as `2e/(1−e²) · δe/e ≈ 4 × 10⁻⁶` (4 ppm) on `Δω`. That
+matches the observed ~3 ppm floor where `dt`-tightening stops
+helping. `A = 0.387098` has 6 significant figures; its contribution
+is `≈ 1` ppm, the secondary IC floor.
+
+Implications:
+
+- f64 is **not** the bottleneck at this horizon and IC precision.
+  WHFast's compensated summation would not reduce the floor on this
+  specific scenario.
+- Pushing below ~3 ppm on this scenario requires higher-precision
+  Mercury IC (`a` to 8 sig figs, `e` to 6 sig figs). Free improvement
+  if the 500-orbit gate is updated in lockstep.
+- f64 random-walk in the perturbation accumulator becomes visible at
+  `dt = 1e-4` (~10⁸ evaluations); for a 10⁵-orbit horizon at the same
+  step density it would dominate. **That** is the regime where
+  WHFast's compensated summation pays off.
+
+The locked protocol `dt = 1e-2` sits at a clean operating point: 6.7
+ppm, comfortably inside the 10 ppm gate, with truncation contribution
+dominant over the IC floor (so the gate is sensitive to a
+Mercurius-implementation regression, not just IC quality). No revision
+to the locked protocol; the convergence finding clarifies what the
+floor actually is.
+
 ---
 
 ## Decision

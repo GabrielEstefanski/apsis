@@ -57,7 +57,7 @@ const N_ORBITS: u64 = 4153;
 const DT: f64 = 1.0e-2;
 
 fn main() {
-    let output_path = parse_output_path();
+    let (output_path, dt) = parse_args();
     if let Some(parent) = output_path.parent() {
         create_dir_all(parent).expect("failed to create output directory");
     }
@@ -71,7 +71,7 @@ fn main() {
     // ── System setup ────────────────────────────────────────────────────── //
     let mut sys = System::new(vec![sun, mercury], UnitSystem::canonical())
         .with_integrator(IntegratorKind::Mercurius)
-        .with_dt(DT);
+        .with_dt(dt);
     sys.add_perturbation(Box::new(PostNewtonian1PN::solar_units()));
 
     let el0 = compute_elements(sys.bodies(), 1, 0, 1.0)
@@ -88,7 +88,7 @@ fn main() {
         .unwrap();
     writeln!(w, "# units: canonical Hénon (G = 1)").unwrap();
     writeln!(w, "# a={A}, e={E}, m_mercury={M_MERCURY:e}").unwrap();
-    writeln!(w, "# period={period:.18e}, dt={DT:.18e}, n_orbits={N_ORBITS}").unwrap();
+    writeln!(w, "# period={period:.18e}, dt={dt:.18e}, n_orbits={N_ORBITS}").unwrap();
     writeln!(w, "orbit,t,x,y,vx,vy,a_osc,e_osc,omega_osc").unwrap();
 
     write_sample(&mut w, 0, &sys, &el0);
@@ -127,12 +127,31 @@ fn write_sample(
     .unwrap();
 }
 
-fn parse_output_path() -> PathBuf {
+fn parse_args() -> (PathBuf, f64) {
+    let mut output: Option<PathBuf> = None;
+    let mut dt: Option<f64> = None;
     let mut args = env::args().skip(1);
     while let Some(arg) = args.next() {
-        if arg == "--output" || arg == "-o" {
-            return PathBuf::from(args.next().expect("--output requires a path argument"));
+        match arg.as_str() {
+            "--output" | "-o" => {
+                output =
+                    Some(PathBuf::from(args.next().expect("--output requires a path argument")));
+            },
+            "--dt" => {
+                dt = Some(
+                    args.next()
+                        .expect("--dt requires a value argument")
+                        .parse()
+                        .expect("--dt value must parse as f64"),
+                );
+            },
+            _ => {},
         }
     }
-    PathBuf::from("validation/mercury-1pn-long-horizon/out/mercurius.csv")
+    (
+        output.unwrap_or_else(|| {
+            PathBuf::from("validation/mercury-1pn-long-horizon/out/mercurius.csv")
+        }),
+        dt.unwrap_or(DT),
+    )
 }
