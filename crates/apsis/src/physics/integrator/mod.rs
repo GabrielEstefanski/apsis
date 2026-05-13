@@ -44,6 +44,7 @@ pub mod force_model;
 pub mod helpers;
 pub mod ias15;
 pub mod kepler;
+pub mod mercurius;
 pub mod perturbation;
 pub mod primitives;
 pub mod traits;
@@ -59,6 +60,7 @@ pub use force_model::{ForceModel, GravityForceModel};
 pub use helpers::{apply_perturbations, evaluate, scale_acc_and_pe};
 pub use ias15::Ias15;
 pub use kepler::kepler_step;
+pub use mercurius::Mercurius;
 pub use perturbation::{PerturbationDescriptor, PerturbationForce};
 pub use primitives::{drift, kick};
 pub use traits::{AdaptiveStats, Integrator, IntegratorContext, IntegratorKind, StepResult};
@@ -75,5 +77,6 @@ pub fn make_integrator(kind: IntegratorKind) -> Box<dyn Integrator> {
         IntegratorKind::Yoshida4 => Box::new(Yoshida4),
         IntegratorKind::WisdomHolman => Box::new(WisdomHolman::new()),
         IntegratorKind::Ias15 => Box::new(Ias15::new()),
+        IntegratorKind::Mercurius => Box::new(Mercurius::new()),
     }
 }
