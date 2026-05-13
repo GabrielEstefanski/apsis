@@ -106,12 +106,12 @@ pub fn run(config: &RunConfig) -> Result<(), Box<dyn std::error::Error>> {
         let t = system.t();
 
         // CSV recording
-        if let Some(rec) = csv.as_mut() {
-            if rec.should_record(t) {
-                system.update_orbital_elements();
-                let metrics = system.metrics();
-                rec.record(t, system.bodies(), &metrics, system.orbital_elements())?;
-            }
+        if let Some(rec) = csv.as_mut()
+            && rec.should_record(t)
+        {
+            system.update_orbital_elements();
+            let metrics = system.metrics();
+            rec.record(t, system.bodies(), &metrics, system.orbital_elements())?;
         }
 
         // Snapshot saving

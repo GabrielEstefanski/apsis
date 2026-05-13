@@ -10,6 +10,8 @@
 
 mod engine;
 pub mod kernel;
+#[cfg(target_arch = "x86_64")]
+mod simd;
 mod tree;
 
 pub use engine::BarnesHutEngine;
