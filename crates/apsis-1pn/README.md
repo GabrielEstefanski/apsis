@@ -59,13 +59,14 @@ use apsis::physics::integrator::IntegratorKind;
 use apsis::units::UnitSystem;
 use apsis_1pn::PostNewtonian1PN;
 
+let units = UnitSystem::solar_canonical();
 let sun = Body::star(1.0).unsoftened();
 let mercury = Body::rocky(1.66e-7).at(0.387, 0.0).with_velocity(0.0, 1.61).unsoftened();
 
-let mut sys = System::new(vec![sun, mercury], UnitSystem::canonical())
+let mut sys = System::new(vec![sun, mercury], units)
     .with_integrator(IntegratorKind::Ias15)
     .with_dt(1e-4);
-sys.add_hamiltonian_perturbation(Box::new(PostNewtonian1PN::solar_units()));
+sys.add_hamiltonian_perturbation(Box::new(PostNewtonian1PN::for_units(units)));
 sys.integrate_for(100.0);
 ```
 

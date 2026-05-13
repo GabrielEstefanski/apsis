@@ -9,7 +9,7 @@
 //! Configure an equal-mass two-body orbit in the e = 0.5, a = 1
 //! configuration — periapse r = 0.5, apoapse in a truncated Plummer
 //! potential close to 1.44 — and register
-//! [`PostNewtonian1PN::solar_units`] against a
+//! [`PostNewtonian1PN::for_units(UnitSystem::solar_canonical())`] against a
 //! [`TruncatedPlummerKernel`] with cutoff `R_c = 1`. The truncated kernel
 //! provides `Exactness::Modified + Continuity::C0`; 1PN requires
 //! `Exact + Smooth`. Two invariant violations are therefore expected on
@@ -147,10 +147,12 @@ fn truncated_kernel_plus_1pn_fires_both_exactness_and_continuity_warnings() {
     });
 
     let kernel = Arc::new(TruncatedPlummerKernel::new(1.0));
-    let mut sys = System::new(two_body_eccentric(), UnitSystem::canonical())
+    let mut sys = System::new(two_body_eccentric(), UnitSystem::solar_canonical())
         .with_kernel(kernel)
         .with_integrator(IntegratorKind::Yoshida4);
-    sys.add_hamiltonian_perturbation(Box::new(PostNewtonian1PN::solar_units()));
+    sys.add_hamiltonian_perturbation(Box::new(PostNewtonian1PN::for_units(
+        UnitSystem::solar_canonical(),
+    )));
 
     let events = captured.lock().unwrap().clone();
     unsubscribe(id);
@@ -219,7 +221,7 @@ fn truncated_kernel_energy_spikes_are_in_bijection_with_r_cut_crossings() {
     // (the cached kinetic/potential fields are still at their default),
     // and pairing that against the first post-step value would look like
     // a spurious spike.
-    let mut sys_smooth = System::new(two_body_eccentric(), UnitSystem::canonical())
+    let mut sys_smooth = System::new(two_body_eccentric(), UnitSystem::solar_canonical())
         .with_integrator(IntegratorKind::Yoshida4)
         .with_dt(DT);
     sys_smooth.step();
@@ -249,11 +251,13 @@ fn truncated_kernel_energy_spikes_are_in_bijection_with_r_cut_crossings() {
 
     // ── Truncated run: same bodies, TruncatedPlummerKernel ───────────────
     let kernel = Arc::new(TruncatedPlummerKernel::new(R_CUT));
-    let mut sys_trunc = System::new(two_body_eccentric(), UnitSystem::canonical())
+    let mut sys_trunc = System::new(two_body_eccentric(), UnitSystem::solar_canonical())
         .with_kernel(kernel)
         .with_integrator(IntegratorKind::Yoshida4)
         .with_dt(DT);
-    sys_trunc.add_hamiltonian_perturbation(Box::new(PostNewtonian1PN::solar_units()));
+    sys_trunc.add_hamiltonian_perturbation(Box::new(PostNewtonian1PN::for_units(
+        UnitSystem::solar_canonical(),
+    )));
     sys_trunc.step();
 
     let mut samples: Vec<Sample> = Vec::with_capacity(N_STEPS);

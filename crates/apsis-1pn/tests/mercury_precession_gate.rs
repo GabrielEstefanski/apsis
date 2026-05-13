@@ -48,10 +48,12 @@ fn mercury_precession_matches_gr_within_100ppm() {
     let v_peri = (2.0 / r_peri - 1.0 / A).sqrt();
     let mercury = Body::rocky(M_MERCURY).at(r_peri, 0.0).with_velocity(0.0, v_peri).unsoftened();
 
-    let mut sys = System::new(vec![sun, mercury], UnitSystem::canonical())
+    let mut sys = System::new(vec![sun, mercury], UnitSystem::solar_canonical())
         .with_integrator(IntegratorKind::Ias15)
         .with_dt(1e-4);
-    sys.add_hamiltonian_perturbation(Box::new(PostNewtonian1PN::solar_units()));
+    sys.add_hamiltonian_perturbation(Box::new(PostNewtonian1PN::for_units(
+        UnitSystem::solar_canonical(),
+    )));
 
     let el0 = compute_elements(sys.bodies(), 1, 0, 1.0).unwrap();
     sys.integrate_for(el0.period * (N_ORBITS as f64));
@@ -68,7 +70,7 @@ fn mercury_precession_matches_gr_within_100ppm() {
         d
     };
 
-    let c = PostNewtonian1PN::solar_units().c();
+    let c = PostNewtonian1PN::for_units(UnitSystem::solar_canonical()).c();
     let predicted = 6.0 * PI / (c * c * A * (1.0 - E * E)) * (N_ORBITS as f64);
 
     let rel_err = (measured - predicted).abs() / predicted.abs();
@@ -100,10 +102,12 @@ fn softened_system_triggers_diagnostic() {
     // Default softening left in place — this is the trap.
     let mut sys = System::new(
         vec![Body::star(1.0), Body::rocky(1e-7).at(0.4, 0.0).with_velocity(0.0, 1.5)],
-        UnitSystem::canonical(),
+        UnitSystem::solar_canonical(),
     )
     .with_integrator(IntegratorKind::Ias15);
-    sys.add_hamiltonian_perturbation(Box::new(PostNewtonian1PN::solar_units()));
+    sys.add_hamiltonian_perturbation(Box::new(PostNewtonian1PN::for_units(
+        UnitSystem::solar_canonical(),
+    )));
 
     let events = captured.lock().unwrap().clone();
     unsubscribe(id);
@@ -135,11 +139,13 @@ fn exact_gravity_system_stays_silent() {
 
     let mut sys = System::new(
         vec![Body::star(1.0), Body::rocky(1e-7).at(0.4, 0.0).with_velocity(0.0, 1.5)],
-        UnitSystem::canonical(),
+        UnitSystem::solar_canonical(),
     )
     .with_exact_gravity()
     .with_integrator(IntegratorKind::Ias15);
-    sys.add_hamiltonian_perturbation(Box::new(PostNewtonian1PN::solar_units()));
+    sys.add_hamiltonian_perturbation(Box::new(PostNewtonian1PN::for_units(
+        UnitSystem::solar_canonical(),
+    )));
 
     let events = captured.lock().unwrap().clone();
     unsubscribe(id);
@@ -169,7 +175,7 @@ fn baseline_newtonian_kepler_is_closed() {
     let mut mercury = Body::rocky(M_MERCURY).at(r_peri, 0.0).with_velocity(0.0, v_peri);
     mercury.softening = 0.0;
 
-    let mut sys = System::new(vec![sun, mercury], UnitSystem::canonical())
+    let mut sys = System::new(vec![sun, mercury], UnitSystem::solar_canonical())
         .with_integrator(IntegratorKind::Ias15)
         .with_dt(1e-4);
     // No perturbation attached → pure Keplerian 2-body.
@@ -237,10 +243,12 @@ fn mercury_precession_3d_inclined_matches_gr_within_100ppm() {
         .with_velocity_3d(0.0, v_peri * cos_i, v_peri * sin_i)
         .unsoftened();
 
-    let mut sys = System::new(vec![sun, mercury], UnitSystem::canonical())
+    let mut sys = System::new(vec![sun, mercury], UnitSystem::solar_canonical())
         .with_integrator(IntegratorKind::Ias15)
         .with_dt(1e-4);
-    sys.add_hamiltonian_perturbation(Box::new(PostNewtonian1PN::solar_units()));
+    sys.add_hamiltonian_perturbation(Box::new(PostNewtonian1PN::for_units(
+        UnitSystem::solar_canonical(),
+    )));
 
     let el0 = compute_elements(sys.bodies(), 1, 0, 1.0).unwrap();
 
@@ -266,7 +274,7 @@ fn mercury_precession_3d_inclined_matches_gr_within_100ppm() {
         d
     };
 
-    let c = PostNewtonian1PN::solar_units().c();
+    let c = PostNewtonian1PN::for_units(UnitSystem::solar_canonical()).c();
     let predicted = 6.0 * PI / (c * c * A * (1.0 - E * E)) * (N_ORBITS as f64);
 
     let rel_err = (measured - predicted).abs() / predicted.abs();
@@ -330,7 +338,7 @@ fn baseline_newtonian_kepler_3d_inclined_is_closed() {
     );
     mercury.softening = 0.0;
 
-    let mut sys = System::new(vec![sun, mercury], UnitSystem::canonical())
+    let mut sys = System::new(vec![sun, mercury], UnitSystem::solar_canonical())
         .with_integrator(IntegratorKind::Ias15)
         .with_dt(1e-4);
     // No perturbation → pure 3D two-body.

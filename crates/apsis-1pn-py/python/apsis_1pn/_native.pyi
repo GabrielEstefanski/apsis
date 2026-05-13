@@ -19,35 +19,25 @@ class PostNewtonian1PN:
     ``System.add_hamiltonian_perturbation(...)``.
 
     The factories follow the observable constructor convention documented
-    in ``apsis::contract``:
+    in ``apsis::contract``. Every constructor binds the operator to a
+    :class:`apsis.UnitSystem`; the ``System`` registration check panics
+    on unit-system mismatch, so you cannot silently mix an operator
+    built for one unit system into a ``System`` integrating in another.
 
-    - Named-regime factories (:meth:`solar_units`, :meth:`for_units`)
-      derive ``c`` from a known physical setup or a supplied
-      :class:`apsis.UnitSystem`. No raw numeric input.
-    - Raw-escape factories (:meth:`from_raw_c`,
-      :meth:`from_raw_c_validated`) accept ``c`` directly. The
-      ``_validated`` form cross-checks against a unit system and raises
-      ``ValueError`` on mismatch.
+    - :meth:`for_units` is the recommended path: derive ``c`` from the
+      same ``UnitSystem`` you passed to ``apsis.System(...)``.
+    - :meth:`from_raw_c` is the explicit-``c`` escape: useful when ``c``
+      is computed by neighbouring code or intentionally non-physical.
+      ``units`` is still required so the registration check remains
+      load-bearing.
     """
-
-    @staticmethod
-    def solar_units() -> Perturbation:
-        """1PN calibrated for canonical solar-system units (G = 1, AU, M_sun)."""
 
     @staticmethod
     def for_units(*, units: UnitSystem) -> Perturbation:
         """1PN with ``c`` derived from the supplied :class:`apsis.UnitSystem`."""
 
     @staticmethod
-    def from_raw_c(*, c: float) -> Perturbation:
-        """1PN with an explicit speed of light, no validation."""
-
-    @staticmethod
-    def from_raw_c_validated(*, c: float, units: UnitSystem) -> Perturbation:
-        """1PN with an explicit ``c``, cross-checked against ``units``.
-
-        Raises ``ValueError`` when the relative error between the
-        supplied ``c`` and the ``c`` derived from ``units`` exceeds
-        ``1e-9``. Use when ``c`` originates from an external source
-        and you want the simulator to confirm it before attaching.
+    def from_raw_c(*, c: float, units: UnitSystem) -> Perturbation:
+        """1PN with an explicit ``c`` value, pinned to ``units`` for the
+        registration-time unit-system check.
         """

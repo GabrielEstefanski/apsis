@@ -44,6 +44,7 @@
 use crate::domain::body::Body;
 use crate::math::Vec3;
 use crate::physics::gravity::kernel::KernelRequirements;
+use crate::units::UnitSystem;
 
 // ── Potential return type ────────────────────────────────────────────────────
 
@@ -85,6 +86,28 @@ pub trait Operator: Send + Sync {
     /// configuration-bearing string (e.g. `"PostNewtonian1PN(solar)"`).
     fn name(&self) -> &'static str {
         std::any::type_name::<Self>()
+    }
+
+    /// [`UnitSystem`] this operator was constructed for, when its
+    /// parameters are dimensional and tied to a specific unit choice.
+    /// Default: `None` — the operator is unit-system-agnostic
+    /// (constant push, dimensionless coupling, …).
+    ///
+    /// **Registration check.** When this returns `Some(u)`, the
+    /// `System::add_*` registration methods compare `u` against the
+    /// `System`'s own `UnitSystem`. A mismatch panics with a structured
+    /// message naming both unit systems and the operator. The check
+    /// makes silent unit-system confusion structurally impossible —
+    /// you cannot register an operator built for IAU solar units in a
+    /// `System` integrating in canonical solar units, even if the
+    /// numeric values would otherwise produce internally-consistent
+    /// (but physically wrong) dynamics.
+    ///
+    /// Operators whose parameters are dimensional **must** override
+    /// this. The default is the safe choice for dimensionless
+    /// operators only.
+    fn declared_units(&self) -> Option<UnitSystem> {
+        None
     }
 
     /// Step-boundary observation. Called once per outer integration
@@ -169,9 +192,15 @@ pub trait NonConservativeOperator: Operator {
 /// Plugin metadata for downstream perturbation crates (`apsis-1pn`
 /// and friends). UIs and headless runners collect descriptors into a
 /// registry without learning concrete operator types.
+///
+/// `build` takes the target `UnitSystem` so the produced operator
+/// carries the same units as the `System` that will register it —
+/// the registration-time `declared_units` check then succeeds rather
+/// than panicking on the consumer. UI catalogs query the active
+/// `System`'s units and pass them through.
 pub trait HamiltonianOperatorDescriptor: Send + Sync {
     fn name(&self) -> &str;
     fn description(&self) -> &str;
     fn kernel_requirements(&self) -> KernelRequirements;
-    fn build(&self) -> Box<dyn HamiltonianOperator>;
+    fn build(&self, units: UnitSystem) -> Box<dyn HamiltonianOperator>;
 }

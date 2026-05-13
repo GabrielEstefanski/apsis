@@ -44,17 +44,21 @@ Quick start
 
     sys = apsis.System(
         bodies=[sun, mercury],
-        units=apsis.units.SOLAR,
+        units=apsis.units.SOLAR_CANONICAL,
         integrator="ias15",
         dt=1e-3,
         exact_gravity=True,
     )
-    sys.add_hamiltonian_perturbation(apsis_1pn.PostNewtonian1PN.solar_units())
+    sys.add_hamiltonian_perturbation(
+        apsis_1pn.PostNewtonian1PN.for_units(units=apsis.units.SOLAR_CANONICAL),
+    )
     sys.integrate_for(100.0)
 
-``PostNewtonian1PN`` is the only export. Use :meth:`solar_units` for
-the canonical solar-system unit system or :meth:`with_c` for any other
-unit choice (geometric units, SI, custom).
+``PostNewtonian1PN`` is the only export. Use :meth:`for_units` to derive
+``c`` from any :class:`apsis.UnitSystem` (the recommended path), or
+:meth:`from_raw_c` to pass an explicit ``c`` value pinned to a unit
+system. The ``System`` registration check panics if the perturbation's
+unit system disagrees with the ``System``'s own.
 
 References
 ----------
