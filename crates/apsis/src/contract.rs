@@ -298,6 +298,45 @@
 //! physical (regime) checked statically AND dynamically. An operator
 //! that survives both is on its derivation's footing for the run.
 //!
+//! ## Citation provenance
+//!
+//! Each registered operator publishes a
+//! [`Citation`](crate::physics::integrator::Citation) carrying the BibTeX
+//! entry of the paper it implements, the DOI when available, and the
+//! implementing crate's `crate_name` / `crate_version` /
+//! `commit_hash` captured at the operator's crate compile site (not
+//! apsis core's). The `commit_hash` field is populated by the operator
+//! crate's `build.rs` via `cargo:rustc-env=`; consumer code never
+//! constructs a citation by hand.
+//!
+//! [`crate::core::system::System::citations`] aggregates them across
+//! Hamiltonian + non-conservative + observer stacks in registration
+//! order; [`crate::core::system::System::provenance`] renders a
+//! human-readable block suitable for paper supplementary material or
+//! for embedding into a snapshot file. Both are deterministic given the
+//! same operator stack — diff two outputs to confirm the dependency
+//! graph stayed bit-equal.
+//!
+//! Operators with no canonical reference (test fakes, internal tooling)
+//! inherit the default `None` and are silently skipped by the
+//! aggregator. The citation surface is opt-in for operators but
+//! opt-out for the federation: every published perturbation crate
+//! should override
+//! [`Operator::citation`](crate::physics::integrator::Operator::citation)
+//! so the run's full reference list reads off the operator stack
+//! automatically.
+//!
+//! - test: [`crate::physics::integrator::citation`] module tests
+//! - test: `tests::citations_skip_operators_without_citation`
+//! - test: `tests::citations_preserve_registration_order`
+//! - test: `tests::provenance_renders_every_registered_citation`
+//!
+//! `crate_version` + `commit_hash` together pin the implementation to a
+//! specific source state and are sufficient (modulo platform-level f64
+//! variance) to reproduce the operator's behaviour bit-for-bit on a
+//! single platform. The reproducibility envelope is the same one the
+//! "What this contract does NOT guarantee" section names below.
+//!
 //! ## What this contract does NOT guarantee
 //!
 //! Reviewers who hold the federation thesis to a stronger standard need

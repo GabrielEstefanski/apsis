@@ -201,6 +201,59 @@ impl System {
         self.regime_warnings_emitted.clear();
     }
 
+    /// Aggregate [`Citation`](crate::physics::integrator::Citation)
+    /// entries from every registered operator (Hamiltonian +
+    /// non-conservative + observers). Operators without a citation
+    /// (default `None`) are silently skipped.
+    ///
+    /// Order: Hamiltonian operators first, in registration order;
+    /// then non-conservative; then observers — same order as
+    /// dispatch. Stable so a consumer can diff two `citations()`
+    /// outputs to confirm the dependency graph stayed bit-equal.
+    ///
+    /// Integrator and kernel citations are not yet aggregated by
+    /// this method; they live on different traits (`Integrator`,
+    /// `Kernel`) that do not yet expose `citation()`. Future
+    /// expansion will fold them in so the full reference list comes
+    /// from one call.
+    pub fn citations(&self) -> Vec<crate::physics::integrator::Citation> {
+        let mut out = Vec::new();
+        for op in &self.hamiltonian_perturbations {
+            if let Some(c) = op.citation() {
+                out.push(c);
+            }
+        }
+        for op in &self.non_conservative_perturbations {
+            if let Some(c) = op.citation() {
+                out.push(c);
+            }
+        }
+        for op in &self.observers {
+            if let Some(c) = op.citation() {
+                out.push(c);
+            }
+        }
+        out
+    }
+
+    /// Render the registered operator stack's citations as a
+    /// human-readable provenance block. Layout is the standard one
+    /// from [`crate::physics::integrator::render_provenance`] —
+    /// stable, diffable, suitable for paper supplementary material
+    /// or for embedding in snapshot files.
+    ///
+    /// ```ignore
+    /// println!("{}", sys.provenance());
+    /// // Provenance (1 operator):
+    /// //
+    /// //   apsis-1pn 0.1.0 (commit f2d8e91)
+    /// //     DOI: 10.1007/BF00769986
+    /// //     @article{anderson1975, ...}
+    /// ```
+    pub fn provenance(&self) -> String {
+        crate::physics::integrator::render_provenance(&self.citations())
+    }
+
     /// Check that the operator's
     /// [`declared_units`](Operator::declared_units) matches the
     /// `System`'s own `UnitSystem`. Returns `Ok(())` when the operator
@@ -638,6 +691,102 @@ mod tests {
             "expected no regime warnings for in-regime initial state, got {}",
             warnings.len()
         );
+    }
+
+    // ── Citation aggregation tests ───────────────────────────────────────────
+
+    /// A Hamiltonian operator that publishes a fixed citation. Used to
+    /// exercise `System::citations()` / `System::provenance()` without
+    /// pulling in `apsis-1pn` (the workspace's only real citation
+    /// publisher) — perturbations.rs lives in the core crate.
+    struct CitedOp(crate::physics::integrator::Citation);
+
+    impl Operator for CitedOp {
+        fn name(&self) -> &'static str {
+            "CitedOp"
+        }
+        fn citation(&self) -> Option<crate::physics::integrator::Citation> {
+            Some(self.0)
+        }
+    }
+
+    impl HamiltonianOperator for CitedOp {
+        fn accumulate_force(&self, _bodies: &[Body], _acc: &mut [crate::math::Vec3]) {}
+    }
+
+    fn fake_citation(crate_name: &'static str) -> crate::physics::integrator::Citation {
+        crate::physics::integrator::Citation {
+            bibtex: "@article{fake, year={2026}}",
+            doi: Some("10.0000/fake"),
+            crate_name,
+            crate_version: "0.1.0",
+            commit_hash: None,
+        }
+    }
+
+    /// Empty stack — no citations, provenance string says so.
+    #[test]
+    fn citations_empty_when_no_operators_registered() {
+        let sys = System::new(vec![Body::star(1.0)], UnitSystem::solar_canonical());
+        assert!(sys.citations().is_empty());
+        assert!(sys.provenance().contains("no operators"));
+    }
+
+    /// Operators that don't override `citation()` (default `None`) are
+    /// silently skipped. Mixed stacks return only the publishers.
+    #[test]
+    fn citations_skip_operators_without_citation() {
+        struct UncitedOp;
+        impl Operator for UncitedOp {}
+        impl HamiltonianOperator for UncitedOp {
+            fn accumulate_force(&self, _b: &[Body], _a: &mut [crate::math::Vec3]) {}
+        }
+
+        let mut sys = System::new(vec![Body::star(1.0)], UnitSystem::solar_canonical())
+            .with_integrator(IntegratorKind::Ias15);
+        sys.add_hamiltonian_perturbation(Box::new(UncitedOp)).expect("UncitedOp is unit-agnostic");
+        sys.add_hamiltonian_perturbation(Box::new(CitedOp(fake_citation("apsis-fake"))))
+            .expect("CitedOp is unit-agnostic");
+
+        let cites = sys.citations();
+        assert_eq!(cites.len(), 1, "only the publishing operator should appear");
+        assert_eq!(cites[0].crate_name, "apsis-fake");
+    }
+
+    /// Registration order is preserved — consumers diff `provenance()`
+    /// across runs to confirm the operator stack stayed bit-equal.
+    #[test]
+    fn citations_preserve_registration_order() {
+        let mut sys = System::new(vec![Body::star(1.0)], UnitSystem::solar_canonical())
+            .with_integrator(IntegratorKind::Ias15);
+        sys.add_hamiltonian_perturbation(Box::new(CitedOp(fake_citation("apsis-a"))))
+            .expect("CitedOp is unit-agnostic");
+        sys.add_hamiltonian_perturbation(Box::new(CitedOp(fake_citation("apsis-b"))))
+            .expect("CitedOp is unit-agnostic");
+
+        let cites = sys.citations();
+        assert_eq!(cites.len(), 2);
+        assert_eq!(cites[0].crate_name, "apsis-a");
+        assert_eq!(cites[1].crate_name, "apsis-b");
+    }
+
+    /// `provenance()` runs the standard renderer over the aggregated
+    /// citations. Sanity: the rendered block names every operator's
+    /// crate.
+    #[test]
+    fn provenance_renders_every_registered_citation() {
+        let mut sys = System::new(vec![Body::star(1.0)], UnitSystem::solar_canonical())
+            .with_integrator(IntegratorKind::Ias15);
+        sys.add_hamiltonian_perturbation(Box::new(CitedOp(fake_citation("apsis-a"))))
+            .expect("CitedOp is unit-agnostic");
+        sys.add_hamiltonian_perturbation(Box::new(CitedOp(fake_citation("apsis-b"))))
+            .expect("CitedOp is unit-agnostic");
+
+        let block = sys.provenance();
+        assert!(block.contains("(2 operators):"));
+        assert!(block.contains("apsis-a 0.1.0"));
+        assert!(block.contains("apsis-b 0.1.0"));
+        assert!(block.contains("DOI: 10.0000/fake"));
     }
 
     /// Warn-once dedup: a violation that persists across cadence

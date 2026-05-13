@@ -44,6 +44,7 @@
 use crate::domain::body::Body;
 use crate::math::Vec3;
 use crate::physics::gravity::kernel::KernelRequirements;
+use crate::physics::integrator::citation::Citation;
 use crate::physics::integrator::regime::RegimeViolation;
 use crate::units::UnitSystem;
 
@@ -162,6 +163,27 @@ pub trait Operator: Send + Sync {
     /// an empty vector by default.
     fn regime_check_cadence(&self) -> usize {
         100
+    }
+
+    /// Reference card for the operator: BibTeX entry of the paper
+    /// implementing this physics, DOI when available, and the
+    /// implementing crate's name + version + build commit. Default:
+    /// `None` — operator has no canonical citation (test fakes,
+    /// internal tooling).
+    ///
+    /// Federation-thesis-aligned: every published perturbation crate
+    /// should override this so [`crate::core::system::System::citations`]
+    /// produces a complete reference list automatically. The
+    /// `crate_name` / `crate_version` / `commit_hash` fields use
+    /// `env!("CARGO_PKG_NAME")` / `env!("CARGO_PKG_VERSION")` /
+    /// `option_env!(...)` so the captured values are the **operator's
+    /// crate** state, not apsis core's.
+    ///
+    /// See [`Citation`](crate::physics::integrator::Citation) for the
+    /// field contract and [`crate::physics::integrator::render_provenance`]
+    /// for the standard rendering.
+    fn citation(&self) -> Option<Citation> {
+        None
     }
 }
 

@@ -532,6 +532,53 @@ impl PySystem {
             .map_err(|e| crate::errors::unit_system_mismatch_to_pyerr(*e))
     }
 
+    // ── Provenance ───────────────────────────────────────────────────────
+
+    /// Reference list for the registered operator stack. Returns one
+    /// dictionary per citation, in registration order, with keys:
+    ///
+    /// - ``crate_name`` (str)
+    /// - ``crate_version`` (str)
+    /// - ``commit_hash`` (str | None) — full SHA when the implementing
+    ///   crate was built from a git checkout, ``None`` otherwise
+    /// - ``doi`` (str | None) — bare DOI suffix (e.g. ``10.1086/153180``)
+    /// - ``bibtex`` (str) — full BibTeX entry / entries for the
+    ///   underlying paper(s)
+    ///
+    /// Operators that don't publish a citation (test fakes, internal
+    /// tooling, default ``None``) are silently skipped. The returned
+    /// list is empty when no operators are registered, or when none of
+    /// them publish a citation.
+    ///
+    /// Stable across runs given the same operator stack — diff two
+    /// outputs to confirm the dependency graph stayed bit-equal.
+    fn citations(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let cites = self.inner.citations();
+        let list = pyo3::types::PyList::empty(py);
+        for c in cites {
+            let dict = pyo3::types::PyDict::new(py);
+            dict.set_item("crate_name", c.crate_name)?;
+            dict.set_item("crate_version", c.crate_version)?;
+            dict.set_item("commit_hash", c.commit_hash)?;
+            dict.set_item("doi", c.doi)?;
+            dict.set_item("bibtex", c.bibtex)?;
+            list.append(dict)?;
+        }
+        Ok(list.into())
+    }
+
+    /// Render the registered operator stack's citations as a
+    /// human-readable provenance block. Suitable for paper supplementary
+    /// material or for embedding in a snapshot file.
+    ///
+    /// The layout is identical to the Rust ``System::provenance()``
+    /// renderer — call sites can diff two outputs (across runs, across
+    /// machines, across language bindings) to confirm the dependency
+    /// graph stayed bit-equal.
+    fn provenance(&self) -> String {
+        self.inner.provenance()
+    }
+
     fn __repr__(&self) -> String {
         let m = self.inner.metrics();
         format!(

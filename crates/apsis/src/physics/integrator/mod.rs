@@ -39,6 +39,7 @@
 //! - Everhart (1985). *Dyn. Comets* 115, 185–202 (original RADAU15).
 //! - Rein & Spiegel (2015). *MNRAS* 446, 1424–1437 (IAS15).
 
+pub mod citation;
 pub mod coefficients;
 pub mod conservation;
 pub mod dense;
@@ -58,6 +59,7 @@ pub mod yoshida4;
 
 // ── Re-exports ────────────────────────────────────────────────────────────────
 
+pub use citation::{Citation, render_provenance};
 pub use coefficients::{Y4_C, Y4_D, Y4_W0, Y4_W1};
 pub use conservation::{
     ConservationClass, ConservationContribution, ConservationReport, EnergyImpact, OperatorRole,

@@ -87,7 +87,9 @@ use apsis::domain::body::Body;
 use apsis::math::Vec3;
 use apsis::physics::gravity::kernel::KernelRequirements;
 use apsis::physics::integrator::regime::{classify_mass_ratio, mass_ratio};
-use apsis::physics::integrator::{HamiltonianOperator, Operator, RegimeViolation, Severity};
+use apsis::physics::integrator::{
+    Citation, HamiltonianOperator, Operator, RegimeViolation, Severity,
+};
 use apsis::units::UnitSystem;
 
 /// Mass ratio above which the test-particle pairwise 1PN approximation
@@ -309,7 +311,49 @@ impl Operator for PostNewtonian1PN {
     fn regime_check_cadence(&self) -> usize {
         15_000
     }
+
+    /// Anderson et al. (1975) — original test-particle 1PN derivation
+    /// in the Schwarzschild gauge — and Will (1993) for the EIH
+    /// background. Crate name + version + git commit are captured at
+    /// build time from this crate's `Cargo.toml` and `build.rs`, not
+    /// apsis core's, so the reproducibility envelope pins the
+    /// implementing source state independently of the host
+    /// integrator's version.
+    fn citation(&self) -> Option<Citation> {
+        Some(Citation {
+            bibtex: PN1_BIBTEX,
+            doi: Some("10.1086/153180"),
+            crate_name: env!("CARGO_PKG_NAME"),
+            crate_version: env!("CARGO_PKG_VERSION"),
+            commit_hash: option_env!("APSIS_1PN_GIT_COMMIT").filter(|s| !s.is_empty()),
+        })
+    }
 }
+
+/// BibTeX block for the test-particle pairwise 1PN derivation.
+/// Anderson et al. (1975) is the primary reference for the
+/// Schwarzschild-gauge test-particle form implemented in this crate;
+/// Will (1993) is the canonical textbook treatment of the EIH
+/// background the derivation reduces from in the test-particle limit.
+/// Both entries live here as a single static so consumers receive the
+/// full reference list per operator without splitting strings at the
+/// call site.
+const PN1_BIBTEX: &str = r#"@article{anderson1975,
+  author  = {Anderson, J. D. and Esposito, P. B. and Martin, W. and Thornton, C. L. and Muhleman, D. O.},
+  title   = {Experimental test of general relativity using time-delay data from Mariner 6 and Mariner 7},
+  journal = {Astrophysical Journal},
+  volume  = {200},
+  pages   = {221--233},
+  year    = {1975},
+  doi     = {10.1086/153180}
+}
+@book{will1993,
+  author    = {Will, C. M.},
+  title     = {Theory and Experiment in Gravitational Physics},
+  publisher = {Cambridge University Press},
+  year      = {1993},
+  edition   = {2}
+}"#;
 
 impl HamiltonianOperator for PostNewtonian1PN {
     fn accumulate_force(&self, bodies: &[Body], acc: &mut [Vec3]) {
@@ -682,6 +726,32 @@ mod tests {
         assert_eq!(req, KernelRequirements::exact_and_smooth());
         assert_eq!(req.required_exactness, Some(Exactness::Exact));
         assert_eq!(req.min_continuity, Some(Continuity::Smooth));
+    }
+
+    /// `citation()` returns Anderson 1975 + Will 1993 with the
+    /// implementing crate's name + version pinned at build time. The
+    /// commit hash is `Some(...)` when the build came from a git
+    /// checkout (the common case in CI and dev) and `None` otherwise.
+    /// We only assert the structural shape — name and version are
+    /// known at compile time, the commit-hash branch is environment-
+    /// dependent and tested by `c_solar_units_matches_si_derivation`-
+    /// style sanity rather than direct equality.
+    #[test]
+    fn citation_pins_anderson_1975_and_will_1993() {
+        let pn = PostNewtonian1PN::for_units(UnitSystem::solar_canonical());
+        let c = pn.citation().expect("PostNewtonian1PN must publish a citation");
+        assert_eq!(c.crate_name, "apsis-1pn", "crate_name must match this crate");
+        assert_eq!(c.crate_version, env!("CARGO_PKG_VERSION"));
+        assert_eq!(c.doi, Some("10.1086/153180"));
+        assert!(c.bibtex.contains("anderson1975"), "bibtex missing primary reference");
+        assert!(c.bibtex.contains("will1993"), "bibtex missing textbook reference");
+        assert!(c.bibtex.contains("Mariner"), "Anderson 1975 abstract phrase missing from bibtex");
+        // Commit hash, if present, must look like a SHA — no
+        // accidental garbage like "fatal: not a git repository".
+        if let Some(h) = c.commit_hash {
+            assert!(h.chars().all(|ch| ch.is_ascii_hexdigit()), "commit_hash not a hex SHA: {h}");
+            assert!(h.len() >= 7, "commit_hash suspiciously short: {h}");
+        }
     }
 
     /// Order-of-magnitude check: Mercury at perihelion sees a 1PN
