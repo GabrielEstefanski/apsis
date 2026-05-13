@@ -37,32 +37,71 @@ Three regimes drive the case for a hybrid:
 
 ## Algorithm
 
-Following Rein et al. 2019 §2. Hamiltonian decomposition:
+Faithful port of REBOUND's `integrator_mercurius.c` (Rein et al. 2019). The
+implementation mirrors REBOUND's structure rather than the simplified
+"clean Hamiltonian split" sketch the design proposal carried — that
+sketch is mathematically incomplete: a pure $(1-K)\,V$ flow generates a
+kick (no position evolution), so feeding it to IAS15 (which integrates
+$\ddot x = a$) produces a $v\cdot \tau$ free drift on top of the
+analytical Kepler step and double-counts position evolution. REBOUND's
+actual structure is a **rewind hybrid**: the WH branch advances all
+particles, an encounter detector identifies close pairs, those pairs
+rewind to pre-Kepler state, and IAS15 re-integrates them over the same
+$\tau$ window with the full Sun-pull plus the $(1-K)$-weighted
+planet-planet residual. Non-encountering particles keep their
+analytical-Kepler positions.
+
+### Per-step structure
+
+In democratic-heliocentric coordinates (planets relative to Sun position;
+inertial momenta in COM rest frame):
+
+1. **Interaction kick** $\mathrm{int}(\tau/2)$: $v_i \mathrel{+}= \tau/2 \cdot a_i^K$ where $a_i^K$ is the K-weighted planet-planet acceleration (Sun pull excluded — handled analytically by stage 4).
+2. **Jump** $\mathrm{jmp}(\tau/2)$: $q_i \mathrel{+}= \tau/2 \cdot (\sum_j m_j v_j) / m_0$ on every planet.
+3. **COM drift** $\mathrm{com}(\tau)$: track inertial COM motion over the step.
+4. **Backup + Kepler drift** $\mathrm{kep}(\tau)$: snapshot $(q_i, v_i)$ pre-Kepler; analytically advance every planet around the Sun for $\tau$.
+5. **Encounter predict**: scan all pairs, compute $r_\text{min}$ over the step via cubic-Hermite interpolation between pre- and post-Kepler positions; flag pairs with $r_\text{min} < \mathrm{dcrit}_{ij}$ where $\mathrm{dcrit}_{ij} = \max(\mathrm{dcrit}_i, \mathrm{dcrit}_j)$.
+6. **Encounter step** $\mathrm{enc}(\tau)$: for every flagged particle, restore the pre-Kepler snapshot. Run IAS15 over $\tau$ on the encountering subset only. IAS15's force model returns full Sun-pull + $(1-K)$-weighted planet-planet (gravity in REBOUND's `mode = 1`); the K-weighted far-field contribution from non-encountering planets onto the encountering pair is implicit because $K \to 1$ at large separation makes the residual zero anyway.
+7. **Jump** $\mathrm{jmp}(\tau/2)$: same as stage 2.
+8. **Interaction kick** $\mathrm{int}(\tau/2)$.
+
+Outer truncation: $O(\tau^3)$ per step, $O(\tau^2)$ over the integration.
+The K-weighted interaction kicks are the only second-order operator in
+the split; the rest is either analytical (Kepler), exact (jump, COM),
+or high-precision (IAS15 on encountering pairs).
+
+### Changeover function (REBOUND `L_mercury`)
+
+$C^2$ quintic Hermite polynomial with a `0.1 · dcrit` deadband:
 
 $$
-H = H_K + H_\text{indirect} + H_\text{far} + H_\text{close}
+y = \frac{d - 0.1 \, \mathrm{dcrit}}{0.9 \, \mathrm{dcrit}}, \qquad
+L(y) = \begin{cases}
+0 & y \le 0 \\
+10 y^3 - 15 y^4 + 6 y^5 & 0 < y < 1 \\
+1 & y \ge 1
+\end{cases}
 $$
 
-with
+The deadband ensures $L \equiv 0$ for $d < 0.1 \, \mathrm{dcrit}$ — IAS15
+gets full responsibility deep inside the encounter, with no leakage of
+K-weighted force into the close regime.
 
-| Term | Form | Operator |
-| --- | --- | --- |
-| $H_K$ | $\sum_{i \ge 1} (p_i^2 / 2 m_i - G m_0 m_i / |q_i|)$ | Analytical Kepler drift |
-| $H_\text{indirect}$ | $(\sum_i p_i)^2 / (2 m_0)$ | Uniform position drift on planets |
-| $H_\text{far}$ | $-\sum_{i < j} K(r_{ij}/r_\text{cross}^{(ij)}) \, G m_i m_j / r_{ij}$ | K-weighted planet-planet kick |
-| $H_\text{close}$ | $-\sum_{i < j} (1 - K(r_{ij}/r_\text{cross}^{(ij)})) \, G m_i m_j / r_{ij}$ | IAS15 sub-integration |
+### Critical radius (REBOUND `dcrit_for_particle`)
 
-with $q_i = r_i - r_0$ heliocentric and $K$ the changeover function. Per-pair changeover scale $r_\text{cross}^{(ij)} = \alpha \, R_H^{(ij)}$ from the mutual Hill radius.
-
-Symplectic 2nd-order split (DKD-form):
+Per-particle, max of four criteria:
 
 $$
-\Psi_\tau = \Phi_{H_K}^{\tau/2} \; \Phi_{H_\text{indirect}}^{\tau/2} \; \Phi_{H_\text{far}}^{\tau/2} \; \Phi_{H_\text{close}}^{\tau} \; \Phi_{H_\text{far}}^{\tau/2} \; \Phi_{H_\text{indirect}}^{\tau/2} \; \Phi_{H_K}^{\tau/2}
+\mathrm{dcrit}_i = \max \begin{cases}
+v_c \cdot 0.4 \, \tau & \text{average velocity} \\
+|v_i| \cdot 0.4 \, \tau & \text{current velocity} \\
+\alpha \cdot a_i \cdot \sqrt[3]{m_i / (3 m_0)} & \text{Hill radius} \\
+2 r_i^\text{phys} & \text{physical radius}
+\end{cases}
 $$
 
-The inner $\Phi_{H_\text{close}}^{\tau}$ is integrated by the embedded IAS15 instance, which adaptively sub-steps within $[0, \tau]$ until the residual force is exhausted. The IAS15 controller's own state persists across Mercurius outer steps so it can learn the close-field truncation scale.
-
-Total composition: 7-stage symplectic split. Outer truncation: $O(\tau^3)$ per step, $O(\tau^2)$ over the integration. Identical to standard WH order when $K \equiv 1$ (no encounters).
+with $a_i$ the osculating semi-major axis, $v_c = \sqrt{G m_0 / |a_i|}$ the
+circular velocity. Pair-wise scale: $\mathrm{dcrit}_{ij} = \max(\mathrm{dcrit}_i, \mathrm{dcrit}_j)$.
 
 ---
 
@@ -70,23 +109,24 @@ Total composition: 7-stage symplectic split. Outer truncation: $O(\tau^3)$ per s
 
 | Question | Decision | Rationale |
 | --- | --- | --- |
-| §6.1 Hill radius $M_\star$ for non-hierarchical systems | Refuse with `MercuriusError::NonHierarchical` at construction time | Mercurius assumes a dominant central body for the analytical Kepler drift. Non-hierarchical fallback would be a different algorithm (different far-field operator). Honest failure → user routes to IAS15 directly. Matches REBOUND. |
-| §6.2 Changeover function shape | $K(y) = y^2 (3 - 2y)$ on $y \in [0, 1]$, clipped at endpoints | $C^1$ polynomial. Standard cubic Hermite smoothstep, matches Rein et al. 2019 §2.2 default and REBOUND `mercurius` switching. $C^2$ alternatives (Rein et al. mention but do not adopt) cost more in evaluation without measurable order improvement on the planetary regime. |
-| §6.3 Default $\alpha$ (Hill multiplier for $r_\text{cross}$) | $\alpha = 3$ | REBOUND default; validated by Rein et al. 2019 §3 against several planetary scattering scenarios. |
-| §6.4 `fast` integrator selection | Wisdom-Holman | Already implemented (3D-native, dense output, hierarchy classification, 619 tests passing). Yoshida-4 would lose the analytical Kepler step that makes Mercurius cheap on the far field. |
-| §6.5 Per-pair vs global changeover | Per-pair $r_\text{cross}^{(ij)}$ | Canonical in Rein et al. 2019 and physically necessary — different planet pairs have different $R_H^{(ij)}$ scales. Bookkeeping cost is $O(N^2)$ memory for the table, recomputed per outer step; trivial at planetary $N$. |
-| §6.6 Outer step shrink near encounters | Outer $\tau$ stays fixed; inner IAS15 absorbs cost | Canonical Rein et al. 2019 design. The whole point of Mercurius is to *avoid* shrinking the outer step globally; encounter cost stays local to the IAS15 sub-integration. |
+| §6.1 Hill radius $M_\star$ for non-hierarchical systems | Refuse with a `warn_diag!` event + `used_fallback = true`; step does not advance | Mercurius assumes a dominant central body for the analytical Kepler drift. Non-hierarchical fallback would be a different algorithm. Honest failure → user routes to IAS15 directly. Matches REBOUND. |
+| §6.2 Changeover function shape | REBOUND `L_mercury`: $C^2$ quintic Hermite $L(y) = 10 y^3 - 15 y^4 + 6 y^5$ with $y = (d - 0.1\,\mathrm{dcrit})/(0.9\,\mathrm{dcrit})$ | The 0.1·dcrit deadband ensures $L \equiv 0$ deep in the encounter — IAS15 carries the full force without leakage from the K-weighted kick. Earlier draft used a $C^1$ cubic; updated after reading `integrator_mercurius.c` (mid-experiment revision documented in [[feedback_research_commit_discipline]]). |
+| §6.3 Default $\alpha$ (Hill multiplier for `dcrit`) | $\alpha = 3$ | REBOUND default; validated by Rein et al. 2019 §3 against several planetary scattering scenarios. |
+| §6.4 `fast` integrator selection | Wisdom-Holman analytical Kepler drift, K-weighted planet-planet half-kicks | The K-weighted kick is the only second-order operator; Kepler is analytical, jump and COM are exact, encounter step is high-precision. Yoshida-4 would lose the analytical Kepler advantage. |
+| §6.5 Per-pair vs global changeover | Per-pair, via $\mathrm{dcrit}_{ij} = \max(\mathrm{dcrit}_i, \mathrm{dcrit}_j)$ | REBOUND structure — per-particle critical radius derived from 4 criteria (avg velocity, current velocity, Hill radius, physical radius), pair-wise reduced by max. Not the "mutual Hill radius per pair" formulation the design proposal sketched; the 4-criterion form is what REBOUND ships and what Rein et al. 2019 measure against. |
+| §6.6 Outer step shrink near encounters | Outer $\tau$ stays fixed; the inner IAS15 (rewind + restart per encounter step) absorbs cost | Canonical Rein et al. 2019 design. Encounter cost stays local to the encountering subset. |
 
 Additional decisions (not in §6, locked here):
 
 | Decision | Choice | Rationale |
 | --- | --- | --- |
 | Public name | `IntegratorKind::Mercurius`, slug `"mercurius"` | Matches Rein et al. 2019 algorithm name and REBOUND. Self-documenting. |
-| Force model interaction | Mercurius bypasses `IntegratorContext::force` for its internal pair forces; computes direct O(N²) K-weighted kicks and (1-K)-weighted residuals internally | The Barnes-Hut tree provides no value at planetary $N$ and the per-pair changeover requires explicit pair iteration. The internal close-field IAS15 gets a wrapping `ChangeoverForceModel` so its FSAL / Picard contracts are honoured without changes. |
+| Algorithmic structure | Rewind hybrid (REBOUND-faithful), not clean Hamiltonian split | A pure $(1-K)\,V$ Hamiltonian generates a kick (no position evolution); feeding it to IAS15 (which integrates $\ddot x = a$) introduces a $v\cdot\tau$ free drift that double-counts Kepler. REBOUND structure is correct: WH advances all → encounter detect → encountering pairs rewind → IAS15 re-integrates them with full Sun-pull + $(1-K)$ planet-planet. |
+| Force model interaction | Mercurius bypasses `IntegratorContext::force` for its own pair forces (direct O(N²) K-weighted kicks + close-field IAS15 with its own internal force model) | The Barnes-Hut tree adds no value at planetary $N$, and the per-pair K weighting requires explicit pair iteration. |
 | `compute_closeness` 2D defect | Fix in this PR (extends to 3D) | Phase 1 EncounterFlag reads `r_min`; latent 2D bug affects Phase 1 correctness on out-of-plane configurations. Single-line fix; in scope. |
-| `requires_deterministic_force` | `true` | Inherits from the embedded IAS15. Mercurius itself is deterministic given a deterministic close-field force model (which the internal `ChangeoverForceModel` is, by construction). |
-| `controls_own_step_size` | `false` | Outer $\tau$ is consumed exactly per call (`consumed_dt == dt_hint`). The internal IAS15 *does* control its own step within $[0, \tau]$, but that is not visible at the Mercurius trait boundary. |
-| `execution_profile` | `Realtime` | Outer per-step wall time bounded by IAS15-on-encountering-pair cost. Worst-case adversarial (deep encounter at high N) would push into Precision territory; flagged for empirical re-classification after Tier 4 measurement. |
+| `requires_deterministic_force` | `false` | Mercurius does not rely on the outer `ctx.force` being deterministic (it computes its own K-weighted forces internally). The inner IAS15's deterministic-force requirement is satisfied by the embedded close-field force model. |
+| `controls_own_step_size` | `false` | Outer $\tau$ is consumed exactly per call. The internal IAS15 *does* control its own step within encounter sub-integrations, but that is not visible at the Mercurius trait boundary. |
+| `execution_profile` | `Realtime` | Outer per-step wall time bounded by IAS15-on-encountering-subset cost. Adversarial worst case (deep simultaneous encounters at high N) would push into Precision; flagged for empirical re-classification after Tier 4. |
 
 ---
 
@@ -112,10 +152,10 @@ Phase 2 of the design proposal (hard-switch hybrid as a pedagogical stepping sto
 
 Two limits of the changeover function reduce Mercurius to existing first-class integrators. Both must hold to within f64 round-off floor.
 
-| Limit | Reduction | Bound |
-| --- | --- | --- |
-| $K \equiv 1$ everywhere ($r_\text{cross} \to 0$) | Mercurius = WH (close-field IAS15 sees zero force; far-field K-kick = full planet-planet kick) | Per-step trajectory difference vs `WisdomHolman` over 100 steps on `solar_system_inner`: $|\Delta r| \le 10 \, \varepsilon \cdot |r|$, $|\Delta E / E_0| \le 10^{-14}$ |
-| $K \equiv 0$ everywhere ($r_\text{cross} \to \infty$) | Mercurius = WH outer drift + IAS15 close-field on full force (effectively Kepler-aware IAS15) | Per-step trajectory difference vs reference IAS15-direct on `kepler_circular_e0`: $|\Delta a / a| \le 10^{-12}$ over 100 orbits |
+Two limits of the changeover function reduce Mercurius to existing first-class behaviours:
+
+- **No-encounters limit** ($\mathrm{dcrit} \to 0$, equivalently $\alpha = 0$): every pair has $L = 1$, the encounter detector flags nothing, the rewind+IAS15 stage is a no-op, and Mercurius reduces to Wisdom-Holman with the same K-weighted-= full kick decomposition. Bound: $|\Delta E / E_0| \le 10^{-12}$ over 200 steps on `quiet_planetary` with planet/Sun mass ratio $10^{-6}$. The bound is set by the difference in jump-step placement between apsis WH (single jump after Kepler) and Mercurius (jump halves on each side of Kepler) — both are 2nd-order symplectic but accumulate rounding differently. A direct trajectory-equality check is *not* part of Tier 1 because the two splits differ at $O(\tau^3 \cdot m_p / m_0)$ per step.
+- **All-encounters limit** ($\mathrm{dcrit} \to \infty$): every pair triggers the encounter detector, IAS15 integrates the full system every step, Mercurius reduces to IAS15-with-restart. Bound: per-step trajectory $|\Delta r / r| \le 10^{-10}$ vs an independent `Ias15` instance on `quiet_planetary` over 50 steps (loose because the encounter step uses IAS15-restart per outer step rather than continuous IAS15 state).
 
 **Failure here halts the experiment.** Either limit failing means the K-weighting or sub-integration plumbing has a sign / scaling error that no amount of cross-implementation parity will catch.
 
