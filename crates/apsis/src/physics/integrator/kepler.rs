@@ -62,8 +62,15 @@ fn stumpff_s(psi: f64) -> f64 {
 /// f(χ) = (r₀ · v_r₀ / √μ) · χ² c(ψ)  +  (1 − r₀ α) · χ³ s(ψ)  +  r₀ χ
 /// ```
 ///
-/// and `ψ = α χ²`, `α = 1/a` (negative for hyperbolic orbits).
-/// The derivative `df/dχ = r(χ) / √μ` is the instantaneous radius, which is
+/// and `ψ = α χ²`, `α = 1/a` (negative for hyperbolic orbits). All terms
+/// have units of `[length^(3/2)]`, matching the `√μ · dt` LHS — `χ` carries
+/// units `[length^(1/2)]`. A previous formulation divided the `r₀ · χ`
+/// term by `√μ`, mixing time-units into the equation; the equation only
+/// satisfied `f − √μ·dt = 0` when `μ = 1`, so the bug was invisible to
+/// canonical-units (`G = 1`) tests but produced spurious chi roots when
+/// any caller passed `μ ≠ 1` (Wisdom-Holman / Mercurius in solar units).
+///
+/// The derivative `df/dχ = r(χ)` is the instantaneous radius, which is
 /// always positive and guarantees monotone convergence of Newton's method.
 #[inline]
 fn kepler_universal_fd(chi: f64, alpha: f64, r0: f64, vr0: f64, mu: f64, dt: f64) -> (f64, f64) {
@@ -77,10 +84,9 @@ fn kepler_universal_fd(chi: f64, alpha: f64, r0: f64, vr0: f64, mu: f64, dt: f64
     let r = (r0 * vr0 / sqrt_mu) * chi * (1.0 - psi * s) + (1.0 - r0 * alpha) * chi2 * c + r0;
 
     let f_val =
-        (r0 * vr0 / sqrt_mu) * chi2 * c + (1.0 - r0 * alpha) * chi3 * s + r0 * chi / sqrt_mu
-            - sqrt_mu * dt;
+        (r0 * vr0 / sqrt_mu) * chi2 * c + (1.0 - r0 * alpha) * chi3 * s + r0 * chi - sqrt_mu * dt;
 
-    (f_val, r / sqrt_mu)
+    (f_val, r)
 }
 
 // ── Public propagator ─────────────────────────────────────────────────────────
@@ -106,7 +112,7 @@ fn kepler_universal_fd(chi: f64, alpha: f64, r0: f64, vr0: f64, mu: f64, dt: f64
 /// # Convergence
 ///
 /// Newton–Raphson on the universal time equation converges quadratically. The
-/// derivative `df/dχ = r/√μ > 0` is always positive, guaranteeing monotone
+/// derivative `df/dχ = r > 0` is always positive, guaranteeing monotone
 /// convergence. The tolerance is `|Δχ| < 10⁻¹²`, with a safety cap at 50
 /// iterations.
 ///
@@ -197,6 +203,39 @@ mod tests {
 
         assert!((r1 - r0).length() < 1e-10, "position drift {}", (r1 - r0).length());
         assert!((v1 - v0).length() < 1e-10, "velocity drift {}", (v1 - v0).length());
+    }
+
+    /// Same circular-orbit identity but with `mu ≠ 1`. Catches the
+    /// previous units bug where the universal Kepler equation kept a
+    /// `r₀ χ / √μ` term instead of `r₀ χ`, making the chi root
+    /// correct only when `μ = 1`. Solar-units (G ≈ 4π²) is the
+    /// regime that exposed the bug in Mercurius's parity scenario.
+    #[test]
+    fn circular_orbit_period_returns_to_start_with_mu_not_unity() {
+        let mu = 4.0 * std::f64::consts::PI * std::f64::consts::PI; // solar AU-year
+        let r0 = Vec3::new(1.0, 0.0, 0.0);
+        let v0 = Vec3::new(0.0, mu.sqrt(), 0.0);
+        let period = 2.0 * std::f64::consts::PI / mu.sqrt() * r0.length(); // n = √(μ/r³)
+
+        let (r1, v1) = kepler_step(r0, v0, period, mu);
+
+        let pos_drift = (r1 - r0).length();
+        let vel_drift = (v1 - v0).length();
+        assert!(pos_drift < 1.0e-10, "position drift {pos_drift}");
+        assert!(vel_drift < 1.0e-10, "velocity drift {vel_drift}");
+    }
+
+    /// Single small-dt step on a circular orbit at `mu ≠ 1` must
+    /// preserve `|r|`. The chi root is sensitive to the units bug at
+    /// the level of the dominant term in `f(χ)`.
+    #[test]
+    fn circular_step_preserves_radius_with_mu_not_unity() {
+        let mu = 4.0 * std::f64::consts::PI * std::f64::consts::PI;
+        let r0 = Vec3::new(5.20, 0.0, 0.0);
+        let v0 = Vec3::new(0.0, (mu / r0.length()).sqrt(), 0.0);
+        let (r1, _v1) = kepler_step(r0, v0, 0.01, mu);
+        let drift = ((r1.length() - r0.length()) / r0.length()).abs();
+        assert!(drift < 1.0e-12, "radius drift {drift} on circular orbit");
     }
 
     /// Energy is exactly conserved by the analytical propagator (within f64
