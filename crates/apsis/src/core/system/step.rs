@@ -9,6 +9,7 @@ use crate::core::system::System;
 use crate::core::system::helpers::compute_closeness;
 use crate::domain::body_arrays::BodyArrays;
 use crate::math::Vec3;
+use crate::physics::encounter::EncounterFlag;
 use crate::physics::energy::{angular_momentum_z, kinetic_energy, total_energy};
 use crate::physics::integrator::IntegratorContext;
 use crate::physics::integrator::{DenseSnapshot, IntegratorKind};
@@ -178,6 +179,30 @@ impl System {
         let (r_min, soft_max) = compute_closeness(&self.bodies);
         self.r_min = r_min;
         self.softening_max = soft_max;
+
+        // Close-encounter advisory. When `close_encounter_threshold` is
+        // unset the flag is always `Far` and this branch is a single
+        // comparison; when set it grades `r_min` against the threshold
+        // and emits a structured event the first step a Close descent
+        // becomes visible. Edge-triggered on the previous flag — once
+        // the system is Close the warning does not repeat until it has
+        // climbed back out of the band.
+        let new_flag = EncounterFlag::classify(self.r_min, self.close_encounter_threshold);
+        if new_flag == EncounterFlag::Close
+            && self.last_encounter_flag != EncounterFlag::Close
+            && let Some(threshold) = self.close_encounter_threshold
+        {
+            crate::warn_diag!(
+                crate::core::log::Source::System,
+                "close encounter detected",
+                r_min = self.r_min,
+                threshold = threshold,
+                step = self.steps,
+                t = self.t,
+                hint = "consider Mercurius integrator for hybrid close-encounter handling",
+            );
+        }
+        self.last_encounter_flag = new_flag;
 
         // ── 3. Detect events and dispatch post-step hooks ────────────────────
         if !self.hooks.is_empty() {
