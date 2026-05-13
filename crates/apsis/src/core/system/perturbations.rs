@@ -13,9 +13,14 @@ use crate::physics::integrator::traits::IntegratorKind;
 
 impl System {
     /// Register a Hamiltonian-class perturbation. Applied at every
-    /// integration step; `energy_contribution` is summed into
-    /// [`System::total_energy`]. Kernel-precondition violations against
-    /// the active kernel emit one structured `warn_diag` per invariant.
+    /// integration step; its `potential` (when [`Potential::Value`]) is
+    /// summed into [`System::total_energy`]. Operators whose `potential`
+    /// is `NotAvailable` contribute force but not energy, and surface
+    /// as `HamiltonianForceOnly` in [`Self::conservation_report`].
+    /// Kernel-precondition violations against the active kernel emit
+    /// one structured `warn_diag` per invariant.
+    ///
+    /// [`Potential::Value`]: crate::physics::integrator::Potential::Value
     pub fn add_hamiltonian_perturbation(&mut self, p: Box<dyn HamiltonianOperator>) {
         let kernel = self.force_model.kernel();
         let props = kernel.properties(&self.bodies);
@@ -102,10 +107,35 @@ impl System {
     }
 
     /// Remove all registered perturbation operators (Hamiltonian and
-    /// non-conservative) and observers.
+    /// non-conservative) and observers. Use when the caller wants a
+    /// fresh slate; for granular replacement see
+    /// [`clear_hamiltonian_perturbations`](Self::clear_hamiltonian_perturbations),
+    /// [`clear_non_conservative_perturbations`](Self::clear_non_conservative_perturbations),
+    /// and [`clear_observers`](Self::clear_observers).
     pub fn clear_perturbations(&mut self) {
         self.hamiltonian_perturbations.clear();
         self.non_conservative_perturbations.clear();
+        self.observers.clear();
+    }
+
+    /// Remove only the registered Hamiltonian-class perturbations,
+    /// leaving non-conservative perturbations and observers untouched.
+    /// Used by callers that want to atomically replace the Hamiltonian
+    /// stack without disturbing dissipative coupling or diagnostic
+    /// observers.
+    pub fn clear_hamiltonian_perturbations(&mut self) {
+        self.hamiltonian_perturbations.clear();
+    }
+
+    /// Remove only the registered non-conservative perturbations,
+    /// leaving Hamiltonian operators and observers untouched.
+    pub fn clear_non_conservative_perturbations(&mut self) {
+        self.non_conservative_perturbations.clear();
+    }
+
+    /// Remove only the registered observers, leaving force-contributing
+    /// operators untouched.
+    pub fn clear_observers(&mut self) {
         self.observers.clear();
     }
 
@@ -118,6 +148,18 @@ impl System {
     /// Count of registered observers.
     pub fn observer_count(&self) -> usize {
         self.observers.len()
+    }
+
+    /// Conservation property of the registered operator stack as a
+    /// whole, plus the per-operator breakdown that produced it. See
+    /// [`crate::physics::integrator::ConservationReport`] for the
+    /// classification rules and attribution scope.
+    pub fn conservation_report(&self) -> crate::physics::integrator::ConservationReport {
+        crate::physics::integrator::ConservationReport::build(
+            &self.bodies,
+            &self.hamiltonian_perturbations,
+            &self.non_conservative_perturbations,
+        )
     }
 
     #[cfg(test)]

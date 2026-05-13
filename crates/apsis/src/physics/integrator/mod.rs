@@ -40,6 +40,7 @@
 //! - Rein & Spiegel (2015). *MNRAS* 446, 1424–1437 (IAS15).
 
 pub mod coefficients;
+pub mod conservation;
 pub mod dense;
 pub mod force_model;
 pub mod helpers;
@@ -57,6 +58,10 @@ pub mod yoshida4;
 // ── Re-exports ────────────────────────────────────────────────────────────────
 
 pub use coefficients::{Y4_C, Y4_D, Y4_W0, Y4_W1};
+pub use conservation::{
+    ConservationClass, ConservationContribution, ConservationReport, EnergyImpact, OperatorRole,
+    PotentialStatus,
+};
 pub use dense::{DenseCoeffs, DenseSnapshot};
 pub use force_model::{ForceModel, GravityForceModel};
 pub use helpers::{evaluate, scale_acc_and_pe};
@@ -65,6 +70,7 @@ pub use kepler::kepler_step;
 pub use mercurius::Mercurius;
 pub use operator::{
     HamiltonianOperator, HamiltonianOperatorDescriptor, NonConservativeOperator, Operator,
+    Potential,
 };
 pub use primitives::{drift, kick};
 pub use traits::{AdaptiveStats, Integrator, IntegratorContext, IntegratorKind, StepResult};

@@ -120,6 +120,23 @@ pub const C_SOLAR_UNITS: f64 = {
 /// ```
 ///
 /// Stateless. Safe to share across threads.
+///
+/// # Cross-reference to REBOUNDx
+///
+/// This implementation corresponds to REBOUNDx's `gr` effect (Anderson
+/// et al. 1975 test-particle 1PN, velocity-dependent in `(r̂·v)·v` and
+/// `v² · r̂` terms). It is **not** the same as REBOUNDx's
+/// `gr_potential`, which is a velocity-independent effective potential
+/// (Nobili & Roxburgh 1986) that gets pericenter precession right but
+/// the mean motion wrong by `O(GM/(a·c²))`. The Nobili–Roxburgh form
+/// would be a separate operator with closed-form `potential` and
+/// WHFast-symplectic-friendly dispatch; it is not implemented here.
+///
+/// The full N-body Einstein–Infeld–Hoffmann Hamiltonian — the rigorous
+/// form when masses are comparable — is also out of scope. For the
+/// Sun–Mercury validation regime (`m_Mercury / m_Sun ≈ 2 × 10⁻⁷`) the
+/// test-particle simplification is canonical and gates the 4.4 ppm
+/// agreement reported in [`docs/experiments/2026-05-13-mercury-1pn-long-horizon.md`].
 #[derive(Debug, Clone, Copy)]
 pub struct PostNewtonian1PN {
     /// Speed of light in the caller's unit system.
@@ -231,17 +248,16 @@ impl HamiltonianOperator for PostNewtonian1PN {
         }
     }
 
-    /// Pairwise test-particle 1PN is derived as a force expansion of the
-    /// geodesic equation, not as a clean two-body Hamiltonian — the
-    /// closed-form energy term would require the full Einstein–Infeld–
-    /// Hoffmann N-body Hamiltonian, which is out of scope for this
-    /// demonstration crate. Returning zero leaves the conserved energy
-    /// reported by [`apsis::core::system::System::total_energy`] without
-    /// the 1PN correction; the energy diagnostic is still meaningful as
-    /// an indicator of integrator drift on the unperturbed skeleton.
-    fn energy_contribution(&self, _bodies: &[Body]) -> f64 {
-        0.0
-    }
+    // `potential` inherits the default [`Potential::NotAvailable`].
+    //
+    // Test-particle pairwise 1PN is derived as a force expansion of the
+    // geodesic equation, not from a two-body scalar Hamiltonian. The
+    // rigorous form is the full Einstein–Infeld–Hoffmann N-body
+    // Hamiltonian — out of scope for this test-particle approximation
+    // crate. `System::total_energy` therefore excludes this operator's
+    // contribution; `System::conservation_report` surfaces the exclusion
+    // by classifying the system as `HamiltonianForceOnly` whenever 1PN
+    // is the only registered Hamiltonian operator.
 }
 
 /// Federation entry point — a [`HamiltonianOperatorDescriptor`] that

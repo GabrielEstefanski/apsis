@@ -1104,9 +1104,14 @@ mod tests {
             }
         }
 
-        fn energy_contribution(&self, bodies: &[crate::domain::body::Body]) -> f64 {
+        fn potential(
+            &self,
+            bodies: &[crate::domain::body::Body],
+        ) -> crate::physics::integrator::Potential {
             // V = -a_y * Σ y_i so that −∂V/∂y_i = a_y.
-            -self.a_y * bodies.iter().skip(1).map(|b| b.pos_y).sum::<f64>()
+            crate::physics::integrator::Potential::Value(
+                -self.a_y * bodies.iter().skip(1).map(|b| b.pos_y).sum::<f64>(),
+            )
         }
     }
 
