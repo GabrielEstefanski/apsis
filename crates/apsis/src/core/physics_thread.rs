@@ -131,9 +131,10 @@ pub enum PhysicsCmd {
     /// Swap the trail-sampler strategy. Anchors (if any) are discarded; the
     /// next step restores them and records an initial sample.
     SetTrailSampler(TrailSamplerKind),
-    /// Replace the Hamiltonian-perturbation stack atomically. Clears all
-    /// previously registered operators (Hamiltonian, non-conservative,
-    /// observers) and registers each entry in order.
+    /// Atomically replace the Hamiltonian-perturbation stack. Clears
+    /// previously-registered Hamiltonian operators and registers each
+    /// entry in order. **Non-conservative perturbations and observers
+    /// registered separately are not touched.**
     ///
     /// Non-conservative and observer registration through the
     /// physics-thread protocol is not yet exposed; the UI catalog is
@@ -829,7 +830,7 @@ fn apply_cmd(
             *trail_sampler = kind.build();
         },
         PhysicsCmd::SetHamiltonianPerturbations(ps) => {
-            system.clear_perturbations();
+            system.clear_hamiltonian_perturbations();
             for p in ps {
                 system.add_hamiltonian_perturbation(p);
             }

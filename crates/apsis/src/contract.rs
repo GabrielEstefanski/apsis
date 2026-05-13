@@ -249,7 +249,7 @@ mod tests {
         Continuity, Exactness, KernelRequirements, TruncatedPlummerKernel,
     };
     use crate::physics::integrator::{
-        HamiltonianOperator, IntegratorKind, NonConservativeOperator, Operator,
+        HamiltonianOperator, IntegratorKind, NonConservativeOperator, Operator, Potential,
     };
     use crate::units::UnitSystem;
 
@@ -278,12 +278,12 @@ mod tests {
             }
         }
 
-        fn energy_contribution(&self, bodies: &[Body]) -> f64 {
+        fn potential(&self, bodies: &[Body]) -> Potential {
             let mut s = 0.0;
             for b in bodies {
                 s -= self.0.x * b.pos_x + self.0.y * b.pos_y + self.0.z * b.pos_z;
             }
-            s
+            Potential::Value(s)
         }
     }
 
@@ -315,8 +315,8 @@ mod tests {
 
     impl HamiltonianOperator for NullPerturbation {
         fn accumulate_force(&self, _bodies: &[Body], _acc: &mut [Vec3]) {}
-        fn energy_contribution(&self, _bodies: &[Body]) -> f64 {
-            0.0
+        fn potential(&self, _bodies: &[Body]) -> Potential {
+            Potential::Value(0.0)
         }
     }
 
@@ -339,12 +339,12 @@ mod tests {
             }
         }
 
-        fn energy_contribution(&self, bodies: &[Body]) -> f64 {
+        fn potential(&self, bodies: &[Body]) -> Potential {
             let mut s = 0.0;
             for b in bodies {
                 s += b.pos_x * b.pos_x + b.pos_y * b.pos_y + b.pos_z * b.pos_z;
             }
-            0.5 * self.0 * s
+            Potential::Value(0.5 * self.0 * s)
         }
     }
 
@@ -362,8 +362,8 @@ mod tests {
 
     impl HamiltonianOperator for DeclaresExactnessRequirement {
         fn accumulate_force(&self, _bodies: &[Body], _acc: &mut [Vec3]) {}
-        fn energy_contribution(&self, _bodies: &[Body]) -> f64 {
-            0.0
+        fn potential(&self, _bodies: &[Body]) -> Potential {
+            Potential::Value(0.0)
         }
     }
 
@@ -384,8 +384,8 @@ mod tests {
 
     impl HamiltonianOperator for DeclaresContinuityRequirement {
         fn accumulate_force(&self, _bodies: &[Body], _acc: &mut [Vec3]) {}
-        fn energy_contribution(&self, _bodies: &[Body]) -> f64 {
-            0.0
+        fn potential(&self, _bodies: &[Body]) -> Potential {
+            Potential::Value(0.0)
         }
     }
 

@@ -5,7 +5,7 @@
 use crate::domain::body::Body;
 use crate::math::Vec3;
 use crate::physics::integrator::operator::{
-    HamiltonianOperator, NonConservativeOperator, Operator,
+    HamiltonianOperator, NonConservativeOperator, Operator, Potential,
 };
 
 /// Sum the force contributions of every Hamiltonian and
@@ -26,13 +26,22 @@ pub fn accumulate_perturbation_forces(
     }
 }
 
-/// Sum `Σᵢ V_i` across Hamiltonian operators for inclusion in
-/// [`crate::core::system::System::total_energy`].
+/// Sum `Σᵢ V_i` across Hamiltonian operators whose
+/// [`potential`](HamiltonianOperator::potential) returns
+/// [`Potential::Value`]. Operators returning [`Potential::NotAvailable`]
+/// are silently excluded; surfacing that exclusion is the responsibility
+/// of [`crate::core::system::System::conservation_report`].
 pub fn total_hamiltonian_contribution(
     bodies: &[Body],
     hamiltonian: &[Box<dyn HamiltonianOperator>],
 ) -> f64 {
-    hamiltonian.iter().map(|op| op.energy_contribution(bodies)).sum()
+    hamiltonian
+        .iter()
+        .filter_map(|op| match op.potential(bodies) {
+            Potential::Value(v) => Some(v),
+            Potential::NotAvailable => None,
+        })
+        .sum()
 }
 
 /// Dispatch the boundary `observe` hook on every registered operator
