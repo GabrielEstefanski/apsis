@@ -68,10 +68,10 @@ fn mercury_precession_matches_gr_within_100ppm() {
     const N_ORBITS: u64 = 500;
 
     // Softening zeroed so the Newtonian baseline is bit-exact Keplerian.
-    let sun = Body::star(1.0).unsoftened();
+    let sun = Body::star(1.0);
     let r_peri = A * (1.0 - E);
     let v_peri = (2.0 / r_peri - 1.0 / A).sqrt();
-    let mercury = Body::rocky(M_MERCURY).at(r_peri, 0.0).with_velocity(0.0, v_peri).unsoftened();
+    let mercury = Body::rocky(M_MERCURY).at(r_peri, 0.0).with_velocity(0.0, v_peri);
 
     let mut sys = System::new(vec![sun, mercury], UnitSystem::solar_canonical())
         .with_integrator(IntegratorKind::Ias15)
@@ -107,21 +107,13 @@ fn mercury_precession_matches_gr_within_100ppm() {
     );
 }
 
-/// Bus subscribers are process-global; both diagnostic tests below
-/// subscribe with the same marker prefix and would cross-contaminate
-/// when run in parallel. Serialise via a shared mutex.
-static BUS_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-/// Contract test — registering a 1PN perturbation into a softened
-/// system must raise a warn-level diagnostic on the log bus. This is
-/// the protection against the silent Plummer-swamps-GR failure mode
-/// that tripped up the first end-to-end run.
+/// Opting into a Plummer kernel under a perturbation that demands exact
+/// 1/r² (1PN) raises a warn diagnostic at registration time.
 #[test]
-fn softened_system_triggers_diagnostic() {
+fn plummer_kernel_under_1pn_triggers_diagnostic() {
     use apsis::core::log::{Event, Level, subscribe, unsubscribe};
+    use apsis::physics::gravity::NewtonKernel;
     use std::sync::{Arc, Mutex};
-
-    let _guard = BUS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
 
     const MARKER: &str = "perturbation requires exact 1/r gravity";
 
@@ -133,11 +125,11 @@ fn softened_system_triggers_diagnostic() {
         }
     });
 
-    // Default softening left in place — this is the trap.
     let mut sys = System::new(
         vec![Body::star(1.0), Body::rocky(1e-7).at(0.4, 0.0).with_velocity(0.0, 1.5)],
         UnitSystem::solar_canonical(),
     )
+    .with_kernel(std::sync::Arc::new(NewtonKernel::new(0.01)))
     .with_integrator(IntegratorKind::Ias15);
     sys.add_hamiltonian_perturbation(Box::new(PostNewtonian1PN::from_raw_c(
         C_SOLAR_UNITS,
@@ -150,51 +142,9 @@ fn softened_system_triggers_diagnostic() {
 
     assert_eq!(events.len(), 1, "exactly one warning expected");
     assert_eq!(events[0].level, Level::Warn);
-    // Fields are present and describe the softening state.
     let field_names: Vec<&str> = events[0].fields.iter().map(|(k, _)| *k).collect();
-    assert!(field_names.contains(&"softened_bodies"));
-    assert!(field_names.contains(&"max_softening"));
-}
-
-/// Counterpart of the above: when the system is properly unsoftened,
-/// registering the same perturbation must stay silent.
-#[test]
-fn exact_gravity_system_stays_silent() {
-    use apsis::core::log::{Event, subscribe, unsubscribe};
-    use std::sync::{Arc, Mutex};
-
-    let _guard = BUS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-
-    const MARKER: &str = "perturbation requires exact 1/r gravity";
-
-    let captured: Arc<Mutex<Vec<Event>>> = Arc::new(Mutex::new(Vec::new()));
-    let sink = captured.clone();
-    let id = subscribe(move |event: &Event| {
-        if event.message.starts_with(MARKER) {
-            sink.lock().unwrap().push(event.clone());
-        }
-    });
-
-    let mut sys = System::new(
-        vec![Body::star(1.0), Body::rocky(1e-7).at(0.4, 0.0).with_velocity(0.0, 1.5)],
-        UnitSystem::solar_canonical(),
-    )
-    .with_exact_gravity()
-    .with_integrator(IntegratorKind::Ias15);
-    sys.add_hamiltonian_perturbation(Box::new(PostNewtonian1PN::from_raw_c(
-        C_SOLAR_UNITS,
-        UnitSystem::solar_canonical(),
-    )))
-    .expect("Mercury gate: System and operator share UnitSystem::solar_canonical()");
-
-    let events = captured.lock().unwrap().clone();
-    unsubscribe(id);
-
-    assert!(
-        events.is_empty(),
-        "no warning expected for fully-unsoftened system, got {}",
-        events.len()
-    );
+    assert!(field_names.contains(&"kernel_epsilon"));
+    assert!(field_names.contains(&"violated_invariant"));
 }
 
 /// Federation gate — ImplicitMidpoint + 1PN. IAS15 and WHFast measure the
@@ -218,9 +168,8 @@ fn mercury_precession_implicit_midpoint_isolates_1pn_signal() {
     let v_peri = (2.0 / r_peri - 1.0 / A).sqrt();
 
     let omega_drift = |with_1pn: bool| -> f64 {
-        let sun = Body::star(1.0).unsoftened();
-        let mercury =
-            Body::rocky(M_MERCURY).at(r_peri, 0.0).with_velocity(0.0, v_peri).unsoftened();
+        let sun = Body::star(1.0);
+        let mercury = Body::rocky(M_MERCURY).at(r_peri, 0.0).with_velocity(0.0, v_peri);
         let mut sys = System::new(vec![sun, mercury], UnitSystem::solar_canonical())
             .with_integrator(IntegratorKind::ImplicitMidpoint)
             .with_dt(1e-4);
@@ -271,12 +220,10 @@ fn baseline_newtonian_kepler_is_closed() {
     const M_MERCURY: f64 = 1.660_114e-7;
     const N_ORBITS: u64 = 300;
 
-    let mut sun = Body::star(1.0);
-    sun.softening = 0.0;
+    let sun = Body::star(1.0);
     let r_peri = A * (1.0 - E);
     let v_peri = (2.0 / r_peri - 1.0 / A).sqrt();
-    let mut mercury = Body::rocky(M_MERCURY).at(r_peri, 0.0).with_velocity(0.0, v_peri);
-    mercury.softening = 0.0;
+    let mercury = Body::rocky(M_MERCURY).at(r_peri, 0.0).with_velocity(0.0, v_peri);
 
     let mut sys = System::new(vec![sun, mercury], UnitSystem::solar_canonical())
         .with_integrator(IntegratorKind::Ias15)
@@ -321,10 +268,10 @@ fn mercury_precession_whfast_matches_gr_within_100ppm() {
     const M_MERCURY: f64 = 1.660_114e-7;
     const N_ORBITS: u64 = 500;
 
-    let sun = Body::star(1.0).unsoftened();
+    let sun = Body::star(1.0);
     let r_peri = A * (1.0 - E);
     let v_peri = (2.0 / r_peri - 1.0 / A).sqrt();
-    let mercury = Body::rocky(M_MERCURY).at(r_peri, 0.0).with_velocity(0.0, v_peri).unsoftened();
+    let mercury = Body::rocky(M_MERCURY).at(r_peri, 0.0).with_velocity(0.0, v_peri);
 
     let mut sys = System::new(vec![sun, mercury], UnitSystem::solar_canonical())
         .with_integrator(IntegratorKind::WHFast)
@@ -402,15 +349,16 @@ fn mercury_precession_3d_inclined_matches_gr_within_100ppm() {
     const N_ORBITS: u64 = 500;
     const INCLINATION: f64 = 7.0_f64 * std::f64::consts::PI / 180.0; // 7°
 
-    let sun = Body::star(1.0).unsoftened();
+    let sun = Body::star(1.0);
     let r_peri = A * (1.0 - E);
     let v_peri = (2.0 / r_peri - 1.0 / A).sqrt();
     // Rotate the planar velocity (0, v_peri, 0) around x̂ by `INCLINATION`.
     let (sin_i, cos_i) = INCLINATION.sin_cos();
-    let mercury = Body::rocky(M_MERCURY)
-        .at_3d(r_peri, 0.0, 0.0)
-        .with_velocity_3d(0.0, v_peri * cos_i, v_peri * sin_i)
-        .unsoftened();
+    let mercury = Body::rocky(M_MERCURY).at_3d(r_peri, 0.0, 0.0).with_velocity_3d(
+        0.0,
+        v_peri * cos_i,
+        v_peri * sin_i,
+    );
 
     let mut sys = System::new(vec![sun, mercury], UnitSystem::solar_canonical())
         .with_integrator(IntegratorKind::Ias15)
@@ -497,17 +445,15 @@ fn baseline_newtonian_kepler_3d_inclined_is_closed() {
     const N_ORBITS: u64 = 300;
     const INCLINATION: f64 = 7.0_f64 * std::f64::consts::PI / 180.0;
 
-    let mut sun = Body::star(1.0);
-    sun.softening = 0.0;
+    let sun = Body::star(1.0);
     let r_peri = A * (1.0 - E);
     let v_peri = (2.0 / r_peri - 1.0 / A).sqrt();
     let (sin_i, cos_i) = INCLINATION.sin_cos();
-    let mut mercury = Body::rocky(M_MERCURY).at_3d(r_peri, 0.0, 0.0).with_velocity_3d(
+    let mercury = Body::rocky(M_MERCURY).at_3d(r_peri, 0.0, 0.0).with_velocity_3d(
         0.0,
         v_peri * cos_i,
         v_peri * sin_i,
     );
-    mercury.softening = 0.0;
 
     let mut sys = System::new(vec![sun, mercury], UnitSystem::solar_canonical())
         .with_integrator(IntegratorKind::Ias15)

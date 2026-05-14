@@ -76,7 +76,6 @@ pub fn run(config: &RunConfig) -> Result<(), Box<dyn std::error::Error>> {
             integrator_order: system.integrator_kind().order(),
             dt: config.dt,
             theta: system.theta(),
-            softening_scale: system.softening_scale(),
             g_factor: system.g_factor(),
             record_interval: config.csv_interval,
             units: template.units,

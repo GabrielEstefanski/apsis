@@ -15,7 +15,6 @@ impl System {
             steps: self.steps,
             dt: self.current_dt,
             theta: self.force_model.theta(),
-            softening_scale: self.softening_scale,
             g_factor: self.g_factor,
             integrator_kind: self.integrator.kind(),
             // trail_every is now owned by TrailRecorder; persisted at app level.
@@ -61,7 +60,6 @@ impl System {
         self.current_dt = snap.dt;
         self.user_dt = snap.dt;
         self.force_model.set_theta(snap.theta);
-        self.softening_scale = snap.softening_scale;
         self.g_factor = snap.g_factor;
         self.integrator = make_integrator(snap.integrator_kind);
         // trail_every is now managed by TrailRecorder at app level.
@@ -84,8 +82,6 @@ impl System {
         self.dt_ctrl.reset();
         self.theta_ctrl.set(snap.theta);
 
-        let (r_min, softening_max) = compute_closeness(&self.bodies);
-        self.r_min = r_min;
-        self.softening_max = softening_max;
+        self.r_min = compute_closeness(&self.bodies);
     }
 }

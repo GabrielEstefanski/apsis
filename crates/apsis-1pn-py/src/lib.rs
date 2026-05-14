@@ -16,15 +16,16 @@
 //!
 //! # ⚠ Critical precondition
 //!
-//! Attaching 1PN to a softened-gravity system **invalidates the
-//! physical model**. For Mercury-like orbits, the numerical apsidal
-//! precession from Plummer softening alone is ~2 × 10³ larger than
-//! the relativistic signal *and inverts its sign* — energy and
+//! 1PN is derived around the bit-exact Newtonian potential. Default
+//! `apsis.System(...)` uses an exact `NewtonKernel` (ε = 0) and the
+//! registration is silent. Attaching 1PN on top of a softened kernel
+//! **invalidates the physical model**: the numerical apsidal precession
+//! from Plummer softening alone is ~2 × 10³ larger than the relativistic
+//! signal at Mercury's orbit *and inverts its sign* — energy and
 //! angular momentum stay conserved at machine precision while the
-//! trajectory is physically wrong. **This is not a numerical error —
-//! it is a model violation.** Pass `exact_gravity=True` or call
-//! `Body.<material>(...).unsoftened()`; a violation emits a structured
-//! warning at registration.
+//! trajectory is physically wrong. The kernel-requirement check emits
+//! a structured warning at registration if you opt into a softened
+//! kernel from the Rust side.
 //!
 //! # Use
 //!
@@ -32,18 +33,17 @@
 //! import apsis
 //! import apsis_1pn
 //!
-//! sun = apsis.Body.star(mass=1.0).unsoftened()
+//! sun = apsis.Body.star(mass=1.0)
 //! mercury = (apsis.Body.rocky(mass=1.66e-7)
 //!            .at((0.387, 0.0))
 //!            .with_velocity((0.0, 1.61))
-//!            .unsoftened())
+//!            )
 //!
 //! sys = apsis.System(
 //!     bodies=[sun, mercury],
 //!     units=apsis.units.SOLAR_CANONICAL,
 //!     integrator="ias15",
 //!     dt=1e-3,
-//!     exact_gravity=True,
 //! )
 //! # Same UnitSystem on both sides — registration check passes.
 //! sys.add_hamiltonian_perturbation(
@@ -80,13 +80,14 @@ fn wrap_in_apsis_perturbation(
 ///
 /// # Kernel preconditions
 ///
-/// 1PN is derived around the bit-exact Newtonian potential. Attaching
-/// it to a softened-gravity system substitutes a different unperturbed
-/// Hamiltonian whose apsidal precession alone is ~2 × 10³ larger than
-/// the 1PN signal for a Mercury-like orbit, silently inverting the
-/// sign of the measured precession. Either pass `exact_gravity=True`
-/// to `apsis.System(...)` or call `Body.<material>(...).unsoftened()`
-/// on every body.
+/// 1PN is derived around the bit-exact Newtonian potential. The default
+/// `apsis.System(...)` kernel is exact `NewtonKernel` (ε = 0) and the
+/// registration is silent. Attaching 1PN on top of a softened kernel
+/// substitutes a different unperturbed Hamiltonian whose apsidal
+/// precession alone is ~2 × 10³ larger than the 1PN signal for a
+/// Mercury-like orbit, silently inverting the sign of the measured
+/// precession. The kernel-requirement check emits a structured warning
+/// at registration if a softened kernel is in place.
 #[pyclass(module = "apsis_1pn", name = "PostNewtonian1PN")]
 pub struct PyPostNewtonian1PN;
 

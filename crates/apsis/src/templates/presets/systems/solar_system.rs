@@ -811,6 +811,7 @@ pub fn solar_system(seed: u64) -> Template {
         // for stable Velocity Verlet. The 2π factor sets the implicit
         // period to one year for Earth.
         suggested_dt: Some(0.001),
+        suggested_integrator: None,
         units: UnitSystem::solar_au(),
     }
 }

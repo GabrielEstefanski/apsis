@@ -1,5 +1,6 @@
 use crate::{
     domain::body_preset,
+    physics::integrator::IntegratorKind,
     templates::{Template, TemplateBody, UnitSystem},
 };
 
@@ -45,6 +46,10 @@ pub fn three_body_chaotic_ejection(_seed: u64) -> Template {
         orbital_up: None,
         default_view_distance: None,
         suggested_dt: Some(0.001),
+        // Chaotic close encounters require adaptive substeps; IAS15 is
+        // the precision-controlled path that survives the encounter
+        // cascade without dt floor exhaustion.
+        suggested_integrator: Some(IntegratorKind::Ias15),
         units: UnitSystem::dimensionless(),
     }
 }

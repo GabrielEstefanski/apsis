@@ -80,8 +80,8 @@ class Body:
     binding-layer state.
 
     Builder methods (:meth:`at`, :meth:`with_velocity`,
-    :meth:`with_density`, :meth:`unsoftened`) return a new ``Body`` —
-    bodies are value-typed on the Python side.
+    :meth:`with_density`) return a new ``Body`` — bodies are
+    value-typed on the Python side.
     """
 
     @staticmethod
@@ -184,9 +184,6 @@ class Body:
     def with_density(self, density: float) -> Body:
         """Override the material-default density. Recomputes physical radius."""
 
-    def unsoftened(self) -> Body:
-        """Drop softening to zero, restoring exact 1/r gravity for this body."""
-
     # ── Properties ──
     @property
     def mass(self) -> float: ...
@@ -273,7 +270,6 @@ class System:
         integrator: IntegratorKind | str,
         dt: float,
         epsilon: float | None = None,
-        exact_gravity: bool = False,
     ) -> None: ...
 
     # ── Run loop ──

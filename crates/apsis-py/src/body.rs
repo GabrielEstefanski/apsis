@@ -5,15 +5,15 @@
 //! corresponding constructors in [`apsis::domain::body::Body`], a
 //! kwargs-only signature on each factory so position and velocity
 //! never depend on argument order, and an immutable fluent-builder
-//! tail (`at`, `with_velocity`, `with_density`, `unsoftened`) for the
-//! cases where chaining reads more naturally than a single call site.
+//! tail (`at`, `with_velocity`, `with_density`) for the cases where
+//! chaining reads more naturally than a single call site.
 //!
 //! # Façade-only invariant
 //!
 //! Every `#[pymethods]` body in this file delegates to a single call on
 //! [`apsis::domain::body::Body`] — the wrapper translates types at the
 //! boundary and never composes physics. The set of valid presets, the
-//! default softening rule, the density model, and the body-state
+//! density model, and the body-state
 //! invariants are all owned by the core crate; this module is the
 //! Python-shaped door into them.
 //!
@@ -50,41 +50,30 @@ use pyo3::types::PyAny;
 
 use crate::convert::{value_error, xyz_triple};
 
-/// Point-mass body with kinematics, mass, softening, and a binding-
-/// layer material slug.
+/// Point-mass body with kinematics, mass, and a binding-layer material
+/// slug.
 ///
 /// Bodies are constructed through one of the nine preset factories
 /// (`Body.star`, `Body.rocky`, ...) — each chooses sensible defaults
-/// for density, softening, and any visual/physical properties tied to
-/// the preset. Position and velocity always default to zero; pass
-/// them as kwargs (`position=(x, y)`, `velocity=(vx, vy)`) at the
-/// factory or via the fluent builder methods (`at`, `with_velocity`).
+/// for density and any visual/physical properties tied to the preset.
+/// Position and velocity always default to zero; pass them as kwargs
+/// (`position=(x, y)`, `velocity=(vx, vy)`) at the factory or via the
+/// fluent builder methods (`at`, `with_velocity`).
 ///
 /// All builder methods return a fresh `Body` — bodies are immutable
 /// by convention on the Python side, matching the value-semantics of
-/// the underlying `apsis::domain::body::Body` (which is `Copy`). A
-/// body handed to a `System` constructor is therefore not affected by
-/// any subsequent builder call on its original handle.
+/// the underlying `apsis::domain::body::Body` (which is `Copy`).
 ///
 /// Examples:
 ///
 /// ```python
 /// import apsis
 ///
-/// # One-liner with kwargs
 /// mercury = apsis.Body.rocky(
 ///     mass=3e-6,
 ///     position=(0.307, 0.0),
 ///     velocity=(0.0, 1.98),
 /// )
-///
-/// # Equivalent fluent form
-/// mercury = (apsis.Body.rocky(mass=3e-6)
-///            .at((0.307, 0.0))
-///            .with_velocity((0.0, 1.98)))
-///
-/// # Switch off softening (exact 1/r gravity for this body)
-/// sun = apsis.Body.star(mass=1.0).unsoftened()
 /// ```
 #[pyclass(module = "apsis", name = "Body", frozen)]
 #[derive(Clone, Copy)]
@@ -108,7 +97,6 @@ impl PyBody {
         mass: f64,
         position: Option<&Bound<'_, PyAny>>,
         velocity: Option<&Bound<'_, PyAny>>,
-        softening: Option<f64>,
     ) -> PyResult<Self> {
         if !mass.is_finite() {
             return Err(value_error("mass", format!("expected a finite float, got {mass}")));
@@ -134,15 +122,6 @@ impl PyBody {
             inner.vel_y = vy;
             inner.vel_z = vz;
         }
-        if let Some(eps) = softening {
-            if !eps.is_finite() || eps < 0.0 {
-                return Err(value_error(
-                    "softening",
-                    format!("expected a finite non-negative float, got {eps}"),
-                ));
-            }
-            inner.softening = eps;
-        }
 
         Ok(Self { inner, slug })
     }
@@ -154,110 +133,101 @@ impl PyBody {
 
     /// Main-sequence luminous body. Default density and luminous preset.
     #[staticmethod]
-    #[pyo3(signature = (*, mass, position=None, velocity=None, softening=None))]
+    #[pyo3(signature = (*, mass, position=None, velocity=None))]
     fn star(
         mass: f64,
         position: Option<&Bound<'_, PyAny>>,
         velocity: Option<&Bound<'_, PyAny>>,
-        softening: Option<f64>,
     ) -> PyResult<Self> {
-        Self::build(&body_preset::STAR, "star", mass, position, velocity, softening)
+        Self::build(&body_preset::STAR, "star", mass, position, velocity)
     }
 
     /// Brown dwarf — sub-stellar, deuterium-burning regime.
     #[staticmethod]
-    #[pyo3(signature = (*, mass, position=None, velocity=None, softening=None))]
+    #[pyo3(signature = (*, mass, position=None, velocity=None))]
     fn brown_dwarf(
         mass: f64,
         position: Option<&Bound<'_, PyAny>>,
         velocity: Option<&Bound<'_, PyAny>>,
-        softening: Option<f64>,
     ) -> PyResult<Self> {
-        Self::build(&body_preset::BROWN_DWARF, "brown_dwarf", mass, position, velocity, softening)
+        Self::build(&body_preset::BROWN_DWARF, "brown_dwarf", mass, position, velocity)
     }
 
     /// White dwarf — compact stellar remnant.
     #[staticmethod]
-    #[pyo3(signature = (*, mass, position=None, velocity=None, softening=None))]
+    #[pyo3(signature = (*, mass, position=None, velocity=None))]
     fn white_dwarf(
         mass: f64,
         position: Option<&Bound<'_, PyAny>>,
         velocity: Option<&Bound<'_, PyAny>>,
-        softening: Option<f64>,
     ) -> PyResult<Self> {
-        Self::build(&body_preset::WHITE_DWARF, "white_dwarf", mass, position, velocity, softening)
+        Self::build(&body_preset::WHITE_DWARF, "white_dwarf", mass, position, velocity)
     }
 
     /// Gas giant — Jupiter-class hydrogen/helium envelope.
     #[staticmethod]
-    #[pyo3(signature = (*, mass, position=None, velocity=None, softening=None))]
+    #[pyo3(signature = (*, mass, position=None, velocity=None))]
     fn gas_giant(
         mass: f64,
         position: Option<&Bound<'_, PyAny>>,
         velocity: Option<&Bound<'_, PyAny>>,
-        softening: Option<f64>,
     ) -> PyResult<Self> {
-        Self::build(&body_preset::GAS, "gas_giant", mass, position, velocity, softening)
+        Self::build(&body_preset::GAS, "gas_giant", mass, position, velocity)
     }
 
     /// Ice giant — Neptune-class water/methane envelope.
     #[staticmethod]
-    #[pyo3(signature = (*, mass, position=None, velocity=None, softening=None))]
+    #[pyo3(signature = (*, mass, position=None, velocity=None))]
     fn ice_giant(
         mass: f64,
         position: Option<&Bound<'_, PyAny>>,
         velocity: Option<&Bound<'_, PyAny>>,
-        softening: Option<f64>,
     ) -> PyResult<Self> {
-        Self::build(&body_preset::ICE_GIANT, "ice_giant", mass, position, velocity, softening)
+        Self::build(&body_preset::ICE_GIANT, "ice_giant", mass, position, velocity)
     }
 
     /// Rocky body — terrestrial planet or large rocky satellite.
     #[staticmethod]
-    #[pyo3(signature = (*, mass, position=None, velocity=None, softening=None))]
+    #[pyo3(signature = (*, mass, position=None, velocity=None))]
     fn rocky(
         mass: f64,
         position: Option<&Bound<'_, PyAny>>,
         velocity: Option<&Bound<'_, PyAny>>,
-        softening: Option<f64>,
     ) -> PyResult<Self> {
-        Self::build(&body_preset::ROCKY, "rocky", mass, position, velocity, softening)
+        Self::build(&body_preset::ROCKY, "rocky", mass, position, velocity)
     }
 
     /// Icy body — water-dominated composition (outer satellites, KBOs).
     #[staticmethod]
-    #[pyo3(signature = (*, mass, position=None, velocity=None, softening=None))]
+    #[pyo3(signature = (*, mass, position=None, velocity=None))]
     fn icy(
         mass: f64,
         position: Option<&Bound<'_, PyAny>>,
         velocity: Option<&Bound<'_, PyAny>>,
-        softening: Option<f64>,
     ) -> PyResult<Self> {
-        Self::build(&body_preset::ICY, "icy", mass, position, velocity, softening)
+        Self::build(&body_preset::ICY, "icy", mass, position, velocity)
     }
 
     /// Asteroid — rocky minor body.
     #[staticmethod]
-    #[pyo3(signature = (*, mass, position=None, velocity=None, softening=None))]
+    #[pyo3(signature = (*, mass, position=None, velocity=None))]
     fn asteroid(
         mass: f64,
         position: Option<&Bound<'_, PyAny>>,
         velocity: Option<&Bound<'_, PyAny>>,
-        softening: Option<f64>,
     ) -> PyResult<Self> {
-        Self::build(&body_preset::ASTEROID, "asteroid", mass, position, velocity, softening)
+        Self::build(&body_preset::ASTEROID, "asteroid", mass, position, velocity)
     }
 
     /// Comet — volatile-rich minor body.
     #[staticmethod]
-    #[pyo3(signature = (*, mass, position=None, velocity=None, softening=None))]
+    #[pyo3(signature = (*, mass, position=None, velocity=None))]
     fn comet(
         mass: f64,
         position: Option<&Bound<'_, PyAny>>,
         velocity: Option<&Bound<'_, PyAny>>,
-        softening: Option<f64>,
     ) -> PyResult<Self> {
-        Self::build(&body_preset::COMET, "comet", mass, position, velocity, softening)
+        Self::build(&body_preset::COMET, "comet", mass, position, velocity)
     }
 
     // ── Fluent builder ───────────────────────────────────────────────────
@@ -299,16 +269,6 @@ impl PyBody {
             ));
         }
         Ok(Self { inner: self.inner.with_density(density), slug: self.slug })
-    }
-
-    /// Drop this body's Plummer softening to zero, restoring the exact
-    /// $1/r$ potential for every interaction it participates in. Use
-    /// when measuring a deviation-from-Kepler signal whose magnitude
-    /// is below the apsidal precession introduced by the default
-    /// preset-scaled softening (post-Newtonian, $J_2$ oblateness,
-    /// tidal dissipation). Returns a new `Body`.
-    fn unsoftened(&self) -> Self {
-        Self { inner: self.inner.unsoftened(), slug: self.slug }
     }
 
     // ── Read-only properties ─────────────────────────────────────────────
@@ -368,14 +328,6 @@ impl PyBody {
         self.inner.vel_z
     }
 
-    /// Plummer softening length $\epsilon$. Pairwise softening is
-    /// combined in quadrature: $\epsilon_{ij}^2 = (\epsilon_i^2 +
-    /// \epsilon_j^2)/2$.
-    #[getter]
-    fn softening(&self) -> f64 {
-        self.inner.softening
-    }
-
     /// Bulk density of the body. Drives the physical radius through
     /// $r = (3m/4\pi\rho)^{1/3}$.
     #[getter]
@@ -383,8 +335,7 @@ impl PyBody {
         self.inner.density
     }
 
-    /// Physical radius derived from mass and density. Independent of
-    /// any softening calibration applied by the system.
+    /// Physical radius derived from mass and density.
     #[getter]
     fn radius(&self) -> f64 {
         self.inner.physical_radius
@@ -418,7 +369,7 @@ impl PyBody {
 
     fn __repr__(&self) -> String {
         format!(
-            "Body(material={:?}, mass={}, position=({}, {}, {}), velocity=({}, {}, {}), softening={})",
+            "Body(material={:?}, mass={}, position=({}, {}, {}), velocity=({}, {}, {}))",
             self.slug,
             self.inner.mass,
             self.inner.pos_x,
@@ -427,7 +378,6 @@ impl PyBody {
             self.inner.vel_x,
             self.inner.vel_y,
             self.inner.vel_z,
-            self.inner.softening,
         )
     }
 }

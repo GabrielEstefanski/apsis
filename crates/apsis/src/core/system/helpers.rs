@@ -30,23 +30,21 @@ pub(crate) fn resolved_name(
         .unwrap_or_else(|| auto_name(fallback_prefix, existing))
 }
 
-/// Compute the minimum pairwise separation and maximum effective softening
-/// length over all body pairs.
+/// Minimum pairwise separation across all body pairs.
 ///
-/// Skipped (returns sentinels) when N < 2 or N > `N_CLOSENESS_THRESHOLD`,
+/// Skipped (returns `f64::MAX`) when N < 2 or N > `N_CLOSENESS_THRESHOLD`,
 /// to keep overhead bounded for large asteroid-belt simulations.
 ///
 /// Distances are 3D (`dx² + dy² + dz²`); a previous 2D-only implementation
 /// silently understated `r_min` for any inclined or out-of-plane pair.
-pub(crate) fn compute_closeness(bodies: &[Body]) -> (f64, f64) {
+pub(crate) fn compute_closeness(bodies: &[Body]) -> f64 {
     const N_CLOSENESS_THRESHOLD: usize = 512;
 
     if bodies.len() < 2 || bodies.len() > N_CLOSENESS_THRESHOLD {
-        return (f64::MAX, 0.0);
+        return f64::MAX;
     }
 
     let mut r_min = f64::MAX;
-    let mut soft_max = 0.0_f64;
 
     for i in 0..bodies.len() {
         for j in (i + 1)..bodies.len() {
@@ -57,15 +55,8 @@ pub(crate) fn compute_closeness(bodies: &[Body]) -> (f64, f64) {
             if r < r_min {
                 r_min = r;
             }
-            let eps2_ij = (bodies[i].softening * bodies[i].softening
-                + bodies[j].softening * bodies[j].softening)
-                * 0.5;
-            let eps_ij = eps2_ij.sqrt();
-            if eps_ij > soft_max {
-                soft_max = eps_ij;
-            }
         }
     }
 
-    (r_min, soft_max)
+    r_min
 }

@@ -43,6 +43,7 @@ pub fn three_body_figure_eight(_seed: u64) -> Template {
         orbital_up: None,
         default_view_distance: None,
         suggested_dt: Some(0.001),
+        suggested_integrator: None,
         units: UnitSystem::dimensionless(),
     }
 }

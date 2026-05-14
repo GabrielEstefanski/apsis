@@ -84,9 +84,9 @@ use apsis::units::UnitSystem;
 use apsis_radiation::{PoyntingRobertsonDrag, RadiationPressure};
 
 let units = UnitSystem::solar_canonical();
-let sun = Body::star(1.0).unsoftened();
+let sun = Body::star(1.0);
 // β = 0.1 dust grain on a circular orbit at 1 AU.
-let dust = Body::rocky(1e-15).at(1.0, 0.0).with_velocity(0.0, 1.0).unsoftened();
+let dust = Body::rocky(1e-15).at(1.0, 0.0).with_velocity(0.0, 1.0);
 let mut sys = System::new(vec![sun, dust], units)
     .with_integrator(IntegratorKind::Ias15)
     .with_dt(1e-3);

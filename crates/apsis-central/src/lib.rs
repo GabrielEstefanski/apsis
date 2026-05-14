@@ -74,9 +74,9 @@
 //! use apsis_central::CentralForce;
 //!
 //! let units = UnitSystem::solar_canonical();
-//! let sun = Body::star(1.0).unsoftened();
+//! let sun = Body::star(1.0);
 //! let mercury =
-//!     Body::rocky(1.66e-7).at(0.387, 0.0).with_velocity(0.0, 1.61).unsoftened();
+//!     Body::rocky(1.66e-7).at(0.387, 0.0).with_velocity(0.0, 1.61);
 //! let bodies = vec![sun, mercury];
 //!
 //! // Pattern B: pick a desired apsidal rate ω̇ and let the operator
@@ -490,7 +490,7 @@ mod tests {
     #[test]
     fn source_receives_only_recoil_not_self_force() {
         // Single body at origin = source; nothing for it to act on.
-        let bodies = vec![Body::star(1.0).unsoftened()];
+        let bodies = vec![Body::star(1.0)];
         let f = CentralForce::from_raw(0, 1.0, -3.0, solar());
         let mut acc = vec![Vec3::ZERO];
         f.accumulate_force(&bodies, &mut acc);
@@ -502,7 +502,7 @@ mod tests {
     /// component.
     #[test]
     fn force_is_purely_radial() {
-        let bodies = vec![Body::star(1.0).unsoftened(), Body::rocky(1e-10).at(1.0, 0.0)];
+        let bodies = vec![Body::star(1.0), Body::rocky(1e-10).at(1.0, 0.0)];
         let f = CentralForce::from_raw(0, 1.0, -3.0, solar());
         let mut acc = vec![Vec3::ZERO; 2];
         f.accumulate_force(&bodies, &mut acc);
@@ -519,7 +519,7 @@ mod tests {
     fn third_law_recoil_matches_mass_ratio() {
         let m_src = 1.0;
         let m_recv = 1e-6;
-        let bodies = vec![Body::star(m_src).unsoftened(), Body::rocky(m_recv).at(1.0, 0.0)];
+        let bodies = vec![Body::star(m_src), Body::rocky(m_recv).at(1.0, 0.0)];
         let f = CentralForce::from_raw(0, 1.0, -3.0, solar());
         let mut acc = vec![Vec3::ZERO; 2];
         f.accumulate_force(&bodies, &mut acc);
@@ -532,7 +532,7 @@ mod tests {
     /// Force is additive: registering twice doubles the contribution.
     #[test]
     fn force_is_additive() {
-        let bodies = vec![Body::star(1.0).unsoftened(), Body::rocky(1e-10).at(1.0, 0.0)];
+        let bodies = vec![Body::star(1.0), Body::rocky(1e-10).at(1.0, 0.0)];
         let f = CentralForce::from_raw(0, 0.5, -3.0, solar());
 
         let mut once = vec![Vec3::ZERO; 2];
@@ -552,8 +552,7 @@ mod tests {
     /// (polynomial branch).
     #[test]
     fn potential_matches_force_polynomial_branch() {
-        let make_bodies =
-            |x: f64| vec![Body::star(1.0).unsoftened(), Body::rocky(1e-10).at(x, 0.0)];
+        let make_bodies = |x: f64| vec![Body::star(1.0), Body::rocky(1e-10).at(x, 0.0)];
         let f = CentralForce::from_raw(0, 0.3, -3.0, solar());
         let h = 1e-6;
         let v_plus = match f.potential(&make_bodies(1.0 + h)) {
@@ -577,8 +576,7 @@ mod tests {
     /// check.
     #[test]
     fn potential_matches_force_logarithmic_branch() {
-        let make_bodies =
-            |x: f64| vec![Body::star(1.0).unsoftened(), Body::rocky(1e-10).at(x, 0.0)];
+        let make_bodies = |x: f64| vec![Body::star(1.0), Body::rocky(1e-10).at(x, 0.0)];
         let f = CentralForce::from_raw(0, 0.3, -1.0, solar());
         let h = 1e-6;
         let v_plus = match f.potential(&make_bodies(1.0 + h)) {
@@ -601,7 +599,7 @@ mod tests {
     // ── Pattern B inversion error paths ─────────────────────────────────────
 
     fn circular_pair() -> Vec<Body> {
-        vec![Body::star(1.0).unsoftened(), Body::rocky(1e-10).at(1.0, 0.0).with_velocity(0.0, 1.0)]
+        vec![Body::star(1.0), Body::rocky(1e-10).at(1.0, 0.0).with_velocity(0.0, 1.0)]
     }
 
     #[test]
@@ -632,10 +630,10 @@ mod tests {
     #[test]
     fn from_apsidal_rate_rejects_unbound_orbit() {
         let bodies = vec![
-            Body::star(1.0).unsoftened(),
+            Body::star(1.0),
             // Velocity above escape (v_escape at r=1 in canonical = √2);
             // 2.5 > √2 → hyperbolic.
-            Body::rocky(1e-10).at(1.0, 0.0).with_velocity(0.0, 2.5).unsoftened(),
+            Body::rocky(1e-10).at(1.0, 0.0).with_velocity(0.0, 2.5),
         ];
         let err = CentralForce::from_apsidal_rate(0, 1, 1e-9, -3.0, &bodies, solar()).unwrap_err();
         assert!(matches!(err, ApsidalInversionError::UnboundOrbit { idx: 1 }));

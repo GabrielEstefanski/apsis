@@ -378,22 +378,6 @@ impl System {
         self.last_encounter_flag
     }
 
-    // ── Softening ─────────────────────────────────────────────────────────────
-
-    pub fn softening_scale(&self) -> f64 {
-        self.softening_scale
-    }
-
-    /// Set the global Plummer softening scale (`ε = ε_default · scale`) and
-    /// rescale all existing body softenings immediately.
-    pub fn set_softening_scale(&mut self, scale: f64) {
-        use crate::domain::body::default_softening;
-        self.softening_scale = scale.max(0.0);
-        for b in &mut self.bodies {
-            b.softening = default_softening(b.mass) * self.softening_scale;
-        }
-    }
-
     // ── COM shift for TrailRecorder ───────────────────────────────────────────
 
     /// Takes (and clears) the accumulated COM translation since the last call.

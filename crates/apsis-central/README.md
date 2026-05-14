@@ -77,8 +77,8 @@ use apsis::units::UnitSystem;
 use apsis_central::CentralForce;
 
 let units = UnitSystem::solar_canonical();
-let sun = Body::star(1.0).unsoftened();
-let target = Body::rocky(1e-7).at(0.387, 0.0).with_velocity(0.0, 1.61).unsoftened();
+let sun = Body::star(1.0);
+let target = Body::rocky(1e-7).at(0.387, 0.0).with_velocity(0.0, 1.61);
 let bodies = vec![sun, target];
 
 // Pattern B: pick a desired ω̇ and let the operator compute the coupling.

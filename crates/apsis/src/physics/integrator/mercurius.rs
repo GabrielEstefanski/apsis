@@ -870,12 +870,9 @@ mod tests {
         // Sun + 2 widely-separated planets on circular Keplerian
         // orbits. r ∈ {1, 2}; v chosen for circular Kepler at G·M = 1.
         vec![
-            Body::star(1.0).unsoftened(),
-            Body::rocky(1.0e-6).at(1.0, 0.0).with_velocity(0.0, 1.0).unsoftened(),
-            Body::rocky(1.0e-6)
-                .at(2.0, 0.0)
-                .with_velocity(0.0, std::f64::consts::FRAC_1_SQRT_2)
-                .unsoftened(),
+            Body::star(1.0),
+            Body::rocky(1.0e-6).at(1.0, 0.0).with_velocity(0.0, 1.0),
+            Body::rocky(1.0e-6).at(2.0, 0.0).with_velocity(0.0, std::f64::consts::FRAC_1_SQRT_2),
         ]
     }
 
@@ -941,8 +938,8 @@ mod tests {
     #[test]
     fn refuses_non_hierarchical_step() {
         let mut bodies = vec![
-            Body::rocky(1.0).at(-1.0, 0.0).with_velocity(0.0, -0.5).unsoftened(),
-            Body::rocky(1.0).at(1.0, 0.0).with_velocity(0.0, 0.5).unsoftened(),
+            Body::rocky(1.0).at(-1.0, 0.0).with_velocity(0.0, -0.5),
+            Body::rocky(1.0).at(1.0, 0.0).with_velocity(0.0, 0.5),
         ];
         let mut force = GravityForceModel::new(0.5, 16);
         let mut acc: Vec<Vec3> = vec![Vec3::ZERO; bodies.len()];
@@ -1028,12 +1025,9 @@ mod tests {
         // step. The encounter step must engage and consume the outer
         // dt without crashing.
         let bodies = vec![
-            Body::star(1.0).unsoftened(),
-            Body::rocky(1.0e-3).at(1.0, 0.0).with_velocity(0.0, 1.0).unsoftened(),
-            Body::rocky(1.0e-3)
-                .at(2.0, 0.0)
-                .with_velocity(0.0, std::f64::consts::FRAC_1_SQRT_2)
-                .unsoftened(),
+            Body::star(1.0),
+            Body::rocky(1.0e-3).at(1.0, 0.0).with_velocity(0.0, 1.0),
+            Body::rocky(1.0e-3).at(2.0, 0.0).with_velocity(0.0, std::f64::consts::FRAC_1_SQRT_2),
         ];
         let mut bs = bodies;
         let mut merc = Mercurius::with_alpha(100.0);

@@ -1,6 +1,6 @@
 //! Counter-test — `Continuity::C0` precondition violation.
 //!
-//! Pairs the existing Mercury / softening counter-test (which exercises the
+//! Pairs the Mercury / softened-kernel counter-test (which exercises the
 //! `Exactness::Exact` invariant) with a distinct physical signature for the
 //! `Continuity::Smooth` invariant declared by the 1PN correction.
 //!
@@ -48,9 +48,7 @@ use apsis_1pn::PostNewtonian1PN;
 /// Equal-mass two-body configuration at e = 0.5, a = 1 (COM at origin).
 ///
 /// Body 1 is at `(−a(1−e)/2, 0)` with tangential velocity `+v_peri/2`.
-/// Body 2 is the mirror, giving zero COM position and momentum. Both
-/// bodies are explicitly unsoftened so that the only precondition
-/// violations come from the kernel itself.
+/// Body 2 is the mirror, giving zero COM position and momentum.
 fn two_body_eccentric() -> Vec<Body> {
     const A: f64 = 1.0;
     const E: f64 = 0.5;
@@ -62,8 +60,8 @@ fn two_body_eccentric() -> Vec<Body> {
     let v_peri_rel = (M_TOTAL * (1.0 + E) / (A * (1.0 - E))).sqrt();
     let v_each = v_peri_rel / 2.0;
 
-    let body1 = Body::rocky(M_EACH).at(-r_peri / 2.0, 0.0).with_velocity(0.0, -v_each).unsoftened();
-    let body2 = Body::rocky(M_EACH).at(r_peri / 2.0, 0.0).with_velocity(0.0, v_each).unsoftened();
+    let body1 = Body::rocky(M_EACH).at(-r_peri / 2.0, 0.0).with_velocity(0.0, -v_each);
+    let body2 = Body::rocky(M_EACH).at(r_peri / 2.0, 0.0).with_velocity(0.0, v_each);
     vec![body1, body2]
 }
 
@@ -203,9 +201,9 @@ fn truncated_kernel_plus_1pn_fires_both_exactness_and_continuity_warnings() {
 /// the spike magnitudes are several orders of magnitude above the
 /// smooth-kernel baseline drift.
 ///
-/// Running this with the smooth [`PlummerKernel`] on the same bodies
-/// would produce no spikes — the pair of `(baseline, violated)` assertions
-/// guards against false positives on the detection logic itself.
+/// Running this with the smooth default [`NewtonKernel::exact()`] on the
+/// same bodies would produce no spikes — the pair of `(baseline, violated)`
+/// assertions guards against false positives on the detection logic itself.
 #[test]
 #[ignore = "release-mode integration test; run with `cargo test --release -- --ignored`"]
 fn truncated_kernel_energy_spikes_are_in_bijection_with_r_cut_crossings() {
@@ -218,7 +216,7 @@ fn truncated_kernel_energy_spikes_are_in_bijection_with_r_cut_crossings() {
     const N_STEPS: usize = 60_000;
     const SPIKE_THRESHOLD: f64 = 1e-6;
 
-    // ── Reference run: smooth PlummerKernel at the same bodies ───────────
+    // ── Reference run: default smooth NewtonKernel at the same bodies ───
     //
     // Establishes the baseline drift amplitude the spike threshold must
     // clearly separate. The smooth kernel produces no impulsive events,

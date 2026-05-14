@@ -12,7 +12,6 @@
 //! [8]  steps         u64 LE
 //! [8]  dt            f64 LE
 //! [8]  theta         f64 LE
-//! [8]  softening     f64 LE   — softening_scale
 //! [8]  g_factor      f64 LE
 //! [1]  integrator    u8       — 0=VV, 1=Yoshida4, 2=WisdomHolman
 //! [4]  trail_every   u32 LE
@@ -23,11 +22,12 @@
 //! [8]  seed          u64 LE   — reproducibility seed
 //! ----------------
 //! [4]  n_bodies      u32 LE
-//! per body (68 bytes, v6+; 84 bytes in v1–5):
+//! per body (60 bytes, v12+; 68 bytes in v6–11; 84 bytes in v1–5):
 //!   [8] x  [8] y  [8] vx  [8] vy
-//!   [8] mass  [8] density  [8] softening  [8] physical_radius
+//!   [8] mass  [8] density  [8] physical_radius
 //!   [1] material_id  [3] color_rgb
-//! (v1–5 stored two extra f64s here: omega_z + moment_inertia — read and discarded on load)
+//! (v1–5 stored omega_z + moment_inertia — read and discarded on load)
+//! (v6–11 stored a per-body softening f64 — read and discarded on v12+ load)
 //! v2+ names section: n_bodies × (u32 len + UTF-8 bytes)
 //! --- v4+ trail section ---
 //! [1]  trail_has     u8       — 0=no trail, 1=trail present
@@ -87,7 +87,7 @@ use crate::physics::integrator::IntegratorKind;
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 pub const MAGIC: [u8; 4] = *b"GRAV";
-pub const SCHEMA_VERSION: u16 = 11;
+pub const SCHEMA_VERSION: u16 = 12;
 
 // ── Snapshot ──────────────────────────────────────────────────────────────────
 
@@ -108,8 +108,6 @@ pub struct SimSnapshot {
     pub dt: f64,
     /// Barnes–Hut opening angle `θ`.
     pub theta: f64,
-    /// Global Plummer softening scale factor.
-    pub softening_scale: f64,
     /// Gravitational constant multiplier `G_eff = G₀ · g_factor`.
     pub g_factor: f64,
     /// Active symplectic integrator.
@@ -145,7 +143,6 @@ pub struct BodyRecord {
     pub vel_z: f64,
     pub mass: f64,
     pub density: f64,
-    pub softening: f64,
     pub physical_radius: f64,
     pub color: [u8; 3],
     /// Radiation-pressure receiver coefficient. v8+ persists it
@@ -171,7 +168,6 @@ impl BodyRecord {
             vel_z: b.vel_z,
             mass: b.mass,
             density: b.density,
-            softening: b.softening,
             physical_radius: b.physical_radius,
             color: b.color,
             q_pr: b.q_pr,
@@ -189,7 +185,6 @@ impl BodyRecord {
         let mut b = Body::new(self.mass, self.density)
             .at_3d(self.pos_x, self.pos_y, self.pos_z)
             .with_velocity_3d(self.vel_x, self.vel_y, self.vel_z);
-        b.softening = self.softening;
         b.physical_radius = self.physical_radius;
         b.color = self.color;
         b.q_pr = self.q_pr;
@@ -447,7 +442,6 @@ impl SimSnapshot {
         wu64(&mut w, self.steps)?;
         wf64(&mut w, self.dt)?;
         wf64(&mut w, self.theta)?;
-        wf64(&mut w, self.softening_scale)?;
         wf64(&mut w, self.g_factor)?;
         wu8(&mut w, integrator_to_u8(self.integrator_kind))?;
         wu32(&mut w, self.trail_every as u32)?;
@@ -472,7 +466,6 @@ impl SimSnapshot {
             wf64(&mut w, b.vel_z)?;
             wf64(&mut w, b.mass)?;
             wf64(&mut w, b.density)?;
-            wf64(&mut w, b.softening)?;
             wf64(&mut w, b.physical_radius)?;
             w.write_all(&b.color)?;
             wf64(&mut w, b.q_pr)?;
@@ -534,7 +527,11 @@ impl SimSnapshot {
         let steps = ru64(&mut r)?;
         let dt = rf64(&mut r)?;
         let theta = rf64(&mut r)?;
-        let softening_scale = rf64(&mut r)?;
+        // v11 and earlier stored softening_scale here; v12 dropped it
+        // (softening moved into the active gravity kernel).
+        if ver < 12 {
+            let _ = rf64(&mut r)?;
+        }
         let g_factor = rf64(&mut r)?;
         let mut integ_byte = [0u8; 1];
         r.read_exact(&mut integ_byte)?;
@@ -565,7 +562,12 @@ impl SimSnapshot {
             let vz = if ver >= 7 { rf64(&mut r)? } else { 0.0 };
             let mass = rf64(&mut r)?;
             let density = rf64(&mut r)?;
-            let softening = rf64(&mut r)?;
+            // v11 and earlier stored a per-body softening f64 here; v12
+            // dropped it (softening is a kernel parameter, not a body
+            // property).
+            if ver < 12 {
+                let _ = rf64(&mut r)?;
+            }
             let physical_radius = rf64(&mut r)?;
             if ver < 6 {
                 // v1–5 stored omega_z + moment_inertia here — read and discard
@@ -611,7 +613,6 @@ impl SimSnapshot {
                 vel_z: vz,
                 mass,
                 density,
-                softening,
                 physical_radius,
                 color,
                 q_pr,
@@ -669,7 +670,6 @@ impl SimSnapshot {
             steps,
             dt,
             theta,
-            softening_scale,
             g_factor,
             integrator_kind,
             trail_every,
@@ -700,9 +700,17 @@ impl SimSnapshot {
         let t = rf64(&mut r)?;
         let steps = ru64(&mut r)?;
 
-        // Skip: dt(8) + theta(8) + softening(8) + g_factor(8) + integrator(1) + trail_every(4) = 37 bytes.
-        let mut skip = [0u8; 37];
-        r.read_exact(&mut skip)?;
+        // Skip header rest. v12 dropped softening_scale (8 bytes); older
+        // versions still have it.
+        if ver < 12 {
+            // dt(8) + theta(8) + softening_scale(8) + g_factor(8) + integrator(1) + trail_every(4) = 37
+            let mut skip = [0u8; 37];
+            r.read_exact(&mut skip)?;
+        } else {
+            // dt(8) + theta(8) + g_factor(8) + integrator(1) + trail_every(4) = 29
+            let mut skip = [0u8; 29];
+            r.read_exact(&mut skip)?;
+        }
 
         let sim_name = if ver >= 3 {
             let len = ru32(&mut r)? as usize;
