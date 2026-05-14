@@ -8,6 +8,7 @@
 //! | [`Yoshida4`]        | 4th  | 4               | Forest–Ruth / Yoshida (1990) |
 //! | [`WisdomHolman`]    | 2nd  | 1               | Keplerian + perturbation split |
 //! | [`Ias15`]           | 15th | ~14 (adaptive)  | Gauss-Radau, Rein & Spiegel (2015) — **default** |
+//! | [`ImplicitMidpoint`]| 2nd  | ~10 (iterated)  | Single-stage Gauss-Legendre, A-stable, no hierarchy gate |
 //!
 //! # Architecture
 //!
@@ -46,6 +47,7 @@ pub mod dense;
 pub mod force_model;
 pub mod helpers;
 pub mod ias15;
+pub mod implicit_midpoint;
 pub mod kepler;
 pub mod mercurius;
 pub mod operator;
@@ -70,6 +72,7 @@ pub use dense::{DenseCoeffs, DenseSnapshot};
 pub use force_model::{ForceModel, GravityForceModel};
 pub use helpers::{evaluate, scale_acc_and_pe};
 pub use ias15::Ias15;
+pub use implicit_midpoint::{ImplicitMidpoint, IterationOutcome, Solver};
 pub use kepler::kepler_step;
 pub use mercurius::Mercurius;
 pub use operator::{
@@ -95,5 +98,6 @@ pub fn make_integrator(kind: IntegratorKind) -> Box<dyn Integrator> {
         IntegratorKind::WHFast => Box::new(WHFast::new()),
         IntegratorKind::Ias15 => Box::new(Ias15::new()),
         IntegratorKind::Mercurius => Box::new(Mercurius::new()),
+        IntegratorKind::ImplicitMidpoint => Box::new(ImplicitMidpoint::new()),
     }
 }

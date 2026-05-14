@@ -197,6 +197,69 @@ fn exact_gravity_system_stays_silent() {
     );
 }
 
+/// Federation gate — ImplicitMidpoint + 1PN. IAS15 and WHFast measure the
+/// 1PN signal directly because their Newtonian baseline is Kepler-exact
+/// (analytic drift, zero numerical precession). IM integrates the
+/// Newtonian Kepler motion numerically, so it produces an `O(dt²)`
+/// numerical perihelion precession of the same order as the 1PN signal
+/// at any practical dt. The federation contract is verified by
+/// *subtraction*: precession with 1PN minus precession without 1PN must
+/// equal the GR analytical prediction, isolating the operator's
+/// contribution from IM's numerical ghost.
+#[test]
+#[ignore = "release-mode integration test; run with `cargo test --release -- --ignored`"]
+fn mercury_precession_implicit_midpoint_isolates_1pn_signal() {
+    const A: f64 = 0.387_098;
+    const E: f64 = 0.205_63;
+    const M_MERCURY: f64 = 1.660_114e-7;
+    const N_ORBITS: u64 = 500;
+
+    let r_peri = A * (1.0 - E);
+    let v_peri = (2.0 / r_peri - 1.0 / A).sqrt();
+
+    let omega_drift = |with_1pn: bool| -> f64 {
+        let sun = Body::star(1.0).unsoftened();
+        let mercury =
+            Body::rocky(M_MERCURY).at(r_peri, 0.0).with_velocity(0.0, v_peri).unsoftened();
+        let mut sys = System::new(vec![sun, mercury], UnitSystem::solar_canonical())
+            .with_integrator(IntegratorKind::ImplicitMidpoint)
+            .with_dt(1e-4);
+        if with_1pn {
+            sys.add_hamiltonian_perturbation(Box::new(PostNewtonian1PN::from_raw_c(
+                C_SOLAR_UNITS,
+                UnitSystem::solar_canonical(),
+            )))
+            .expect("IM federation gate: shared UnitSystem::solar_canonical()");
+        }
+        let el0 = compute_elements(sys.bodies(), 1, 0, 1.0).unwrap();
+        sys.integrate_for(el0.period * (N_ORBITS as f64));
+        let el_end = compute_elements(sys.bodies(), 1, 0, 1.0).unwrap();
+        let mut d = el_end.omega - el0.omega;
+        while d > PI {
+            d -= 2.0 * PI;
+        }
+        while d <= -PI {
+            d += 2.0 * PI;
+        }
+        d
+    };
+
+    let with_1pn = omega_drift(true);
+    let baseline = omega_drift(false);
+    let measured = with_1pn - baseline;
+
+    let c = C_SOLAR_UNITS;
+    let predicted = 6.0 * PI / (c * c * A * (1.0 - E * E)) * (N_ORBITS as f64);
+
+    let rel_err = (measured - predicted).abs() / predicted.abs();
+    assert!(
+        rel_err < 1e-2,
+        "IM + 1PN federation gate: 1PN-attributable precession off by {rel_err:.3e} — \
+         measured (with − without) = {measured:.3e} rad vs predicted {predicted:.3e} rad \
+         (with-1PN total = {with_1pn:.3e}, baseline ghost = {baseline:.3e})",
+    );
+}
+
 /// Sanity test — without the 1PN perturbation, the same integration
 /// must produce zero precession up to machine precision. Locks in the
 /// baseline that the PN measurement relies on.

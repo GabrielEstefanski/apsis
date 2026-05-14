@@ -318,6 +318,7 @@ fn integrator_short_label(k: IntegratorKind) -> &'static str {
         IntegratorKind::WHFast => "WHFast",
         IntegratorKind::Ias15 => "IAS15",
         IntegratorKind::Mercurius => "Mercurius",
+        IntegratorKind::ImplicitMidpoint => "IM2",
     }
 }
 
