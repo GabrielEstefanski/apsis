@@ -129,9 +129,8 @@ impl IntegratorKind {
                 "Wisdom-Holman split with compensated summation on per-step \
                  position and velocity accumulators (Rein & Tamayo 2015). \
                  Round-off envelope reduced from O(N · ε) to O(√N · ε), \
-                 unlocking long-horizon planetary integration. Optional \
-                 order-17 symplectic corrector boosts boundary truncation \
-                 to O(dt^18). Same hierarchical-mass requirement as WH."
+                 unlocking long-horizon planetary integration. Same \
+                 hierarchical-mass requirement as WH."
             },
             Self::Ias15 => {
                 "15th-order adaptive Gauss-Radau integrator (Rein & Spiegel \

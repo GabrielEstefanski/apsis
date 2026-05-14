@@ -232,6 +232,72 @@ fn baseline_newtonian_kepler_is_closed() {
     );
 }
 
+/// Federation gate — WHFast + 1PN reproduces the same GR perihelion
+/// precession the IAS15 gate above measures. Closes the federation
+/// contract for symplectic-class integrators: a perturbation registered
+/// against `System` is dispatched correctly through WHFast's
+/// `interaction_step`, and the WHFast Phase 2 compensated-summation
+/// accumulator does not corrupt the 1PN force prefactor.
+///
+/// Why a separate gate: WHFast and IAS15 cover different reviewer
+/// expectations. IAS15 is the precision-controlled adaptive path;
+/// WHFast is the long-horizon planetary baseline. The integrator zoo
+/// claim is "every regime composes with every perturbation" — this
+/// test discharges that claim for the WHFast slot.
+///
+/// Threshold matches the IAS15 gate (100 ppm) for the same cross-platform
+/// reasons. WHFast is 2nd-order with fixed dt, so the cumulative phase
+/// noise is `O(N_steps · dt² · m_p / m_0)`; at `dt = 1e-4`, 500 Mercury
+/// orbits, `m_p / m_0 ≈ 1.66e-7`, the noise budget is `~1.7e-8 rad` vs
+/// the GR signal of `~1e-3 rad` — comfortable room under 100 ppm.
+#[test]
+#[ignore = "release-mode integration test; run with `cargo test --release -- --ignored`"]
+fn mercury_precession_whfast_matches_gr_within_100ppm() {
+    const A: f64 = 0.387_098;
+    const E: f64 = 0.205_63;
+    const M_MERCURY: f64 = 1.660_114e-7;
+    const N_ORBITS: u64 = 500;
+
+    let sun = Body::star(1.0).unsoftened();
+    let r_peri = A * (1.0 - E);
+    let v_peri = (2.0 / r_peri - 1.0 / A).sqrt();
+    let mercury = Body::rocky(M_MERCURY).at(r_peri, 0.0).with_velocity(0.0, v_peri).unsoftened();
+
+    let mut sys = System::new(vec![sun, mercury], UnitSystem::solar_canonical())
+        .with_integrator(IntegratorKind::WHFast)
+        .with_dt(1e-4);
+    sys.add_hamiltonian_perturbation(Box::new(PostNewtonian1PN::from_raw_c(
+        C_SOLAR_UNITS,
+        UnitSystem::solar_canonical(),
+    )))
+    .expect("WHFast federation gate: System and operator share UnitSystem::solar_canonical()");
+
+    let el0 = compute_elements(sys.bodies(), 1, 0, 1.0).unwrap();
+    sys.integrate_for(el0.period * (N_ORBITS as f64));
+    let el_end = compute_elements(sys.bodies(), 1, 0, 1.0).unwrap();
+
+    let measured = {
+        let mut d = el_end.omega - el0.omega;
+        while d > PI {
+            d -= 2.0 * PI;
+        }
+        while d <= -PI {
+            d += 2.0 * PI;
+        }
+        d
+    };
+
+    let c = C_SOLAR_UNITS;
+    let predicted = 6.0 * PI / (c * c * A * (1.0 - E * E)) * (N_ORBITS as f64);
+
+    let rel_err = (measured - predicted).abs() / predicted.abs();
+    assert!(
+        rel_err < 1e-4,
+        "WHFast + 1PN Mercury precession off by {rel_err:.3e} — \
+         measured {measured:.3e} rad vs predicted {predicted:.3e} rad",
+    );
+}
+
 /// 3D smoke test — Mercury in an inclined orbit `i = 7°` reproduces the
 /// same GR perihelion precession rate as the planar gate above.
 ///

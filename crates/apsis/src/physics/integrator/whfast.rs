@@ -2,13 +2,9 @@
 //!
 //! Symplectic mixed-variable integrator in democratic-heliocentric
 //! coordinates. Same KDK structure as [`super::wisdom_holman::WisdomHolman`]
-//! with two additions: persistent per-body compensators (Neumaier) on
-//! the position and velocity accumulators, reducing the round-off
-//! envelope on length-N sums from `O(N · ε)` to `O(√N · ε)`
-//! (Higham 2002 §4.5); and an order-17 symplectic corrector
-//! (Wisdom 1996) applied at sync boundaries, pushing boundary
-//! truncation from `O(dt²)` to `O(dt^18)`. Corrector opt-out via
-//! [`WHFast::without_correctors`].
+//! with persistent per-body compensators (Neumaier) on the position
+//! and velocity accumulators, reducing the round-off envelope on
+//! length-N sums from `O(N · ε)` to `O(√N · ε)` (Higham 2002 §4.5).
 //!
 //! Lab notebook:
 //! `docs/experiments/2026-05-13-whfast-integrator.md`.
@@ -16,7 +12,6 @@
 //! # References
 //!
 //! - Rein, H. & Tamayo, D. (2015). *MNRAS* 452, 376.
-//! - Wisdom, J. (1996). *AJ* 112, 1305.
 //! - Wisdom, J. & Holman, M. (1991). *AJ* 102, 1528.
 
 use crate::domain::body::Body;
@@ -39,9 +34,6 @@ const WHFAST_DOMINANCE_RATIO: f64 = 10.0;
 pub struct WHFast {
     cs_pos: Vec<Vec3>,
     cs_vel: Vec<Vec3>,
-    /// Apply the order-17 symplectic corrector at sync boundaries.
-    /// Default `true`; opt-out via [`WHFast::without_correctors`].
-    with_correctors: bool,
 }
 
 impl Default for WHFast {
@@ -52,18 +44,7 @@ impl Default for WHFast {
 
 impl WHFast {
     pub fn new() -> Self {
-        Self { cs_pos: Vec::new(), cs_vel: Vec::new(), with_correctors: true }
-    }
-
-    /// Disable the symplectic corrector — runs bare KDK.
-    #[must_use]
-    pub fn without_correctors(mut self) -> Self {
-        self.with_correctors = false;
-        self
-    }
-
-    pub fn has_correctors(&self) -> bool {
-        self.with_correctors
+        Self { cs_pos: Vec::new(), cs_vel: Vec::new() }
     }
 
     /// `true` when `bodies[0]` dominates the system mass distribution
@@ -372,6 +353,66 @@ fn central_potential(bodies: &[Body], mu: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::physics::integrator::WisdomHolman;
+    use crate::physics::integrator::force_model::GravityForceModel;
+
+    /// Sun + 2 widely-separated planets on circular Keplerian orbits at
+    /// G·M = 1 in canonical units. Mirrors `mercurius::tests`.
+    fn quiet_planetary() -> Vec<Body> {
+        vec![
+            Body::star(1.0).unsoftened(),
+            Body::rocky(1.0e-6).at(1.0, 0.0).with_velocity(0.0, 1.0).unsoftened(),
+            Body::rocky(1.0e-6)
+                .at(2.0, 0.0)
+                .with_velocity(0.0, std::f64::consts::FRAC_1_SQRT_2)
+                .unsoftened(),
+        ]
+    }
+
+    /// Sun + Earth-mass test particle on a circular orbit at r = 1.
+    /// Period is 2π, so N orbits = N · 2π in time.
+    fn two_body_circular() -> Vec<Body> {
+        vec![
+            Body::star(1.0).unsoftened(),
+            Body::rocky(1.0e-9).at(1.0, 0.0).with_velocity(0.0, 1.0).unsoftened(),
+        ]
+    }
+
+    fn step_via(integrator: &mut dyn Integrator, bodies: &mut [Body], dt: f64, n_steps: usize) {
+        let mut force = GravityForceModel::new(0.5, 16);
+        let mut acc: Vec<Vec3> = vec![Vec3::ZERO; bodies.len()];
+        let hamiltonian: Vec<Box<dyn crate::physics::integrator::HamiltonianOperator>> = Vec::new();
+        let non_conservative: Vec<Box<dyn crate::physics::integrator::NonConservativeOperator>> =
+            Vec::new();
+        let mut observers: Vec<Box<dyn crate::physics::integrator::Operator>> = Vec::new();
+        for _ in 0..n_steps {
+            let mut ctx = IntegratorContext {
+                force: &mut force,
+                g_factor: 1.0,
+                hamiltonian_perturbations: &hamiltonian,
+                non_conservative_perturbations: &non_conservative,
+                observers: &mut observers,
+                deadline: None,
+            };
+            integrator.step(bodies, &mut ctx, dt, &mut acc);
+        }
+    }
+
+    fn total_energy(bs: &[Body]) -> f64 {
+        let mut ke = 0.0;
+        let mut pe = 0.0;
+        for (i, b) in bs.iter().enumerate() {
+            ke += 0.5 * b.mass * (b.vel_x.powi(2) + b.vel_y.powi(2) + b.vel_z.powi(2));
+            for j in (i + 1)..bs.len() {
+                let dx = b.pos_x - bs[j].pos_x;
+                let dy = b.pos_y - bs[j].pos_y;
+                let dz = b.pos_z - bs[j].pos_z;
+                let r = (dx * dx + dy * dy + dz * dz).sqrt().max(1.0e-30);
+                pe -= b.mass * bs[j].mass / r;
+            }
+        }
+        ke + pe
+    }
 
     /// `is_suitable_for` mirrors the WH 1991 dominance threshold.
     #[test]
@@ -386,20 +427,6 @@ mod tests {
         assert!(!WHFast::is_suitable_for(&single));
     }
 
-    /// Builder defaults: corrector ON.
-    #[test]
-    fn default_has_correctors_on() {
-        let wh = WHFast::new();
-        assert!(wh.has_correctors());
-    }
-
-    /// `without_correctors` flips the flag.
-    #[test]
-    fn without_correctors_disables() {
-        let wh = WHFast::new().without_correctors();
-        assert!(!wh.has_correctors());
-    }
-
     /// Compensators resize lazily on first step / N change.
     #[test]
     fn ensure_state_size_resizes_compensators() {
@@ -408,11 +435,143 @@ mod tests {
         wh.ensure_state_size(3);
         assert_eq!(wh.cs_pos.len(), 3);
         assert_eq!(wh.cs_vel.len(), 3);
-        // All compensators start at zero.
         assert!(wh.cs_pos.iter().all(|v| *v == Vec3::ZERO));
         assert!(wh.cs_vel.iter().all(|v| *v == Vec3::ZERO));
-        // Resize to a different N zeros the buffers.
         wh.ensure_state_size(5);
         assert_eq!(wh.cs_pos.len(), 5);
+    }
+
+    /// Two-body Kepler closure on a circular orbit. After N orbits the
+    /// heliocentric position should return to its starting state up to
+    /// the integrator's truncation floor. Closure is checked in the
+    /// central-body-relative frame because the inertial planet position
+    /// carries the COM drift `v_com · t_total ≈ 6e-7` over 100 orbits.
+    ///
+    /// The DH Kepler kernel propagates each planet around `mu = G·M_central`,
+    /// not `G·M_total`; the indirect-drift Hamiltonian compensates over a
+    /// full orbit but the residual is `O((dt/T)² · m_p/m_0)` in radial
+    /// position and `O((dt/T) · m_p/m_0 · t)` in along-track phase. At
+    /// `N = 100`, `steps_per_orbit = 1024`, `m_p/m_0 = 1e-9`, the dominant
+    /// drift is the along-track phase: `~ 1 µAU` after 100 orbits.
+    /// Eccentricity and semi-major axis stay bound by the symplectic
+    /// invariant — only the orbital phase walks.
+    ///
+    /// Bound `1e-5`: catches a broken Kepler step, missed indirect drift,
+    /// or a frame-leak; loose enough to track the published `O(N · dt²)`
+    /// phase residual.
+    #[test]
+    fn two_body_closure_returns_after_n_orbits() {
+        let n_orbits = 100;
+        let steps_per_orbit = 1024;
+        let dt = 2.0 * std::f64::consts::PI / steps_per_orbit as f64;
+        let bodies0 = two_body_circular();
+        let mut bodies = bodies0.clone();
+        let mut wh = WHFast::new();
+        step_via(&mut wh, &mut bodies, dt, n_orbits * steps_per_orbit);
+
+        let q0 = Vec3::new(
+            bodies0[1].pos_x - bodies0[0].pos_x,
+            bodies0[1].pos_y - bodies0[0].pos_y,
+            bodies0[1].pos_z - bodies0[0].pos_z,
+        );
+        let q = Vec3::new(
+            bodies[1].pos_x - bodies[0].pos_x,
+            bodies[1].pos_y - bodies[0].pos_y,
+            bodies[1].pos_z - bodies[0].pos_z,
+        );
+        let dr = (q - q0).length();
+        let dr_radial = (q.length() - q0.length()).abs();
+        assert!(
+            dr < 1.0e-5,
+            "two-body closure after {n_orbits} orbits: |Δr| = {dr:.3e}, expected < 1e-5"
+        );
+        assert!(
+            dr_radial < 1.0e-10,
+            "two-body radial closure after {n_orbits} orbits: |Δr_rad| = {dr_radial:.3e}, expected < 1e-10"
+        );
+    }
+
+    /// Brouwer-style energy conservation on a quiet planetary system.
+    /// At `N ≤ 10⁴` both WHFast and WH 1991 sit at the IEEE-754 truncation
+    /// floor; the test guards against gross algorithmic regressions
+    /// (kick / drift / indirect-shift ordering, COM drift, frame leak)
+    /// rather than measuring the compensated-summation advantage. The
+    /// `O(√N · ε)` vs `O(N · ε)` separation lives in the cross-implementation
+    /// lab notebook at `N ≳ 10⁸`.
+    #[test]
+    fn quiet_system_energy_conservation() {
+        let dt = 1.0e-3;
+        let n_steps = 10_000;
+        let mut bodies = quiet_planetary();
+        let e0 = total_energy(&bodies);
+
+        let mut wh = WHFast::new();
+        step_via(&mut wh, &mut bodies, dt, n_steps);
+
+        let e1 = total_energy(&bodies);
+        let rel = ((e1 - e0) / e0).abs();
+        assert!(
+            rel < 1.0e-10,
+            "WHFast quiet-system energy drift over {n_steps} steps: |ΔE/E| = {rel:.3e}, expected < 1e-10"
+        );
+    }
+
+    /// At small step counts WHFast and WH 1991 share the same KDK
+    /// structure, drift kernel (`kepler_step`), and DH frame change;
+    /// they differ only in the compensated-summation accumulator. At
+    /// `N = 200` the per-step compensator updates are below the f64
+    /// ULP of the running positions, so trajectories agree to the
+    /// truncation floor. Tightening below `1e-10` would catch a
+    /// compensator-ordering bug; loosening above `1e-8` would miss a
+    /// frame-leak regression.
+    #[test]
+    fn whfast_matches_wisdom_holman_at_short_horizon() {
+        let dt = 1.0e-3;
+        let n_steps = 200;
+        let mut bodies_whfast = quiet_planetary();
+        let mut bodies_wh = quiet_planetary();
+
+        let mut whfast = WHFast::new();
+        let mut wh = WisdomHolman::new();
+        step_via(&mut whfast, &mut bodies_whfast, dt, n_steps);
+        step_via(&mut wh, &mut bodies_wh, dt, n_steps);
+
+        for (bw, bf) in bodies_whfast.iter().zip(bodies_wh.iter()) {
+            let dx = bw.pos_x - bf.pos_x;
+            let dy = bw.pos_y - bf.pos_y;
+            let dz = bw.pos_z - bf.pos_z;
+            let r = (bw.pos_x.powi(2) + bw.pos_y.powi(2) + bw.pos_z.powi(2)).sqrt().max(1.0e-30);
+            let rel = (dx * dx + dy * dy + dz * dz).sqrt() / r;
+            assert!(
+                rel < 1.0e-9,
+                "WHFast vs WisdomHolman short-horizon parity: |Δr|/r = {rel:.3e}, expected < 1e-9"
+            );
+        }
+    }
+
+    /// Refusing a non-hierarchical scenario is the integrator's contract;
+    /// `is_suitable_for` is the gate, but the per-step path also has to
+    /// signal violation when called on an inadequate system. Validates
+    /// the `HierarchySignal::Violated` arm rather than panic-on-bad-input.
+    #[test]
+    fn step_signals_hierarchy_on_short_input() {
+        let mut bodies = vec![Body::star(1.0).unsoftened()];
+        let mut force = GravityForceModel::new(0.5, 16);
+        let mut acc: Vec<Vec3> = vec![Vec3::ZERO; bodies.len()];
+        let hamiltonian: Vec<Box<dyn crate::physics::integrator::HamiltonianOperator>> = Vec::new();
+        let non_conservative: Vec<Box<dyn crate::physics::integrator::NonConservativeOperator>> =
+            Vec::new();
+        let mut observers: Vec<Box<dyn crate::physics::integrator::Operator>> = Vec::new();
+        let mut ctx = IntegratorContext {
+            force: &mut force,
+            g_factor: 1.0,
+            hamiltonian_perturbations: &hamiltonian,
+            non_conservative_perturbations: &non_conservative,
+            observers: &mut observers,
+            deadline: None,
+        };
+        let mut wh = WHFast::new();
+        let result = wh.step(&mut bodies, &mut ctx, 0.01, &mut acc);
+        assert_eq!(result.hierarchy_signal, Some(HierarchySignal::Violated));
     }
 }
