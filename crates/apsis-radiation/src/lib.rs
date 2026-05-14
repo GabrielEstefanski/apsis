@@ -1,102 +1,27 @@
-//! Out-of-tree perturbation crate for `apsis`. Radiation pressure +
-//! Poynting–Robertson drag per Burns, Lamy & Soter (1979).
+//! Radiation-pressure perturbations per Burns, Lamy & Soter
+//! (1979, *Icarus* 40, 1).
 //!
-//! **This crate proves the federation contract scales to dissipative
-//! physics.** It is the first publisher of a [`NonConservativeOperator`]
-//! and ships alongside a conservative [`HamiltonianOperator`] derived
-//! from the same paper. The two together demonstrate the
-//! Hamiltonian / non-Hamiltonian split inside a single physical regime
-//! (small-particle dynamics around a luminous source).
-//!
-//! No `pub(crate)` access into `apsis`, no patches to core sources, no
-//! dependency other than `apsis` itself — every coupling is through the
-//! public API. A future change to that API that breaks this crate fails
-//! CI loudly rather than quietly.
-//!
-//! # Physics
-//!
-//! For a body of mass m, area A, illuminated by a luminous source of
-//! luminosity L at distance r, the radiation force splits naturally
-//! into a radial pressure term (lossless, conservative) and a
-//! relativistic drag term (Poynting–Robertson, dissipative). Burns,
-//! Lamy & Soter (1979) showed the leading-order force can be written
-//! purely in terms of the dimensionless ratio
-//!
-//! ```text
-//!   β ≡ F_rad / F_grav = (3 · L · Q_pr) / (16π · G · M · c · ρ · s)
-//! ```
-//!
-//! where `Q_pr` is the radiation pressure efficiency, `ρ` is the body's
-//! density, and `s` its radius. This crate takes `β` per body as the
-//! fundamental input — a deliberate choice so the operator stays
-//! decoupled from grain-physics derivations (consumers may compute β
-//! however they want: textbook closed form, Mie theory, dust survey
-//! data).
-//!
-//! ## [`RadiationPressure`] — Hamiltonian operator
-//!
-//! Radial 1/r² force opposing gravity, identical structurally to a
-//! gravitational reduction `G_eff = G · (1 − β)`:
-//!
-//! ```text
-//!   F_rad(i ← source) = + β_i · G · M_source · m_i / r² · r̂
-//! ```
-//!
-//! Conservative: deriveable from the central potential
-//! `V_rad(i) = − β_i · G · M_source · m_i / r`. This crate contributes
-//! that closed form to [`crate::physics::integrator::Potential`] so
-//! `System::total_energy` accounts for it.
-//!
-//! ## [`PoyntingRobertsonDrag`] — non-conservative operator
-//!
-//! Relativistic correction yielding angular-momentum loss. Per Burns
-//! et al. eq. (7):
-//!
-//! ```text
-//!   F_PR(i ← source) = − (β_i · G · M_source / r²) · [ (2·v_r/c) · r̂ + v / c ]
-//! ```
-//!
-//! where `v_r = v · r̂` is the radial velocity component. Symplectic
-//! integrators registered alongside this operator will warn at
-//! registration; the energy-drift signal is the physical effect, not a
-//! numerical artifact.
-//!
-//! For a circular orbit the analytic semi-major-axis decay timescale is
-//!
-//! ```text
-//!   τ_PR = a² · c² / (4 · β · G · M_source)
-//! ```
-//!
-//! which the crate's validation gate (`tests/dust_decay_gate.rs`)
-//! reproduces against a numerical integration.
+//! [`RadiationPressure`] is the radial 1/r² force opposing gravity
+//! (Hamiltonian, conservative). [`PoyntingRobertsonDrag`] is the
+//! relativistic v/c term causing semi-major-axis decay
+//! (non-conservative). Both take per-body
+//! `β = F_rad / F_grav` as input.
 //!
 //! # Conventions
 //!
-//! - `bodies[source]` is the radiating body (typically `bodies[0]`).
-//!   It must itself feel no radiation force; `betas[source]` must be 0.
-//! - `betas[i]` ≥ 0; `β > 1` corresponds to radiation overpowering
-//!   gravity (the "blowout" regime — orbit is unbound). The operator
-//!   does not refuse `β > 1`, it just integrates the unbound trajectory.
-//! - `r̂` points from receiver to source (matches the apsis sign
-//!   convention noted in the apsis-1pn crate-level docs).
+//! - `bodies[source]` is the radiating body. `betas[source]` must be 0.
+//! - `r̂` points from receiver to source.
+//! - `β > 1` is the unbound "blowout" regime, integrated without warning.
 //!
 //! # Use
 //!
 //! ```ignore
-//! use apsis::core::system::System;
-//! use apsis::domain::body::Body;
-//! use apsis::physics::integrator::IntegratorKind;
-//! use apsis::units::UnitSystem;
-//! use apsis_radiation::{PoyntingRobertsonDrag, RadiationPressure};
-//!
 //! let units = UnitSystem::solar_canonical();
 //! let sun = Body::star(1.0).unsoftened();
-//! // β = 0.1 dust grain at 1 AU, circular Keplerian.
 //! let dust = Body::rocky(1e-15).at(1.0, 0.0).with_velocity(0.0, 1.0).unsoftened();
 //! let mut sys = System::new(vec![sun, dust], units)
 //!     .with_integrator(IntegratorKind::Ias15)
 //!     .with_dt(1e-3);
-//!
 //! sys.add_hamiltonian_perturbation(Box::new(
 //!     RadiationPressure::from_raw_betas(0, vec![0.0, 0.1], units),
 //! ))?;
@@ -105,14 +30,10 @@
 //! ))?;
 //! ```
 //!
-//! # References
+//! # Reference
 //!
-//! Burns, J. A., Lamy, P. L., & Soter, S. (1979). Radiation forces on
-//! small particles in the solar system. *Icarus* 40, 1–48.
+//! Burns, J. A., Lamy, P. L., & Soter, S. (1979).
 //! DOI: [10.1016/0019-1035(79)90050-2](https://doi.org/10.1016/0019-1035(79)90050-2).
-//!
-//! [`NonConservativeOperator`]: apsis::physics::integrator::NonConservativeOperator
-//! [`HamiltonianOperator`]: apsis::physics::integrator::HamiltonianOperator
 
 #![deny(unsafe_code)]
 #![allow(clippy::needless_range_loop)]
@@ -129,24 +50,14 @@ use apsis::units::UnitSystem;
 /// Speed of light in m/s — CODATA exact by SI definition.
 const C_SI: f64 = 299_792_458.0;
 
-/// Common per-body β bookkeeping shared by the two radiation operators.
-/// Both consume the same physical input (per-body β indexed by body,
-/// plus the source body's index); the only difference is which force
-/// expression they accumulate.
+/// Per-body β bookkeeping shared by [`RadiationPressure`] and
+/// [`PoyntingRobertsonDrag`].
 #[derive(Debug, Clone)]
 struct BetaTable {
-    /// Index of the radiating body. Convention: `bodies[0]` for the
-    /// solar-system fixtures, but the operator accepts any index.
     source: usize,
-    /// β per body, indexed in body-vector order. `betas[source]` must
-    /// be 0 — a body cannot radiate on itself.
     betas: Vec<f64>,
-    /// Speed of light expressed in `units`. Cached at construction so
-    /// the hot loop avoids the multiply.
+    /// Speed of light in `units`. Cached at construction.
     c: f64,
-    /// Unit system this operator was built for. Used by
-    /// [`Operator::declared_units`] to fail loudly at registration when
-    /// paired with a `System` integrating in a different unit system.
     units: UnitSystem,
 }
 
@@ -156,10 +67,7 @@ impl BetaTable {
         Self { source, betas, c, units }
     }
 
-    /// β for body `i`, or 0 if the table is shorter than the current
-    /// body vector (operator was registered before bodies were added).
-    /// Out-of-range indices return 0 so the hot loop never panics; the
-    /// regime check surfaces the mis-sized table at warn cadence.
+    /// β for body `i`, or 0 if the table is shorter than `bodies`.
     fn beta_for(&self, i: usize) -> f64 {
         self.betas.get(i).copied().unwrap_or(0.0)
     }
@@ -167,48 +75,32 @@ impl BetaTable {
 
 // ── RadiationPressure (Hamiltonian) ──────────────────────────────────────────
 
-/// Radial radiation pressure: a conservative central force opposing
-/// gravity from the source body, scaled per receiver by `β`.
-///
-/// Stateless. Safe to share across threads.
-///
-/// # Cross-reference to REBOUNDx
-///
-/// Corresponds to the conservative half of REBOUNDx's `radiation_forces`
-/// effect. The dissipative half is exposed here as
-/// [`PoyntingRobertsonDrag`] so consumers can register one without the
-/// other (e.g. high-β grains where the radial pressure dominates and
-/// the PR drag is negligible on simulation timescales).
+/// Radial radiation pressure: conservative central force scaled per
+/// receiver by `β`. Force expression
+/// `F_rad(i ← source) = + β_i · G · M_source · m_i / r² · r̂`;
+/// closed-form potential `V_rad = − β · G · M · m / r` published via
+/// [`HamiltonianOperator::potential`].
 #[derive(Debug, Clone)]
 pub struct RadiationPressure {
     table: BetaTable,
 }
 
 impl RadiationPressure {
-    /// Construct from a raw per-body β array. `source` is the index of
-    /// the radiating body; `betas[i]` is body `i`'s radiation-to-gravity
-    /// force ratio. `betas[source]` must be 0 — enforced by
-    /// [`Operator::check_regime`] at registration.
-    ///
-    /// Use when β is computed by neighbouring code (Mie theory, dust
-    /// survey data, ad-hoc parameter scan). For closed-form β from
-    /// grain physics see the README — a Pattern A `for_dust_grain(...)`
-    /// constructor will be added when a consumer needs it.
+    /// `source` is the index of the radiating body; `betas[i]` is body
+    /// `i`'s β. `betas[source]` must be 0 (enforced at registration via
+    /// [`Operator::check_regime`]).
     pub fn from_raw_betas(source: usize, betas: Vec<f64>, units: UnitSystem) -> Self {
         Self { table: BetaTable::new(source, betas, units) }
     }
 
-    /// β value applied to body `i`.
     pub fn beta_for(&self, i: usize) -> f64 {
         self.table.beta_for(i)
     }
 
-    /// Index of the radiating body.
     pub fn source(&self) -> usize {
         self.table.source
     }
 
-    /// Unit system this operator was constructed for.
     pub fn units(&self) -> UnitSystem {
         self.table.units
     }
@@ -223,22 +115,10 @@ impl Operator for RadiationPressure {
         Some(self.table.units)
     }
 
-    /// Radiation pressure as a 1/r² central force is mathematically
-    /// well-defined under any kernel — softening just shifts the
-    /// equilibrium radius. We leave [`KernelRequirements`] empty so the
-    /// operator can be registered against the default softened kernel
-    /// without a warning. The validation gate uses
-    /// `with_exact_gravity()` for clean comparison against the analytic
-    /// τ_PR formula but that is the gate's choice, not the operator's
-    /// requirement.
     fn kernel_requirements(&self) -> KernelRequirements {
         KernelRequirements::none()
     }
 
-    /// Surface mis-sized β tables (operator built for a different body
-    /// count than the current `System` carries) and the
-    /// `betas[source] != 0` invariant. β > 1 ("blowout") is allowed
-    /// without warning — it is a legitimate physical regime.
     fn check_regime(&self, bodies: &[Body], _t: f64) -> Vec<RegimeViolation> {
         let mut violations = Vec::new();
         if self.table.betas.len() != bodies.len() {
