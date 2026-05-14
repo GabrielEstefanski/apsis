@@ -408,7 +408,8 @@ fn integrator_is_symplectic(kind: IntegratorKind) -> bool {
         | IntegratorKind::Yoshida4
         | IntegratorKind::WisdomHolman
         | IntegratorKind::WHFast
-        | IntegratorKind::Mercurius => true,
+        | IntegratorKind::Mercurius
+        | IntegratorKind::ImplicitMidpoint => true,
         IntegratorKind::Ias15 => false,
     }
 }

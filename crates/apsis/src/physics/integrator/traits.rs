@@ -41,6 +41,7 @@ pub enum IntegratorKind {
     WHFast,
     Ias15,
     Mercurius,
+    ImplicitMidpoint,
 }
 
 impl IntegratorKind {
@@ -53,6 +54,7 @@ impl IntegratorKind {
             Self::WHFast => "WHFast (2nd, Keplerian, compensated)",
             Self::Ias15 => "IAS15 (15th, adaptive)",
             Self::Mercurius => "Mercurius (hybrid, WH + IAS15)",
+            Self::ImplicitMidpoint => "Implicit Midpoint (2nd, A-stable)",
         }
     }
 
@@ -70,7 +72,8 @@ impl IntegratorKind {
             | Self::Yoshida4
             | Self::WisdomHolman
             | Self::WHFast
-            | Self::Mercurius => ExecutionProfile::Realtime,
+            | Self::Mercurius
+            | Self::ImplicitMidpoint => ExecutionProfile::Realtime,
         }
     }
 
@@ -83,6 +86,7 @@ impl IntegratorKind {
             Self::WHFast => 2,
             Self::Ias15 => 15,
             Self::Mercurius => 2,
+            Self::ImplicitMidpoint => 2,
         }
     }
 
@@ -103,6 +107,11 @@ impl IntegratorKind {
             // quoted number is an amortised lower bound assuming no pair
             // is in close encounter; engaging encounters add IAS15 substeps.
             Self::Mercurius => 2,
+            // ImplicitMidpoint: one force eval per fixed-point iteration
+            // plus one final eval at the end-state. Mean iteration count
+            // is 3-6 for non-stiff conservative gravity; quoted figure is
+            // an upper bound assuming `max_iterations = 10`.
+            Self::ImplicitMidpoint => 11,
         }
     }
 
@@ -147,14 +156,24 @@ impl IntegratorKind {
                  the encountering pair while preserving secular stability \
                  elsewhere. Requires a hierarchical mass distribution."
             },
+            Self::ImplicitMidpoint => {
+                "Single-stage Gauss-Legendre symplectic method (Hairer-Lubich-Wanner \
+                 2006, Chapter II.1.4). A-stable on the entire left half-plane and \
+                 time-symmetric. Iterates per step on the implicit midpoint state \
+                 (Picard, max 10 iterations by default; Newton-Krylov reserved in \
+                 the API). Makes no central-mass dominance assumption — accepts \
+                 BH binaries, equal-mass triples, particle clouds. Not L-stable; \
+                 dissipation-dominant extreme regimes need Radau IIA or BDF."
+            },
         }
     }
 
     /// All known variants, in the order shown in the UI combo-box.
-    pub const ALL: [IntegratorKind; 6] = [
+    pub const ALL: [IntegratorKind; 7] = [
         IntegratorKind::Ias15,
         IntegratorKind::Mercurius,
         IntegratorKind::WHFast,
+        IntegratorKind::ImplicitMidpoint,
         IntegratorKind::Yoshida4,
         IntegratorKind::VelocityVerlet,
         IntegratorKind::WisdomHolman,
@@ -169,6 +188,7 @@ impl IntegratorKind {
             Self::WHFast => "whfast",
             Self::Ias15 => "ias15",
             Self::Mercurius => "mercurius",
+            Self::ImplicitMidpoint => "implicit_midpoint",
         }
     }
 }
@@ -184,6 +204,7 @@ impl std::str::FromStr for IntegratorKind {
             "whfast" => Ok(Self::WHFast),
             "ias15" => Ok(Self::Ias15),
             "mercurius" => Ok(Self::Mercurius),
+            "implicit_midpoint" => Ok(Self::ImplicitMidpoint),
             _ => Err(format!(
                 "unknown integrator {:?}; valid slugs: {}",
                 s,

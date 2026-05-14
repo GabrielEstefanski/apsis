@@ -600,6 +600,7 @@ fn kind_slug(kind: CoreIntegratorKind) -> &'static str {
         CoreIntegratorKind::WisdomHolman => "wisdom_holman",
         CoreIntegratorKind::Mercurius => "mercurius",
         CoreIntegratorKind::WHFast => "whfast",
+        CoreIntegratorKind::ImplicitMidpoint => "implicit_midpoint",
     }
 }
 
