@@ -25,7 +25,7 @@ Three regimes drive the case for a hybrid:
 
 2. **Long-horizon hierarchical with rare encounters** (10⁴ – 10⁶ orbits, planet–planetesimal). IAS15 saturates at the Brouwer-law floor for energy drift over very long horizons; WH preserves secular stability arbitrarily long. Today there is no apsis integrator that handles both regimes within one run.
 
-3. **Federated-FPM demonstration.** The thesis ([[project_thesis_anchor]], [[project_paper_positioning]]) frames apsis as a federation where physics components are first-class. Mercurius federates two existing integrators into a single algorithm — the federation idea applied to the temporal axis instead of the perturbation axis. Worth the implementation cost on positioning grounds alone.
+3. **Federated-FPM demonstration.** The federation thesis frames apsis as a system where physics components are first-class. Mercurius federates two existing integrators into a single algorithm — the federation idea applied to the temporal axis instead of the perturbation axis. Worth the implementation cost on positioning grounds alone.
 
 ### What this experiment is NOT testing
 
@@ -110,7 +110,7 @@ circular velocity. Pair-wise scale: $\mathrm{dcrit}_{ij} = \max(\mathrm{dcrit}_i
 | Question | Decision | Rationale |
 | --- | --- | --- |
 | §6.1 Hill radius $M_\star$ for non-hierarchical systems | Refuse with a `warn_diag!` event + `used_fallback = true`; step does not advance | Mercurius assumes a dominant central body for the analytical Kepler drift. Non-hierarchical fallback would be a different algorithm. Honest failure → user routes to IAS15 directly. Matches REBOUND. |
-| §6.2 Changeover function shape | REBOUND `L_mercury`: $C^2$ quintic Hermite $L(y) = 10 y^3 - 15 y^4 + 6 y^5$ with $y = (d - 0.1\,\mathrm{dcrit})/(0.9\,\mathrm{dcrit})$ | The 0.1·dcrit deadband ensures $L \equiv 0$ deep in the encounter — IAS15 carries the full force without leakage from the K-weighted kick. Earlier draft used a $C^1$ cubic; updated after reading `integrator_mercurius.c` (mid-experiment revision documented in [[feedback_research_commit_discipline]]). |
+| §6.2 Changeover function shape | REBOUND `L_mercury`: $C^2$ quintic Hermite $L(y) = 10 y^3 - 15 y^4 + 6 y^5$ with $y = (d - 0.1\,\mathrm{dcrit})/(0.9\,\mathrm{dcrit})$ | The 0.1·dcrit deadband ensures $L \equiv 0$ deep in the encounter — IAS15 carries the full force without leakage from the K-weighted kick. Earlier draft used a $C^1$ cubic; updated after reading `integrator_mercurius.c` (mid-experiment revision recorded as a separate commit). |
 | §6.3 Default $\alpha$ (Hill multiplier for `dcrit`) | $\alpha = 3$ | REBOUND default; validated by Rein et al. 2019 §3 against several planetary scattering scenarios. |
 | §6.4 `fast` integrator selection | Wisdom-Holman analytical Kepler drift, K-weighted planet-planet half-kicks | The K-weighted kick is the only second-order operator; Kepler is analytical, jump and COM are exact, encounter step is high-precision. Yoshida-4 would lose the analytical Kepler advantage. |
 | §6.5 Per-pair vs global changeover | Per-pair, via $\mathrm{dcrit}_{ij} = \max(\mathrm{dcrit}_i, \mathrm{dcrit}_j)$ | REBOUND structure — per-particle critical radius derived from 4 criteria (avg velocity, current velocity, Hill radius, physical radius), pair-wise reduced by max. Not the "mutual Hill radius per pair" formulation the design proposal sketched; the 4-criterion form is what REBOUND ships and what Rein et al. 2019 measure against. |
