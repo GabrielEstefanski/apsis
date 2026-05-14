@@ -332,10 +332,11 @@ fn rf64(r: &mut impl Read) -> io::Result<f64> {
 /// |------|---------|
 /// | 0    | `VelocityVerlet` |
 /// | 1    | `Yoshida4` |
-/// | 2    | `WisdomHolman` (v5+) |
-/// | 3    | `Ias15` (v6+)     |
-/// | 4    | `Mercurius` (v15+) |
-/// | 5    | `WHFast` (v16+)   |
+/// | 2    | `WisdomHolman` |
+/// | 3    | `Ias15`        |
+/// | 4    | `Mercurius`    |
+/// | 5    | `WHFast`       |
+/// | 6    | `ImplicitMidpoint` |
 fn integrator_to_u8(i: IntegratorKind) -> u8 {
     match i {
         IntegratorKind::VelocityVerlet => 0,
@@ -344,6 +345,7 @@ fn integrator_to_u8(i: IntegratorKind) -> u8 {
         IntegratorKind::Ias15 => 3,
         IntegratorKind::Mercurius => 4,
         IntegratorKind::WHFast => 5,
+        IntegratorKind::ImplicitMidpoint => 6,
     }
 }
 
@@ -357,6 +359,7 @@ fn u8_to_integrator(v: u8) -> IntegratorKind {
         3 => IntegratorKind::Ias15,
         4 => IntegratorKind::Mercurius,
         5 => IntegratorKind::WHFast,
+        6 => IntegratorKind::ImplicitMidpoint,
         _ => IntegratorKind::VelocityVerlet,
     }
 }
