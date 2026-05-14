@@ -594,7 +594,6 @@ impl SimulationApp {
         let mut physics_cfg = PhysicsConfig::default();
         physics_cfg.integrator = system.integrator_kind();
         physics_cfg.theta = system.theta();
-        physics_cfg.softening_scale = system.softening_scale();
 
         let physics = spawn_physics(system, true /* start paused */);
 

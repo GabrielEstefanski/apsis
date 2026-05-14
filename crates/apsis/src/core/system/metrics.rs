@@ -50,7 +50,7 @@ impl System {
             last_step_degraded: self.last_step_degraded,
 
             r_min: self.r_min,
-            softening_max: self.softening_max,
+            kernel_epsilon_squared: self.force_model.kernel().epsilon_squared(),
 
             recommended_dt: self.recommended_dt(),
             adaptive_stats: self.integrator.adaptive_stats(),
@@ -139,47 +139,32 @@ impl System {
 
     /// Physics-justified recommended timestep from the current system state.
     ///
-    /// Two regimes, selected by whether the system has positive softening on
-    /// every body:
+    /// Two regimes, selected by whether the active gravity kernel uses
+    /// softening:
     ///
     /// - **Softened (η = 0.05):** Power-style acceleration criterion
-    ///   `η · √(ε_min / a_max)` (formula structure from Power et al. 2003;
-    ///   the η value is an apsis-side convention within the 0.01–0.1 range
-    ///   typical in literature) combined with Aarseth's jerk criterion
-    ///   `η · √(a_max / |jerk|)` (Aarseth 2003 §2). Uses the smallest
-    ///   softening length as the resolution scale; `√(ε / a)` has the
-    ///   dimensions of time and is bounded above by the time the body
-    ///   needs to traverse one softening length under acceleration
-    ///   `a_max`.
+    ///   `η · √(ε / a_max)` (Power et al. 2003) combined with Aarseth's
+    ///   jerk criterion `η · √(a_max / |jerk|)` (Aarseth 2003 §2). Uses
+    ///   the kernel's softening length as the resolution scale.
     ///
-    /// - **Unsoftened fallback (η = 0.01):** the Power-style formula
-    ///   degenerates at `ε = 0` (`dt = η · √(0 / a) = 0`). The fallback
-    ///   uses the shortest pairwise Kepler period (Aarseth 2003 §2):
-    ///   `T_ij = 2π · √(r_ij³ / μ_ij)` with `μ_ij = G · (m_i + m_j)`, and
-    ///   returns `η · min_pairs(T_ij)`. This is closed-form, scale-aware,
-    ///   and naturally tightens during close encounters (`T_ij → 0` as
-    ///   `r_ij → 0`; the `1e-9` floor bounds the degenerate limit). A mixed
-    ///   system with any unsoftened body falls back to the pair criterion —
-    ///   conservative, since a single unsoftened body sets the integrator
-    ///   stiffness regardless of the rest.
+    /// - **Unsoftened fallback (η = 0.01):** shortest pairwise Kepler
+    ///   period `T_ij = 2π · √(r_ij³ / μ_ij)` (Aarseth 2003 §2). Closed-
+    ///   form, scale-aware, naturally tightens during close encounters.
     ///
-    /// Returns `None` before the first force evaluation, when N = 0, when
-    /// N = 1 in the unsoftened branch (no pair to evaluate), or when every
-    /// pair degenerates (zero separation or zero reduced mass).
+    /// Returns `None` before the first force evaluation, when N = 0, or
+    /// when every pair degenerates.
     pub fn recommended_dt(&self) -> Option<f64> {
         if self.bodies.is_empty() || self.last_diag.max_acc <= 1e-30 {
             return None;
         }
 
-        let eps_min = self.bodies.iter().map(|b| b.softening).fold(f64::MAX, f64::min);
+        let eps_sq = self.force_model.kernel().epsilon_squared();
+        let eps = eps_sq.sqrt();
 
-        // Softened path: Power-style acceleration criterion + Aarseth (2003 §2)
-        // jerk criterion. Requires `ε > 0` as a length scale; degenerate at
-        // `ε = 0`.
-        if eps_min > 0.0 && eps_min < f64::MAX {
+        if eps > 0.0 {
             const ETA: f64 = 0.05;
 
-            let dt_acc = ETA * (eps_min / self.last_diag.max_acc).sqrt();
+            let dt_acc = ETA * (eps / self.last_diag.max_acc).sqrt();
 
             let dt_jerk = if self.last_diag.jerk > 1e-30 {
                 ETA * (self.last_diag.max_acc / self.last_diag.jerk).sqrt()
@@ -270,8 +255,8 @@ mod tests {
     #[test]
     fn unsoftened_two_body_returns_pair_kepler_period() {
         let bodies = vec![
-            Body::rocky(1.0).at(-1.0, 0.0).with_velocity(0.0, -0.5).unsoftened(),
-            Body::rocky(1.0).at(1.0, 0.0).with_velocity(0.0, 0.5).unsoftened(),
+            Body::rocky(1.0).at(-1.0, 0.0).with_velocity(0.0, -0.5),
+            Body::rocky(1.0).at(1.0, 0.0).with_velocity(0.0, 0.5),
         ];
         let mut sys = System::new(bodies, UnitSystem::canonical())
             .with_integrator(IntegratorKind::VelocityVerlet)
@@ -293,9 +278,9 @@ mod tests {
     #[test]
     fn unsoftened_three_body_closest_pair_dominates() {
         let bodies = vec![
-            Body::rocky(1.0).at(0.0, 0.0).with_velocity(0.0, 0.0).unsoftened(),
-            Body::rocky(1.0).at(1.0, 0.0).with_velocity(0.5, 0.5).unsoftened(),
-            Body::rocky(1.0).at(10.0, 0.0).with_velocity(0.0, 0.0).unsoftened(),
+            Body::rocky(1.0).at(0.0, 0.0).with_velocity(0.0, 0.0),
+            Body::rocky(1.0).at(1.0, 0.0).with_velocity(0.5, 0.5),
+            Body::rocky(1.0).at(10.0, 0.0).with_velocity(0.0, 0.0),
         ];
         let mut sys = System::new(bodies, UnitSystem::canonical())
             .with_integrator(IntegratorKind::VelocityVerlet)
@@ -319,15 +304,11 @@ mod tests {
         assert!(r_close < 2.0, "closest pair must remain close after one step");
     }
 
-    /// Mixed softened + unsoftened: any unsoftened body forces `eps_min = 0`,
-    /// routing through the pair-Kepler fallback. A softened companion does
-    /// not switch the branch back to the Power-style path; the conservative
-    /// choice (use the stiffer criterion) wins.
+    /// Default Newton kernel routes through the pair-Kepler fallback.
     #[test]
-    fn mixed_softening_falls_back_to_pair_kepler() {
+    fn newton_kernel_falls_back_to_pair_kepler() {
         let bodies = vec![
-            Body::rocky(1.0).at(-1.0, 0.0).with_velocity(0.0, -0.5).unsoftened(),
-            // Default material softening on the second body (positive).
+            Body::rocky(1.0).at(-1.0, 0.0).with_velocity(0.0, -0.5),
             Body::rocky(1.0).at(1.0, 0.0).with_velocity(0.0, 0.5),
         ];
         let mut sys = System::new(bodies, UnitSystem::canonical())
@@ -335,34 +316,13 @@ mod tests {
             .with_dt(0.01);
         sys.step();
 
-        let dt = sys.recommended_dt().expect("mixed system should yield Some via fallback");
+        let dt = sys.recommended_dt().expect("Newton kernel should yield Some via pair-Kepler");
         let expected = expected_dt_unsoftened(&sys);
         let rel_err = (dt - expected).abs() / expected;
         assert!(
             rel_err < 1e-14,
-            "mixed system did not route through pair-Kepler fallback: \
-             expected {expected:.6e} (pair-only), got {dt:.6e}",
+            "Newton kernel did not route through pair-Kepler fallback: \
+             expected {expected:.6e}, got {dt:.6e}",
         );
-    }
-
-    /// Regression on the softened path: when every body has positive softening,
-    /// the Power-style acceleration + Aarseth jerk criterion runs unchanged. Verifies the new
-    /// branch did not break the existing behaviour.
-    #[test]
-    fn softened_path_returns_finite_positive_dt() {
-        let bodies = vec![
-            // Default rocky material → non-zero softening.
-            Body::rocky(1.0).at(-1.0, 0.0).with_velocity(0.0, -0.5),
-            Body::rocky(1.0).at(1.0, 0.0).with_velocity(0.0, 0.5),
-        ];
-        assert!(bodies.iter().all(|b| b.softening > 0.0), "test fixture must use softened bodies");
-
-        let mut sys = System::new(bodies, UnitSystem::canonical())
-            .with_integrator(IntegratorKind::VelocityVerlet)
-            .with_dt(0.01);
-        sys.step();
-
-        let dt = sys.recommended_dt().expect("softened path should yield Some");
-        assert!(dt > 0.0 && dt.is_finite(), "softened recommended_dt must be positive and finite");
     }
 }

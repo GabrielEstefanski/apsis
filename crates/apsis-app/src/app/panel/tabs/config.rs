@@ -62,7 +62,7 @@ fn param_row<R>(
 impl SimulationApp {
     /// Renders the **Config** side-panel tab.
     ///
-    /// Exposes controls for force accuracy (Barnes–Hut θ, Plummer softening),
+    /// Exposes controls for force accuracy (Barnes–Hut θ),
     /// gravity scaling, integration algorithm and time step, trail sampling,
     /// and a one-click reset to factory defaults.
     pub(super) fn panel_tab_config(&mut self, ui: &mut egui::Ui) {
@@ -119,100 +119,9 @@ impl SimulationApp {
             self.system.set_exact_threshold(thr);
         }
 
-        let eps_tip = "Global Plummer softening scale.\n\
-            Per-body default: ε = 0.02 · m^(1/3)\n\
-            1.0 = default  |  > 1 suppresses singularities  |  < 1 sharper forces";
-
-        let mut eps = self.physics_cfg.softening_scale;
-        let changed = param_row(ui, "ε scale", eps_tip, LBL_W, |ui| {
-            ui.add_sized(
-                egui::vec2(SL_W, 18.0),
-                egui::Slider::new(&mut eps, 0.01_f64..=10.0)
-                    .logarithmic(true)
-                    .show_value(true)
-                    .custom_formatter(|v, _| format!("{v:.3}")),
-            )
-            .changed()
-        });
-        if changed {
-            self.physics_cfg.softening_scale = eps;
-            self.system.set_softening_scale(eps);
-        }
-
-        ui.label(
-            RichText::new(format!("  ε_eff = 0.02·m^⅓·{:.3}", self.physics_cfg.softening_scale))
-                .size(9.0)
-                .color(TEXT_DIM),
-        );
-
-        // Softening validity indicator: estimates the fractional force error
-        // from the ratio ε_max / r_min and flags critical close encounters.
-        {
-            let m = self.system.metrics();
-            let r_min = m.r_min;
-            let soft_max = m.softening_max;
-            let has_data = r_min < f64::MAX && r_min > 1e-30 && soft_max > 0.0;
-
-            if has_data {
-                let ratio = soft_max / r_min;
-
-                // Fractional force error ≈ (3/2)(ε/r)² for ε/r ≪ 1.
-                let force_err_pct = (1.5 * ratio * ratio * 100.0).min(9999.0);
-
-                let (dot, color, sev_label) = if ratio > 0.3 {
-                    ("▲", DANGER, "critical")
-                } else if ratio > 0.1 {
-                    ("▲", ACCENT, "warning")
-                } else {
-                    ("●", SUCCESS, "ok")
-                };
-
-                ui.add_space(2.0);
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new(dot).size(9.0).color(color));
-                    ui.label(RichText::new("softening").size(9.5).color(TEXT_DIM));
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        ui.label(RichText::new(sev_label).size(9.5).color(color).strong());
-                    });
-                });
-
-                ui.horizontal(|ui| {
-                    ui.label(
-                        RichText::new(format!("  ε/r_min = {ratio:.3e}")).size(9.0).color(TEXT_DIM),
-                    );
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        ui.label(
-                            RichText::new(format!("~{force_err_pct:.1}% err"))
-                                .size(9.0)
-                                .color(color),
-                        );
-                    });
-                });
-
-                if ratio > 0.1 {
-                    egui::Frame::NONE
-                        .fill(Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), 18))
-                        .stroke(Stroke::new(0.5, color.gamma_multiply(0.4)))
-                        .corner_radius(3.0)
-                        .inner_margin(egui::Margin::symmetric(6, 3))
-                        .show(ui, |ui| {
-                            ui.set_width(ui.available_width());
-                            let hint = if ratio > 0.3 {
-                                "force accuracy severely compromised — \
-                                 reduce ε scale or increase body separations"
-                            } else {
-                                "close encounter detected — \
-                                 reduce ε scale or switch to Yoshida 4th-order"
-                            };
-                            ui.add(
-                                egui::Label::new(RichText::new(hint).size(9.0).color(color)).wrap(),
-                            );
-                        });
-                } else {
-                    ui.add_space(18.0);
-                }
-            }
-        }
+        // Softening control removed in Layer 3: gravity defaults to exact
+        // 1/r² (Newton kernel). Plummer / future kernels are selected via
+        // System::with_kernel(...), not via a per-body slider.
 
         // ── GRAVITY ───────────────────────────────────────────────────────────
 
@@ -295,57 +204,6 @@ impl SimulationApp {
             self.apply_perturbations();
         }
 
-        // Warn on any active perturbation whose `kernel_requirements`
-        // would not be satisfied by the current Plummer-softened kernel.
-        // The check is structural — it consumes the same `Exactness` rank
-        // the integrator uses to gate registration, so the UI mirrors the
-        // physics contract instead of inventing its own predicate.
-        let warn_softening = self.physics_cfg.softening_scale > 0.0
-            && self.perturbation_catalog.iter().any(|e| {
-                e.enabled
-                    && e.descriptor.kernel_requirements().required_exactness
-                        == Some(Exactness::Exact)
-            });
-        if warn_softening {
-            ui.add_space(2.0);
-            let warn = WARN;
-            egui::Frame::NONE
-                .fill(Color32::from_rgba_unmultiplied(warn.r(), warn.g(), warn.b(), 18))
-                .stroke(Stroke::new(0.5, warn.gamma_multiply(0.4)))
-                .corner_radius(3.0)
-                .inner_margin(egui::Margin::symmetric(6, 4))
-                .show(ui, |ui| {
-                    ui.set_width(ui.available_width());
-                    ui.add(
-                        egui::Label::new(
-                            RichText::new(
-                                "Active perturbation requires exact 1/r gravity. \
-                                 Plummer softening is on — its numerical apsidal \
-                                 precession dominates the physical signal.",
-                            )
-                            .size(9.0)
-                            .color(warn),
-                        )
-                        .wrap(),
-                    );
-                    ui.add_space(3.0);
-                    if ui
-                        .add(
-                            egui::Button::new(
-                                RichText::new("Disable softening").size(9.5).color(warn),
-                            )
-                            .fill(Color32::TRANSPARENT)
-                            .stroke(Stroke::new(0.5, warn.gamma_multiply(0.6)))
-                            .min_size(egui::vec2(120.0, 18.0)),
-                        )
-                        .clicked()
-                    {
-                        self.physics_cfg.softening_scale = 0.0;
-                        self.system.set_softening_scale(0.0);
-                    }
-                });
-        }
-
         // ── RESET ─────────────────────────────────────────────────────────────
 
         ui.add_space(10.0);
@@ -354,7 +212,6 @@ impl SimulationApp {
             self.system.set_exact_threshold(defaults.exact_threshold);
             self.system.set_seed(defaults.seed);
             self.system.set_theta(defaults.theta);
-            self.system.set_softening_scale(defaults.softening_scale);
             self.system.set_g_factor(defaults.g_factor);
             self.physics_cfg = defaults;
         }

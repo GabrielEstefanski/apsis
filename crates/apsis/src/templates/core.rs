@@ -8,8 +8,8 @@
 //!
 //! `TemplateBody` is intentionally a *descriptor*, not a `Body`. It holds only
 //! the quantities that the scenario author specifies explicitly; all derived
-//! physical properties (density, physical radius, softening)
-//! are computed by `Body::of` at instantiation time using the material model.
+//! physical properties (density, physical radius) are computed by `Body::of`
+//! at instantiation time using the material model.
 //!
 //! This separation means templates are:
 //! - **Compact** — no redundant derived fields.
@@ -47,7 +47,6 @@ use crate::domain::body_preset::BodyPreset;
 /// |---------------------|----------------------------------------|
 /// | Bulk density        | `preset.density.density_at(mass)`      |
 /// | Physical radius     | `radius_from_density_mass(ρ, m)`       |
-/// | Softening length    | `default_softening(mass)`              |
 /// | Display colour      | `preset.default_color`                 |
 /// | Radiation `q_pr`    | `preset.default_q_pr`                  |
 /// | Luminosity          | `preset.luminosity.compute(...)`       |
@@ -322,6 +321,23 @@ pub struct Template {
     /// scenarios that require a specific cadence (e.g. close binary stars that
     /// need a small fixed step for accuracy).
     pub suggested_dt: Option<f64>,
+
+    /// Suggested integrator for this scenario.
+    ///
+    /// `None` means the template has no preference — the user's existing
+    /// integrator choice (or the app default, Yoshida 4) wins. `Some(kind)`
+    /// is a recommendation that the app applies only when the user has not
+    /// explicitly chosen an integrator. Hierarchy:
+    ///
+    /// ```text
+    /// explicit user choice  >  template suggestion  >  app default
+    /// ```
+    ///
+    /// Use for scenarios with specific numerical requirements: stiff
+    /// close-encounter problems (Pythagorean → Mercurius), high-precision
+    /// fine-physics measurements (Mercury 1PN → Ias15), arbitrary topology
+    /// requiring an implicit method (BH binary → ImplicitMidpoint).
+    pub suggested_integrator: Option<crate::physics::integrator::IntegratorKind>,
 
     /// Physical unit system used by this template.
     ///

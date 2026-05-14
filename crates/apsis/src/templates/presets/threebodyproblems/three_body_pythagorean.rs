@@ -11,6 +11,7 @@
 
 use crate::{
     domain::body_preset,
+    physics::integrator::IntegratorKind,
     templates::{Template, TemplateBody, UnitSystem},
 };
 
@@ -56,6 +57,9 @@ pub fn three_body_pythagorean(_seed: u64) -> Template {
         orbital_up: None,
         default_view_distance: None,
         suggested_dt: Some(0.001),
+        // Pythagorean has tight close encounters; Mercurius's hybrid
+        // changeover handles them; Newton + fixed-step explicit blows up.
+        suggested_integrator: Some(IntegratorKind::Mercurius),
         units: UnitSystem::dimensionless(),
     }
 }

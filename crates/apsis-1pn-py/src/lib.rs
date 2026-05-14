@@ -23,7 +23,7 @@
 //! angular momentum stay conserved at machine precision while the
 //! trajectory is physically wrong. **This is not a numerical error —
 //! it is a model violation.** Pass `exact_gravity=True` or call
-//! `Body.<material>(...).unsoftened()`; a violation emits a structured
+//! `Body.<material>(...)`; a violation emits a structured
 //! warning at registration.
 //!
 //! # Use
@@ -32,11 +32,11 @@
 //! import apsis
 //! import apsis_1pn
 //!
-//! sun = apsis.Body.star(mass=1.0).unsoftened()
+//! sun = apsis.Body.star(mass=1.0)
 //! mercury = (apsis.Body.rocky(mass=1.66e-7)
 //!            .at((0.387, 0.0))
 //!            .with_velocity((0.0, 1.61))
-//!            .unsoftened())
+//!            )
 //!
 //! sys = apsis.System(
 //!     bodies=[sun, mercury],
@@ -85,7 +85,7 @@ fn wrap_in_apsis_perturbation(
 /// Hamiltonian whose apsidal precession alone is ~2 × 10³ larger than
 /// the 1PN signal for a Mercury-like orbit, silently inverting the
 /// sign of the measured precession. Either pass `exact_gravity=True`
-/// to `apsis.System(...)` or call `Body.<material>(...).unsoftened()`
+/// to `apsis.System(...)` or call `Body.<material>(...)`
 /// on every body.
 #[pyclass(module = "apsis_1pn", name = "PostNewtonian1PN")]
 pub struct PyPostNewtonian1PN;

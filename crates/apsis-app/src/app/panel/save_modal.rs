@@ -129,7 +129,6 @@ impl SimulationApp {
                             // Sync app UI state back from snapshot
                             self.physics_cfg.integrator      = snap.integrator_kind;
                             self.physics_cfg.theta           = snap.theta;
-                            self.physics_cfg.softening_scale = snap.softening_scale;
                             self.physics_cfg.g_factor        = snap.g_factor;
                             self.sim_name = snap.sim_name.clone();
                             // Restore trail recorder from snapshot.

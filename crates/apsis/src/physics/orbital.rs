@@ -2380,10 +2380,8 @@ mod tests {
 
         let m = 1.0;
         let z0 = 1.0;
-        let mut a = Body::rocky(m).at_3d(0.0, 0.0, z0).with_velocity_3d(0.0, 0.0, -0.05);
-        let mut b = Body::rocky(m).at_3d(0.0, 0.0, -z0).with_velocity_3d(0.0, 0.0, 0.05);
-        a.softening = 0.0;
-        b.softening = 0.0;
+        let a = Body::rocky(m).at_3d(0.0, 0.0, z0).with_velocity_3d(0.0, 0.0, -0.05);
+        let b = Body::rocky(m).at_3d(0.0, 0.0, -z0).with_velocity_3d(0.0, 0.0, 0.05);
 
         let mut sys = System::new(vec![a, b], UnitSystem::canonical())
             .with_integrator(IntegratorKind::Ias15)

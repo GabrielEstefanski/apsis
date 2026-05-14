@@ -1284,7 +1284,7 @@ impl Integrator for Ias15 {
                                     floor = DT_MIN,
                                     floor_hit_count = c,
                                     substep = self.substeps_total,
-                                    hint = "scenario may be stiff — consider increasing softening, reducing N, or relaxing epsilon",
+                                    hint = "scenario may be stiff — consider a softened kernel (NewtonKernel::new(ε > 0)), reducing N, or relaxing epsilon",
                                 );
                             }
                         }
@@ -2232,10 +2232,8 @@ mod tests {
         // driver artificially inflates the number of `step()` calls.
         let dt_budget = period / 20.0;
 
-        let mut b1 = Body::rocky(1.0).at(-r_peri / 2.0, 0.0).with_velocity(0.0, -v_peri / 2.0);
-        b1.softening = 0.0;
-        let mut b2 = Body::rocky(1.0).at(r_peri / 2.0, 0.0).with_velocity(0.0, v_peri / 2.0);
-        b2.softening = 0.0;
+        let b1 = Body::rocky(1.0).at(-r_peri / 2.0, 0.0).with_velocity(0.0, -v_peri / 2.0);
+        let b2 = Body::rocky(1.0).at(r_peri / 2.0, 0.0).with_velocity(0.0, v_peri / 2.0);
 
         let mut sys = System::new(vec![b1, b2], UnitSystem::canonical())
             .with_theta(0.5)
@@ -2323,10 +2321,8 @@ mod tests {
         let r_peri = A * (1.0 - E);
         let v_peri = (MU * (1.0 + E) / (A * (1.0 - E))).sqrt();
 
-        let mut b1 = Body::rocky(1.0).at(-r_peri / 2.0, 0.0).with_velocity(0.0, -v_peri / 2.0);
-        b1.softening = 0.0;
-        let mut b2 = Body::rocky(1.0).at(r_peri / 2.0, 0.0).with_velocity(0.0, v_peri / 2.0);
-        b2.softening = 0.0;
+        let b1 = Body::rocky(1.0).at(-r_peri / 2.0, 0.0).with_velocity(0.0, -v_peri / 2.0);
+        let b2 = Body::rocky(1.0).at(r_peri / 2.0, 0.0).with_velocity(0.0, v_peri / 2.0);
 
         let mut sys = System::new(vec![b1, b2], UnitSystem::canonical())
             .with_theta(0.5)
@@ -2373,14 +2369,11 @@ mod tests {
         const T_END: f64 = 10.0;
         const PEAK_TOL: f64 = 1e-11;
 
-        let mut bodies = vec![
+        let bodies = vec![
             Body::rocky(3.0).at(1.0, 3.0).with_velocity(0.0, 0.0),
             Body::rocky(4.0).at(-2.0, -1.0).with_velocity(0.0, 0.0),
             Body::rocky(5.0).at(1.0, -1.0).with_velocity(0.0, 0.0),
         ];
-        for b in &mut bodies {
-            b.softening = 0.0;
-        }
 
         let mut sys = System::new(bodies, UnitSystem::canonical())
             .with_theta(0.5)
@@ -2435,10 +2428,8 @@ mod tests {
         let period = 2.0 * std::f64::consts::PI * (A.powi(3) / MU).sqrt();
         let dt_budget = period;
 
-        let mut b1 = Body::rocky(1.0).at(-r_peri / 2.0, 0.0).with_velocity(0.0, -v_peri / 2.0);
-        b1.softening = 0.0;
-        let mut b2 = Body::rocky(1.0).at(r_peri / 2.0, 0.0).with_velocity(0.0, v_peri / 2.0);
-        b2.softening = 0.0;
+        let b1 = Body::rocky(1.0).at(-r_peri / 2.0, 0.0).with_velocity(0.0, -v_peri / 2.0);
+        let b2 = Body::rocky(1.0).at(r_peri / 2.0, 0.0).with_velocity(0.0, v_peri / 2.0);
 
         let mut sys = System::new(vec![b1, b2], UnitSystem::canonical())
             .with_theta(0.5)
@@ -2963,9 +2954,9 @@ mod tests {
 
         // Planar Pythagorean (canonical Burrau initial conditions).
         let planar_bodies = vec![
-            Body::rocky(3.0).at(1.0, 3.0).with_velocity(0.0, 0.0).unsoftened(),
-            Body::rocky(4.0).at(-2.0, -1.0).with_velocity(0.0, 0.0).unsoftened(),
-            Body::rocky(5.0).at(1.0, -1.0).with_velocity(0.0, 0.0).unsoftened(),
+            Body::rocky(3.0).at(1.0, 3.0).with_velocity(0.0, 0.0),
+            Body::rocky(4.0).at(-2.0, -1.0).with_velocity(0.0, 0.0),
+            Body::rocky(5.0).at(1.0, -1.0).with_velocity(0.0, 0.0),
         ];
 
         // Inclined Pythagorean: each body's position rotated 30° around `x̂`.
@@ -2977,10 +2968,7 @@ mod tests {
             .map(|b| {
                 let pos = rotate_around_x(Vec3::new(b.pos_x, b.pos_y, b.pos_z), INCLINATION);
                 let vel = rotate_around_x(Vec3::new(b.vel_x, b.vel_y, b.vel_z), INCLINATION);
-                Body::rocky(b.mass)
-                    .at_3d(pos.x, pos.y, pos.z)
-                    .with_velocity_3d(vel.x, vel.y, vel.z)
-                    .unsoftened()
+                Body::rocky(b.mass).at_3d(pos.x, pos.y, pos.z).with_velocity_3d(vel.x, vel.y, vel.z)
             })
             .collect();
 
@@ -3043,8 +3031,8 @@ mod tests {
 
         // Planar two-body high-e Kepler.
         let planar_bodies = vec![
-            Body::rocky(1.0).at(-r_peri / 2.0, 0.0).with_velocity(0.0, -v_peri / 2.0).unsoftened(),
-            Body::rocky(1.0).at(r_peri / 2.0, 0.0).with_velocity(0.0, v_peri / 2.0).unsoftened(),
+            Body::rocky(1.0).at(-r_peri / 2.0, 0.0).with_velocity(0.0, -v_peri / 2.0),
+            Body::rocky(1.0).at(r_peri / 2.0, 0.0).with_velocity(0.0, v_peri / 2.0),
         ];
 
         let inclined_bodies: Vec<Body> = planar_bodies
@@ -3052,10 +3040,7 @@ mod tests {
             .map(|b| {
                 let pos = rotate_around_x(Vec3::new(b.pos_x, b.pos_y, b.pos_z), INCLINATION);
                 let vel = rotate_around_x(Vec3::new(b.vel_x, b.vel_y, b.vel_z), INCLINATION);
-                Body::rocky(b.mass)
-                    .at_3d(pos.x, pos.y, pos.z)
-                    .with_velocity_3d(vel.x, vel.y, vel.z)
-                    .unsoftened()
+                Body::rocky(b.mass).at_3d(pos.x, pos.y, pos.z).with_velocity_3d(vel.x, vel.y, vel.z)
             })
             .collect();
 
@@ -3129,8 +3114,8 @@ mod tests {
         let dt_budget = period / 20.0;
 
         let planar_bodies = [
-            Body::rocky(1.0).at(-r_peri / 2.0, 0.0).with_velocity(0.0, -v_peri / 2.0).unsoftened(),
-            Body::rocky(1.0).at(r_peri / 2.0, 0.0).with_velocity(0.0, v_peri / 2.0).unsoftened(),
+            Body::rocky(1.0).at(-r_peri / 2.0, 0.0).with_velocity(0.0, -v_peri / 2.0),
+            Body::rocky(1.0).at(r_peri / 2.0, 0.0).with_velocity(0.0, v_peri / 2.0),
         ];
 
         let bodies: Vec<Body> = planar_bodies
@@ -3138,10 +3123,7 @@ mod tests {
             .map(|b| {
                 let pos = rotate_around_x(Vec3::new(b.pos_x, b.pos_y, b.pos_z), INCLINATION);
                 let vel = rotate_around_x(Vec3::new(b.vel_x, b.vel_y, b.vel_z), INCLINATION);
-                Body::rocky(b.mass)
-                    .at_3d(pos.x, pos.y, pos.z)
-                    .with_velocity_3d(vel.x, vel.y, vel.z)
-                    .unsoftened()
+                Body::rocky(b.mass).at_3d(pos.x, pos.y, pos.z).with_velocity_3d(vel.x, vel.y, vel.z)
             })
             .collect();
 

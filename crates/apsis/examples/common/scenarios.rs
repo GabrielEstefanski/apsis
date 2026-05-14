@@ -161,7 +161,7 @@ pub fn build_friendly_cluster(n: usize, seed: u64) -> Vec<Body> {
 pub fn build_hierarchical_kepler(n: usize, seed: u64) -> Vec<Body> {
     let mut rng = SmallRng::seed_from_u64(seed);
     let mut bodies = Vec::with_capacity(n);
-    bodies.push(Body::star(1.0).at(0.0, 0.0).unsoftened());
+    bodies.push(Body::star(1.0).at(0.0, 0.0));
 
     let log_a_min = 0.3_f64.log10();
     let log_a_max = 30.0_f64.log10();

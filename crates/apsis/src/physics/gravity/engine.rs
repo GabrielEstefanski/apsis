@@ -34,7 +34,7 @@ use crate::domain::body_arrays::BodyArrays;
 use crate::math::Vec3;
 use rayon::prelude::*;
 
-use super::kernel::{G, Kernel, PlummerKernel, pair_eps2};
+use super::kernel::{G, Kernel, NewtonKernel};
 #[cfg(target_arch = "x86_64")]
 use super::simd;
 use super::tree::{DEFAULT_LEAF, DIRECT_MODE_THRESHOLD, EXACT_THRESHOLD, NO_CHILD, Node, Octree};
@@ -120,8 +120,8 @@ impl WalkCounters {
 /// every step without any carry-over from previous steps.
 ///
 /// The pair potential is supplied by a [`Kernel`] held behind [`Arc`]; the
-/// default (from [`BarnesHutEngine::new`]) is [`PlummerKernel`], which
-/// reproduces the Plummer-softened force law used throughout the library.
+/// default (from [`BarnesHutEngine::new`]) is [`NewtonKernel`] with
+/// `ε = 0` (exact `1/r²`).
 pub struct BarnesHutEngine {
     tree: Octree,
     /// N ≤ this → exact O(N²); N > this → Barnes-Hut traversal.
@@ -134,12 +134,12 @@ pub struct BarnesHutEngine {
 }
 
 impl BarnesHutEngine {
-    /// Create a new engine with the default [`PlummerKernel`].
+    /// Create a new engine with the default [`NewtonKernel`] (exact 1/r²).
     ///
     /// `max_depth` bounds the octree depth; 16 is sufficient for all
     /// practical particle counts.
     pub fn new(max_depth: usize) -> Self {
-        Self::with_kernel(max_depth, Arc::new(PlummerKernel::new()))
+        Self::with_kernel(max_depth, Arc::new(NewtonKernel::exact()))
     }
 
     /// Create a new engine with a caller-supplied [`Kernel`] implementation.
@@ -328,8 +328,7 @@ impl BarnesHutEngine {
         let body_pos_x = arrays.pos_x[body_idx];
         let body_pos_y = arrays.pos_y[body_idx];
         let body_pos_z = arrays.pos_z[body_idx];
-        let body_softening = arrays.softening[body_idx];
-        let eps2 = body_softening * body_softening;
+        let eps2 = self.kernel.epsilon_squared();
         let mut violation_sum = 0.0_f64;
         let mut weight_sum = 0.0_f64;
 
@@ -468,10 +467,11 @@ impl BarnesHutEngine {
 
 /// Direct O(N²) pairwise force evaluation — exact for any N.
 ///
-/// Iterates over all unique pairs (i, j) reading positions / mass / softening
-/// from the [`BodyArrays`] snapshot. For each pair, applies Newton's 3rd
-/// law by updating both `acc[i]` and `acc[j]` from the same kernel
-/// evaluation, using pairwise softening ε²_ij = (ε²_i + ε²_j) / 2.
+/// Iterates over all unique pairs (i, j) reading positions / mass from the
+/// [`BodyArrays`] snapshot. For each pair, applies Newton's 3rd law by
+/// updating both `acc[i]` and `acc[j]` from the same kernel evaluation.
+/// Softening, when the active kernel uses one, is read from the kernel
+/// itself (single global parameter).
 ///
 /// The component-by-component `m · d · fac` chain is load-bearing: re-
 /// associating into a shared `m_fac = mass * fac` factor shifts ULPs and
@@ -487,10 +487,9 @@ fn exact_eval(arrays: &BodyArrays, kernel: &dyn Kernel, acc: &mut [Vec3]) -> f64
             let dx = arrays.pos_x[j] - arrays.pos_x[i];
             let dy = arrays.pos_y[j] - arrays.pos_y[i];
             let dz = arrays.pos_z[j] - arrays.pos_z[i];
-            let eps2 = pair_eps2(arrays.softening[i], arrays.softening[j]);
             let r_sq = dx * dx + dy * dy + dz * dz;
 
-            let fac = G * kernel.acceleration_factor(r_sq, eps2);
+            let fac = G * kernel.acceleration_factor(r_sq);
 
             let mass_i = arrays.mass[i];
             let mass_j = arrays.mass[j];
@@ -502,7 +501,7 @@ fn exact_eval(arrays: &BodyArrays, kernel: &dyn Kernel, acc: &mut [Vec3]) -> f64
             acc[j].y -= mass_i * dy * fac;
             acc[j].z -= mass_i * dz * fac;
 
-            let phi_ij = -G * mass_j * kernel.potential(r_sq, eps2);
+            let phi_ij = -G * mass_j * kernel.potential(r_sq);
             potential += mass_i * phi_ij;
         }
     }
@@ -568,8 +567,6 @@ fn bh_walk_emit_lists(
     let body_pos_x = arrays.pos_x[body_idx];
     let body_pos_y = arrays.pos_y[body_idx];
     let body_pos_z = arrays.pos_z[body_idx];
-    let body_softening = arrays.softening[body_idx];
-    let body_eps2 = body_softening * body_softening;
 
     let mut counters = WalkCounters::default();
     lists.clear();
@@ -599,10 +596,12 @@ fn bh_walk_emit_lists(
         }
 
         // BH criterion: accept this node as a pseudo-body when s/d < θ.
+        // Geometric distance — softening (when present) lives in the
+        // kernel and is applied at force evaluation, not at acceptance.
         let dx = node.com_x - body_pos_x;
         let dy = node.com_y - body_pos_y;
         let dz = node.com_z - body_pos_z;
-        let d = (dx * dx + dy * dy + dz * dz + body_eps2).sqrt();
+        let d = (dx * dx + dy * dy + dz * dz).sqrt();
 
         if node.size() / d < theta {
             lists.accepted_node_indices.push(raw);
@@ -643,8 +642,7 @@ fn bh_process_lists(
     let body_pos_x = arrays.pos_x[body_idx];
     let body_pos_y = arrays.pos_y[body_idx];
     let body_pos_z = arrays.pos_z[body_idx];
-    let body_softening = arrays.softening[body_idx];
-    let body_eps2 = body_softening * body_softening;
+    let body_eps2 = kernel.epsilon_squared();
 
     // Phase 2a: leaf-pair Plummer monopole. Dispatched per-engine to either
     // the scalar dyn-kernel path or the AVX2 inlined-Plummer path.
@@ -653,7 +651,6 @@ fn bh_process_lists(
             body_pos_x,
             body_pos_y,
             body_pos_z,
-            body_softening,
             arrays,
             kernel,
             &lists.leaf_body_indices,
@@ -664,7 +661,7 @@ fn bh_process_lists(
                 body_pos_x,
                 body_pos_y,
                 body_pos_z,
-                body_softening,
+                body_eps2,
                 arrays,
                 &lists.leaf_body_indices,
             )
@@ -679,11 +676,11 @@ fn bh_process_lists(
         let dz = node.com_z - body_pos_z;
         let r_sq = dx * dx + dy * dy + dz * dz;
 
-        let fac = G * node.mass * kernel.acceleration_factor(r_sq, body_eps2);
+        let fac = G * node.mass * kernel.acceleration_factor(r_sq);
         a.x += dx * fac;
         a.y += dy * fac;
         a.z += dz * fac;
-        phi += -G * node.mass * kernel.potential(r_sq, body_eps2);
+        phi += -G * node.mass * kernel.potential(r_sq);
 
         let q_zz = -(node.q_xx + node.q_yy);
         let qr_x = node.q_xx * dx + node.q_xy * dy + node.q_xz * dz;
@@ -755,7 +752,6 @@ fn leaf_pair_scalar(
     body_pos_x: f64,
     body_pos_y: f64,
     body_pos_z: f64,
-    body_softening: f64,
     arrays: &BodyArrays,
     kernel: &dyn Kernel,
     leaf_body_indices: &[u32],
@@ -769,14 +765,13 @@ fn leaf_pair_scalar(
         let dx = arrays.pos_x[bi] - body_pos_x;
         let dy = arrays.pos_y[bi] - body_pos_y;
         let dz = arrays.pos_z[bi] - body_pos_z;
-        let eps2 = pair_eps2(body_softening, arrays.softening[bi]);
         let r_sq = dx * dx + dy * dy + dz * dz;
 
-        let fac = G * other_mass * kernel.acceleration_factor(r_sq, eps2);
+        let fac = G * other_mass * kernel.acceleration_factor(r_sq);
         a.x += dx * fac;
         a.y += dy * fac;
         a.z += dz * fac;
-        phi += -G * other_mass * kernel.potential(r_sq, eps2);
+        phi += -G * other_mass * kernel.potential(r_sq);
     }
 
     (a, phi)
@@ -800,7 +795,7 @@ fn bh_eval_body_single_phase(
     let body_pos_x = arrays.pos_x[body_idx];
     let body_pos_y = arrays.pos_y[body_idx];
     let body_pos_z = arrays.pos_z[body_idx];
-    let body_softening = arrays.softening[body_idx];
+    let eps2 = kernel.epsilon_squared();
 
     let mut a = Vec3::ZERO;
     let mut phi = 0.0_f64;
@@ -828,33 +823,31 @@ fn bh_eval_body_single_phase(
                 let dx = arrays.pos_x[bi] - body_pos_x;
                 let dy = arrays.pos_y[bi] - body_pos_y;
                 let dz = arrays.pos_z[bi] - body_pos_z;
-                let eps2 = pair_eps2(body_softening, arrays.softening[bi]);
                 let r_sq = dx * dx + dy * dy + dz * dz;
 
-                let fac = G * other_mass * kernel.acceleration_factor(r_sq, eps2);
+                let fac = G * other_mass * kernel.acceleration_factor(r_sq);
                 a.x += dx * fac;
                 a.y += dy * fac;
                 a.z += dz * fac;
-                phi += -G * other_mass * kernel.potential(r_sq, eps2);
+                phi += -G * other_mass * kernel.potential(r_sq);
                 counters.n_leaf_interactions += 1;
             }
             continue;
         }
 
-        // BH criterion: accept this node as a pseudo-body when s/d < θ.
+        // BH criterion: geometric distance, no softening at acceptance.
         let dx = node.com_x - body_pos_x;
         let dy = node.com_y - body_pos_y;
         let dz = node.com_z - body_pos_z;
-        let eps2 = body_softening * body_softening;
-        let d = (dx * dx + dy * dy + dz * dz + eps2).sqrt();
+        let d = (dx * dx + dy * dy + dz * dz).sqrt();
 
         if node.size() / d < theta {
             let r_sq = dx * dx + dy * dy + dz * dz;
-            let fac = G * node.mass * kernel.acceleration_factor(r_sq, eps2);
+            let fac = G * node.mass * kernel.acceleration_factor(r_sq);
             a.x += dx * fac;
             a.y += dy * fac;
             a.z += dz * fac;
-            phi += -G * node.mass * kernel.potential(r_sq, eps2);
+            phi += -G * node.mass * kernel.potential(r_sq);
 
             let q_zz = -(node.q_xx + node.q_yy);
             let qr_x = node.q_xx * dx + node.q_xy * dy + node.q_xz * dz;
@@ -1475,7 +1468,7 @@ mod tests {
                 let mut arrays = BodyArrays::with_capacity(bodies.len());
                 arrays.pack_from(&bodies);
 
-                let kernel = PlummerKernel::new();
+                let kernel = NewtonKernel::exact();
                 let nodes = {
                     let mut tree: Octree = Octree::new(16);
                     tree.build(&arrays);
@@ -1805,7 +1798,8 @@ mod tests {
     #[test]
     #[cfg(target_arch = "x86_64")]
     fn dispatch_picks_avx2_when_plummer_and_avx2_fma_available() {
-        let kernel = PlummerKernel::new();
+        // Plummer is opt-in via NewtonKernel with ε > 0.
+        let kernel = NewtonKernel::new(0.01);
         let picked = LeafPairKernel::select(&kernel);
         match picked {
             LeafPairKernel::Avx2 => {

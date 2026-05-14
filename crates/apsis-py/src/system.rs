@@ -37,11 +37,11 @@ use crate::units::PyUnitSystem;
 /// ```python
 /// import apsis
 ///
-/// sun = apsis.Body.star(mass=1.0).unsoftened()
+/// sun = apsis.Body.star(mass=1.0)
 /// mercury = (apsis.Body.rocky(mass=3e-6)
 ///            .at((0.307, 0.0))
 ///            .with_velocity((0.0, 1.98))
-///            .unsoftened())
+///            )
 ///
 /// sys = apsis.System(
 ///     bodies=[sun, mercury],
@@ -93,12 +93,8 @@ impl PySystem {
     ///   close-encounter changeover. `None` (default) keeps the
     ///   integrator's built-in $\alpha = 3$, matching REBOUND. Ignored
     ///   by non-Mercurius integrators.
-    /// - `exact_gravity`: drop the Plummer softening on every body in
-    ///   one call. Equivalent to building the bodies with
-    ///   `Body.<material>(...).unsoftened()` but applies system-wide
-    ///   without per-body chaining. Default `False`.
     #[new]
-    #[pyo3(signature = (*, bodies, units, integrator, dt, epsilon=None, mercurius_alpha=None, exact_gravity=false))]
+    #[pyo3(signature = (*, bodies, units, integrator, dt, epsilon=None, mercurius_alpha=None))]
     fn new(
         bodies: Vec<PyBody>,
         units: PyUnitSystem,
@@ -106,7 +102,6 @@ impl PySystem {
         dt: f64,
         epsilon: Option<f64>,
         mercurius_alpha: Option<f64>,
-        exact_gravity: bool,
     ) -> PyResult<Self> {
         if !dt.is_finite() || dt <= 0.0 {
             return Err(value_error(
@@ -135,9 +130,6 @@ impl PySystem {
         let body_vec = bodies.into_iter().map(|b| b.inner).collect::<Vec<_>>();
 
         let mut sys = CoreSystem::new(body_vec, units.inner).with_integrator(kind).with_dt(dt);
-        if exact_gravity {
-            sys = sys.with_exact_gravity();
-        }
         if let Some(eps) = epsilon {
             sys.set_ias15_epsilon(eps);
         }
@@ -518,7 +510,7 @@ impl PySystem {
     /// to a softened-gravity system) emit structured warnings on
     /// ``stderr`` — they are non-fatal and do not raise. Use
     /// ``System(..., exact_gravity=True)`` or
-    /// ``Body.<material>(...).unsoftened()`` to silence.
+    /// ``Body.<material>(...)`` to silence.
     ///
     /// Non-conservative operators (drag, radiation reaction) travel in a
     /// separate capsule; the Python wrapper for them is not yet exposed.

@@ -105,18 +105,17 @@ pub struct Metrics {
     /// fixed-step integrators this is always `false`.
     pub last_step_degraded: bool,
 
-    // ── Softening diagnostics ─────────────────────────────────────────────── //
+    // ── Geometry diagnostics ─────────────────────────────────────────────── //
     /// Minimum pairwise separation observed at the last step (simulation units).
     ///
     /// Set to `f64::MAX` when fewer than 2 bodies are present or when N is too
     /// large for O(N²) computation (> [`N_CLOSENESS_THRESHOLD`]).
     pub r_min: f64,
 
-    /// Maximum effective pairwise softening length at the last step:
-    ///   `ε_ij = √((ε²_i + ε²_j) / 2)`,  maximised over all pairs.
-    ///
-    /// Zero when no pairs exist.
-    pub softening_max: f64,
+    /// Squared softening of the active gravity kernel. Zero for the
+    /// default Newton kernel; positive when a Plummer (or other softened)
+    /// kernel is selected.
+    pub kernel_epsilon_squared: f64,
 
     // ── Timestep guidance ─────────────────────────────────────────────────── //
     /// Recommended timestep derived from the current system state.
