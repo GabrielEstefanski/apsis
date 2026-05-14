@@ -78,6 +78,13 @@ pub(crate) enum IntegratorKind {
     /// as Wisdom-Holman.
     #[pyo3(name = "WHFAST")]
     WHFast,
+
+    /// Single-stage Gauss-Legendre implicit symplectic method
+    /// (Hairer-Lubich-Wanner 2006, Chapter II.1.4). A-stable, time-
+    /// symmetric, no central-mass dominance assumption — accepts BH
+    /// binaries, equal-mass triples, particle clouds. Not L-stable.
+    #[pyo3(name = "IMPLICIT_MIDPOINT")]
+    ImplicitMidpoint,
 }
 
 #[pymethods]
@@ -100,6 +107,7 @@ impl IntegratorKind {
             Self::WisdomHolman => "WISDOM_HOLMAN",
             Self::Mercurius => "MERCURIUS",
             Self::WHFast => "WHFAST",
+            Self::ImplicitMidpoint => "IMPLICIT_MIDPOINT",
         }
     }
 
@@ -114,6 +122,7 @@ impl IntegratorKind {
             Self::WisdomHolman => "wisdom_holman",
             Self::Mercurius => "mercurius",
             Self::WHFast => "whfast",
+            Self::ImplicitMidpoint => "implicit_midpoint",
         }
     }
 }
@@ -127,6 +136,7 @@ impl IntegratorKind {
             CoreIntegratorKind::WisdomHolman => Self::WisdomHolman,
             CoreIntegratorKind::Mercurius => Self::Mercurius,
             CoreIntegratorKind::WHFast => Self::WHFast,
+            CoreIntegratorKind::ImplicitMidpoint => Self::ImplicitMidpoint,
         }
     }
 
@@ -138,6 +148,7 @@ impl IntegratorKind {
             Self::WisdomHolman => CoreIntegratorKind::WisdomHolman,
             Self::Mercurius => CoreIntegratorKind::Mercurius,
             Self::WHFast => CoreIntegratorKind::WHFast,
+            Self::ImplicitMidpoint => CoreIntegratorKind::ImplicitMidpoint,
         }
     }
 }
@@ -162,7 +173,9 @@ pub(crate) fn resolve(obj: &Bound<'_, PyAny>) -> PyResult<CoreIntegratorKind> {
                 "integrator",
                 format!(
                     "{err} (got {s:?}; accepted: 'ias15', 'yoshida4', \
-                     'velocity_verlet', 'wisdom_holman', or any IntegratorKind variant)"
+                     'velocity_verlet', 'wisdom_holman', 'whfast', \
+                     'mercurius', 'implicit_midpoint', or any \
+                     IntegratorKind variant)"
                 ),
             )
         });
