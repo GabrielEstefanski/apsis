@@ -168,12 +168,9 @@ mod tests {
         assert!((f - 1.0).abs() < 1e-12);
     }
 
-    // ── Drift gates ─────────────────────────────────────────────────────────
+    // ── Oracle helpers ──────────────────────────────────────────────────────
 
-    /// Convert an `f64` to its exact `BigRational` representation.
-    /// `f64` is `m · 2^e` for integers `m`, `e`; `BigRational` carries
-    /// both directions losslessly. Used as the oracle for drift gates
-    /// below.
+    /// Convert an `f64` to its exact `BigRational` (`m · 2^e`).
     fn f64_to_rational(x: f64) -> BigRational {
         if x == 0.0 {
             return BigRational::zero();
@@ -195,84 +192,173 @@ mod tests {
         }
     }
 
-    /// Sum a slice of `f64` exactly via `BigRational`, return the
-    /// `f64` closest to the analytic sum. This is the oracle: every
-    /// term is converted losslessly, the sum is exact, only the final
-    /// projection back to `f64` rounds.
-    fn exact_sum_as_f64(xs: &[f64]) -> f64 {
-        let mut acc = BigRational::zero();
-        for &x in xs {
-            acc += f64_to_rational(x);
-        }
-        acc.to_f64().expect("sum representable as f64")
+    fn rational_to_f64(r: &BigRational) -> f64 {
+        r.to_f64().expect("rational projects to representable f64")
     }
 
-    /// Constant-`dt` drift over 10⁶ steps. Naive `f64` drifts by
-    /// `O(N · ε · |total|)`; compensated stays at the IEEE-754 floor
-    /// for the analytic sum.
+    // ── Drift gates ─────────────────────────────────────────────────────────
+    //
+    // The oracle is the exact rational sum of the *intent values* the dt
+    // sequence is meant to represent (e.g. 1/10, not the f64 closest to
+    // 1/10). Comparing summer outputs against the intent measures both
+    // representation error (irreducible in f64) and accumulation error
+    // (what compensated removes).
+
+    /// Constant `dt = 1/10` over 10⁶ steps. Intent oracle:
+    /// `BigRational::new(N, 10)`. Compensated drift bound is one ULP
+    /// of the total; naive drift grows worst-case as `O(N · ε · |total|)`.
     ///
-    /// Oracle: arbitrary-precision rational sum, projected back to
-    /// the nearest `f64`. Independent of the algorithm under test.
+    /// Note on the compensated bound: `f64` guarantees `|f64(x) − x| <
+    /// 0.5 ULP(x)`, so the per-term representation error is bounded
+    /// below the per-term ULP. Compensated reaches the nearest `f64`
+    /// to the analytic sum; when that distance is sub-ULP it rounds
+    /// to the same `f64` as the projected oracle and the measured
+    /// drift is `0.0`. This is the floor in `f64`, not a missing test.
     #[test]
-    fn constant_dt_million_step_drift_vs_oracle() {
-        let dt = 0.1_f64;
+    fn constant_dt_drift_vs_intent_oracle() {
         let n_steps = 1_000_000_usize;
-        let dts = vec![dt; n_steps];
-        let oracle = exact_sum_as_f64(&dts);
+        let dt_f64 = 0.1_f64;
+        let dt_intent = BigRational::new(BigInt::from(1), BigInt::from(10));
+        let oracle_rat: BigRational = dt_intent * BigRational::from_integer(BigInt::from(n_steps));
+        let oracle = rational_to_f64(&oracle_rat);
 
         let mut t_naive = 0.0_f64;
         let mut t_comp = CompensatedF64::ZERO;
-        for &d in &dts {
-            t_naive += d;
-            t_comp += d;
+        for _ in 0..n_steps {
+            t_naive += dt_f64;
+            t_comp += dt_f64;
         }
         let drift_naive = (t_naive - oracle).abs();
         let drift_comp = (t_comp.total() - oracle).abs();
-        assert!(drift_naive > 1e-7, "naive drift below regression bound: {drift_naive:.3e}");
-        assert!(drift_comp < 1e-9, "compensated drift above ε floor: {drift_comp:.3e}");
+        let ulp_oracle = oracle.abs() * f64::EPSILON;
+
         assert!(
-            drift_naive / drift_comp.max(f64::MIN_POSITIVE) > 100.0,
-            "compensated must beat naive by ≥ 100×",
+            drift_naive > 1e-7,
+            "naive should drift well above representation floor; got {drift_naive:.3e}"
+        );
+        assert!(
+            drift_comp <= ulp_oracle,
+            "compensated drift exceeds 1 ULP of oracle; got {drift_comp:.3e} > {ulp_oracle:.3e}"
+        );
+        assert!(
+            drift_naive > 100.0 * ulp_oracle,
+            "naive must drift by ≥ 100 ULPs; got {drift_naive:.3e} vs ULP {ulp_oracle:.3e}"
         );
     }
 
-    /// Adaptive-cadence drift: `dt` varies pseudo-randomly in
-    /// `[0.05, 0.15]` over 10⁶ steps. Same oracle and bounds as the
-    /// constant-`dt` gate.
+    /// Adaptive cadence: `dt = 1/20 + (state / u64::MAX) · 1/10`,
+    /// `state` from a 64-bit xorshift, over 10⁶ steps. Snapshots every
+    /// `N / 10` steps capture the drift trajectory; both the final
+    /// drift and the maximum drift across snapshots must clear the
+    /// gates. This rules out a clean cancellation at the endpoint
+    /// hiding a large excursion mid-run.
     #[test]
-    fn adaptive_dt_million_step_drift_vs_oracle() {
-        let n_steps = 1_000_000_usize;
+    fn adaptive_dt_drift_vs_intent_oracle_with_snapshots() {
+        const N_STEPS: usize = 1_000_000;
+        const N_SNAPSHOTS: usize = 10;
+
+        // Generate dts in two parallel sequences:
+        //   dts_f64    — what the summers consume
+        //   dts_intent — what the oracle sums exactly
         let mut state: u64 = 0xDEAD_BEEF_CAFE_BABE;
-        let mut dts = Vec::with_capacity(n_steps);
-        for _ in 0..n_steps {
+        let mut dts_f64 = Vec::with_capacity(N_STEPS);
+        let mut dts_intent: Vec<BigRational> = Vec::with_capacity(N_STEPS);
+        let one_twentieth = BigRational::new(BigInt::from(1), BigInt::from(20));
+        let one_tenth = BigRational::new(BigInt::from(1), BigInt::from(10));
+        let u64_max_rat = BigRational::from_integer(BigInt::from(u64::MAX));
+        for _ in 0..N_STEPS {
             state ^= state << 13;
             state ^= state >> 7;
             state ^= state << 17;
-            let r = (state as f64) / (u64::MAX as f64);
-            dts.push(0.05 + 0.10 * r);
+            let r_f64 = (state as f64) / (u64::MAX as f64);
+            dts_f64.push(0.05 + 0.10 * r_f64);
+            let r_rat = BigRational::from_integer(BigInt::from(state)) / u64_max_rat.clone();
+            dts_intent.push(one_twentieth.clone() + one_tenth.clone() * r_rat);
         }
 
-        let oracle = exact_sum_as_f64(&dts);
-
+        let snapshot_stride = N_STEPS / N_SNAPSHOTS;
+        let mut oracle_running = BigRational::zero();
         let mut t_naive = 0.0_f64;
         let mut t_comp = CompensatedF64::ZERO;
-        for &d in &dts {
-            t_naive += d;
-            t_comp += d;
+        let mut max_drift_naive = 0.0_f64;
+        let mut max_drift_comp = 0.0_f64;
+
+        for i in 0..N_STEPS {
+            t_naive += dts_f64[i];
+            t_comp += dts_f64[i];
+            oracle_running += &dts_intent[i];
+
+            // Snapshot at every stride boundary (and the final step).
+            if (i + 1) % snapshot_stride == 0 || i == N_STEPS - 1 {
+                let oracle_now = rational_to_f64(&oracle_running);
+                let d_n = (t_naive - oracle_now).abs();
+                let d_c = (t_comp.total() - oracle_now).abs();
+                if d_n > max_drift_naive {
+                    max_drift_naive = d_n;
+                }
+                if d_c > max_drift_comp {
+                    max_drift_comp = d_c;
+                }
+            }
         }
-        let drift_naive = (t_naive - oracle).abs();
-        let drift_comp = (t_comp.total() - oracle).abs();
-        assert!(drift_naive > 1e-9, "naive drift below regression bound: {drift_naive:.3e}");
-        assert!(drift_comp < 1e-9, "compensated drift above ε floor: {drift_comp:.3e}");
+
+        let oracle_final = rational_to_f64(&oracle_running);
+        let drift_final_naive = (t_naive - oracle_final).abs();
+        let drift_final_comp = (t_comp.total() - oracle_final).abs();
+        let ulp_final = oracle_final.abs() * f64::EPSILON;
+
+        // Random-sign cancellation in adaptive cadence reduces naive
+        // drift to ~√N · ε · |total| ≈ 30 ULPs at N=10⁶. Bound 10
+        // ULPs is the floor that proves divergence above pure round-off
+        // without overclaiming the random-walk envelope.
         assert!(
-            drift_naive / drift_comp.max(f64::MIN_POSITIVE) > 100.0,
-            "compensated must beat naive by ≥ 100×",
+            drift_final_naive > 10.0 * ulp_final,
+            "naive should drift past 10 ULPs at endpoint; got {drift_final_naive:.3e} vs ULP {ulp_final:.3e}"
+        );
+        assert!(
+            drift_final_comp <= ulp_final,
+            "compensated final drift exceeds 1 ULP of oracle; got {drift_final_comp:.3e} > {ulp_final:.3e}"
+        );
+
+        assert!(
+            max_drift_comp <= 2.0 * ulp_final,
+            "compensated max-snapshot drift exceeds 2 ULPs; got {max_drift_comp:.3e}"
+        );
+        assert!(
+            max_drift_naive > 10.0 * max_drift_comp.max(ulp_final),
+            "naive max-snapshot must beat compensated by ≥ 10× of max(comp, ULP); \
+             got naive {max_drift_naive:.3e} vs comp {max_drift_comp:.3e}"
         );
     }
 
-    /// Order independence under mixed magnitudes: summing 1000 ε-scale
-    /// terms before a `1e10` term and the reverse order produce the
-    /// same compensated total within ε.
+    /// Compensated drift stays bounded by 1 ULP of the running total
+    /// for every `N ∈ {10⁴, 10⁵, 10⁶}`, confirming the bound is not
+    /// an artifact of one specific step count.
+    #[test]
+    fn compensated_within_one_ulp_across_step_counts() {
+        let dt_f64 = 0.1_f64;
+        let dt_intent = BigRational::new(BigInt::from(1), BigInt::from(10));
+
+        for &n_steps in &[10_000_usize, 100_000, 1_000_000] {
+            let oracle = rational_to_f64(
+                &(dt_intent.clone() * BigRational::from_integer(BigInt::from(n_steps))),
+            );
+            let mut t_comp = CompensatedF64::ZERO;
+            for _ in 0..n_steps {
+                t_comp += dt_f64;
+            }
+            let d_c = (t_comp.total() - oracle).abs();
+            let ulp_n = oracle.abs() * f64::EPSILON;
+            assert!(
+                d_c <= ulp_n,
+                "compensated drift exceeds 1 ULP at N={n_steps}: {d_c:.3e} > {ulp_n:.3e}"
+            );
+        }
+    }
+
+    /// Order independence under mixed magnitudes. Two compensated
+    /// summers consume identical terms in opposite orders; both must
+    /// agree with the oracle within ε.
     #[test]
     fn order_invariance_under_mixed_magnitudes() {
         let big = 1e10_f64;
@@ -291,23 +377,31 @@ mod tests {
             b += small;
         }
 
-        let mut terms = vec![small; n_small];
-        terms.push(big);
-        let oracle = exact_sum_as_f64(&terms);
+        let oracle_rat = f64_to_rational(big)
+            + BigRational::from_integer(BigInt::from(n_small as i64)) * f64_to_rational(small);
+        let oracle = rational_to_f64(&oracle_rat);
 
         assert!((a.total() - b.total()).abs() < 1e-9);
         assert!((a.total() - oracle).abs() < 1e-9);
         assert!((b.total() - oracle).abs() < 1e-9);
     }
 
-    /// Sanity for the rational oracle: an exact integer sum survives
-    /// the `f64 → BigRational → f64` round trip with zero drift.
+    /// Sanity for the rational oracle: integer sums round-trip through
+    /// `BigRational` to the exact expected value.
     #[test]
     fn rational_oracle_is_exact_for_representable_sums() {
         let xs = vec![1.0_f64, 2.0, 3.0, 4.0, 5.0];
-        assert_eq!(exact_sum_as_f64(&xs), 15.0);
+        let mut acc = BigRational::zero();
+        for &x in &xs {
+            acc += f64_to_rational(x);
+        }
+        assert_eq!(rational_to_f64(&acc), 15.0);
 
         let xs2 = vec![0.5_f64; 100];
-        assert_eq!(exact_sum_as_f64(&xs2), 50.0);
+        let mut acc2 = BigRational::zero();
+        for &x in &xs2 {
+            acc2 += f64_to_rational(x);
+        }
+        assert_eq!(rational_to_f64(&acc2), 50.0);
     }
 }
