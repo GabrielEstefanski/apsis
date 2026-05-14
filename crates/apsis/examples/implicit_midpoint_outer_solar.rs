@@ -20,17 +20,11 @@ fn outer_solar() -> Vec<Body> {
     // Approximate present-epoch elements; absolute geometry doesn't matter
     // for symplecticity diagnostics, only that the system stays bound.
     vec![
-        Body::star(1.0).unsoftened(),
+        Body::star(1.0),
         // Jupiter: a ≈ 5.20 AU, m ≈ 9.55e-4 M_sun, v_circ ≈ √(1/5.2)
-        Body::gas_giant(9.547_919e-4)
-            .at(5.20, 0.0)
-            .with_velocity(0.0, (1.0_f64 / 5.20).sqrt())
-            .unsoftened(),
+        Body::gas_giant(9.547_919e-4).at(5.20, 0.0).with_velocity(0.0, (1.0_f64 / 5.20).sqrt()),
         // Saturn: a ≈ 9.58 AU, m ≈ 2.86e-4 M_sun
-        Body::gas_giant(2.858_860e-4)
-            .at(0.0, 9.58)
-            .with_velocity(-(1.0_f64 / 9.58).sqrt(), 0.0)
-            .unsoftened(),
+        Body::gas_giant(2.858_860e-4).at(0.0, 9.58).with_velocity(-(1.0_f64 / 9.58).sqrt(), 0.0),
     ]
 }
 
@@ -51,10 +45,8 @@ fn total_energy(bodies: &[Body]) -> f64 {
 }
 
 fn run_one(kind: IntegratorKind, n_steps: u64, dt: f64, sample_every: u64) -> RunStats {
-    let mut sys = System::new(outer_solar(), UnitSystem::solar_canonical())
-        .with_exact_gravity()
-        .with_integrator(kind)
-        .with_dt(dt);
+    let mut sys =
+        System::new(outer_solar(), UnitSystem::solar_canonical()).with_integrator(kind).with_dt(dt);
 
     let e0 = total_energy(sys.bodies());
     let mut peak_rel_de = 0.0_f64;

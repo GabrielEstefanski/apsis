@@ -9,7 +9,7 @@
 //! | [`system`]         | [`System`]: central state, `step()` dispatch, body CRUD    |
 //! | [`physics_thread`] | Background thread, `PhysicsHandle`, `RenderState` publish  |
 //! | [`metrics`]        | [`Metrics`] data-transfer object                           |
-//! | [`calibration`]    | COM recentering, softening/radius helpers                  |
+//! | [`calibration`]    | COM recentering helpers                                    |
 //! | [`adaptive`]       | [`DtController`], [`ThetaController`]                      |
 //! | [`diagnostics`]    | Per-step acceleration and jerk statistics                  |
 //! | [`log`]            | Structured event bus + `warn_diag!`/`info_diag!` macros    |

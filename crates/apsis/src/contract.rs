@@ -560,8 +560,8 @@ mod tests {
     /// numbers don't matter — the same fixture across tests means the
     /// invariants are tested against the same dynamical regime.
     fn fixture_system() -> System {
-        let primary = Body::star(1.0).at(0.0, 0.0).with_velocity(0.0, 0.0).unsoftened();
-        let satellite = Body::rocky(1e-6).at(1.0, 0.0).with_velocity(0.0, 1.0).unsoftened();
+        let primary = Body::star(1.0).at(0.0, 0.0).with_velocity(0.0, 0.0);
+        let satellite = Body::rocky(1e-6).at(1.0, 0.0).with_velocity(0.0, 1.0);
         System::new(vec![primary, satellite], UnitSystem::canonical())
             .with_integrator(IntegratorKind::Ias15)
             .with_dt(1e-3)
@@ -643,9 +643,8 @@ mod tests {
         const N_STEPS: u64 = 200;
 
         let run = |x_offset: f64| {
-            let primary = Body::star(1.0).at(0.0, 0.0).with_velocity(0.0, 0.0).unsoftened();
-            let satellite =
-                Body::rocky(1e-6).at(1.0 + x_offset, 0.0).with_velocity(0.0, 1.0).unsoftened();
+            let primary = Body::star(1.0).at(0.0, 0.0).with_velocity(0.0, 0.0);
+            let satellite = Body::rocky(1e-6).at(1.0 + x_offset, 0.0).with_velocity(0.0, 1.0);
             let mut sys = System::new(vec![primary, satellite], UnitSystem::canonical())
                 .with_integrator(IntegratorKind::Ias15)
                 .with_dt(1e-3);
@@ -990,23 +989,18 @@ mod tests {
     }
 
     /// **Invariant 8 (Exactness).** A perturbation declaring a single
-    /// `required_exactness = Exact` requirement, registered against the
-    /// default Plummer kernel (which reports `Softened` whenever any
-    /// body has nonzero softening), produces exactly one warning whose
+    /// `required_exactness = Exact` requirement, registered against an
+    /// opt-in Plummer kernel, produces exactly one warning whose
     /// `violated_invariant` tag identifies the offending invariant.
-    /// No silent acceptance, no spurious second warning for an
-    /// invariant the perturbation did not constrain.
-    ///
-    /// The bodies use their default material softening — i.e. the
-    /// configuration that any new user gets without thinking about
-    /// kernel preconditions, which is exactly the case the contract
-    /// must catch.
     #[test]
     fn failure_exactness_violation_emits_exactly_one_warning() {
+        use crate::physics::gravity::NewtonKernel;
+        use std::sync::Arc;
         let invariants = capture_violation_invariants(|| {
             let primary = Body::star(1.0).at(0.0, 0.0).with_velocity(0.0, 0.0);
             let satellite = Body::rocky(1e-6).at(1.0, 0.0).with_velocity(0.0, 1.0);
             let mut sys = System::new(vec![primary, satellite], UnitSystem::canonical())
+                .with_kernel(Arc::new(NewtonKernel::new(0.01)))
                 .with_integrator(IntegratorKind::Ias15)
                 .with_dt(1e-3);
             sys.add_hamiltonian_perturbation(Box::new(DeclaresExactnessRequirement))

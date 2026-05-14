@@ -67,8 +67,8 @@ fn pr_drag_energy_drift_matches_burns_1979_to_5_percent() {
     let m_dust = 1e-15_f64; // mass irrelevant to per-unit-mass dynamics
     let v_k = 1.0_f64; // Keplerian velocity at 1 AU in G=M=1 units
 
-    let sun = Body::star(1.0).unsoftened();
-    let dust = Body::rocky(m_dust).at(r0, 0.0).with_velocity(0.0, v_k).unsoftened();
+    let sun = Body::star(1.0);
+    let dust = Body::rocky(m_dust).at(r0, 0.0).with_velocity(0.0, v_k);
 
     let mut sys =
         System::new(vec![sun, dust], units).with_integrator(IntegratorKind::Ias15).with_dt(1e-3);
@@ -110,8 +110,8 @@ fn pr_drag_energy_drift_matches_burns_1979_to_5_percent() {
 #[test]
 fn ias15_alone_preserves_energy_for_circular_baseline() {
     let units = UnitSystem::solar_canonical();
-    let sun = Body::star(1.0).unsoftened();
-    let dust = Body::rocky(1e-15).at(1.0, 0.0).with_velocity(0.0, 1.0).unsoftened();
+    let sun = Body::star(1.0);
+    let dust = Body::rocky(1e-15).at(1.0, 0.0).with_velocity(0.0, 1.0);
 
     let mut sys =
         System::new(vec![sun, dust], units).with_integrator(IntegratorKind::Ias15).with_dt(1e-3);

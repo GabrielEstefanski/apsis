@@ -1,6 +1,6 @@
 //! Long-horizon Mercury 1PN — apsis Mercurius + apsis-1pn side.
 //!
-//! Sun + Mercury (unsoftened) integrated under apsis Mercurius with the
+//! Sun + Mercury integrated under apsis Mercurius with the
 //! `apsis-1pn` Schwarzschild test-particle GR correction registered, for
 //! 1000 years (~4150 Mercury orbits) in the canonical-Hénon unit system.
 //! Mirrors the IAS15 sibling example (`mercury_1pn_long_horizon_ias15.rs`)
@@ -63,10 +63,10 @@ fn main() {
     }
 
     // ── Initial conditions (identical to IAS15 sibling, bit-for-bit) ───── //
-    let sun = Body::star(1.0).unsoftened();
+    let sun = Body::star(1.0);
     let r_peri = A * (1.0 - E);
     let v_peri = (2.0 / r_peri - 1.0 / A).sqrt();
-    let mercury = Body::rocky(M_MERCURY).at(r_peri, 0.0).with_velocity(0.0, v_peri).unsoftened();
+    let mercury = Body::rocky(M_MERCURY).at(r_peri, 0.0).with_velocity(0.0, v_peri);
 
     // ── System setup ────────────────────────────────────────────────────── //
     let mut sys = System::new(vec![sun, mercury], UnitSystem::solar_canonical())

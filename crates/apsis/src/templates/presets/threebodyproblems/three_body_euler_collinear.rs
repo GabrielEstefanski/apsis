@@ -15,7 +15,7 @@
 //! `vᵢ = ω·|rᵢ|`. The lightest body sits farthest from the COM (largest
 //! orbit), the heaviest closest.
 //!
-//! The preset uses `(m₁, m₂, m₃) = (0.1, 1.0, 0.5)`, which gives `λ ≈ 1.5`
+//! The preset uses `(m₁, m₂, m₃) = (0.1, 1.0, 0.5)`, which gives `λ ≈ 1.18`
 //! and produces a visible asymmetric configuration: the light body traces
 //! the largest orbit, the heavy middle body the smallest, the medium-mass
 //! body in between.
@@ -129,6 +129,7 @@ pub fn three_body_euler_collinear(_seed: u64) -> Template {
         orbital_up: None,
         default_view_distance: None,
         suggested_dt: Some(0.001),
+        suggested_integrator: None,
         units: UnitSystem::dimensionless(),
     }
 }
@@ -137,12 +138,12 @@ pub fn three_body_euler_collinear(_seed: u64) -> Template {
 mod tests {
     use super::*;
 
-    /// Quintic root for `(0.1, 1.0, 0.5)` is `λ ≈ 1.5`. Verifies the
+    /// Quintic root for `(0.1, 1.0, 0.5)` is `λ ≈ 1.18`. Verifies the
     /// solver finds a positive root that satisfies the polynomial.
     #[test]
     fn quintic_root_satisfies_polynomial() {
         let lambda = euler_lambda(0.1, 1.0, 0.5);
-        assert!(lambda > 0.0 && lambda < 5.0);
+        assert!((lambda - 1.18).abs() < 0.01, "expected λ ≈ 1.18, got {lambda}");
         let m1 = 0.1;
         let m2 = 1.0;
         let m3 = 0.5;

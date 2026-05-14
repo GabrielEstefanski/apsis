@@ -48,7 +48,7 @@ impl System {
         self.run_regime_check_on_operator(p.as_ref());
 
         let kernel = self.force_model.kernel();
-        let props = kernel.properties(&self.bodies);
+        let props = kernel.properties();
         let violations = p.kernel_requirements().check_against(&props);
 
         for v in &violations {
@@ -76,7 +76,7 @@ impl System {
         self.run_regime_check_on_operator(p.as_ref());
 
         let kernel = self.force_model.kernel();
-        let props = kernel.properties(&self.bodies);
+        let props = kernel.properties();
         let violations = p.kernel_requirements().check_against(&props);
         for v in &violations {
             self.emit_kernel_requirement_violation(v);
@@ -110,7 +110,7 @@ impl System {
         self.run_regime_check_on_operator(o.as_ref());
 
         let kernel = self.force_model.kernel();
-        let props = kernel.properties(&self.bodies);
+        let props = kernel.properties();
         let violations = o.kernel_requirements().check_against(&props);
         for v in &violations {
             self.emit_kernel_requirement_violation(v);
@@ -276,17 +276,14 @@ impl System {
     fn emit_kernel_requirement_violation(&self, v: &RequirementViolation) {
         match v {
             RequirementViolation::Exactness { required, provided } => {
-                let softened = self.bodies.iter().filter(|b| b.softening != 0.0).count();
-                let max_softening =
-                    self.bodies.iter().map(|b| b.softening.abs()).fold(0.0_f64, f64::max);
+                let kernel_eps = self.force_model.kernel().epsilon_squared().sqrt();
                 crate::warn_diag!(
                     Source::System,
-                    "perturbation requires exact 1/r gravity but bodies are softened; \
-                     call System::with_exact_gravity() or Body::unsoftened() — numerical \
-                     apsidal precession from Plummer softening will otherwise swamp the signal",
-                    softened_bodies = softened,
-                    total_bodies = self.bodies.len(),
-                    max_softening = max_softening,
+                    "perturbation requires exact 1/r gravity but the active kernel \
+                     has ε > 0 — numerical apsidal precession from the softened \
+                     kernel will otherwise swamp the signal; rebuild with \
+                     NewtonKernel::exact() (or NewtonKernel::new(0.0)) to restore exact 1/r²",
+                    kernel_epsilon = kernel_eps,
                     violated_invariant = "Exactness",
                     kernel_exactness = format!("{provided:?}"),
                     required_exactness = format!("{required:?}"),
@@ -364,36 +361,6 @@ impl System {
         )
     }
 
-    #[cfg(test)]
-    pub(crate) fn softening_scale_value(&self) -> f64 {
-        self.softening_scale
-    }
-
-    /// Zero the Plummer softening on every currently-registered body, and
-    /// set the system's `softening_scale` to `0` so any body added later
-    /// inherits exact `1/r` gravity too.
-    ///
-    /// Use at construction time for fine-physics experiments — post-Newtonian
-    /// corrections, J2 oblateness, tidal dissipation — where the default
-    /// material-scaled softening would contribute a numerical apsidal
-    /// precession that dominates the measurement.
-    ///
-    /// ```ignore
-    /// let units = UnitSystem::solar_canonical();
-    /// let mut sys = System::from_template(TemplateKind::SolarSystem, units)
-    ///     .with_exact_gravity()
-    ///     .with_integrator(IntegratorKind::Ias15);
-    /// sys.add_hamiltonian_perturbation(Box::new(PostNewtonian1PN::for_units(units)));
-    /// ```
-    #[must_use]
-    pub fn with_exact_gravity(mut self) -> Self {
-        for b in &mut self.bodies {
-            b.softening = 0.0;
-        }
-        self.softening_scale = 0.0;
-        self
-    }
-
     /// Swap the gravitational kernel the system dispatches through.
     #[must_use]
     pub fn with_kernel(mut self, kernel: Arc<dyn Kernel>) -> Self {
@@ -423,25 +390,6 @@ mod tests {
     use crate::domain::body::Body;
     use crate::physics::integrator::IntegratorKind;
     use crate::units::UnitSystem;
-
-    #[test]
-    fn with_exact_gravity_zeroes_existing_bodies() {
-        let bodies = vec![Body::star(1.0), Body::rocky(3e-6)];
-        // Pre-condition: material-scaled softening is nonzero.
-        assert!(bodies.iter().all(|b| b.softening > 0.0));
-
-        let sys = System::new(bodies, UnitSystem::canonical()).with_exact_gravity();
-        assert!(sys.bodies().iter().all(|b| b.softening == 0.0));
-        assert_eq!(sys.softening_scale_value(), 0.0);
-    }
-
-    #[test]
-    fn with_exact_gravity_persists_for_later_added_bodies() {
-        let mut sys =
-            System::new(vec![Body::star(1.0)], UnitSystem::canonical()).with_exact_gravity();
-        sys.add_body(Body::rocky(3e-6));
-        assert!(sys.bodies().iter().all(|b| b.softening == 0.0));
-    }
 
     /// A pure observer: contributes no force, no energy, just counts
     /// `observe` calls. Smoke-tests the dispatch contract that observers
@@ -796,10 +744,13 @@ mod tests {
     #[test]
     fn regime_check_dedups_persistent_violation_across_steps() {
         let warnings = capture_regime_warnings("MassRatioBound", || {
-            let mut sys =
-                System::new(vec![Body::star(1.0), Body::star(1.0)], UnitSystem::solar_canonical())
-                    .with_integrator(IntegratorKind::Ias15)
-                    .with_dt(1e-3);
+            let bodies = vec![
+                Body::star(1.0).at(-1.0, 0.0).with_velocity(0.0, -0.5),
+                Body::star(1.0).at(1.0, 0.0).with_velocity(0.0, 0.5),
+            ];
+            let mut sys = System::new(bodies, UnitSystem::solar_canonical())
+                .with_integrator(IntegratorKind::Ias15)
+                .with_dt(1e-3);
             sys.add_hamiltonian_perturbation(Box::new(MassRatioBound {
                 warn: 0.01,
                 cadence: 10, // check every 10 steps

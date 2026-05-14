@@ -360,22 +360,16 @@ mod tests {
     /// G·M = 1 in canonical units. Mirrors `mercurius::tests`.
     fn quiet_planetary() -> Vec<Body> {
         vec![
-            Body::star(1.0).unsoftened(),
-            Body::rocky(1.0e-6).at(1.0, 0.0).with_velocity(0.0, 1.0).unsoftened(),
-            Body::rocky(1.0e-6)
-                .at(2.0, 0.0)
-                .with_velocity(0.0, std::f64::consts::FRAC_1_SQRT_2)
-                .unsoftened(),
+            Body::star(1.0),
+            Body::rocky(1.0e-6).at(1.0, 0.0).with_velocity(0.0, 1.0),
+            Body::rocky(1.0e-6).at(2.0, 0.0).with_velocity(0.0, std::f64::consts::FRAC_1_SQRT_2),
         ]
     }
 
     /// Sun + Earth-mass test particle on a circular orbit at r = 1.
     /// Period is 2π, so N orbits = N · 2π in time.
     fn two_body_circular() -> Vec<Body> {
-        vec![
-            Body::star(1.0).unsoftened(),
-            Body::rocky(1.0e-9).at(1.0, 0.0).with_velocity(0.0, 1.0).unsoftened(),
-        ]
+        vec![Body::star(1.0), Body::rocky(1.0e-9).at(1.0, 0.0).with_velocity(0.0, 1.0)]
     }
 
     fn step_via(integrator: &mut dyn Integrator, bodies: &mut [Body], dt: f64, n_steps: usize) {
@@ -555,7 +549,7 @@ mod tests {
     /// the `HierarchySignal::Violated` arm rather than panic-on-bad-input.
     #[test]
     fn step_signals_hierarchy_on_short_input() {
-        let mut bodies = vec![Body::star(1.0).unsoftened()];
+        let mut bodies = vec![Body::star(1.0)];
         let mut force = GravityForceModel::new(0.5, 16);
         let mut acc: Vec<Vec3> = vec![Vec3::ZERO; bodies.len()];
         let hamiltonian: Vec<Box<dyn crate::physics::integrator::HamiltonianOperator>> = Vec::new();

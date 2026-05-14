@@ -12,21 +12,19 @@
 //!
 //! # Critical precondition
 //!
-//! Attaching 1PN to a softened-gravity system invalidates the physical
-//! model: numerical apsidal precession from Plummer softening alone is
-//! ~2 × 10³ larger than the relativistic signal and of opposite sign.
-//! Call [`Body::unsoftened`](apsis::domain::body::Body::unsoftened) on
-//! every body or
-//! [`System::with_exact_gravity`](apsis::core::system::System::with_exact_gravity)
-//! system-wide. The kernel-requirement check at registration emits a
-//! structured warning if violated.
+//! Attaching 1PN to a softened kernel (`NewtonKernel::new(ε > 0)`)
+//! invalidates the physical model: numerical apsidal precession from a
+//! Plummer-style 1/√(r²+ε²) potential is ~2 × 10³ larger than the
+//! relativistic signal and of opposite sign at Mercury's orbit. The
+//! default `NewtonKernel::exact()` is silent against the kernel-
+//! requirement check; opting into ε > 0 emits a structured warning.
 //!
 //! # Use
 //!
 //! ```ignore
 //! let units   = UnitSystem::solar_canonical();
-//! let sun     = Body::star(1.0).unsoftened();
-//! let mercury = Body::rocky(1.66e-7).at(0.307, 0.0).with_velocity(0.0, 2.078).unsoftened();
+//! let sun     = Body::star(1.0);
+//! let mercury = Body::rocky(1.66e-7).at(0.307, 0.0).with_velocity(0.0, 2.078);
 //! let mut sys = System::new(vec![sun, mercury], units)
 //!     .with_integrator(IntegratorKind::Ias15)
 //!     .with_dt(1e-4);
@@ -411,10 +409,8 @@ mod tests {
     #[test]
     fn check_regime_silent_for_sun_mercury() {
         let pn = PostNewtonian1PN::for_units(UnitSystem::solar_canonical());
-        let bodies = vec![
-            Body::star(1.0).unsoftened(),
-            Body::rocky(1.66e-7).at(0.387, 0.0).with_velocity(0.0, 1.61).unsoftened(),
-        ];
+        let bodies =
+            vec![Body::star(1.0), Body::rocky(1.66e-7).at(0.387, 0.0).with_velocity(0.0, 1.61)];
         let violations = pn.check_regime(&bodies, 0.0);
         assert!(
             violations.is_empty(),
@@ -428,7 +424,7 @@ mod tests {
     #[test]
     fn check_regime_flags_equal_mass_binary_as_hard() {
         let pn = PostNewtonian1PN::for_units(UnitSystem::solar_canonical());
-        let bodies = vec![Body::star(1.0).unsoftened(), Body::star(1.0).unsoftened()];
+        let bodies = vec![Body::star(1.0), Body::star(1.0)];
         let violations = pn.check_regime(&bodies, 0.0);
         assert_eq!(violations.len(), 1, "expected exactly one violation for equal-mass binary");
         let v = &violations[0];
@@ -446,7 +442,7 @@ mod tests {
     #[test]
     fn check_regime_silent_for_sun_jupiter() {
         let pn = PostNewtonian1PN::for_units(UnitSystem::solar_canonical());
-        let bodies = vec![Body::star(1.0).unsoftened(), Body::gas_giant(9.547e-4).unsoftened()];
+        let bodies = vec![Body::star(1.0), Body::gas_giant(9.547e-4)];
         let violations = pn.check_regime(&bodies, 0.0);
         assert!(
             violations.is_empty(),

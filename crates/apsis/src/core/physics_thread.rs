@@ -49,7 +49,6 @@ pub struct RenderState {
     pub names: Vec<String>,
     pub metrics: Metrics,
     pub orbital_elements: Vec<Option<OrbitalElements>>,
-    pub softening_scale: f64,
     pub seed: u64,
     /// Simulation time units advanced per wall-second (rolling 500 ms window).
     /// Zero until the first measurement completes.
@@ -112,7 +111,6 @@ pub enum PhysicsCmd {
     SetExactThreshold(usize),
     SetSeed(u64),
     SetTheta(f64),
-    SetSofteningScale(f64),
     SetGFactor(f64),
     SetIntegrator(IntegratorKind),
     AddBody(Body),
@@ -163,7 +161,6 @@ pub struct PhysicsHandle {
     names: Vec<String>,
     metrics: Metrics,
     orbital_elements: Vec<Option<OrbitalElements>>,
-    softening_scale: f64,
     sim_rate: f64,
     sim_rate_responsive: f64,
     accelerations: Vec<Vec3>,
@@ -212,7 +209,6 @@ impl PhysicsHandle {
             self.names = rs.names.clone();
             self.metrics = rs.metrics;
             self.orbital_elements = rs.orbital_elements.clone();
-            self.softening_scale = rs.softening_scale;
             self.sim_rate = rs.sim_rate;
             self.sim_rate_responsive = rs.sim_rate_responsive;
             self.accelerations.clone_from(&rs.accelerations);
@@ -417,9 +413,6 @@ impl PhysicsHandle {
     pub fn integrator_kind(&self) -> IntegratorKind {
         self.metrics.integrator_kind
     }
-    pub fn softening_scale(&self) -> f64 {
-        self.softening_scale
-    }
     /// `UnitSystem` of the underlying `System`. Captured at spawn time
     /// and immutable thereafter; safe to call from the UI thread without
     /// blocking on the physics thread. Use when constructing operators
@@ -484,9 +477,6 @@ impl PhysicsHandle {
     }
     pub fn set_theta(&self, theta: f64) {
         self.send(PhysicsCmd::SetTheta(theta));
-    }
-    pub fn set_softening_scale(&self, s: f64) {
-        self.send(PhysicsCmd::SetSofteningScale(s));
     }
     pub fn set_g_factor(&self, g: f64) {
         self.send(PhysicsCmd::SetGFactor(g));
@@ -568,7 +558,6 @@ impl PhysicsHandle {
             steps: m.steps,
             dt: m.dt,
             theta: m.theta,
-            softening_scale: self.softening_scale,
             g_factor: m.g_factor,
             integrator_kind: m.integrator_kind,
             trail_every: 1, // trail_every now owned by TrailRecorder; app sets on snapshot
@@ -598,7 +587,6 @@ pub fn spawn(mut system: System, paused: bool) -> PhysicsHandle {
         names: system.names().to_vec(),
         metrics: system.metrics(),
         orbital_elements: system.orbital_elements().to_vec(),
-        softening_scale: system.softening_scale(),
         seed: system.seed(),
         sim_rate: 0.0,
         sim_rate_responsive: 0.0,
@@ -638,7 +626,6 @@ pub fn spawn(mut system: System, paused: bool) -> PhysicsHandle {
         names: initial.names,
         metrics: initial.metrics,
         orbital_elements: initial.orbital_elements,
-        softening_scale: initial.softening_scale,
         sim_rate: 0.0,
         sim_rate_responsive: 0.0,
         accelerations: initial.accelerations.clone(),
@@ -680,7 +667,6 @@ fn publish_full(
     publish_positions(system, rs);
     rs.names = system.names().to_vec();
     rs.orbital_elements = system.orbital_elements().to_vec();
-    rs.softening_scale = system.softening_scale();
     rs.seed = system.seed();
     let src_acc = system.last_accelerations();
     if rs.accelerations.len() == src_acc.len() {
@@ -709,7 +695,6 @@ fn cmd_blocks_during_precision(cmd: &PhysicsCmd) -> bool {
         | PhysicsCmd::SetExactThreshold(_)
         | PhysicsCmd::SetSeed(_)
         | PhysicsCmd::SetTheta(_)
-        | PhysicsCmd::SetSofteningScale(_)
         | PhysicsCmd::SetGFactor(_)
         | PhysicsCmd::SetIntegrator(_)
         | PhysicsCmd::SetDtMode(_)
@@ -773,10 +758,6 @@ fn apply_cmd(
         },
         PhysicsCmd::SetTheta(theta) => {
             system.set_theta(theta);
-            *needs_full_publish = true;
-        },
-        PhysicsCmd::SetSofteningScale(s) => {
-            system.set_softening_scale(s);
             *needs_full_publish = true;
         },
         PhysicsCmd::SetGFactor(g) => {
