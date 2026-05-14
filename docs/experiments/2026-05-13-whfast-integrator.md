@@ -4,11 +4,11 @@
 
 **Subject:** Adds `IntegratorKind::WHFast` to the apsis integrator zoo as a faithful port of Rein & Tamayo 2015 (MNRAS 452, 376–388). Compensated-summation symplectic integrator that pushes the round-off floor from `O(ε · N)` (apsis WH 1991) to `O(ε · √N)`, enabling 10⁹-orbit horizons. Symplectic corrector of order 17 (Wisdom 1996) ON by default for boosted truncation. Does **not** replace `IntegratorKind::WisdomHolman` — adds to zoo.
 
-**Status:** Protocol declared *a priori*, before any code lands. Locks the algorithmic decisions and validation-against-REBOUND scenario before implementation, per [[feedback_research_commit_discipline]].
+**Status:** Protocol declared *a priori*, before any code lands. Locks the algorithmic decisions and validation-against-REBOUND scenario before implementation.
 
 **Branch:** `feat/whfast-integrator`, branched from `develop` after PR #87 (long-horizon Mercury 1PN) merges.
 
-**Roadmap context:** First locked target in [[project_integrator_zoo_roadmap]] — paper-baseline credential. Subsequent integrators in the zoo (Implicit Midpoint, Gauss-Legendre RK, AR-Chain) follow only after the v0.1 paper.
+**Roadmap context:** First locked target in the integrator-zoo roadmap — paper-baseline credential. Subsequent integrators in the zoo (Implicit Midpoint, Gauss-Legendre RK, AR-Chain) follow only after the v0.1 paper.
 
 ---
 
@@ -20,7 +20,7 @@ The apsis integrator zoo ships WH (1991) at the foundational "Wisdom-Holman spli
 
 2. **Symplectic correctors** (Wisdom 1996, McLachlan 1995) — additional kick/drift compositions that cancel higher-order error terms in the WH split. Order-17 corrector reduces truncation from `O(dt²)` to `O(dt^{17 + 1})` for the corrected slice, at one-time-only cost (correctors compose into a single boundary kick before/after the inner KDK loop). Practical effect at Solar-System cadence: ~3-5× tighter conservation per step, free.
 
-WHFast is paper-baseline. With WHFast in the zoo, apsis covers the four canonical integrator regimes: low-cost real-time (VV / Yoshida4), market-standard long-horizon planetary (WHFast), close-encounter hybrid (Mercurius), and adaptive precision (IAS15). Federation thesis ([[project_thesis_anchor]]): every regime composes with every perturbation through a single contract.
+WHFast is paper-baseline. With WHFast in the zoo, apsis covers the four canonical integrator regimes: low-cost real-time (VV / Yoshida4), market-standard long-horizon planetary (WHFast), close-encounter hybrid (Mercurius), and adaptive precision (IAS15). Federation thesis: every regime composes with every perturbation through a single contract.
 
 ---
 
@@ -30,7 +30,7 @@ Three claims chain into this experiment:
 
 1. **The Mercury 1PN convergence experiment showed f64 round-off becomes visible at ~10⁸ perturbation evaluations** (`docs/experiments/2026-05-13-mercury-1pn-long-horizon.md` §Convergence experiment). That matches the regime where compensated summation pays off — `N_steps ≳ 10⁸` is where WH 1991's `O(ε·N)` floor crosses the science-relevant precision. WHFast's `O(ε·√N)` floor pushes the crossover by ~`√10⁸ ≈ 10⁴`, which is exactly the multi-Gyr Solar System integration regime planetary dynamics papers cite.
 
-2. **The integrator-zoo positioning thesis ([[project_integrator_zoo_roadmap]]) makes WHFast first** — it is the credential reviewers expect before they engage with novel integrators (Mercurius, federation contract). Without WHFast in the zoo, the integrator-of-integrators claim looks under-equipped.
+2. **The integrator-zoo positioning thesis makes WHFast first** — it is the credential reviewers expect before they engage with novel integrators (Mercurius, federation contract). Without WHFast in the zoo, the integrator-of-integrators claim looks under-equipped.
 
 3. **The federated FPM thesis depends on the integrator slot accepting any first-class symplectic-class integrator.** WHFast composes with apsis-1pn and any future perturbation through the same `Mercurius::interaction_step`-style mechanism (PR #86). Validating WHFast + 1PN at the same ~3-7 ppm precision floor as Mercurius + 1PN closes the federation contract demonstration over the entire active-integrator set.
 
@@ -214,4 +214,3 @@ Three-side test infrastructure following the existing `validation/rebound-parity
 - Existing apsis WH (1991): `crates/apsis/src/physics/integrator/wisdom_holman.rs`.
 - Mercurius implementation lab notebook: `docs/experiments/2026-05-13-mercurius-hybrid.md`.
 - Long-horizon Mercury 1PN: `docs/experiments/2026-05-13-mercury-1pn-long-horizon.md`.
-- Integrator zoo roadmap: [[project_integrator_zoo_roadmap]].
