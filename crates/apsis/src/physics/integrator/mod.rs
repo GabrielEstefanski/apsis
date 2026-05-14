@@ -54,6 +54,7 @@ pub mod primitives;
 pub mod regime;
 pub mod traits;
 pub mod velocity_verlet;
+pub mod whfast;
 pub mod wisdom_holman;
 pub mod yoshida4;
 
@@ -79,6 +80,7 @@ pub use primitives::{drift, kick};
 pub use regime::{RegimeViolation, Severity};
 pub use traits::{AdaptiveStats, Integrator, IntegratorContext, IntegratorKind, StepResult};
 pub use velocity_verlet::VelocityVerlet;
+pub use whfast::WHFast;
 pub use wisdom_holman::WisdomHolman;
 pub use yoshida4::Yoshida4;
 
@@ -90,6 +92,7 @@ pub fn make_integrator(kind: IntegratorKind) -> Box<dyn Integrator> {
         IntegratorKind::VelocityVerlet => Box::new(VelocityVerlet),
         IntegratorKind::Yoshida4 => Box::new(Yoshida4),
         IntegratorKind::WisdomHolman => Box::new(WisdomHolman::new()),
+        IntegratorKind::WHFast => Box::new(WHFast::new()),
         IntegratorKind::Ias15 => Box::new(Ias15::new()),
         IntegratorKind::Mercurius => Box::new(Mercurius::new()),
     }

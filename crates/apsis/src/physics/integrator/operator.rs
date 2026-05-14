@@ -202,8 +202,7 @@ pub trait Operator: Send + Sync {
 ///
 /// Operators with non-trivial closed-form `V` should handle singular
 /// cases inside the method (e.g. logarithmic fallback at `γ = −1` for a
-/// power-law central force `F ∝ r^γ`, following the REBOUNDx
-/// `central_force` precedent). Returning `Value(f64::NAN)` is a
+/// power-law central force `F ∝ r^γ`). Returning `Value(f64::NAN)` is a
 /// contract violation; return [`Potential::NotAvailable`] instead when
 /// the closed form is genuinely undefined or numerically unsafe in the
 /// current regime.

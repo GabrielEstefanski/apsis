@@ -2,7 +2,10 @@
 
 Python bindings for [`apsis-1pn`](../apsis-1pn).
 
-**This crate proves that the apsis perturbation extension model is preserved across both Rust and Python boundaries** — without duplicating physics, breaking ownership semantics, or requiring kernel modification. The cross-extension transport (a typed [`PyCapsule`](https://docs.python.org/3/c-api/capsule.html) carrying a `Box<dyn HamiltonianOperator>`) is provided by [`apsis-py-core`](../apsis-py-core) and consumed once here. New Python perturbation crates copy this shape verbatim.
+The 1PN operator constructed in `apsis-1pn` crosses the Rust → Python
+boundary via a typed [`PyCapsule`](https://docs.python.org/3/c-api/capsule.html)
+carrying a `Box<dyn HamiltonianOperator>`. The capsule transport lives
+in [`apsis-py-core`](../apsis-py-core) and is consumed here.
 
 ## Extension contract
 
@@ -58,11 +61,11 @@ sys.add_hamiltonian_perturbation(
 sys.integrate_for(100.0)
 ```
 
-## What this is NOT
+## Scope
 
-- **Distribution is intentionally minimal.** This crate exists to validate the extension model, not to maximise adoption.
-- **Physics lives once.** The 1PN formula is implemented in [`apsis-1pn`](../apsis-1pn); this crate is plumbing only. There is no second copy to drift.
-- **Different architectural axis from REBOUND/REBOUNDx.** Mature codes solve "integrate this Solar System with extra forces"; this project explores strict kernel/perturbation separation and citable force composition. For research that needs the full breadth of REBOUNDx (gr_full, spin-orbit, gravitational-wave emission), use REBOUNDx.
+- Plumbing only. The 1PN formula is implemented once in
+  [`apsis-1pn`](../apsis-1pn); this crate carries it across the
+  Rust → Python boundary.
 
 ## References
 

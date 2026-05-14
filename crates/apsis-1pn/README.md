@@ -1,10 +1,10 @@
 # apsis-1pn
 
-Out-of-tree perturbation crate for [`apsis`](../apsis).
+Out-of-tree perturbation crate for [`apsis`](../apsis). Adds the 1PN
+(test-particle Schwarzschild) correction as a `HamiltonianOperator`.
 
-**This crate proves that the perturbation extension contract is buildable, not just documented.** It compiles against the public API alone — no `pub(crate)` access, no patches to core sources, no dependency other than `apsis` itself. A future change to that API that breaks this crate fails CI loudly rather than quietly.
-
-Use it as the **template** when writing new perturbation crates (radiation pressure, J2, drag, …).
+Compiles against the public `apsis` API alone — no `pub(crate)` access,
+no patches to core sources.
 
 ## Extension contract
 
@@ -70,11 +70,11 @@ sys.add_hamiltonian_perturbation(Box::new(PostNewtonian1PN::for_units(units)));
 sys.integrate_for(100.0);
 ```
 
-## What this is NOT
+## Scope
 
-- **Distribution is intentionally minimal.** The dependency set never grows beyond `apsis` — that constraint *is* the proof.
-- **Not a production GR engine.** Full Einstein–Infeld–Hoffmann cross-terms are out of scope; only the test-particle Schwarzschild limit is implemented.
-- **Different architectural axis from REBOUND/REBOUNDx.** Mature codes solve "integrate this Solar System with extra forces"; this project explores strict kernel/perturbation separation and citable force composition. Research beyond the test-particle regime, and the full breadth of REBOUNDx (gr_full, spin-orbit, GW emission), should use REBOUNDx.
+- Test-particle Schwarzschild limit only. Full Einstein–Infeld–Hoffmann
+  cross-terms (multi-body PN) are out of scope.
+- Dependency set restricted to `apsis`.
 
 ## References
 

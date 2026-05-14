@@ -625,11 +625,9 @@ mod wh_guard {
 
 // ── WH refactor: per-bug regression tests + smoke tests ──────────────────────
 //
-// Regression coverage for the four documented TD-008 defects, organised per
-// the protocol declared in
-// docs/experiments/2026-05-03-wh-refactor.md §Hypothesis Tier 2. Each test
-// exercises one defect with initial conditions chosen so that the failure
-// mode the defect predicts dominates the observable signature.
+// Each test exercises one defect from the WH refactor with initial
+// conditions chosen so that the failure mode the defect predicts
+// dominates the observable signature.
 
 mod wh_refactor_regression {
     use super::*;

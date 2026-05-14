@@ -1,18 +1,13 @@
 //! Python binding for [`apsis_1pn`].
 //!
-//! **This crate proves that the apsis perturbation extension model is
-//! preserved across both Rust and Python boundaries** — without
-//! duplicating physics, breaking ownership semantics, or requiring
-//! kernel modification. A `Box<dyn HamiltonianOperator>` constructed
-//! in [`apsis_1pn`] crosses into Python via a typed
-//! [`PyCapsule`](pyo3::types::PyCapsule) (transport defined in
-//! [`apsis_py_core`]), travels in the pure-Python `apsis.Perturbation`
-//! wrapper, and is unwrapped at `System.add_hamiltonian_perturbation`
-//! back into Rust. The 1PN formula itself is implemented exactly once,
-//! in [`apsis_1pn`]; this crate is plumbing only.
+//! A `Box<dyn HamiltonianOperator>` constructed in [`apsis_1pn`] crosses
+//! into Python via a typed [`PyCapsule`](pyo3::types::PyCapsule)
+//! (transport defined in [`apsis_py_core`]), travels in the pure-Python
+//! `apsis.Perturbation` wrapper, and is unwrapped at
+//! `System.add_hamiltonian_perturbation` back into Rust. The 1PN formula
+//! itself lives in [`apsis_1pn`]; this crate is plumbing only.
 //!
-//! Treat this crate as the **template** when writing Python bindings
-//! for new perturbation crates: every factory below is a one-liner
+//! Each factory below is a one-liner
 //! built on [`apsis_py_core::box_into_capsule`].
 //!
 //! See [`README`](https://github.com/gabrielbragaestefanski/apsis/tree/master/crates/apsis-1pn-py)

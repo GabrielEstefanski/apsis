@@ -1453,14 +1453,13 @@ mod tests {
         assert_eq!(counters_exact.n_leaf_interactions, 0);
     }
 
-    // ── Tier 1 — two-phase walk vs single-phase reference ──────────────────── //
+    // ── two-phase walk vs single-phase reference ──────────────────────────── //
 
-    /// Tier 1 of `2026-05-11-simd-kernel.md` for the two-phase walk
-    /// refactor. The two-phase pattern changes summation order from
-    /// DFS-interleaved to segregated (all leaf-pairs first, then all
-    /// accepted-nodes), so floating-point reordering is expected at
-    /// `O(n_interactions × ULP)` ≈ ~7 × 10⁻¹³ at N = 10⁴. Bound 1 × 10⁻¹³
-    /// covers the typical case (most bodies have fewer than ~3000
+    /// The two-phase pattern changes summation order from DFS-interleaved
+    /// to segregated (all leaf-pairs first, then all accepted-nodes), so
+    /// floating-point reordering is expected at `O(n_interactions × ULP)`
+    /// ≈ ~7 × 10⁻¹³ at N = 10⁴. Bound 1 × 10⁻¹³ covers the typical case
+    /// (most bodies have fewer than ~3000
     /// interactions); a single body in a small-force pocket can hit the
     /// upper edge of the worst-case envelope, so the gate uses p99
     /// rather than max.
