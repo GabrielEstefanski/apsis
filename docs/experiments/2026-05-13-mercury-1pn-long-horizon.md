@@ -25,7 +25,7 @@ Three claims chain into this experiment:
 2. **The precision is stable.** Issue #29's open question — does the agreement hold at 4× the horizon, or does cumulative round-off swamp the signal? Answer here.
 3. **The federation contract works at the precision floor.** Not just "WH + 1PN works" or "IAS15 + 1PN works" — *any* integrator + *any* perturbation. Mercurius is the most architecturally complex integrator in the apsis zoo (rewind hybrid with embedded IAS15 sub-integrator); if 1PN composes cleanly through Mercurius's K-weighted half-kicks (post PR #86), the contract is demonstrated at the level the paper needs.
 
-The paper positioning ([[project_paper_positioning]]) makes the federation an explicit point of differentiation against monolithic codebases. A clean Mercurius + 1PN parity result is the demonstration that the "federated FPM" framing is operationally true, not just rhetorical.
+The paper positioning makes the federation an explicit point of differentiation against monolithic codebases. A clean Mercurius + 1PN parity result is the demonstration that the "federated FPM" framing is operationally true, not just rhetorical.
 
 ### What this experiment is NOT testing
 
