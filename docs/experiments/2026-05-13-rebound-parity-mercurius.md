@@ -245,7 +245,7 @@ independently-implemented adaptive integrators on chaotic dynamics,
 not as a Mercurius defect.
 
 The original Tier 2 §Hypothesis is *not* loosened or reinterpreted to
-make the FAIL go away (per [[feedback_no_tuning_to_pass]]). It is
+make the FAIL go away. It is
 preserved verbatim above and the bound's incorrectness is documented
 in §Interpretation with the year-by-year trace as evidence. Future
 parity tests of Mercurius-class integrators against REBOUND should

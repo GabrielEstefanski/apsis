@@ -78,8 +78,7 @@
 //!   gravity (the "blowout" regime — orbit is unbound). The operator
 //!   does not refuse `β > 1`, it just integrates the unbound trajectory.
 //! - `r̂` points from receiver to source (matches the apsis sign
-//!   convention noted in the apsis-1pn crate-level docs and the
-//!   memory entry [[feedback_fine_physics_traps]]).
+//!   convention noted in the apsis-1pn crate-level docs).
 //!
 //! # Use
 //!
