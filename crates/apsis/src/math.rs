@@ -1,7 +1,9 @@
 //! Mathematical primitives shared across the physics stack.
 
+pub mod compensated;
 pub mod vec3;
 
+pub use compensated::CompensatedF64;
 pub use vec3::Vec3;
 
 /// Wraps an angle into the canonical `[-π, π]` range.
