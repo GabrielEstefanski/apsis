@@ -1,84 +1,43 @@
-//! Out-of-tree perturbation crate for `apsis`.
+//! First post-Newtonian gravitational correction (Schwarzschild,
+//! test-particle form applied pairwise) per Anderson et al. (1975,
+//! *ApJ* 200, 221). Recovers the GR perihelion precession
+//! `Δφ = 6π G M / (c² a (1 − e²))` at leading order. CI gate
+//! reproduces Mercury's 43 arcsec/century to 4.4 ppm.
 //!
-//! **This crate proves that the perturbation extension contract is
-//! buildable, not just documented.** It compiles against the public API
-//! alone — no `pub(crate)` access, no patches to core sources, no
-//! dependency other than `apsis` itself. A future change to that API
-//! that breaks this crate fails CI loudly rather than quietly.
+//! Force expression on receiver `i` from source `j ≠ i`:
 //!
-//! Treat this crate as the **template** when writing new perturbation
-//! crates (radiation pressure, J2 oblateness, drag, …). See the
-//! crate-level README for the full extension-contract specification
-//! and the rationale.
+//! ```text
+//!   a_1PN(i ← j) = G m_j / (c² r²) · [ (4 G m_j / r − v_i²) · r̂ + 4 (r̂ · v_i) v_i ]
+//! ```
 //!
-//! # ⚠ Critical precondition
+//! # Critical precondition
 //!
-//! Attaching 1PN to a softened-gravity system **invalidates the physical
-//! model**. For Mercury-like orbits, the numerical apsidal precession
-//! induced by Plummer softening alone is ~2 × 10³ larger than the
-//! relativistic signal *and inverts its sign*. Energy and angular
-//! momentum stay conserved at machine precision while the trajectory
-//! is physically wrong.
-//!
-//! **This is not a numerical error — it is a model violation.**
-//!
+//! Attaching 1PN to a softened-gravity system invalidates the physical
+//! model: numerical apsidal precession from Plummer softening alone is
+//! ~2 × 10³ larger than the relativistic signal and of opposite sign.
 //! Call [`Body::unsoftened`](apsis::domain::body::Body::unsoftened) on
 //! every body or
 //! [`System::with_exact_gravity`](apsis::core::system::System::with_exact_gravity)
-//! system-wide. The contract is enforced once, in the core: a violation
-//! emits a structured warning at registration naming the failed invariant.
+//! system-wide. The kernel-requirement check at registration emits a
+//! structured warning if violated.
 //!
-//! # Validation signal
-//!
-//! With the contract enforced, this crate reproduces Mercury's textbook
-//! 43 arcsec/century rate to **4.4 ppm**, gated in CI under `mercury-gate`.
-//!
-//! # Physics
-//!
-//! The implementation uses the **test-particle 1PN (Schwarzschild) formula**
-//! applied pairwise: for every receiver `i` and every source `j ≠ i`,
-//!
-//! ```text
-//!   a_1PN(i←j) = G m_j / (c² r²) · [ (4 G m_j / r − v_i²) · r̂ + 4 (r̂ · v_i) v_i ]
-//! ```
-//!
-//! where `r = r_j − r_i`, `r̂` is the corresponding unit vector, `v_i` is the
-//! receiver's velocity, and `c` is the speed of light in simulation units.
-//!
-//! This is the Schwarzschild limit of the full Einstein–Infeld–Hoffmann (EIH)
-//! equations. It is **exact** for a test mass around a dominant source
-//! (e.g. Mercury–Sun with `m_Mercury / m_Sun ≈ 2 × 10⁻⁷`) and recovers the
-//! GR perihelion precession `Δφ = 6π G M / (c² a (1−e²))` per orbit at
-//! leading order.
-//!
-//! For equal-mass binaries the full EIH cross-terms matter and this crate's
-//! result is approximate. That regime is out of scope for the current
-//! demonstration; the paper's Mercury test sits squarely in the
-//! test-particle regime where the simplified form is canonical.
-//!
-//! # Usage
+//! # Use
 //!
 //! ```ignore
-//! use apsis::core::system::System;
-//! use apsis::domain::body::Body;
-//! use apsis::physics::integrator::IntegratorKind;
-//! use apsis::units::UnitSystem;
-//! use apsis_1pn::PostNewtonian1PN;
-//!
 //! let units   = UnitSystem::solar_canonical();
 //! let sun     = Body::star(1.0).unsoftened();
 //! let mercury = Body::rocky(1.66e-7).at(0.307, 0.0).with_velocity(0.0, 2.078).unsoftened();
 //! let mut sys = System::new(vec![sun, mercury], units)
 //!     .with_integrator(IntegratorKind::Ias15)
 //!     .with_dt(1e-4);
-//!
-//! // The same `units` flows through System and operator. The
-//! // registration check panics on mismatch.
-//! sys.add_hamiltonian_perturbation(Box::new(PostNewtonian1PN::for_units(units)));
-//!
-//! sys.integrate_for(200.0 * std::f64::consts::PI);
-//! println!("dE/E = {:.3e}", sys.energy_delta());
+//! sys.add_hamiltonian_perturbation(Box::new(PostNewtonian1PN::for_units(units)))?;
 //! ```
+//!
+//! # Reference
+//!
+//! Anderson, J. D., Esposito, P. B., Martin, W., Thornton, C. L., &
+//! Muhleman, D. O. (1975). DOI:
+//! [10.1086/153180](https://doi.org/10.1086/153180).
 
 #![deny(unsafe_code)]
 #![allow(clippy::needless_range_loop)]
@@ -92,38 +51,20 @@ use apsis::physics::integrator::{
 };
 use apsis::units::UnitSystem;
 
-/// Mass ratio above which the test-particle pairwise 1PN approximation
-/// starts losing accuracy noticeably (warn level). Calibrated so that
-/// the Sun–Jupiter case (m_J/m_Sun ≈ 9.5e-4) sits inside the regime,
-/// while equal-mass binaries are well outside.
+/// Mass ratio at which the test-particle approximation starts losing
+/// accuracy. Calibrated so Sun–Jupiter (≈ 9.5 × 10⁻⁴) sits inside.
 const PN1_MASS_RATIO_WARN: f64 = 1.0e-2;
 
-/// Mass ratio above which the test-particle pairwise 1PN approximation
-/// is fundamentally inappropriate (hard level). The full Einstein–
-/// Infeld–Hoffmann N-body Hamiltonian is the rigorous form for
-/// comparable masses.
+/// Mass ratio above which the test-particle approximation no longer
+/// applies; the full EIH N-body Hamiltonian is the rigorous form.
 const PN1_MASS_RATIO_HARD: f64 = 1.0e-1;
 
-/// Speed of light in m/s — CODATA exact by SI definition.
+/// Speed of light, m/s.
 const C_SI: f64 = 299_792_458.0;
 
-/// Speed of light expressed in the simulator's canonical solar-system units:
-///
-/// | Unit      | Value                   |
-/// |-----------|-------------------------|
-/// | Length    | 1 AU                    |
-/// | Mass      | 1 M☉                    |
-/// | Time      | 1 year / (2π)           |
-/// | G         | 1                       |
-///
-/// Computed at compile time from SI constants so the derivation, not a
-/// hand-transcribed literal, is the source of truth:
-///
-/// ```text
-///   C_SOLAR_UNITS = c_SI · (year_s / 2π) / AU_SI
-/// ```
-///
-/// Current value: approximately `10_065.130` AU per (year / 2π).
+/// Speed of light in solar canonical units (AU per year/(2π), G = 1),
+/// derived at compile time from `c_SI · (year_s / 2π) / AU_SI`.
+/// Current value ≈ `10_065.130`.
 pub const C_SOLAR_UNITS: f64 = {
     const AU_SI: f64 = 149_597_870_700.0; // m, IAU 2012
     const YEAR_S: f64 = 365.25 * 86_400.0;
@@ -131,99 +72,39 @@ pub const C_SOLAR_UNITS: f64 = {
     C_SI * (YEAR_S / TWO_PI) / AU_SI
 };
 
-/// First post-Newtonian gravitational correction (Schwarzschild,
-/// test-particle form applied pairwise).
-///
-/// Register via
-/// [`System::add_hamiltonian_perturbation`](apsis::core::system::System::add_hamiltonian_perturbation):
-///
-/// ```ignore
-/// use apsis::units::UnitSystem;
-/// let units = UnitSystem::solar_canonical();
-/// let mut sys = System::new(bodies, units).with_integrator(IntegratorKind::Ias15);
-/// sys.add_hamiltonian_perturbation(Box::new(PostNewtonian1PN::for_units(units)));
-/// ```
-///
-/// The operator carries the [`UnitSystem`] it was constructed for; the
-/// `System`'s registration check panics on mismatch (see
-/// [`Operator::declared_units`](apsis::physics::integrator::Operator::declared_units)).
-/// Constructing with `UnitSystem::solar_canonical()` and registering
-/// against a `System` built with `UnitSystem::solar()` (IAU convention)
-/// will panic — the two are different unit systems despite the shared
-/// "solar" label.
-///
-/// Stateless. Safe to share across threads.
-///
-/// # Cross-reference to REBOUNDx
-///
-/// This implementation corresponds to REBOUNDx's `gr` effect (Anderson
-/// et al. 1975 test-particle 1PN, velocity-dependent in `(r̂·v)·v` and
-/// `v² · r̂` terms). It is **not** the same as REBOUNDx's
-/// `gr_potential`, which is a velocity-independent effective potential
-/// (Nobili & Roxburgh 1986) that gets pericenter precession right but
-/// the mean motion wrong by `O(GM/(a·c²))`. The Nobili–Roxburgh form
-/// would be a separate operator with closed-form `potential` and
-/// WHFast-symplectic-friendly dispatch; it is not implemented here.
-///
-/// The full N-body Einstein–Infeld–Hoffmann Hamiltonian — the rigorous
-/// form when masses are comparable — is also out of scope. For the
-/// Sun–Mercury validation regime (`m_Mercury / m_Sun ≈ 2 × 10⁻⁷`) the
-/// test-particle simplification is canonical and gates the 4.4 ppm
-/// agreement reported in [`docs/experiments/2026-05-13-mercury-1pn-long-horizon.md`].
+/// First post-Newtonian Schwarzschild correction, test-particle form
+/// applied pairwise. Carries the [`UnitSystem`] it was constructed for;
+/// `System` registration returns `Err(UnitSystemMismatch)` if it
+/// disagrees with the system's own unit system.
 #[derive(Debug, Clone, Copy)]
 pub struct PostNewtonian1PN {
     /// Speed of light in `units`.
     c: f64,
-    /// Unit system this instance was constructed for. Used by
-    /// [`Operator::declared_units`](apsis::physics::integrator::Operator::declared_units)
-    /// to fail loudly at registration when paired with a `System`
-    /// integrating in a different unit system.
     units: UnitSystem,
 }
 
 impl PostNewtonian1PN {
-    // ── Named-regime constructor (Pattern A) ──────────────────────────────────
-
-    /// Construct for an arbitrary [`UnitSystem`], deriving `c` exactly
-    /// from `c_SI · T_scale / L_scale`. The recommended constructor —
-    /// the user picks the unit system once (typically the same one
-    /// passed to [`System::new`]), `c` is computed so the relativistic
-    /// correction stays consistent with the rest of the integration.
-    ///
-    /// The most common solar-physics choice is
-    /// [`UnitSystem::solar_canonical`] (G = 1, AU, year/(2π), M☉),
-    /// matching the apsis-1pn validation portfolio; for IAU
-    /// compatibility (G ≈ 4π², AU, year, M☉) use [`UnitSystem::solar`].
-    ///
-    /// [`System::new`]: apsis::core::system::System::new
+    /// Construct for the supplied [`UnitSystem`], deriving `c` from
+    /// `c_SI · T_scale / L_scale`. Recommended constructor — pass the
+    /// same units used to build the `System`. For IAU solar (G ≈ 4π²)
+    /// use [`UnitSystem::solar`]; for canonical (G = 1) use
+    /// [`UnitSystem::solar_canonical`].
     pub fn for_units(units: UnitSystem) -> Self {
         Self { c: C_SI * units.time_scale_si() / units.length_scale_si(), units }
     }
 
-    // ── Raw escape ────────────────────────────────────────────────────────────
-
-    /// Construct from a raw `c` value with the operator pinned to the
-    /// supplied [`UnitSystem`]. No cross-check between `c` and `units`
-    /// — `c` is taken as given. The `System` registration check still
-    /// validates that `units` matches the `System`'s own `UnitSystem`,
-    /// so the value cannot land silently in the wrong frame.
-    ///
-    /// Use when `c` is computed by neighbouring code (so cross-checking
-    /// against `units` is redundant), or for hypothetical experiments
-    /// where `c` is intentionally non-physical (e.g. "what if `c` were
-    /// 5 % larger?"). Prefer [`for_units`](Self::for_units) for normal
-    /// physics — it derives `c` from the unit system, eliminating the
-    /// raw value entirely.
+    /// Construct from an explicit `c` value pinned to `units`. Use when
+    /// `c` is computed externally; prefer [`for_units`](Self::for_units)
+    /// otherwise. `c` is unchecked; the `units` cross-check at
+    /// registration still applies.
     pub const fn from_raw_c(c: f64, units: UnitSystem) -> Self {
         Self { c, units }
     }
 
-    /// Speed of light this instance was configured with.
     pub const fn c(&self) -> f64 {
         self.c
     }
 
-    /// Unit system this instance was configured with.
     pub const fn units(&self) -> UnitSystem {
         self.units
     }
@@ -234,33 +115,15 @@ impl Operator for PostNewtonian1PN {
         Some(self.units)
     }
 
-    /// The 1PN correction is derived by expanding the geodesic equation
-    /// around the Newtonian Hamiltonian `H_N = p²/2m − GMm/r`. The
-    /// expansion therefore requires:
-    ///
-    /// - **Exactness::Exact** — the unperturbed base must be the bit-exact
-    ///   1/r potential. Plummer softening would substitute a different
-    ///   unperturbed system whose apsidal precession alone is ~2 × 10³
-    ///   larger than the 1PN signal for a Mercury-like orbit, swamping
-    ///   the physical effect and inverting its sign.
-    /// - **Continuity::Smooth** — symplectic integration of the correction
-    ///   relies on a smooth Hamiltonian flow; force discontinuities cannot
-    ///   be represented within any symplectic splitting scheme regardless
-    ///   of integrator order.
+    /// 1PN expands around the bit-exact 1/r Hamiltonian and requires a
+    /// smooth Hamiltonian flow for symplectic integration. Softening or
+    /// force discontinuities break the derivation.
     fn kernel_requirements(&self) -> KernelRequirements {
         KernelRequirements::exact_and_smooth()
     }
 
-    /// Test-particle pairwise 1PN assumes `m_secondary ≪ m_primary`
-    /// for every secondary in the system (treating `bodies[0]` as the
-    /// primary). Beyond ~1 % the leading-order error from the
-    /// dropped EIH cross-terms becomes comparable to the 1PN signal
-    /// itself; beyond ~10 % the operator's output is no longer
-    /// physics — the full EIH N-body Hamiltonian is required.
-    ///
-    /// `bodies[0]` is treated as the primary by convention (consistent
-    /// with the rest of the apsis solar-system fixtures: Sun first,
-    /// planets following).
+    /// Test-particle pairwise 1PN assumes `m_secondary ≪ m_primary` for
+    /// every secondary; `bodies[0]` is the primary by convention.
     fn check_regime(&self, bodies: &[Body], _t: f64) -> Vec<RegimeViolation> {
         let mut violations = Vec::new();
         if bodies.len() < 2 {
@@ -303,22 +166,14 @@ impl Operator for PostNewtonian1PN {
         violations
     }
 
-    /// 1PN's only declared regime bound is the mass ratio, which is
-    /// static for any sane simulation (masses do not change). Check
-    /// once per Mercury orbit's worth of steps — about 15 000 IAS15
-    /// substeps for the 500-orbit gate. Effectively a no-op in the
-    /// hot loop.
+    /// Mass ratio is static; one check per ~Mercury-orbit worth of
+    /// steps is sufficient.
     fn regime_check_cadence(&self) -> usize {
         15_000
     }
 
-    /// Anderson et al. (1975) — original test-particle 1PN derivation
-    /// in the Schwarzschild gauge — and Will (1993) for the EIH
-    /// background. Crate name + version + git commit are captured at
-    /// build time from this crate's `Cargo.toml` and `build.rs`, not
-    /// apsis core's, so the reproducibility envelope pins the
-    /// implementing source state independently of the host
-    /// integrator's version.
+    /// Anderson et al. (1975) for the Schwarzschild test-particle form;
+    /// Will (1993) for the EIH background.
     fn citation(&self) -> Option<Citation> {
         Some(Citation {
             bibtex: PN1_BIBTEX,
@@ -330,14 +185,6 @@ impl Operator for PostNewtonian1PN {
     }
 }
 
-/// BibTeX block for the test-particle pairwise 1PN derivation.
-/// Anderson et al. (1975) is the primary reference for the
-/// Schwarzschild-gauge test-particle form implemented in this crate;
-/// Will (1993) is the canonical textbook treatment of the EIH
-/// background the derivation reduces from in the test-particle limit.
-/// Both entries live here as a single static so consumers receive the
-/// full reference list per operator without splitting strings at the
-/// call site.
 const PN1_BIBTEX: &str = r#"@article{anderson1975,
   author  = {Anderson, J. D. and Esposito, P. B. and Martin, W. and Thornton, C. L. and Muhleman, D. O.},
   title   = {Experimental test of general relativity using time-delay data from Mariner 6 and Mariner 7},
@@ -432,12 +279,8 @@ impl HamiltonianOperator for PostNewtonian1PN {
     // is the only registered Hamiltonian operator.
 }
 
-/// Federation entry point — a [`HamiltonianOperatorDescriptor`] that
-/// consumers register without ever naming [`PostNewtonian1PN`] directly.
-///
-/// The descriptor delegates `kernel_requirements` to the produced
-/// operator; metadata (`name`, `description`) is the single authoritative
-/// source for any UI surface that lists this plugin.
+/// [`HamiltonianOperatorDescriptor`] for plugin registries — produces
+/// a `PostNewtonian1PN` for the supplied [`UnitSystem`].
 ///
 /// [`HamiltonianOperatorDescriptor`]: apsis::physics::integrator::HamiltonianOperatorDescriptor
 pub struct Descriptor;
