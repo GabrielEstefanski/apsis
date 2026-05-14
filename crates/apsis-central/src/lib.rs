@@ -40,9 +40,8 @@
 //!
 //! # Observable inversion (Pattern B)
 //!
-//! The Tamayo et al. 2019 result (REBOUNDx `central_force.c`) is that
-//! a near-circular orbit at instantaneous separation `d` and mean
-//! motion `n` precesses at
+//! The Tamayo et al. 2019 result is that a near-circular orbit at
+//! instantaneous separation `d` and mean motion `n` precesses at
 //!
 //! ```text
 //!   ω̇ = (1 + γ/2) · A · d^(γ + 2) · n / (G · M_source)
@@ -63,8 +62,7 @@
 //!
 //! Limitation: the inversion assumes near-circular geometry. For high
 //! eccentricity the apsidal rate picks up an `e`-dependent correction
-//! that this constructor does not apply. Mirrors REBOUNDx's
-//! documented behaviour.
+//! that this constructor does not apply.
 //!
 //! # Use
 //!
@@ -172,7 +170,6 @@ impl CentralForce {
     ///
     /// Assumes near-circular geometry — high `e` introduces an
     /// `e`-dependent correction the inversion does not apply.
-    /// Mirrors REBOUNDx `rebx_central_force_Acentral`.
     ///
     /// # Errors
     ///
@@ -394,8 +391,7 @@ impl HamiltonianOperator for CentralForce {
             }
             let b_i = &bodies[i];
             // r̂ points from source to receiver (force is "outward
-            // from central particle" per the Tamayo 2019 / REBOUNDx
-            // convention).
+            // from central particle" per Tamayo 2019).
             let dx = b_i.pos_x - src.pos_x;
             let dy = b_i.pos_y - src.pos_y;
             let dz = b_i.pos_z - src.pos_z;
@@ -405,15 +401,15 @@ impl HamiltonianOperator for CentralForce {
             }
             // Per-axis: a = A · r^γ · r̂ = A · r^(γ−1) · (Δ).
             // Compute r^(γ−1) via r²^((γ−1)/2) so we avoid one sqrt
-            // when γ is integer-friendly. Mirrors REBOUNDx.
+            // when γ is integer-friendly.
             let prefac = self.a_central * r2.powf((self.gamma - 1.0) / 2.0);
             acc[i].x += prefac * dx;
             acc[i].y += prefac * dy;
             acc[i].z += prefac * dz;
             // Newton's third law on the source: equal-and-opposite
-            // contribution scaled by m_receiver / m_source, matching
-            // REBOUNDx central_force.c. Without this, momentum drifts
-            // — the force pair is asymmetric otherwise.
+            // contribution scaled by m_receiver / m_source. Without
+            // this, momentum drifts — the force pair is asymmetric
+            // otherwise.
             let recoil = -b_i.mass / m_src;
             acc[self.source].x += recoil * prefac * dx;
             acc[self.source].y += recoil * prefac * dy;

@@ -27,8 +27,8 @@ use apsis_central::CentralForce;
 ///   instantaneous separation `d` (perihelion = `a(1−e)` here) rather
 ///   than the secular semi-major axis `a`. For `e = 0.1` the
 ///   `d^(γ+2)` factor differs from `a^(γ+2)` by ≈ 11%, biasing the
-///   recovered `A` by the same factor. This is REBOUNDx's documented
-///   convention; deviating would break the cross-implementation
+///   recovered `A` by the same factor. Documented behaviour of the
+///   formula; deviating would break the cross-implementation
 ///   round-trip.
 /// - **IAS15 truncation** over 50 orbits: well below 10⁻⁵ on ω, way
 ///   under the gate.
