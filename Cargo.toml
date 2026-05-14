@@ -8,6 +8,7 @@ members = [
     "crates/apsis-py",
     "crates/apsis-py-core",
     "crates/apsis-radiation",
+    "crates/apsis-central",
 ]
 
 # `apsis-py` is a Python extension module (`cdylib` + PyO3). Building
@@ -23,6 +24,7 @@ default-members = [
     "crates/apsis-app",
     "crates/apsis-1pn",
     "crates/apsis-radiation",
+    "crates/apsis-central",
 ]
 
 [workspace.package]
