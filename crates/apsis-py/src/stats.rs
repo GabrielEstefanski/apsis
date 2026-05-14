@@ -22,6 +22,7 @@ fn integrator_slug(kind: CoreIntegratorKind) -> &'static str {
         CoreIntegratorKind::VelocityVerlet => "velocity_verlet",
         CoreIntegratorKind::WisdomHolman => "wisdom_holman",
         CoreIntegratorKind::Mercurius => "mercurius",
+        CoreIntegratorKind::WHFast => "whfast",
     }
 }
 

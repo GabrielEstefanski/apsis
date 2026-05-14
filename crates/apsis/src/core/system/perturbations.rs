@@ -407,6 +407,7 @@ fn integrator_is_symplectic(kind: IntegratorKind) -> bool {
         IntegratorKind::VelocityVerlet
         | IntegratorKind::Yoshida4
         | IntegratorKind::WisdomHolman
+        | IntegratorKind::WHFast
         | IntegratorKind::Mercurius => true,
         IntegratorKind::Ias15 => false,
     }

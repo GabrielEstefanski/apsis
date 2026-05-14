@@ -326,9 +326,8 @@ pub fn solar_n641() -> ScenarioSpec {
 ///     geometry, bounded pair separations, no birthday-problem close
 ///     encounters. Useful for future work that wants to isolate
 ///     integrator behaviour at high N from scenario stiffness.
-///   * Running it through the new pairing (IAS15 auto-switches to
-///     direct O(N²)) gives a clean reading of IAS15's in-regime
-///     quality at N=641 — paper-grade material.
+///   * Running it under IAS15 with the auto-switch to direct O(N²)
+///     gives a clean reading of IAS15's in-regime quality at N=641.
 ///   * Comparing its metrics between force models (direct vs a
 ///     hypothetical smooth multipole method in the future) is
 ///     exactly the experiment the scenario was designed for.

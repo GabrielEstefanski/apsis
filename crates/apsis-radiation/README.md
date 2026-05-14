@@ -4,18 +4,14 @@ Out-of-tree perturbation crate for [`apsis`](../apsis). Radiation
 pressure (Hamiltonian) and Poynting–Robertson drag (non-conservative)
 per Burns, Lamy & Soter (1979).
 
-**This crate proves the federation contract scales to dissipative
-physics.** It is the first downstream publisher of a
+Ships a
 [`NonConservativeOperator`](../apsis/src/physics/integrator/operator.rs)
-and ships alongside a conservative
+(Poynting–Robertson drag) alongside a conservative
 [`HamiltonianOperator`](../apsis/src/physics/integrator/operator.rs)
-derived from the same paper. The two together demonstrate the
-Hamiltonian / non-Hamiltonian split inside a single physical regime
-(small-particle dynamics around a luminous source).
+(radiation pressure), both derived from Burns et al. (1979).
 
-Like [`apsis-1pn`](../apsis-1pn), this crate compiles against the public
-API alone — no `pub(crate)` access into `apsis`, no patches to core
-sources, no dependency other than `apsis` itself.
+Compiles against the public `apsis` API alone — no `pub(crate)` access,
+no patches to core sources.
 
 ## Operators
 

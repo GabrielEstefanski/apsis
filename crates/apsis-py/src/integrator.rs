@@ -69,6 +69,15 @@ pub(crate) enum IntegratorKind {
     /// hierarchical mass distribution.
     #[pyo3(name = "MERCURIUS")]
     Mercurius,
+
+    /// Wisdom-Holman split with compensated summation on per-step
+    /// position and velocity accumulators (Rein & Tamayo 2015).
+    /// Reduces round-off envelope from $O(N \cdot \varepsilon)$ to
+    /// $O(\sqrt{N} \cdot \varepsilon)$, unlocking long-horizon
+    /// planetary integration. Same hierarchical-mass requirement
+    /// as Wisdom-Holman.
+    #[pyo3(name = "WHFAST")]
+    WHFast,
 }
 
 #[pymethods]
@@ -90,6 +99,7 @@ impl IntegratorKind {
             Self::VelocityVerlet => "VELOCITY_VERLET",
             Self::WisdomHolman => "WISDOM_HOLMAN",
             Self::Mercurius => "MERCURIUS",
+            Self::WHFast => "WHFAST",
         }
     }
 
@@ -103,6 +113,7 @@ impl IntegratorKind {
             Self::VelocityVerlet => "velocity_verlet",
             Self::WisdomHolman => "wisdom_holman",
             Self::Mercurius => "mercurius",
+            Self::WHFast => "whfast",
         }
     }
 }
@@ -115,6 +126,7 @@ impl IntegratorKind {
             CoreIntegratorKind::VelocityVerlet => Self::VelocityVerlet,
             CoreIntegratorKind::WisdomHolman => Self::WisdomHolman,
             CoreIntegratorKind::Mercurius => Self::Mercurius,
+            CoreIntegratorKind::WHFast => Self::WHFast,
         }
     }
 
@@ -125,6 +137,7 @@ impl IntegratorKind {
             Self::VelocityVerlet => CoreIntegratorKind::VelocityVerlet,
             Self::WisdomHolman => CoreIntegratorKind::WisdomHolman,
             Self::Mercurius => CoreIntegratorKind::Mercurius,
+            Self::WHFast => CoreIntegratorKind::WHFast,
         }
     }
 }
