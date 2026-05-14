@@ -107,6 +107,11 @@ fn mercury_precession_matches_gr_within_100ppm() {
     );
 }
 
+/// Bus subscribers are process-global; both diagnostic tests below
+/// subscribe with the same marker prefix and would cross-contaminate
+/// when run in parallel. Serialise via a shared mutex.
+static BUS_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Contract test — registering a 1PN perturbation into a softened
 /// system must raise a warn-level diagnostic on the log bus. This is
 /// the protection against the silent Plummer-swamps-GR failure mode
@@ -115,6 +120,8 @@ fn mercury_precession_matches_gr_within_100ppm() {
 fn softened_system_triggers_diagnostic() {
     use apsis::core::log::{Event, Level, subscribe, unsubscribe};
     use std::sync::{Arc, Mutex};
+
+    let _guard = BUS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
 
     const MARKER: &str = "perturbation requires exact 1/r gravity";
 
@@ -155,6 +162,8 @@ fn softened_system_triggers_diagnostic() {
 fn exact_gravity_system_stays_silent() {
     use apsis::core::log::{Event, subscribe, unsubscribe};
     use std::sync::{Arc, Mutex};
+
+    let _guard = BUS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
 
     const MARKER: &str = "perturbation requires exact 1/r gravity";
 
