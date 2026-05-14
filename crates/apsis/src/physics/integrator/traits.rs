@@ -38,6 +38,7 @@ pub enum IntegratorKind {
     VelocityVerlet,
     Yoshida4,
     WisdomHolman,
+    WHFast,
     Ias15,
     Mercurius,
 }
@@ -49,6 +50,7 @@ impl IntegratorKind {
             Self::VelocityVerlet => "Velocity Verlet (2nd)",
             Self::Yoshida4 => "Yoshida 4th-order",
             Self::WisdomHolman => "Wisdom–Holman (2nd, Keplerian)",
+            Self::WHFast => "WHFast (2nd, Keplerian, compensated)",
             Self::Ias15 => "IAS15 (15th, adaptive)",
             Self::Mercurius => "Mercurius (hybrid, WH + IAS15)",
         }
@@ -64,9 +66,11 @@ impl IntegratorKind {
     pub fn execution_profile(self) -> ExecutionProfile {
         match self {
             Self::Ias15 => ExecutionProfile::Precision,
-            Self::VelocityVerlet | Self::Yoshida4 | Self::WisdomHolman | Self::Mercurius => {
-                ExecutionProfile::Realtime
-            },
+            Self::VelocityVerlet
+            | Self::Yoshida4
+            | Self::WisdomHolman
+            | Self::WHFast
+            | Self::Mercurius => ExecutionProfile::Realtime,
         }
     }
 
@@ -76,6 +80,7 @@ impl IntegratorKind {
             Self::VelocityVerlet => 2,
             Self::Yoshida4 => 4,
             Self::WisdomHolman => 2,
+            Self::WHFast => 2,
             Self::Ias15 => 15,
             Self::Mercurius => 2,
         }
@@ -91,6 +96,7 @@ impl IntegratorKind {
             Self::VelocityVerlet => 2,
             Self::Yoshida4 => 4,
             Self::WisdomHolman => 1,
+            Self::WHFast => 1,
             Self::Ias15 => 14,
             // Mercurius: 2 K-weighted half-kicks + analytical Kepler drift +
             // an IAS15 sub-integration whose cost is data-dependent. The
@@ -119,6 +125,14 @@ impl IntegratorKind {
                  solved analytically; perturbations are stepped numerically. \
                  Designed for hierarchical planetary systems."
             },
+            Self::WHFast => {
+                "Wisdom-Holman split with compensated summation on per-step \
+                 position and velocity accumulators (Rein & Tamayo 2015). \
+                 Round-off envelope reduced from O(N · ε) to O(√N · ε), \
+                 unlocking long-horizon planetary integration. Optional \
+                 order-17 symplectic corrector boosts boundary truncation \
+                 to O(dt^18). Same hierarchical-mass requirement as WH."
+            },
             Self::Ias15 => {
                 "15th-order adaptive Gauss-Radau integrator (Rein & Spiegel \
                  2015). Non-symplectic but conserves energy to machine \
@@ -138,9 +152,10 @@ impl IntegratorKind {
     }
 
     /// All known variants, in the order shown in the UI combo-box.
-    pub const ALL: [IntegratorKind; 5] = [
+    pub const ALL: [IntegratorKind; 6] = [
         IntegratorKind::Ias15,
         IntegratorKind::Mercurius,
+        IntegratorKind::WHFast,
         IntegratorKind::Yoshida4,
         IntegratorKind::VelocityVerlet,
         IntegratorKind::WisdomHolman,
@@ -152,6 +167,7 @@ impl IntegratorKind {
             Self::VelocityVerlet => "velocity_verlet",
             Self::Yoshida4 => "yoshida4",
             Self::WisdomHolman => "wisdom_holman",
+            Self::WHFast => "whfast",
             Self::Ias15 => "ias15",
             Self::Mercurius => "mercurius",
         }
@@ -166,6 +182,7 @@ impl std::str::FromStr for IntegratorKind {
             "velocity_verlet" => Ok(Self::VelocityVerlet),
             "yoshida4" => Ok(Self::Yoshida4),
             "wisdom_holman" => Ok(Self::WisdomHolman),
+            "whfast" => Ok(Self::WHFast),
             "ias15" => Ok(Self::Ias15),
             "mercurius" => Ok(Self::Mercurius),
             _ => Err(format!(
