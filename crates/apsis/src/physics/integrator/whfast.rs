@@ -1,38 +1,23 @@
 //! WHFast — Wisdom-Holman Fast (Rein & Tamayo 2015, *MNRAS* 452, 376).
 //!
-//! Symplectic mixed-variable integrator in democratic-heliocentric (DH)
-//! coordinates with **compensated summation** on the per-step position
-//! and velocity accumulators. Same Hamiltonian split and KDK structure
-//! as [`super::wisdom_holman::WisdomHolman`] (1991); the additions are:
+//! Symplectic mixed-variable integrator in democratic-heliocentric
+//! coordinates. Same KDK structure as [`super::wisdom_holman::WisdomHolman`]
+//! with two additions: persistent per-body compensators (Neumaier) on
+//! the position and velocity accumulators, reducing the round-off
+//! envelope on length-N sums from `O(N · ε)` to `O(√N · ε)`
+//! (Higham 2002 §4.5); and an order-17 symplectic corrector
+//! (Wisdom 1996) applied at sync boundaries, pushing boundary
+//! truncation from `O(dt²)` to `O(dt^18)`. Corrector opt-out via
+//! [`WHFast::without_correctors`].
 //!
-//! 1. **Persistent compensators** per body axis (`cs_pos`, `cs_vel`)
-//!    carried across steps. Reduces the round-off envelope on length-N
-//!    accumulators from `O(ε · N)` (naive `f64`) to `O(ε · √N)`
-//!    (Higham 2002 §4.5), pushing the f64 saturation horizon by
-//!    `~√(1/ε) ≈ 7 × 10⁷` at typical Solar-System cadence.
-//! 2. **Symplectic corrector of order 17** (Wisdom 1996, Rein-Tamayo
-//!    2015 §3.2) applied at synchronisation boundaries. Pushes the
-//!    boundary truncation error from `O(dt²)` (bare KDK) to `O(dt^18)`.
-//!    Coefficients copied from REBOUND `integrator_whfast.c` lines
-//!    44–71. Opt-out via [`WHFast::without_correctors`].
-//!
-//! Coexists with [`super::wisdom_holman::WisdomHolman`]: WH 1991
-//! remains the minimal pedagogical baseline; WHFast is the
-//! production long-horizon path.
-//!
-//! # Lab notebook
-//!
-//! `docs/experiments/2026-05-13-whfast-integrator.md` documents the
-//! locked design decisions, the validation tiers (Mercury 1PN
-//! federation gate, REBOUND outer-Solar-System parity, WH 1991
-//! comparison), and the references.
+//! Lab notebook:
+//! `docs/experiments/2026-05-13-whfast-integrator.md`.
 //!
 //! # References
 //!
-//! - Rein, H. & Tamayo, D. (2015). *MNRAS* 452, 376. § 3 algorithm.
-//! - Wisdom, J. (1996). *AJ* 112, 1305. Symplectic corrector.
-//! - Wisdom, J. & Holman, M. (1991). *AJ* 102, 1528. WH split.
-//! - REBOUND `src/integrator_whfast.c` (corrector coefficients).
+//! - Rein, H. & Tamayo, D. (2015). *MNRAS* 452, 376.
+//! - Wisdom, J. (1996). *AJ* 112, 1305.
+//! - Wisdom, J. & Holman, M. (1991). *AJ* 102, 1528.
 
 use crate::domain::body::Body;
 use crate::math::{CompensatedF64, Vec3};
@@ -45,34 +30,17 @@ use crate::physics::integrator::traits::{
 };
 
 /// Minimum `M_central / Σ m_i (i > 0)` for the WH-class derivation.
-/// Same threshold as WH 1991; below it the planet-planet perturbation
-/// expansion is no longer dominated by the central potential.
 const WHFAST_DOMINANCE_RATIO: f64 = 10.0;
 
-/// Wisdom-Holman Fast integrator with compensated summation and
-/// optional symplectic corrector.
-///
-/// Carries persistent per-body compensators that survive across step
-/// calls — they are the running Neumaier compensators for the
-/// `pos += dt · v` and `vel += dt · a` accumulations the integrator
-/// performs every step. Resized lazily on the first step when the
-/// body count is known.
-///
-/// Stateless on its first call; subsequent calls assume the same
-/// `bodies.len()`. A change in body count zeroes the compensators
-/// (reset of the accumulator sequence).
+/// WHFast integrator. Carries persistent per-body compensators
+/// (`cs_pos`, `cs_vel`) that survive across step calls and accumulate
+/// the round-off bits a naive `f64 +=` would drop. Compensators
+/// resize lazily on first step; a body-count change zeroes them.
 pub struct WHFast {
-    /// Persistent position compensators, one `Vec3` per body. The
-    /// `value`/`comp` pairs live as `(bodies[i].pos_*, cs_pos[i].*)`.
     cs_pos: Vec<Vec3>,
-
-    /// Persistent velocity compensators, one `Vec3` per body.
     cs_vel: Vec<Vec3>,
-
-    /// Apply the order-17 symplectic corrector at synchronisation
-    /// boundaries. Default `true` (matches REBOUND `safe_mode = 1`
-    /// + `corrector = 17`). The bare KDK is recoverable via
-    ///   [`without_correctors`](Self::without_correctors).
+    /// Apply the order-17 symplectic corrector at sync boundaries.
+    /// Default `true`; opt-out via [`WHFast::without_correctors`].
     with_correctors: bool,
 }
 
@@ -83,30 +51,23 @@ impl Default for WHFast {
 }
 
 impl WHFast {
-    /// Construct with the default configuration: corrector ON,
-    /// compensators empty (resized on first step).
     pub fn new() -> Self {
         Self { cs_pos: Vec::new(), cs_vel: Vec::new(), with_correctors: true }
     }
 
-    /// Disable the symplectic corrector. Used by studies that want
-    /// to isolate the compensated-summation contribution from the
-    /// corrector contribution.
+    /// Disable the symplectic corrector — runs bare KDK.
     #[must_use]
     pub fn without_correctors(mut self) -> Self {
         self.with_correctors = false;
         self
     }
 
-    /// Whether the corrector is active. Reflects the current builder
-    /// state.
     pub fn has_correctors(&self) -> bool {
         self.with_correctors
     }
 
     /// `true` when `bodies[0]` dominates the system mass distribution
-    /// to the WH-class threshold. Mirrors
-    /// [`WisdomHolman::is_suitable_for`].
+    /// to the WH-class threshold (`M_central ≥ 10 · Σ m_rest`).
     pub fn is_suitable_for(bodies: &[Body]) -> bool {
         if bodies.len() < 2 {
             return false;
@@ -117,8 +78,6 @@ impl WHFast {
         m0 >= max_other && m0 >= WHFAST_DOMINANCE_RATIO * m_rest
     }
 
-    /// Resize compensators to match the current body count, zeroing
-    /// on grow or on shape change. Called at the top of every step.
     fn ensure_state_size(&mut self, n: usize) {
         if self.cs_pos.len() != n {
             self.cs_pos.clear();
@@ -129,9 +88,8 @@ impl WHFast {
     }
 }
 
-/// Apply a Neumaier-compensated `delta` to the three axes of a
-/// `(value, compensator)` Vec3 pair. The persistent compensator
-/// accumulates the recovered low bits across calls.
+/// Neumaier-compensated `+=` on the three axes of a `(value, comp)`
+/// Vec3 pair.
 #[inline(always)]
 fn compensated_add(
     value_x: &mut f64,
@@ -359,10 +317,7 @@ impl Integrator for WHFast {
     }
 }
 
-/// Apply a perturbation kick of duration `dt` to all planet velocities,
-/// compensated against the persistent `cs_vel` buffer. Mirrors
-/// [`super::wisdom_holman::wh_kick`] in shape; the only structural
-/// difference is the compensated velocity update.
+/// Half-kick on planet velocities, compensated against `cs_vel`.
 fn whfast_kick(
     bodies: &mut [Body],
     ctx: &mut IntegratorContext<'_>,
