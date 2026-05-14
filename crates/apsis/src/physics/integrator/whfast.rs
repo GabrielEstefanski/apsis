@@ -31,20 +31,20 @@ const WHFAST_DOMINANCE_RATIO: f64 = 10.0;
 /// (`cs_pos`, `cs_vel`) that survive across step calls and accumulate
 /// the round-off bits a naive `f64 +=` would drop. Compensators
 /// resize lazily on first step; a body-count change zeroes them.
+///
+/// The slot-0 (central body) compensators are allocated but never
+/// written: the Sun's inertial state is reconstructed analytically from
+/// barycenter conservation each step, not accumulated. The unused slot
+/// keeps `body_idx = i + 1` indexing trivial throughout.
+#[derive(Default)]
 pub struct WHFast {
     cs_pos: Vec<Vec3>,
     cs_vel: Vec<Vec3>,
 }
 
-impl Default for WHFast {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl WHFast {
     pub fn new() -> Self {
-        Self { cs_pos: Vec::new(), cs_vel: Vec::new() }
+        Self::default()
     }
 
     /// `true` when `bodies[0]` dominates the system mass distribution

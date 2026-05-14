@@ -236,8 +236,8 @@ fn baseline_newtonian_kepler_is_closed() {
 /// precession the IAS15 gate above measures. Closes the federation
 /// contract for symplectic-class integrators: a perturbation registered
 /// against `System` is dispatched correctly through WHFast's
-/// `interaction_step`, and the WHFast Phase 2 compensated-summation
-/// accumulator does not corrupt the 1PN force prefactor.
+/// `interaction_step`, and the WHFast compensated-summation accumulator
+/// does not corrupt the 1PN force prefactor.
 ///
 /// Why a separate gate: WHFast and IAS15 cover different reviewer
 /// expectations. IAS15 is the precision-controlled adaptive path;
