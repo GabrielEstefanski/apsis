@@ -48,9 +48,13 @@ impl PyPostNewtonian1PN {
 }
 
 pub(crate) fn register(parent: &Bound<'_, PyModule>) -> PyResult<()> {
-    let gr = PyModule::new(parent.py(), "gr")?;
+    let py = parent.py();
+    let gr = PyModule::new(py, "gr")?;
     gr.add_class::<PyPostNewtonian1PN>()?;
     gr.add("C_SOLAR_UNITS", apsis_1pn::C_SOLAR_UNITS)?;
     parent.add_submodule(&gr)?;
+    // `add_submodule` does not register the child in `sys.modules`,
+    // so `from apsis._native.gr import X` would fail without this.
+    py.import("sys")?.getattr("modules")?.set_item("apsis._native.gr", &gr)?;
     Ok(())
 }
