@@ -55,16 +55,23 @@ first-post-Newtonian correction supplied by an out-of-tree plugin.
 
 ## 3. Workspace architecture
 
-The project is a Cargo workspace of six crates, split by role:
+The project is a Cargo workspace split by role:
 
 | crate | role |
 |---|---|
 | [`apsis`](../crates/apsis/) | The library: domain types, physics, integrators, `apsis::contract` formalisation, public API. Resolves no UI dependency — enforced in CI. |
-| [`apsis-1pn`](../crates/apsis-1pn/) | First downstream force crate: Einstein-Infeld-Hoffmann (Schwarzschild limit) 1PN correction. Reference implementation of the federation contract. Depends only on `apsis` through the public API. |
-| [`apsis-py`](../crates/apsis-py/) | Python binding (PyO3, abi3-py39). Researcher-first kwargs API exposing `Body`, `IntegratorKind`, `System`, `Trajectory`, and adaptive-controller diagnostics. |
-| [`apsis-py-core`](../crates/apsis-py-core/) | Cross-extension transport (rlib): `Box<dyn HamiltonianOperator>` ↔ `PyCapsule`. Allows out-of-tree force crates to expose Python bindings without re-implementing physics. |
-| [`apsis-1pn-py`](../crates/apsis-1pn-py/) | Python binding for `apsis-1pn`. Reference implementation of the federation contract at the Rust/Python boundary. |
+| [`apsis-1pn`](../crates/apsis-1pn/) | First downstream force crate: 1PN Schwarzschild correction (Anderson 1975). Reference implementation of the federation contract. Depends only on `apsis` through the public API. |
+| [`apsis-radiation`](../crates/apsis-radiation/) | Radiation pressure + Poynting–Robertson drag (Burns 1979). |
+| [`apsis-central`](../crates/apsis-central/) | Central-potential perturbations (Tamayo 2019, Pattern B). |
+| [`apsis-py-core`](../crates/apsis-py-core/) | Capsule transport + extractors (rlib). Used by the `apsis` Python distribution and any external `apsis-plugin-X` cdylib. |
+| [`apsis-python`](../crates/apsis-python/) | PyO3 cdylib backing the `apsis` Python distribution. Bundles every internal operator behind feature flags. |
 | [`apsis-app`](../crates/apsis-app/) | Optional interactive shell: egui/wgpu event loop, camera, panels, and GPU-side rendering. Not part of the validated surface. |
+
+The Python package source lives at the repository root in
+[`apsis/`](../apsis/); maturin builds the cdylib via the root
+`pyproject.toml`. Users `pip install apsis` and write
+`from apsis.gr import PostNewtonian1PN` — every internal operator
+ships under one import.
 
 The dependency direction is monotone: every binding and every force
 crate depends on `apsis` through the public extension API only —
