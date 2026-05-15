@@ -10,6 +10,10 @@ maturin develop --release
 
 ## Features
 
-| feature | submodule  | crate     |
-|---------|------------|-----------|
-| `gr`    | `apsis.gr` | apsis-1pn |
+| feature     | submodule         | crate            |
+|-------------|-------------------|------------------|
+| `gr`        | `apsis.gr`        | apsis-1pn        |
+| `radiation` | `apsis.radiation` | apsis-radiation  |
+| `central`   | `apsis.central`   | apsis-central    |
+
+All three are default-on. The published wheel ships with `--all-features`.
