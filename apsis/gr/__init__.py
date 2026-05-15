@@ -1,8 +1,17 @@
-"""General-relativistic perturbations.
+"""First post-Newtonian Schwarzschild correction (Anderson et al. 1975).
 
-Currently exposes the first post-Newtonian Schwarzschild correction
-(test-particle form, applied pairwise) — the canonical Mercury
-perihelion test.
+```python
+from apsis.gr import PostNewtonian1PN
+sys.add_hamiltonian_perturbation(
+    PostNewtonian1PN.for_units(units=apsis.units.SOLAR_CANONICAL),
+)
+```
+
+`C_SOLAR_UNITS` is the speed of light in the canonical solar
+unit system (AU per `year/2π`), exposed for callers that need the
+constant directly.
 """
 
-__all__: list[str] = []
+from apsis._native.gr import C_SOLAR_UNITS, PostNewtonian1PN
+
+__all__ = ["C_SOLAR_UNITS", "PostNewtonian1PN"]

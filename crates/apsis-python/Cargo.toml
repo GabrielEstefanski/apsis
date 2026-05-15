@@ -14,8 +14,14 @@ description = "PyO3 cdylib backing the apsis Python distribution."
 name = "apsis_python"
 crate-type = ["cdylib"]
 
+[features]
+default = ["gr"]
+gr = ["dep:apsis-1pn"]
+
 [dependencies]
 apsis = { path = "../apsis" }
 apsis-py-core = { path = "../apsis-py-core" }
 pyo3 = { version = "0.23", features = ["extension-module", "abi3-py39"] }
 numpy = "0.23"
+
+apsis-1pn = { path = "../apsis-1pn", optional = true }
