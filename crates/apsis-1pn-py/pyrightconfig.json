@@ -1,8 +1,0 @@
-{
-    "include": ["python", "tests"],
-    "exclude": ["**/__pycache__", "**/.venv", "**/target"],
-    "extraPaths": ["python"],
-    "typeCheckingMode": "strict",
-    "reportMissingImports": "warning",
-    "reportMissingTypeStubs": "warning"
-}
