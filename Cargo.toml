@@ -4,24 +4,17 @@ members = [
     "crates/apsis",
     "crates/apsis-app",
     "crates/apsis-1pn",
-    "crates/apsis-1pn-py",
-    "crates/apsis-py",
     "crates/apsis-py-core",
     "crates/apsis-python",
     "crates/apsis-radiation",
     "crates/apsis-central",
 ]
 
-# `apsis-python` (and the legacy `apsis-py` / `apsis-1pn-py` cdylibs
-# being phased out) are Python extension modules. Building them
-# requires Python development headers on the host machine; a normal
-# Rust contributor working only on the core or app should not be
-# forced to install Python just to run `cargo build` at the workspace
-# root. Listing them as workspace members but not as default members
-# keeps `cargo {build,test,check}` (no `-p`) on a pure Rust toolchain,
-# while `cargo {build,test,check} -p apsis-python` (and `maturin
-# develop` from the repo root) build them explicitly when the
-# contributor opts in.
+# `apsis-python` is a Python extension module (cdylib). Building it
+# requires Python development headers on the host. Excluding it from
+# default-members keeps `cargo {build,test,check}` (no `-p`) on a
+# pure Rust toolchain; `maturin develop` from the repo root builds
+# it explicitly.
 default-members = [
     "crates/apsis",
     "crates/apsis-app",

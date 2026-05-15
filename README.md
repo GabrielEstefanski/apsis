@@ -3,15 +3,15 @@
 *A Federated Model for Composable N-Body Force Artifacts*
 
 APSIS treats N-body force perturbations as first-class scientific
-artifacts. The model is *federated*: each force is an independent
-Rust crate — developed, versioned, and cited separately, without
-central integration into a monolithic codebase. Every force ships
-with a Python binding through `apsis-py-core`'s cross-extension
-transport, preserving the same contract across the FFI without
-reimplementing physics. A simulation's physical model is therefore
-not embedded in code, but in its dependency graph: `Cargo.toml`
-declares the forces, `Cargo.lock` pins them bit-precisely. The
-simulator is infrastructure for composing those artifacts.
+artifacts. The model is *federated* in Rust: each force is an
+independent Cargo crate — developed, versioned, and cited
+separately, without central integration into a monolithic codebase.
+Python users see a single distribution: `pip install apsis` brings
+the core simulator and every operator submodule (`apsis.gr`,
+future `apsis.radiation`, …) under one import. A simulation's
+physical model is in its dependency graph: `Cargo.toml` declares
+the forces, `Cargo.lock` pins them bit-precisely. The simulator is
+infrastructure for composing those artifacts.
 
 The core integrator is IAS15 (Rein & Spiegel, 2015), audited against
 the algorithmic specification §2–3 and validated against REBOUND's
@@ -105,31 +105,27 @@ the formal treatment.
 
 ### Python
 
-APSIS is not a simulation library — it is a runtime for composing
-physics distributed as crates. Each force lives in its own
-pip-installable package and is registered with a system at runtime;
-the simulation script is a *composition* of physics, not a
-*configuration* of a monolith. The example below composes two crates:
-the `apsis` runtime and `apsis-1pn`, a force crate implementing the
-1PN relativistic correction — the effect responsible for Mercury's
-perihelion precession.
+APSIS is a runtime for composing physics distributed as crates.
+Internal forces are submodules of the apsis distribution
+(`apsis.gr`, future `apsis.radiation`, …); external forces ship as
+`apsis-plugin-X` packages with the same registration contract. The
+simulation script is a *composition* of physics, not a
+*configuration* of a monolith.
 
-`pip install apsis apsis-1pn` will work after the first PyPI
-release. Today, build from source via
-[`maturin`](https://github.com/PyO3/maturin):
+`pip install apsis` will work after the first PyPI release. Today,
+build from source via [`maturin`](https://github.com/PyO3/maturin):
 
 ```bash
-git clone https://github.com/gabrielbragaestefanski/apsis && cd apsis
+git clone https://github.com/GabrielEstefanski/apsis && cd apsis
 pip install maturin
-maturin develop --release --manifest-path crates/apsis-py/Cargo.toml
-maturin develop --release --manifest-path crates/apsis-1pn-py/Cargo.toml
+maturin develop --release
 ```
 
 Then:
 
 ```python
 import apsis
-import apsis_1pn  # the 1PN force, distributed as an independent package
+from apsis.gr import PostNewtonian1PN
 
 sun = apsis.Body.star(mass=1.0)
 mercury = apsis.Body.rocky(
@@ -141,16 +137,18 @@ sys = apsis.System(
     integrator="ias15", dt=1e-3,
 )
 sys.add_hamiltonian_perturbation(
-    apsis_1pn.PostNewtonian1PN.for_units(units=apsis.units.SOLAR_CANONICAL),
+    PostNewtonian1PN.for_units(units=apsis.units.SOLAR_CANONICAL),
 )
 sys.integrate_for(100.0)
 
 print(sys)
 ```
 
-Adding a force is `pip install apsis-yourforce` and one extra import.
-Reproducing a paper's physical model is reading its
-`requirements.txt`. The runtime never changes; the composition does.
+Adding an internal force is one Cargo crate + one feature flag in
+`apsis-python`. Adding an external force is `pip install apsis-plugin-yourforce`
+and one extra import. Reproducing a paper's physical model is reading
+its `requirements.txt` (Python) or `Cargo.toml` (Rust). The runtime
+never changes; the composition does.
 
 ### Rust
 
@@ -226,23 +224,27 @@ cross-implementation parity scenario.
 
 ## Architecture: federation, library-first
 
-The workspace is six crates split by role: a UI-free physics core, a
-Python façade, and a federation of independently citable extension
-points. The core does not know the app or the bindings exist; CI
-enforces the separation.
+The Rust workspace is a UI-free physics core plus a federation of
+independently citable force crates. Python users see a single
+`apsis` distribution that bundles every internal operator behind
+one import. The core does not know the app or the Python binding
+exists; CI enforces the separation.
 
 | crate | role | dependencies |
 |---|---|---|
 | [`apsis`](crates/apsis/) | The library. Physics, integrators, public extension API. | Zero UI: `cargo tree -p apsis` resolves no `egui`/`wgpu`/`eframe`. |
-| [`apsis-py`](crates/apsis-py/) | Python binding (PyO3, abi3-py39). Façade-only. | `apsis`, `pyo3`, `numpy`. |
-| [`apsis-py-core`](crates/apsis-py-core/) | Cross-extension transport (rlib): `Box<dyn HamiltonianOperator>` ↔ `PyCapsule`. | `apsis`, `pyo3`. |
 | [`apsis-1pn`](crates/apsis-1pn/) | First downstream force crate: 1PN Schwarzschild correction. Reference implementation of the federation contract. | **Only** `apsis`. |
-| [`apsis-1pn-py`](crates/apsis-1pn-py/) | Python binding for `apsis-1pn`. Reference implementation of the contract at the Rust/Python boundary. | `apsis-1pn`, `apsis-py-core`. |
+| [`apsis-radiation`](crates/apsis-radiation/) | Radiation pressure + Poynting–Robertson drag (Burns 1979). | **Only** `apsis`. |
+| [`apsis-central`](crates/apsis-central/) | Central-potential perturbations (Pattern B, Tamayo 2019). | **Only** `apsis`. |
+| [`apsis-py-core`](crates/apsis-py-core/) | Capsule transport + extractors (rlib) — used by the apsis Python distribution and any external `apsis-plugin-X` cdylib. | `apsis`, `pyo3`. |
+| [`apsis-python`](crates/apsis-python/) | PyO3 cdylib backing the `apsis` Python distribution. Bundles every internal operator behind feature flags. | `apsis`, `apsis-py-core`, operator crates. |
 | [`apsis-app`](crates/apsis-app/) | Optional interactive egui/wgpu shell. Not part of the library's validated surface. | `apsis`, `egui`, `wgpu`, `eframe`. |
 
-Direction: every binding and every force crate depends on `apsis`
-through the public extension API only — never `pub(crate)`, never
-core internals. Adding a force is adding a crate.
+Python source lives at the repository root in [`apsis/`](apsis/);
+maturin builds the cdylib in `crates/apsis-python` via the root
+`pyproject.toml`. Adding an internal force is adding a Cargo crate
+and a feature flag; adding an external force is publishing
+`apsis-plugin-X` against the public extension API.
 
 ## Fine-physics guardrail
 
