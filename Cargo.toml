@@ -58,3 +58,17 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 tracing-tracy = "0.11"
 egui_kittest = "0.34.1"
+
+# ── Profiles ─────────────────────────────────────────────────────────────────
+
+# Test-time optimization. Default `cargo test` builds with `opt-level = 0`,
+# which dominates wall time on compute-heavy physics tests (IAS15, long-orbit
+# integrations, parity portfolio). Optimize own crates moderately and
+# dependencies aggressively; both compile artifacts cache between runs.
+[profile.test]
+opt-level = 2
+debug = true
+incremental = true
+
+[profile.test.package."*"]
+opt-level = 3
