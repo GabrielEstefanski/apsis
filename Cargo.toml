@@ -58,3 +58,15 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 tracing-tracy = "0.11"
 egui_kittest = "0.34.1"
+
+# ── Profiles ─────────────────────────────────────────────────────────────────
+
+# opt-level=2 for own crates (incremental compile cost) + 3 for deps (cached).
+# Default opt-level=0 dominates wall time on IAS15 / parity tests.
+[profile.test]
+opt-level = 2
+debug = true
+incremental = true
+
+[profile.test.package."*"]
+opt-level = 3
