@@ -115,12 +115,15 @@ jobs:
             ~/.cargo/git
             target
           key: ${{ runner.os }}-cargo-pybuild-${{ hashFiles('**/Cargo.lock') }}
-      - name: install maturin
-        run: pip install maturin
-      - name: maturin develop
-        run: maturin develop --release
+      - name: create venv + maturin develop
+        run: |
+          python -m venv .venv
+          . .venv/bin/activate
+          pip install maturin
+          maturin develop --release
       - name: from apsis import + from apsis.gr import
         run: |
+          . .venv/bin/activate
           python -c "import apsis; print('apsis', apsis.__version__)"
           python -c "from apsis.gr import PostNewtonian1PN, C_SOLAR_UNITS; assert C_SOLAR_UNITS > 1e4"
           python -c "import apsis; from apsis.gr import PostNewtonian1PN; \
