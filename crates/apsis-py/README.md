@@ -35,11 +35,10 @@ Or build a custom system explicitly:
 ```python
 import apsis
 
-sun = apsis.Body.star(mass=1.0).unsoftened()
+sun = apsis.Body.star(mass=1.0)
 mercury = (apsis.Body.rocky(mass=3e-6)
               .at(0.307, 0.0)
-              .with_velocity(0.0, 1.98)
-              .unsoftened())
+              .with_velocity(0.0, 1.98))
 
 sys = apsis.System(
     bodies=[sun, mercury],

@@ -19,13 +19,13 @@ Preconditions are expressed at the type level and surfaced at runtime, ensuring 
 
 ## ⚠️ Critical precondition
 
-Attaching 1PN to a softened-gravity system **invalidates the physical model**.
+1PN is derived around the bit-exact Newtonian potential. Default `apsis.System(...)` uses an exact `NewtonKernel` (ε = 0) and the registration is silent. Attaching 1PN on top of a softened kernel **invalidates the physical model**.
 
 For Mercury-like orbits, the numerical apsidal precession induced by Plummer softening alone is **~2000× larger than the relativistic signal, and inverts its sign**. Energy and angular momentum stay conserved at machine precision while the trajectory is physically wrong.
 
 **This is not a numerical error — it is a model violation.**
 
-Pass `exact_gravity=True` to `apsis.System(...)` or call `Body.<material>(...).unsoftened()` on every body. The kernel-vs-perturbation contract is enforced once, in the core: a violation emits a structured warning at `add_hamiltonian_perturbation` time naming the failed invariant. The warning is the deliberate behaviour — apsis does not silently correct invalid physical configurations. Surfacing the violation is the contract; auto-fixing would erase it.
+The kernel-vs-perturbation contract is enforced once, in the core: opting into a softened kernel (currently from the Rust side via `System::with_kernel(NewtonKernel::new(ε > 0))`) emits a structured warning at `add_hamiltonian_perturbation` time naming the failed invariant. The warning is the deliberate behaviour — apsis does not silently correct invalid physical configurations. Surfacing the violation is the contract; auto-fixing would erase it.
 
 ## Why this matters
 
@@ -41,18 +41,16 @@ Splitting each perturbation into an independently citable crate enables:
 import apsis
 import apsis_1pn
 
-sun = apsis.Body.star(mass=1.0).unsoftened()
+sun = apsis.Body.star(mass=1.0)
 mercury = (apsis.Body.rocky(mass=1.66e-7)
            .at((0.387, 0.0))
-           .with_velocity((0.0, 1.61))
-           .unsoftened())
+           .with_velocity((0.0, 1.61)))
 
 sys = apsis.System(
     bodies=[sun, mercury],
     units=apsis.units.SOLAR_CANONICAL,
     integrator="ias15",
     dt=1e-3,
-    exact_gravity=True,
 )
 # Same UnitSystem on both sides — registration check passes.
 sys.add_hamiltonian_perturbation(

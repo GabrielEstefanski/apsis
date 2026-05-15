@@ -22,10 +22,7 @@ use crate::units::UnitSystem;
 
 #[test]
 fn units_snapshot_is_immutable_across_integration() {
-    let bodies = vec![
-        Body::star(1.0).unsoftened(),
-        Body::rocky(3e-6).at(1.0, 0.0).with_velocity(0.0, 1.0).unsoftened(),
-    ];
+    let bodies = vec![Body::star(1.0), Body::rocky(3e-6).at(1.0, 0.0).with_velocity(0.0, 1.0)];
     let mut sys = System::new(bodies, UnitSystem::solar())
         .with_integrator(IntegratorKind::Ias15)
         .with_dt(1e-3);
@@ -682,11 +679,8 @@ mod wh_refactor_regression {
         let v_peri = ((1.0 + e) / (a * (1.0 - e))).sqrt();
         let v_com = Vec3::new(0.1, 0.05, 0.02);
         let mut bodies = vec![
-            Body::star(m_central).at(0.0, 0.0).with_velocity(v_com.x, v_com.y).unsoftened(),
-            Body::rocky(m_planet)
-                .at(r_peri, 0.0)
-                .with_velocity(v_com.x, v_peri + v_com.y)
-                .unsoftened(),
+            Body::star(m_central).at(0.0, 0.0).with_velocity(v_com.x, v_com.y),
+            Body::rocky(m_planet).at(r_peri, 0.0).with_velocity(v_com.x, v_peri + v_com.y),
         ];
         bodies[0].vel_z = v_com.z;
         bodies[1].vel_z = v_com.z;
@@ -732,8 +726,8 @@ mod wh_refactor_regression {
         let r_peri = a * (1.0 - e);
         let v_peri = ((1.0 + e) / (a * (1.0 - e))).sqrt();
         let bodies = vec![
-            Body::star(m_central).at(0.0, 0.0).unsoftened(),
-            Body::rocky(m_planet).at(r_peri, 0.0).with_velocity(0.0, v_peri).unsoftened(),
+            Body::star(m_central).at(0.0, 0.0),
+            Body::rocky(m_planet).at(r_peri, 0.0).with_velocity(0.0, v_peri),
         ];
 
         let period = 2.0 * std::f64::consts::PI * (a.powi(3) / (m_central + m_planet)).sqrt();
@@ -775,11 +769,8 @@ mod wh_refactor_regression {
         let v_peri = ((1.0 + e) / (a * (1.0 - e))).sqrt();
 
         let mut bodies = vec![
-            Body::star(m_central).at(0.0, 0.0).unsoftened(),
-            Body::rocky(m_planet)
-                .at(r_peri, 0.0)
-                .with_velocity(0.0, v_peri * inclination.cos())
-                .unsoftened(),
+            Body::star(m_central).at(0.0, 0.0),
+            Body::rocky(m_planet).at(r_peri, 0.0).with_velocity(0.0, v_peri * inclination.cos()),
         ];
         bodies[1].vel_z = v_peri * inclination.sin();
 
@@ -834,8 +825,8 @@ mod wh_refactor_regression {
         // for separation 2 and v = 0.5 each. Dominance ratio = 1, far below
         // the WH_DOMINANCE_RATIO = 10 threshold.
         let bodies = vec![
-            Body::rocky(1.0).at(-1.0, 0.0).with_velocity(0.0, -0.5).unsoftened(),
-            Body::rocky(1.0).at(1.0, 0.0).with_velocity(0.0, 0.5).unsoftened(),
+            Body::rocky(1.0).at(-1.0, 0.0).with_velocity(0.0, -0.5),
+            Body::rocky(1.0).at(1.0, 0.0).with_velocity(0.0, 0.5),
         ];
 
         let period = 4.0 * std::f64::consts::PI;
@@ -896,8 +887,8 @@ mod wh_refactor_regression {
         let r_peri = a * (1.0 - e);
         let v_peri = ((1.0 + e) / (a * (1.0 - e))).sqrt();
         let bodies = vec![
-            Body::star(m_central).at(0.0, 0.0).unsoftened(),
-            Body::rocky(m_planet).at(r_peri, 0.0).with_velocity(0.0, v_peri).unsoftened(),
+            Body::star(m_central).at(0.0, 0.0),
+            Body::rocky(m_planet).at(r_peri, 0.0).with_velocity(0.0, v_peri),
         ];
 
         let period = 2.0 * std::f64::consts::PI;
@@ -938,8 +929,8 @@ mod wh_refactor_regression {
         let r_peri = a * (1.0 - e);
         let v_peri = ((1.0 + e) / (a * (1.0 - e))).sqrt();
         let bodies = vec![
-            Body::star(m_sun).at(0.0, 0.0).unsoftened(),
-            Body::rocky(m_mercury).at(r_peri, 0.0).with_velocity(0.0, v_peri).unsoftened(),
+            Body::star(m_sun).at(0.0, 0.0),
+            Body::rocky(m_mercury).at(r_peri, 0.0).with_velocity(0.0, v_peri),
         ];
 
         let period = 2.0 * std::f64::consts::PI * (a.powi(3) / (m_sun + m_mercury)).sqrt();
@@ -1005,10 +996,8 @@ mod benchmarks {
         let r_peri = A * (1.0 - E);
         let v_peri = (MU * (1.0 + E) / (A * (1.0 - E))).sqrt();
 
-        let mut b1 = Body::rocky(1.0).at(-r_peri / 2.0, 0.0).with_velocity(0.0, -v_peri / 2.0);
-        b1.softening = 0.0;
-        let mut b2 = Body::rocky(1.0).at(r_peri / 2.0, 0.0).with_velocity(0.0, v_peri / 2.0);
-        b2.softening = 0.0;
+        let b1 = Body::rocky(1.0).at(-r_peri / 2.0, 0.0).with_velocity(0.0, -v_peri / 2.0);
+        let b2 = Body::rocky(1.0).at(r_peri / 2.0, 0.0).with_velocity(0.0, v_peri / 2.0);
 
         let mut sys = System::new(vec![b1, b2], UnitSystem::canonical())
             .with_theta(0.5)
@@ -1072,11 +1061,7 @@ mod benchmarks {
 
         let bodies = FIGURE8_IC
             .iter()
-            .map(|&(x, y, vx, vy)| {
-                let mut b = Body::rocky(1.0).at(x, y).with_velocity(vx, vy);
-                b.softening = 0.0;
-                b
-            })
+            .map(|&(x, y, vx, vy)| Body::rocky(1.0).at(x, y).with_velocity(vx, vy))
             .collect();
         let mut sys = System::new(bodies, UnitSystem::canonical())
             .with_theta(0.5)
@@ -1113,11 +1098,7 @@ mod benchmarks {
         ] {
             let bodies = FIGURE8_IC
                 .iter()
-                .map(|&(x, y, vx, vy)| {
-                    let mut b = Body::rocky(1.0).at(x, y).with_velocity(vx, vy);
-                    b.softening = 0.0;
-                    b
-                })
+                .map(|&(x, y, vx, vy)| Body::rocky(1.0).at(x, y).with_velocity(vx, vy))
                 .collect();
             let mut sys = System::new(bodies, UnitSystem::canonical())
                 .with_theta(0.5)
@@ -1151,14 +1132,11 @@ mod benchmarks {
     // Position tests are limited to t = 1 (before chaos onset).
 
     fn pythagorean_system(dt: f64) -> System {
-        let mut bodies = [
+        let bodies = [
             Body::rocky(3.0).at(1.0, 3.0).with_velocity(0.0, 0.0),
             Body::rocky(4.0).at(-2.0, -1.0).with_velocity(0.0, 0.0),
             Body::rocky(5.0).at(1.0, -1.0).with_velocity(0.0, 0.0),
         ];
-        for b in &mut bodies {
-            b.softening = 0.0;
-        }
         let mut sys = System::new(bodies.to_vec(), UnitSystem::canonical())
             .with_theta(0.5)
             .with_dt(dt)

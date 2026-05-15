@@ -32,7 +32,6 @@
 //! # order:            4
 //! # dt:               1.00e-04
 //! # theta:            0.500
-//! # softening_scale:  1.000
 //! # g_factor:         1.000
 //! # record_interval:  1.00e-02
 //! ```
@@ -57,7 +56,6 @@ pub struct RecordMetadata {
     pub integrator_order: u32,
     pub dt: f64,
     pub theta: f64,
-    pub softening_scale: f64,
     pub g_factor: f64,
     pub record_interval: f64,
     /// Physical unit system used by the template that produced this recording.
@@ -162,7 +160,8 @@ impl SimRecorder {
         metrics: &Metrics,
         orbital: &[Option<OrbitalElements>],
     ) -> std::io::Result<()> {
-        let pe_per_body = per_body_potential_energy(bodies, self.g_factor);
+        let pe_per_body =
+            per_body_potential_energy(bodies, self.g_factor, metrics.kernel_epsilon_squared);
 
         // ── Body rows ──────────────────────────────────────────────────────
         for (i, body) in bodies.iter().enumerate() {
@@ -303,7 +302,6 @@ fn build_metadata_block(timestamp: &str, m: &RecordMetadata) -> String {
          # order:            {}\n\
          # dt:               {:.2e}\n\
          # theta:            {:.3}\n\
-         # softening_scale:  {:.3}\n\
          # g_factor:         {:.4}\n\
          # record_interval:  {:.2e}\n\
          # ─────────────────────────────────────────────────────\n\
@@ -317,7 +315,6 @@ fn build_metadata_block(timestamp: &str, m: &RecordMetadata) -> String {
         m.integrator_order,
         m.dt,
         m.theta,
-        m.softening_scale,
         m.g_factor,
         m.record_interval,
         m.units.label,

@@ -18,16 +18,6 @@ pub struct PhysicsConfig {
     /// - `θ → 1.5`: aggressively approximated → O(N log N), less accurate
     pub theta: f64,
 
-    /// Global Plummer softening scale applied on top of the per-body default.
-    ///
-    /// Per-body default: `ε = EPS_BASE · m^(1/3)` (Plummer mass-proportional).
-    /// This scale multiplies that value: `ε_eff = ε_default · softening_scale`.
-    ///
-    /// - `1.0` — default; physically motivated size
-    /// - `< 1.0` — sharper forces, closer to point-mass singularity
-    /// - `> 1.0` — smoother forces, suppress close encounters
-    pub softening_scale: f64,
-
     // ── Gravity ───────────────────────────────────────────────────────────────
     /// Effective gravitational strength multiplier.
     ///
@@ -62,7 +52,6 @@ impl Default for PhysicsConfig {
             exact_threshold: 64,
             seed: 0,
             theta: 0.5,
-            softening_scale: 1.0,
             g_factor: 1.0,
             trail_every: 1,
             mass_label: "M".into(),

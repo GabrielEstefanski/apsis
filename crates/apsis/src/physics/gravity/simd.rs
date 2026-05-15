@@ -164,7 +164,7 @@ pub(crate) unsafe fn process_leafpair_avx2(
     body_pos_x: f64,
     body_pos_y: f64,
     body_pos_z: f64,
-    body_softening: f64,
+    eps_sq: f64,
     arrays: &BodyArrays,
     leaf_body_indices: &[u32],
 ) -> (Vec3, f64) {
@@ -175,9 +175,8 @@ pub(crate) unsafe fn process_leafpair_avx2(
         let bpx = _mm256_set1_pd(body_pos_x);
         let bpy = _mm256_set1_pd(body_pos_y);
         let bpz = _mm256_set1_pd(body_pos_z);
-        let body_soft_sq = _mm256_set1_pd(body_softening * body_softening);
+        let eps_sq_v = _mm256_set1_pd(eps_sq);
         let g_vec = _mm256_set1_pd(G);
-        let half = _mm256_set1_pd(0.5);
         let one = _mm256_set1_pd(1.0);
         let neg_g = _mm256_set1_pd(-G);
 
@@ -194,7 +193,6 @@ pub(crate) unsafe fn process_leafpair_avx2(
             let opy = _mm256_i32gather_pd::<8>(arrays.pos_y.as_ptr(), idx);
             let opz = _mm256_i32gather_pd::<8>(arrays.pos_z.as_ptr(), idx);
             let omass = _mm256_i32gather_pd::<8>(arrays.mass.as_ptr(), idx);
-            let osoft = _mm256_i32gather_pd::<8>(arrays.softening.as_ptr(), idx);
 
             let dx = _mm256_sub_pd(opx, bpx);
             let dy = _mm256_sub_pd(opy, bpy);
@@ -205,10 +203,7 @@ pub(crate) unsafe fn process_leafpair_avx2(
                 _mm256_mul_pd(dz, dz),
             );
 
-            let other_soft_sq = _mm256_mul_pd(osoft, osoft);
-            let pair_eps2 = _mm256_mul_pd(_mm256_add_pd(body_soft_sq, other_soft_sq), half);
-
-            let r_sq_eff = _mm256_add_pd(r_sq, pair_eps2);
+            let r_sq_eff = _mm256_add_pd(r_sq, eps_sq_v);
             let r_eff = _mm256_sqrt_pd(r_sq_eff);
             let inv_r = _mm256_div_pd(one, r_eff);
 
@@ -242,10 +237,8 @@ pub(crate) unsafe fn process_leafpair_avx2(
         let dx_s = arrays.pos_x[bi] - body_pos_x;
         let dy_s = arrays.pos_y[bi] - body_pos_y;
         let dz_s = arrays.pos_z[bi] - body_pos_z;
-        let other_soft = arrays.softening[bi];
-        let pair_eps2 = 0.5 * (body_softening * body_softening + other_soft * other_soft);
         let r_sq = dx_s * dx_s + dy_s * dy_s + dz_s * dz_s;
-        let inv_r = (r_sq + pair_eps2).sqrt().recip();
+        let inv_r = (r_sq + eps_sq).sqrt().recip();
         let inv_r3 = inv_r * inv_r * inv_r;
         let fac = G * other_mass * inv_r3;
         a.x += dx_s * fac;

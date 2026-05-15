@@ -24,11 +24,7 @@ impl System {
     /// the preset's `display_name` via [`add_named_body`] for
     /// `"Rocky 1"`-style names.
     pub fn add_body(&mut self, mut body: Body) {
-        use crate::domain::body::default_softening;
         body.sync_physical_properties();
-        if (self.softening_scale - 1.0).abs() > 1e-15 {
-            body.softening = default_softening(body.mass) * self.softening_scale;
-        }
         self.total_mass += body.mass;
         self.names.push(auto_name(DEFAULT_NAME_PREFIX, &self.names));
         self.bodies.push(body);
@@ -46,12 +42,8 @@ impl System {
     /// More efficient than calling [`add_body`] in a loop: the trail buffer is
     /// reset only once and the energy baseline is invalidated once.
     pub fn add_bodies(&mut self, new_bodies: Vec<Body>) {
-        use crate::domain::body::default_softening;
         for mut body in new_bodies {
             body.sync_physical_properties();
-            if (self.softening_scale - 1.0).abs() > 1e-15 {
-                body.softening = default_softening(body.mass) * self.softening_scale;
-            }
             self.total_mass += body.mass;
             self.names.push(auto_name(DEFAULT_NAME_PREFIX, &self.names));
             self.bodies.push(body);
@@ -63,14 +55,10 @@ impl System {
 
     /// Add multiple bodies in a single batch while preserving explicit names.
     pub fn add_named_bodies(&mut self, new_bodies: Vec<NamedBody>) {
-        use crate::domain::body::default_softening;
         for mut named_body in new_bodies {
             let body = named_body.body;
             let mut body = body;
             body.sync_physical_properties();
-            if (self.softening_scale - 1.0).abs() > 1e-15 {
-                body.softening = default_softening(body.mass) * self.softening_scale;
-            }
             self.total_mass += body.mass;
             let name = resolved_name(named_body.name.take(), DEFAULT_NAME_PREFIX, &self.names);
             self.names.push(name);
@@ -168,9 +156,7 @@ impl System {
         self.zero_com_velocity();
         self.recenter_com();
 
-        let (r_min, softening_max) = compute_closeness(&self.bodies);
-        self.r_min = r_min;
-        self.softening_max = softening_max;
+        self.r_min = compute_closeness(&self.bodies);
         self.template_source = None;
     }
 

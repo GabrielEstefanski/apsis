@@ -173,29 +173,31 @@ integrator order or step control.
 The mechanism surfaces through the library's structured diagnostic
 channel. When `System::add_hamiltonian_perturbation(operator)` is
 invoked (or its non-conservative counterpart), the active kernel's
-properties are computed from the current bodies and matched
-field-by-field against `operator.kernel_requirements()`; every
-invariant violation emits a `warn_diag!` event naming the specific
-invariant, the value required, and the value provided. A Plummer kernel with
-every body `.unsoftened()` reports Exactness::Exact dynamically, so
-a correctly configured run stays silent. `System::with_exact_gravity()`
-and per-body `Body::unsoftened()` are idempotent helpers safe to
-include unconditionally in research scripts.
+properties are matched field-by-field against
+`operator.kernel_requirements()`; every invariant violation emits a
+`warn_diag!` event naming the specific invariant, the value required,
+and the value provided. The default kernel is `NewtonKernel::exact()`
+(ε = 0), which reports `Exactness::Exact`, so a correctly configured
+run stays silent. Cluster-scale work that opts into a softened kernel
+via `System::with_kernel(Arc::new(NewtonKernel::new(ε > 0)))` triggers
+the diagnostic at registration of any Exactness-requiring operator.
 
 Two counter-tests exercise the two invariants separately. The **Exactness**
 counter-test is the Sun–Mercury configuration integrated for 500
 orbital periods under the adaptive Gauss–Radau IAS15 scheme
-[@ReinSpiegel2015]. With both bodies unsoftened — Exactness satisfied —
-the accumulated longitude of periastron drifts by 42.983 arcseconds
-per century against the closed-form general-relativistic prediction
+[@ReinSpiegel2015]. Under the default `NewtonKernel::exact()`
+(ε = 0) — Exactness satisfied — the accumulated longitude of
+periastron drifts by 42.983 arcseconds per century against the
+closed-form general-relativistic prediction
 $6\pi GM / (c^2 a (1 - e^2))$ = 43.000 arcseconds per century
 [@Will1993], a relative error of $\sim 10^{-6}$ saturated at the f64
 noise floor with the energy invariant flat at machine precision over
-the integration window. With the library's
-default Plummer softening left in place — Exactness violated — the
-drift is $-83\,128$ arcseconds per century: three orders of magnitude
-larger than the relativistic effect and of the wrong sign, while energy
-and angular momentum remain conserved to machine precision throughout.
+the integration window. With a Plummer-softened kernel
+(`NewtonKernel::new(ε ≈ 0.02 AU)`, the cluster-scale ε for a
+solar-mass body) opted in — Exactness violated — the drift is
+$-83\,128$ arcseconds per century: three orders of magnitude larger
+than the relativistic effect and of the wrong sign, while energy and
+angular momentum remain conserved to machine precision throughout.
 
 The **Continuity** counter-test is a distinct configuration designed
 to exercise the second invariant on a distinct observable. An
@@ -275,7 +277,7 @@ state, so a registration with no consumer attached completes normally
 and a subsequent subscriber-attached registration still observes the
 warning. Four tests. The two demonstrated counter-tests above are
 specific instances of the first guarantee (one Exactness diagnostic on
-softening violation; one Continuity diagnostic on truncated-Plummer
+softened-kernel violation; one Continuity diagnostic on truncated-Plummer
 violation); the remaining tests pin the audit-trail and
 no-silent-acceptance properties that the kernel-precondition
 demonstration alone would not exhibit.
@@ -293,7 +295,7 @@ Exactness counter-test (Sun–Mercury standard orbital elements,
 $\varepsilon = 0$ for the satisfied case, $\varepsilon \approx 0.02$ AU
 for the violated case, 500-period integration); fourth-order Yoshida
 at fixed $dt = 10^{-3} \cdot T$ for the Continuity counter-test
-(equal-mass two-body $a = 1$, $e = 0.5$, both bodies unsoftened,
+(equal-mass two-body $a = 1$, $e = 0.5$, default exact kernel,
 $R_c = 1$, $\alpha = 0.8$, 60 simulation-unit integration). Sources
 at `crates/apsis-1pn/tests/mercury_precession_gate.rs` and
 `crates/apsis-1pn/tests/kernel_continuity_counter_test.rs`; both

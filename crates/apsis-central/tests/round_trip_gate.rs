@@ -52,12 +52,12 @@ fn from_apsidal_rate_synthetic_round_trip() {
     // its direction (= ω) is robust against per-step f64 noise. At
     // e = 1e-3 the angular noise on e_vec aliased catastrophically
     // with the per-orbit sampling, drowning the secular signal.
-    let sun = Body::star(1.0).unsoftened();
+    let sun = Body::star(1.0);
     let bound_e = 0.1_f64;
     let a = 1.0_f64;
     let r0 = a * (1.0 - bound_e);
     let v0 = ((1.0 + bound_e) / (1.0 - bound_e)).sqrt(); // canonical: v_circ = 1 at a = 1
-    let receiver = Body::rocky(1e-10).at(r0, 0.0).with_velocity(0.0, v0).unsoftened();
+    let receiver = Body::rocky(1e-10).at(r0, 0.0).with_velocity(0.0, v0);
     let bodies = vec![sun, receiver];
 
     // Pattern B: pick a target ω̇ and let the operator invert.
@@ -116,12 +116,12 @@ fn from_apsidal_rate_synthetic_round_trip() {
 #[test]
 fn keplerian_baseline_does_not_precess() {
     let units = UnitSystem::solar_canonical();
-    let sun = Body::star(1.0).unsoftened();
+    let sun = Body::star(1.0);
     let bound_e = 0.1_f64;
     let a = 1.0_f64;
     let r0 = a * (1.0 - bound_e);
     let v0 = ((1.0 + bound_e) / (1.0 - bound_e)).sqrt();
-    let receiver = Body::rocky(1e-10).at(r0, 0.0).with_velocity(0.0, v0).unsoftened();
+    let receiver = Body::rocky(1e-10).at(r0, 0.0).with_velocity(0.0, v0);
     let bodies = vec![sun, receiver];
 
     let mut sys = System::new(bodies, units).with_integrator(IntegratorKind::Ias15).with_dt(1e-3);

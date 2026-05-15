@@ -74,6 +74,7 @@ pub fn sun_earth_lagrange(_seed: u64) -> Template {
         orbital_up: None,
         default_view_distance: None,
         suggested_dt: Some(0.002),
+        suggested_integrator: None,
         units: UnitSystem::solar_au(),
     }
 }

@@ -92,7 +92,7 @@ fn main() {
     let g = units.g();
 
     let mut bodies = vec![
-        Body::star(M_SUN).at_3d(0.0, 0.0, 0.0).with_velocity_3d(0.0, 0.0, 0.0).unsoftened(),
+        Body::star(M_SUN).at_3d(0.0, 0.0, 0.0).with_velocity_3d(0.0, 0.0, 0.0),
         circular_planet(M_JUPITER, A_JUPITER, 0.0, g),
         circular_planet(M_SATURN, A_SATURN, std::f64::consts::FRAC_PI_2, g),
         circular_planet(M_URANUS, A_URANUS, std::f64::consts::PI, g),
@@ -148,7 +148,7 @@ fn circular_planet(mass: f64, a: f64, nu: f64, g: f64) -> Body {
     let y = a * nu.sin();
     let vx = -v_c * nu.sin();
     let vy = v_c * nu.cos();
-    Body::rocky(mass).at_3d(x, y, 0.0).with_velocity_3d(vx, vy, 0.0).unsoftened()
+    Body::rocky(mass).at_3d(x, y, 0.0).with_velocity_3d(vx, vy, 0.0)
 }
 
 /// Eccentric inclined planet starting at periapsis. Position in the
@@ -161,10 +161,11 @@ fn eccentric_inclined_planet(mass: f64, a: f64, e: f64, i: f64, g: f64) -> Body 
     // Standard vis-viva at periapsis around a 1 M_sun primary:
     //   v_peri² = G M (2/r_peri - 1/a) = (G M / a) · (1 + e) / (1 - e)
     let v_peri = (g * M_SUN / a * (1.0 + e) / (1.0 - e)).sqrt();
-    Body::rocky(mass)
-        .at_3d(r_peri, 0.0, 0.0)
-        .with_velocity_3d(0.0, v_peri * i.cos(), v_peri * i.sin())
-        .unsoftened()
+    Body::rocky(mass).at_3d(r_peri, 0.0, 0.0).with_velocity_3d(
+        0.0,
+        v_peri * i.cos(),
+        v_peri * i.sin(),
+    )
 }
 
 /// Subtract the centre-of-mass position and velocity from every body so
@@ -226,9 +227,9 @@ fn write_sample(w: &mut BufWriter<File>, year: u64, sys: &System) {
 }
 
 /// Total mechanical energy `KE + PE`, with `KE = ½ Σ m_i v_i²` and
-/// `PE = −Σ_{i<j} G m_i m_j / r_ij` (no softening, all bodies are
-/// `Body::unsoftened()`). 3D inner products. Matches REBOUND's
-/// `sim.energy()` for the Mercurius/IAS15 N-body Hamiltonian.
+/// `PE = −Σ_{i<j} G m_i m_j / r_ij` (default exact NewtonKernel, ε = 0).
+/// 3D inner products. Matches REBOUND's `sim.energy()` for the
+/// Mercurius/IAS15 N-body Hamiltonian.
 fn total_energy(bodies: &[Body], g: f64) -> f64 {
     let ke: f64 = bodies
         .iter()

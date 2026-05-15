@@ -1,11 +1,12 @@
 //! Per-step Struct-of-Arrays snapshot of the body state read by the
 //! gravity hot path.
 //!
-//! [`BodyArrays`] holds the five fields the BH walk and the tree build
-//! actually read — `pos_x`, `pos_y`, `pos_z`, `mass`, `softening` — laid
-//! out as five contiguous `Vec<f64>`. The integrator and the public API
-//! continue to read [`Body`]; SoA is execution state for one phase, not a
-//! domain type.
+//! [`BodyArrays`] holds the four fields the BH walk and the tree build
+//! actually read — `pos_x`, `pos_y`, `pos_z`, `mass` — laid out as four
+//! contiguous `Vec<f64>`. The integrator and the public API continue to
+//! read [`Body`]; SoA is execution state for one phase, not a domain
+//! type. Force-law softening (when the active kernel uses it) is read
+//! from the kernel itself, not the bodies.
 //!
 //! ## Lifecycle (per step)
 //!
@@ -23,9 +24,9 @@
 //!
 //! ## Field selection
 //!
-//! Five fields, exactly one BH-walk leaf-pair payload per body (40 bytes).
+//! Four fields, exactly one BH-walk leaf-pair payload per body (32 bytes).
 //! Velocity is deliberately excluded — including `vel_x/y/z` would inflate
-//! to 64 bytes and halve the per-cache-line density that motivates the
+//! the row size and halve the per-cache-line density that motivates the
 //! refactor. The integrator reads/writes velocity through [`Body`] and is
 //! compute-bound in its own internal coefficient arrays, not Body-bound.
 //!
@@ -45,7 +46,6 @@ pub struct BodyArrays {
     pub pos_y: Vec<f64>,
     pub pos_z: Vec<f64>,
     pub mass: Vec<f64>,
-    pub softening: Vec<f64>,
 }
 
 impl BodyArrays {
@@ -62,7 +62,6 @@ impl BodyArrays {
             pos_y: Vec::with_capacity(capacity),
             pos_z: Vec::with_capacity(capacity),
             mass: Vec::with_capacity(capacity),
-            softening: Vec::with_capacity(capacity),
         }
     }
 
@@ -87,7 +86,6 @@ impl BodyArrays {
         self.pos_y.clear();
         self.pos_z.clear();
         self.mass.clear();
-        self.softening.clear();
     }
 
     /// Overwrite the snapshot with the five hot fields of `bodies`.
@@ -104,21 +102,18 @@ impl BodyArrays {
         self.pos_y.clear();
         self.pos_z.clear();
         self.mass.clear();
-        self.softening.clear();
 
         let n = bodies.len();
         self.pos_x.reserve(n);
         self.pos_y.reserve(n);
         self.pos_z.reserve(n);
         self.mass.reserve(n);
-        self.softening.reserve(n);
 
         for b in bodies {
             self.pos_x.push(b.pos_x);
             self.pos_y.push(b.pos_y);
             self.pos_z.push(b.pos_z);
             self.mass.push(b.mass);
-            self.softening.push(b.softening);
         }
     }
 }
@@ -153,11 +148,10 @@ mod tests {
             assert_eq!(arrays.pos_y[i].to_bits(), b.pos_y.to_bits());
             assert_eq!(arrays.pos_z[i].to_bits(), b.pos_z.to_bits());
             assert_eq!(arrays.mass[i].to_bits(), b.mass.to_bits());
-            assert_eq!(arrays.softening[i].to_bits(), b.softening.to_bits());
         }
     }
 
-    /// All five field arrays must always be the same length. A divergence
+    /// All four field arrays must always be the same length. A divergence
     /// would mean a partial pack happened (panic mid-loop, etc.) and any
     /// indexed read of `arrays.pos_x[i]` paired with `arrays.mass[i]`
     /// silently reads stale data.
@@ -172,7 +166,6 @@ mod tests {
         assert_eq!(arrays.pos_y.len(), n);
         assert_eq!(arrays.pos_z.len(), n);
         assert_eq!(arrays.mass.len(), n);
-        assert_eq!(arrays.softening.len(), n);
     }
 
     /// Empty input produces empty arrays (not panic, not stale carryover).
@@ -227,6 +220,5 @@ mod tests {
         assert!(arrays.pos_y.capacity() >= 64);
         assert!(arrays.pos_z.capacity() >= 64);
         assert!(arrays.mass.capacity() >= 64);
-        assert!(arrays.softening.capacity() >= 64);
     }
 }
