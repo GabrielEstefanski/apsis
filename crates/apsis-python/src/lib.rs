@@ -26,6 +26,10 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
     #[cfg(feature = "gr")]
     operators::gr::register(m)?;
+    #[cfg(feature = "radiation")]
+    operators::radiation::register(m)?;
+    #[cfg(feature = "central")]
+    operators::central::register(m)?;
 
     Ok(())
 }
