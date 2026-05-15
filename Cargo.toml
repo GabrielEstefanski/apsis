@@ -61,10 +61,8 @@ egui_kittest = "0.34.1"
 
 # ── Profiles ─────────────────────────────────────────────────────────────────
 
-# Test-time optimization. Default `cargo test` builds with `opt-level = 0`,
-# which dominates wall time on compute-heavy physics tests (IAS15, long-orbit
-# integrations, parity portfolio). Optimize own crates moderately and
-# dependencies aggressively; both compile artifacts cache between runs.
+# opt-level=2 for own crates (incremental compile cost) + 3 for deps (cached).
+# Default opt-level=0 dominates wall time on IAS15 / parity tests.
 [profile.test]
 opt-level = 2
 debug = true
