@@ -4,8 +4,12 @@ use apsis::physics::integrator::HamiltonianOperator;
 use apsis_py_core::box_into_capsule;
 use pyo3::prelude::*;
 
+#[cfg(feature = "central")]
+pub mod central;
 #[cfg(feature = "gr")]
 pub mod gr;
+#[cfg(feature = "radiation")]
+pub mod radiation;
 
 /// Wrap a freshly-built boxed operator into an `apsis.Perturbation`
 /// instance ready for `System.add_hamiltonian_perturbation(...)`.

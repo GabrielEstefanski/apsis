@@ -15,8 +15,10 @@ name = "apsis_python"
 crate-type = ["cdylib"]
 
 [features]
-default = ["gr"]
+default = ["gr", "radiation", "central"]
 gr = ["dep:apsis-1pn"]
+radiation = ["dep:apsis-radiation"]
+central = ["dep:apsis-central"]
 
 [dependencies]
 apsis = { path = "../apsis" }
@@ -25,3 +27,5 @@ pyo3 = { version = "0.23", features = ["extension-module", "abi3-py39"] }
 numpy = "0.23"
 
 apsis-1pn = { path = "../apsis-1pn", optional = true }
+apsis-radiation = { path = "../apsis-radiation", optional = true }
+apsis-central = { path = "../apsis-central", optional = true }

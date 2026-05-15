@@ -12,3 +12,8 @@
 apsis/*.pyd
 apsis/*.so
 apsis/*.dylib
+
+# Python bytecode caches.
+__pycache__/
+*.pyc
+*.pyo
