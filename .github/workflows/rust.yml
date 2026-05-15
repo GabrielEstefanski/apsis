@@ -129,14 +129,24 @@ jobs:
           . .venv/bin/activate
           pip install maturin
           maturin develop --release
-      - name: from apsis import + from apsis.gr import
+      - name: from apsis import + per-operator import
         run: |
           . .venv/bin/activate
           python -c "import apsis; print('apsis', apsis.__version__)"
           python -c "from apsis.gr import PostNewtonian1PN, C_SOLAR_UNITS; assert C_SOLAR_UNITS > 1e4"
+          python -c "from apsis.radiation import RadiationPressure"
+          python -c "from apsis.central import CentralForce"
           python -c "import apsis; from apsis.gr import PostNewtonian1PN; \
             p = PostNewtonian1PN.for_units(units=apsis.units.SOLAR_CANONICAL); \
             assert isinstance(p, apsis.Perturbation)"
+      - name: examples run
+        run: |
+          . .venv/bin/activate
+          python examples/mercury_perihelion.py
+          python examples/radiation_dust.py
+          python examples/central_precession.py
+          python examples/federation_composition.py
+          python examples/implicit_midpoint.py
 
   # ── Release-mode validation: Mercury 1PN vs GR ───────────────────────────
   # Headline physics gate. Mercury 1PN reproduces the GR perihelion
