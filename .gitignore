@@ -9,3 +9,8 @@
 /records
 .claude
 /out
+
+# Maturin-built extension modules (output of `maturin develop`).
+apsis/*.pyd
+apsis/*.so
+apsis/*.dylib
