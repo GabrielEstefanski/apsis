@@ -16,13 +16,14 @@ unit system (AU per `year/2π`).
 1PN is derived around the bit-exact Newtonian potential. Default
 ``apsis.System(...)`` uses ``NewtonKernel::exact()`` (ε = 0); the
 registration is silent. Attaching 1PN on top of a softened kernel
-(opt-in via ``System::with_kernel(NewtonKernel::new(ε > 0))``,
-typically for cluster work) makes the numerical apsidal precession
-from softening alone ~2 × 10³ larger than the relativistic signal at
-Mercury's orbit, with the wrong sign — energy and angular momentum
-remain conserved at machine precision while the trajectory is
-physically wrong. The kernel-requirement check at registration
-emits a structured warning when this happens.
+(opt-in via ``System::with_kernel(NewtonKernel::new(ε > 0))`` on the
+Rust side, typically for cluster work — currently not reachable from
+Python) makes the numerical apsidal precession from softening alone
+~2 × 10³ larger than the relativistic signal at Mercury's orbit,
+with the wrong sign — energy and angular momentum remain conserved
+at machine precision while the trajectory is physically wrong. The
+kernel-requirement check at registration emits a structured warning
+when this happens.
 """
 
 from apsis._native.gr import C_SOLAR_UNITS, PostNewtonian1PN
