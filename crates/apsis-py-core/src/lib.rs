@@ -56,7 +56,6 @@ pub fn extract_unit_system(units: &Bound<'_, PyAny>) -> PyResult<UnitSystem> {
     let l = units.getattr("length_scale_si")?.extract::<f64>()?;
     let t = units.getattr("time_scale_si")?.extract::<f64>()?;
     let m = units.getattr("mass_scale_si")?.extract::<f64>()?;
-    UnitSystem::custom(l, t, m).map_err(|e| {
-        PyValueError::new_err(format!("units: failed to construct UnitSystem: {e}"))
-    })
+    UnitSystem::custom(l, t, m)
+        .map_err(|e| PyValueError::new_err(format!("units: failed to construct UnitSystem: {e}")))
 }
