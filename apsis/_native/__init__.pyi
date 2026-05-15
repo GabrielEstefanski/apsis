@@ -1,17 +1,9 @@
 """Type stubs for the Rust extension module ``apsis._native``.
 
-Mirrors the runtime API exposed by the PyO3 ``#[pymodule]`` definition
-in ``crates/apsis-py/src/lib.rs``. This file is the source of truth
-for static type checking; ``apsis/__init__.pyi`` re-exports from here.
-
-The ``_native`` namespace itself is private — researchers should
-``import apsis`` and access the same classes through the package
-façade rather than reaching into ``apsis._native``.
-
-Each declaration here is checked against the runtime by the smoke
-tests in ``tests/test_basic.py`` (signature matching) and against
-the user-facing API by ``mypy --strict`` over the ``examples/``
-directory in CI.
+Mirrors the runtime API exposed by the PyO3 ``#[pymodule]`` in
+``crates/apsis-python/src/lib.rs``. The ``apsis`` user-facing
+package re-exports from here. Submodule stubs (``gr``, future
+``radiation``/``central``) live as sibling files in this directory.
 """
 
 from __future__ import annotations
