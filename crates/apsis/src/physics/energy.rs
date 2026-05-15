@@ -37,7 +37,7 @@
 
 use crate::domain::body::Body;
 use crate::math::Vec3;
-use crate::physics::gravity::{G, pair_eps2};
+use crate::physics::gravity::G;
 
 // ── Structural contract: Body is Copy ────────────────────────────────────────
 //
@@ -162,7 +162,7 @@ pub fn center_of_mass_state(bodies: &[Body]) -> (Vec3, Vec3) {
 /// recorder at the per-record interval, parameter scans). NOT intended
 /// for per-frame UI sampling — wiring this into a render path will
 /// silently quadratic-cost the frame budget.
-pub fn per_body_potential_energy(bodies: &[Body], g_factor: f64) -> Vec<f64> {
+pub fn per_body_potential_energy(bodies: &[Body], g_factor: f64, eps_sq: f64) -> Vec<f64> {
     let n = bodies.len();
     let mut pe = vec![0.0_f64; n];
 
@@ -171,8 +171,7 @@ pub fn per_body_potential_energy(bodies: &[Body], g_factor: f64) -> Vec<f64> {
             let dx = bodies[j].pos_x - bodies[i].pos_x;
             let dy = bodies[j].pos_y - bodies[i].pos_y;
             let dz = bodies[j].pos_z - bodies[i].pos_z;
-            let eps2 = pair_eps2(bodies[i].softening, bodies[j].softening);
-            let d2 = dx * dx + dy * dy + dz * dz + eps2;
+            let d2 = dx * dx + dy * dy + dz * dz + eps_sq;
             let phi = -G * g_factor * bodies[i].mass * bodies[j].mass / d2.sqrt();
             pe[i] += phi * 0.5;
             pe[j] += phi * 0.5;

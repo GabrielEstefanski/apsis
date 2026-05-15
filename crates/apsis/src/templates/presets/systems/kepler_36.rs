@@ -88,6 +88,7 @@ pub fn kepler_36(seed: u64) -> Template {
         display_scale: 1.0,
         orbital_up: None,
         default_view_distance: None,
+        suggested_integrator: None,
         units: UnitSystem::solar_au(),
     }
 }

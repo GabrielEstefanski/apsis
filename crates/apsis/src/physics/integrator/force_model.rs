@@ -13,7 +13,7 @@ use std::sync::Arc;
 use crate::domain::body::Body;
 use crate::domain::body_arrays::BodyArrays;
 use crate::math::Vec3;
-use crate::physics::gravity::{BarnesHutEngine, Kernel, PlummerKernel};
+use crate::physics::gravity::{BarnesHutEngine, Kernel, NewtonKernel};
 
 // ── Trait ─────────────────────────────────────────────────────────────────────
 
@@ -72,12 +72,10 @@ pub trait ForceModel: Send {
 
     /// Handle to the gravitational kernel this force model dispatches through.
     ///
-    /// The default returns [`PlummerKernel`] for force models that do not
-    /// have an explicit kernel concept — preserving the simulator's
-    /// canonical Plummer-softened semantics for consumers that query
-    /// kernel properties via [`Kernel::properties`].
+    /// The default returns [`NewtonKernel`] (exact 1/r²) for force models
+    /// that do not have an explicit kernel concept.
     fn kernel(&self) -> Arc<dyn Kernel> {
-        Arc::new(PlummerKernel::new())
+        Arc::new(NewtonKernel::exact())
     }
 
     /// Swap the active kernel.
@@ -117,8 +115,10 @@ pub trait ForceModel: Send {
 
 // ── GravityForceModel ─────────────────────────────────────────────────────────
 
-/// Default force model: Barnes-Hut / exact O(N²) gravity with Plummer
-/// softening, parameterised by the opening angle θ.
+/// Default force model: Barnes-Hut / exact O(N²) gravity, parameterised
+/// by the opening angle θ. The kernel (Newton with `ε ≥ 0`, or any
+/// other [`Kernel`] impl) is held separately and selected via
+/// [`System::with_kernel`](crate::core::system::System::with_kernel).
 ///
 /// Owns the per-`compute()` SoA snapshot buffer
 /// ([`BodyArrays`](crate::domain::body_arrays::BodyArrays)). Each call to

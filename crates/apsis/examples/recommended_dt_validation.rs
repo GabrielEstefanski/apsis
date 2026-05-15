@@ -60,10 +60,9 @@ const INTEGRATORS: &[(IntegratorKind, &str)] = &[
 
 // ── Energy and Lz from current body state ──────────────────────────────── //
 
-/// Total mechanical energy with the Plummer-softened pair potential.
-/// Reduces to the unsoftened `1/r` form when every body has `softening = 0`.
-/// All 13 scenarios in the protocol use the default Plummer kernel, so this
-/// formula matches the integrator's energy bookkeeping for the scored runs.
+/// Total mechanical energy under the exact `1/r` pair potential. Matches
+/// the integrator's energy bookkeeping for runs using the default
+/// `NewtonKernel::exact()` (ε = 0), which all 13 protocol scenarios do.
 fn total_energy(bodies: &[Body], g: f64) -> f64 {
     let ke: f64 = bodies
         .iter()
@@ -76,10 +75,7 @@ fn total_energy(bodies: &[Body], g: f64) -> f64 {
             let dy = bodies[i].pos_y - bodies[j].pos_y;
             let dz = bodies[i].pos_z - bodies[j].pos_z;
             let r2 = dx * dx + dy * dy + dz * dz;
-            let eps2 = 0.5
-                * (bodies[i].softening * bodies[i].softening
-                    + bodies[j].softening * bodies[j].softening);
-            pe -= g * bodies[i].mass * bodies[j].mass / (r2 + eps2).sqrt();
+            pe -= g * bodies[i].mass * bodies[j].mass / r2.sqrt();
         }
     }
     ke + pe

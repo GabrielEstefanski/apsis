@@ -1,26 +1,14 @@
 use crate::domain::body_preset::{self, BodyClass, BodyPreset};
 use std::f64::consts::PI;
 
-/// Base softening length for a body of mass 1.0.
-/// Per-body softening scales as `EPS_BASE * mass^(1/3)`, so each body's
-/// softening volume is proportional to its mass — physically motivated by
-/// the Plummer-equivalent equal-mass softening criterion.
-///
-/// Exposed as `#[doc(hidden)] pub` so calibration and softening-scaling
-/// tools can read the baseline without committing it as a stable API
-/// constant — future calibration work may change the numeric value.
-#[doc(hidden)]
-pub const EPS_BASE: f64 = 0.02;
-
 /// Point-mass body: kinematics, mass, and the small set of physical
 /// properties read by gravitational and radiation force evaluators.
 ///
 /// Body owns its physical state directly. It carries no taxonomy
 /// reference — material classifications are construction-time presets
-/// (see [`crate::domain::body_preset`]), not runtime fields. The
-/// resulting struct matches the REBOUND `reb_particle` shape: every
-/// field is a quantity a force evaluator might read, and every default
-/// is sensible for a non-emitting non-receiving point mass.
+/// (see [`crate::domain::body_preset`]), not runtime fields. Body holds
+/// no force-law parameter (softening, Yukawa range, …) — those live in
+/// the active [`Kernel`](crate::physics::gravity::Kernel) on `System`.
 #[derive(Clone, Copy, Debug)]
 pub struct Body {
     pub pos_x: f64,
@@ -30,13 +18,6 @@ pub struct Body {
     pub vel_y: f64,
     pub vel_z: f64,
     pub mass: f64,
-
-    /// Gravitational softening length ε for this body.
-    ///
-    /// Pairwise: ε²_ij = (ε²_i + ε²_j) / 2.
-    ///
-    /// Calibrated by `System::calibrate_softening`.
-    pub softening: f64,
 
     /// True physical radius derived from mass and density.
     ///
@@ -122,13 +103,11 @@ impl Body {
     // receiver). This is the form documented in the paper.
 
     /// Construct a body with explicit mass and density. Physical
-    /// radius is derived as `r = (3m / 4πρ)^(1/3)`; softening uses
-    /// the project default `EPS_BASE * m^(1/3)`. Position and
-    /// velocity start at the origin with no velocity; tune via the
-    /// fluent builder methods or the preset-based factories.
+    /// radius is derived as `r = (3m / 4πρ)^(1/3)`. Position and
+    /// velocity start at the origin; tune via the fluent builder
+    /// methods or the preset-based factories.
     pub fn new(mass: f64, density: f64) -> Self {
         let physical_radius = radius_from_density_mass(density, mass);
-        let softening = default_softening(mass);
         Self {
             pos_x: 0.0,
             pos_y: 0.0,
@@ -137,7 +116,6 @@ impl Body {
             vel_y: 0.0,
             vel_z: 0.0,
             mass,
-            softening,
             physical_radius,
             density,
             color: [180, 180, 180],
@@ -151,11 +129,10 @@ impl Body {
     /// Construct a body from a [`BodyPreset`] at the requested mass.
     ///
     /// Density, colour, `q_pr`, and luminosity are all taken from the
-    /// preset; physical radius and softening are derived. Mass is
-    /// assumed to be in solar units — the preset's luminosity model
-    /// runs with that assumption. For non-solar unit systems, override
-    /// the resulting body's `luminosity` field manually after
-    /// construction.
+    /// preset; physical radius is derived. Mass is assumed to be in
+    /// solar units — the preset's luminosity model runs with that
+    /// assumption. For non-solar unit systems, override the resulting
+    /// body's `luminosity` field manually after construction.
     pub fn from_preset(preset: &BodyPreset, mass: f64) -> Self {
         // Preset density models live in human-readable kg/m³ so the
         // source reads like the literature; cross to coherent
@@ -163,7 +140,6 @@ impl Body {
         let density_kg_m3 = preset.density.density_at(mass);
         let density = density_kg_m3 * crate::templates::builders::KG_M3_TO_SOLAR_AU3;
         let physical_radius = radius_from_density_mass(density, mass);
-        let softening = default_softening(mass);
         let luminosity = preset
             .luminosity
             .map(|src| src.compute(mass, physical_radius / SOLAR_RADIUS_AU))
@@ -177,7 +153,6 @@ impl Body {
             vel_y: 0.0,
             vel_z: 0.0,
             mass,
-            softening,
             physical_radius,
             density,
             color: preset.default_color,
@@ -357,36 +332,6 @@ impl Body {
         NamedBody { body: self, name: Some(name.into()) }
     }
 
-    /// Zero this body's Plummer softening length, producing the exact `1/r`
-    /// potential for every interaction involving it.
-    ///
-    /// The simulator defaults every body to a preset-scaled Plummer
-    /// softening (`EPS_BASE · mass^(1/3)`). For a solar-mass body this
-    /// gives ε ≈ 0.02 AU — about 5 % of Mercury's perihelion distance —
-    /// which introduces a numerical apsidal precession that can easily
-    /// dominate a fine-physics signal (post-Newtonian precession, J2
-    /// oblateness, tidal dissipation). Call this when the body participates
-    /// in a measurement of such a deviation-from-Kepler effect.
-    ///
-    /// Equivalent to `body.softening = 0.0;` but expresses intent:
-    ///
-    /// ```ignore
-    /// let sun     = Body::star(1.0).unsoftened();
-    /// let mercury = Body::rocky(3e-6)
-    ///     .at(0.307, 0.0)
-    ///     .with_velocity(0.0, 1.98)
-    ///     .unsoftened();
-    /// ```
-    ///
-    /// See also [`System::with_exact_gravity`](crate::core::system::System::with_exact_gravity)
-    /// to unsoften the whole system in one call.
-    #[inline]
-    #[must_use]
-    pub fn unsoftened(mut self) -> Self {
-        self.softening = 0.0;
-        self
-    }
-
     // ── Mutators ──────────────────────────────────────────────────────────────
 
     /// Recompute the physical radius from the current mass and density.
@@ -406,11 +351,6 @@ impl Body {
     pub fn is_luminous(&self) -> bool {
         self.luminosity > 0.0
     }
-}
-
-/// Default softening before system-scale calibration.
-pub(crate) fn default_softening(mass: f64) -> f64 {
-    EPS_BASE * mass.abs().cbrt()
 }
 
 /// Radius of a uniform sphere from its bulk density and mass.
@@ -454,14 +394,6 @@ const SOLAR_RADIUS_AU: f64 = 0.00465047;
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn unsoftened_zeroes_softening() {
-        let b = Body::rocky(1.0);
-        assert!(b.softening > 0.0, "default softening should be nonzero");
-        let b = b.unsoftened();
-        assert_eq!(b.softening, 0.0);
-    }
 
     #[test]
     fn fluent_builder_produces_expected_state() {

@@ -81,10 +81,8 @@ fn main() {
     let secondary_x = (M_PRIMARY / m_total) * r_peri;
     let secondary_vy = (M_PRIMARY / m_total) * v_peri;
 
-    let primary =
-        Body::star(M_PRIMARY).at(primary_x, 0.0).with_velocity(0.0, primary_vy).unsoftened();
-    let secondary =
-        Body::rocky(M_SECONDARY).at(secondary_x, 0.0).with_velocity(0.0, secondary_vy).unsoftened();
+    let primary = Body::star(M_PRIMARY).at(primary_x, 0.0).with_velocity(0.0, primary_vy);
+    let secondary = Body::rocky(M_SECONDARY).at(secondary_x, 0.0).with_velocity(0.0, secondary_vy);
 
     // ── Integrator setup ────────────────────────────────────────────────── //
     //
@@ -150,13 +148,12 @@ fn write_sample(w: &mut BufWriter<File>, orbit: u64, sys: &System) {
     .unwrap();
 }
 
-/// Total mechanical energy for the two-body unsoftened system.
+/// Total mechanical energy for the two-body system (default exact NewtonKernel).
 ///
 /// Computed inline rather than through `apsis::physics::energy` so the
 /// formula is visible at the comparison site and matches REBOUND's
 /// `sim.calculate_energy()` convention exactly: KE = ½ Σ mᵢ vᵢ², PE =
-/// −Σᵢ<ⱼ G mᵢ mⱼ / rᵢⱼ, with G = 1 and no softening (verified by
-/// `Body::unsoftened()` on every body in this configuration).
+/// −Σᵢ<ⱼ G mᵢ mⱼ / rᵢⱼ, with G = 1 under the default exact NewtonKernel (ε = 0).
 fn total_energy(bodies: &[Body]) -> f64 {
     let ke: f64 =
         bodies.iter().map(|b| 0.5 * b.mass * (b.vel_x * b.vel_x + b.vel_y * b.vel_y)).sum();

@@ -173,9 +173,9 @@ impl System {
             && !self.bodies.is_empty()
             && let Some(engine) = self.force_model.bh_engine()
         {
-            // theta_error_proxy reads body 0's pos / softening from
-            // the SoA snapshot. Pack a transient buffer for this one
-            // call (~40 µs at N = 10⁴; called once per step) — the
+            // theta_error_proxy reads body 0's position from the SoA
+            // snapshot. Pack a transient buffer for this one call
+            // (~40 µs at N = 10⁴; called once per step) — the
             // ForceModel's own snapshot was packed at the previous
             // compute() and may be stale relative to current bodies.
             let theta = self.force_model.theta();
@@ -200,9 +200,7 @@ impl System {
             self.pending_com_shift.1 += -dy as f32;
         }
 
-        let (r_min, soft_max) = compute_closeness(&self.bodies);
-        self.r_min = r_min;
-        self.softening_max = soft_max;
+        self.r_min = compute_closeness(&self.bodies);
 
         // Close-encounter advisory. When `close_encounter_threshold` is
         // unset the flag is always `Far` and this branch is a single

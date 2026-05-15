@@ -337,21 +337,15 @@ mod tests {
     /// G·M = 1. Mirrors the `mercurius` / `whfast` test fixtures.
     fn quiet_planetary() -> Vec<Body> {
         vec![
-            Body::star(1.0).unsoftened(),
-            Body::rocky(1.0e-6).at(1.0, 0.0).with_velocity(0.0, 1.0).unsoftened(),
-            Body::rocky(1.0e-6)
-                .at(2.0, 0.0)
-                .with_velocity(0.0, std::f64::consts::FRAC_1_SQRT_2)
-                .unsoftened(),
+            Body::star(1.0),
+            Body::rocky(1.0e-6).at(1.0, 0.0).with_velocity(0.0, 1.0),
+            Body::rocky(1.0e-6).at(2.0, 0.0).with_velocity(0.0, std::f64::consts::FRAC_1_SQRT_2),
         ]
     }
 
     /// Sun + Earth-mass test particle on a circular orbit at r = 1.
     fn two_body_circular() -> Vec<Body> {
-        vec![
-            Body::star(1.0).unsoftened(),
-            Body::rocky(1.0e-9).at(1.0, 0.0).with_velocity(0.0, 1.0).unsoftened(),
-        ]
+        vec![Body::star(1.0), Body::rocky(1.0e-9).at(1.0, 0.0).with_velocity(0.0, 1.0)]
     }
 
     /// Equal-mass binary at separation `2`. Differentiator scenario for
@@ -359,8 +353,8 @@ mod tests {
     /// integrates it without ceremony.
     fn equal_mass_binary() -> Vec<Body> {
         vec![
-            Body::rocky(1.0).at(-1.0, 0.0).with_velocity(0.0, -0.5).unsoftened(),
-            Body::rocky(1.0).at(1.0, 0.0).with_velocity(0.0, 0.5).unsoftened(),
+            Body::rocky(1.0).at(-1.0, 0.0).with_velocity(0.0, -0.5),
+            Body::rocky(1.0).at(1.0, 0.0).with_velocity(0.0, 0.5),
         ]
     }
 
@@ -571,9 +565,9 @@ mod tests {
         let v3 = (-0.932_407_37, -0.864_731_46);
         let v_outer = (-v3.0 * 0.5, -v3.1 * 0.5);
         let bodies0 = vec![
-            Body::rocky(1.0).at(r1.0, r1.1).with_velocity(v_outer.0, v_outer.1).unsoftened(),
-            Body::rocky(1.0).at(-r1.0, -r1.1).with_velocity(v_outer.0, v_outer.1).unsoftened(),
-            Body::rocky(1.0).at(0.0, 0.0).with_velocity(v3.0, v3.1).unsoftened(),
+            Body::rocky(1.0).at(r1.0, r1.1).with_velocity(v_outer.0, v_outer.1),
+            Body::rocky(1.0).at(-r1.0, -r1.1).with_velocity(v_outer.0, v_outer.1),
+            Body::rocky(1.0).at(0.0, 0.0).with_velocity(v3.0, v3.1),
         ];
         let mut bodies = bodies0.clone();
         let e0 = total_energy(&bodies);
@@ -654,7 +648,7 @@ mod tests {
     /// Single body — no force pairs, no-op step.
     #[test]
     fn single_body_input_is_no_op() {
-        let mut bodies = vec![Body::star(1.0).unsoftened()];
+        let mut bodies = vec![Body::star(1.0)];
         let mut im = ImplicitMidpoint::new();
         let mut force = GravityForceModel::new(0.5, 16);
         let mut acc: Vec<Vec3> = vec![Vec3::ZERO; bodies.len()];

@@ -190,7 +190,7 @@ fn tooltip_text(tab: PanelTab) -> (&'static str, &'static str) {
         PanelTab::Templates => ("Templates", "Load preset systems (Solar, TRAPPIST, …)"),
         PanelTab::View => ("View", "Toggle grid, trails, orbits, labels"),
         PanelTab::Camera => ("Camera", "Fit to view, follow selected, re-center"),
-        PanelTab::Config => ("Config", "Integrator, θ, softening, G (moves to Settings later)"),
+        PanelTab::Config => ("Config", "Integrator, θ, G (moves to Settings later)"),
     }
 }
 

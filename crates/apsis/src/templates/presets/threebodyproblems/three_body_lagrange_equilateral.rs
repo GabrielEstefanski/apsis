@@ -1,10 +1,11 @@
 //! Lagrange's equilateral three-body solution (equal-mass case).
 //!
 //! Three equal masses at the vertices of an equilateral triangle,
-//! rotating rigidly about the common centre of mass. For three equal
-//! masses at distance `r` from the COM, the angular velocity that
-//! balances gravity is `ω = √(3·G·m / r³)` and each body's velocity
-//! is tangential with magnitude `ω·r`.
+//! rotating rigidly about the common centre of mass. With `r` denoting
+//! the distance from each vertex to the COM (side length `L = r·√3`),
+//! the gravitational force on each body sums to `G·m²·√3 / L²` toward
+//! the COM. Balancing centripetal `m·ω²·r` against this gives
+//! `ω² = G·m / (r³·√3)` and tangential speed `v = ω·r`.
 //!
 //! Lagrange's equilateral solution is *only* linearly stable when one
 //! mass strongly dominates the other two — Routh's criterion requires
@@ -27,7 +28,7 @@ use crate::{
 pub fn three_body_lagrange_equilateral(_seed: u64) -> Template {
     let m = 1.0_f64;
     let r = 1.0_f64;
-    let omega = (3.0 * m / (r * r * r)).sqrt();
+    let omega = (m / (r * r * r * 3.0_f64.sqrt())).sqrt();
     let v = omega * r;
 
     let p1 = [r, 0.0, 0.0];
@@ -76,6 +77,7 @@ pub fn three_body_lagrange_equilateral(_seed: u64) -> Template {
         orbital_up: None,
         default_view_distance: None,
         suggested_dt: Some(0.001),
+        suggested_integrator: None,
         units: UnitSystem::dimensionless(),
     }
 }

@@ -33,19 +33,17 @@ def _mercury_two_body_with_1pn() -> tuple[apsis.System, apsis.Perturbation]:
     convention. The registration check in ``add_hamiltonian_perturbation``
     requires the two unit systems to match exactly.
     """
-    sun = apsis.Body.star(mass=1.0).unsoftened()
+    sun = apsis.Body.star(mass=1.0)
     mercury = (
         apsis.Body.rocky(mass=1.66e-7)
         .at((0.387, 0.0))
         .with_velocity((0.0, 1.61))
-        .unsoftened()
     )
     sys = apsis.System(
         bodies=[sun, mercury],
         units=apsis.units.SOLAR_CANONICAL,
         integrator="ias15",
         dt=1e-3,
-        exact_gravity=True,
     )
     p = apsis_1pn.PostNewtonian1PN.for_units(units=apsis.units.SOLAR_CANONICAL)
     return sys, p
@@ -142,26 +140,9 @@ def test_two_systems_need_two_perturbations() -> None:
     assert sys_b.t >= 0.5
 
 
-def test_attach_without_exact_gravity_emits_warning_but_still_runs() -> None:
-    """Kernel-requirement violation (1PN on softened gravity) emits a
-    structured warning at ``add_hamiltonian_perturbation`` time but
-    does not raise — the run proceeds with the user's choice, just
-    flagged."""
-    sun = apsis.Body.star(mass=1.0)  # softened by default
-    mercury = (
-        apsis.Body.rocky(mass=1.66e-7)
-        .at((0.387, 0.0))
-        .with_velocity((0.0, 1.61))
-    )
-    sys = apsis.System(
-        bodies=[sun, mercury],
-        units=apsis.units.SOLAR_CANONICAL,
-        integrator="ias15",
-        dt=1e-3,
-        # Note: exact_gravity=False (default), the kernel-requirement
-        # warning fires here.
-    )
-    p = apsis_1pn.PostNewtonian1PN.for_units(units=apsis.units.SOLAR_CANONICAL)
-    sys.add_hamiltonian_perturbation(p)  # warning expected on stderr; not an exception
-    sys.integrate_for(0.1)
-    assert sys.t >= 0.1
+# Kernel-requirement violation coverage lives in the parent crate
+# (`crates/apsis-1pn/tests/mercury_precession_gate.rs::plummer_kernel_under_1pn_triggers_diagnostic`).
+# The Python binding does not yet expose a softened-kernel constructor
+# (`System::with_kernel`), so the warning path is currently unreachable
+# from Python; the assertion would test absence-of-warning rather than
+# emission, which is meaningless under the new exact-default model.

@@ -201,7 +201,6 @@ impl SimulationApp {
                             integrator_order: self.physics_cfg.integrator.order(),
                             dt: self.system.dt(),
                             theta: self.physics_cfg.theta,
-                            softening_scale: self.physics_cfg.softening_scale,
                             g_factor: self.physics_cfg.g_factor,
                             record_interval: self.record_interval,
                             units: self.active_units,

@@ -15,4 +15,4 @@ mod simd;
 mod tree;
 
 pub use engine::BarnesHutEngine;
-pub use kernel::{G, Kernel, PlummerKernel, pair_eps2};
+pub use kernel::{G, Kernel, NewtonKernel};

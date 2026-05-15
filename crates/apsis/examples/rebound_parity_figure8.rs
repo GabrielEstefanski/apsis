@@ -88,9 +88,9 @@ fn main() {
     // literals. Forcing additional correction here would introduce an
     // implementation-divergent f64 perturbation to ICs that should be
     // bit-identical between the apsis and REBOUND sides.
-    let body1 = Body::rocky(MASS).at(R1.0, R1.1).with_velocity(V1.0, V1.1).unsoftened();
-    let body2 = Body::rocky(MASS).at(R2.0, R2.1).with_velocity(V2.0, V2.1).unsoftened();
-    let body3 = Body::rocky(MASS).at(R3.0, R3.1).with_velocity(V3.0, V3.1).unsoftened();
+    let body1 = Body::rocky(MASS).at(R1.0, R1.1).with_velocity(V1.0, V1.1);
+    let body2 = Body::rocky(MASS).at(R2.0, R2.1).with_velocity(V2.0, V2.1);
+    let body3 = Body::rocky(MASS).at(R3.0, R3.1).with_velocity(V3.0, V3.1);
 
     // ── Integrator setup ────────────────────────────────────────────────── //
     let dt0 = PERIOD * DT_FRACTION_OF_PERIOD;
@@ -154,7 +154,7 @@ fn write_sample(w: &mut BufWriter<File>, sample: u64, sys: &System) {
 /// Total mechanical energy, computed inline so the formula is visible at
 /// the comparison site and matches REBOUND's `sim.energy()` convention
 /// exactly: KE = ½ Σ mᵢ vᵢ², PE = −Σᵢ<ⱼ G mᵢ mⱼ / rᵢⱼ, with G = 1 and
-/// no softening (verified by `Body::unsoftened()` on every body).
+/// no softening (default exact NewtonKernel, ε = 0).
 fn total_energy(bodies: &[Body]) -> f64 {
     let ke: f64 =
         bodies.iter().map(|b| 0.5 * b.mass * (b.vel_x * b.vel_x + b.vel_y * b.vel_y)).sum();

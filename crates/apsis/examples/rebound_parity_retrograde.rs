@@ -89,10 +89,8 @@ fn main() {
     let secondary_x = (M_PRIMARY / m_total) * r_peri;
     let secondary_vy = -(M_PRIMARY / m_total) * v_peri; // sign flipped vs prograde
 
-    let primary =
-        Body::star(M_PRIMARY).at(primary_x, 0.0).with_velocity(0.0, primary_vy).unsoftened();
-    let secondary =
-        Body::rocky(M_SECONDARY).at(secondary_x, 0.0).with_velocity(0.0, secondary_vy).unsoftened();
+    let primary = Body::star(M_PRIMARY).at(primary_x, 0.0).with_velocity(0.0, primary_vy);
+    let secondary = Body::rocky(M_SECONDARY).at(secondary_x, 0.0).with_velocity(0.0, secondary_vy);
 
     // ── Integrator setup ────────────────────────────────────────────────── //
     let period = 2.0 * std::f64::consts::PI;
@@ -157,7 +155,7 @@ fn write_sample(w: &mut BufWriter<File>, orbit: u64, sys: &System) {
     .unwrap();
 }
 
-/// Total mechanical energy for the two-body unsoftened system. Mirrors the
+/// Total mechanical energy for the two-body system (default exact NewtonKernel). Mirrors the
 /// Kepler-prograde harness's `total_energy`; identical formula since the
 /// sign of `v` does not affect the kinetic-energy or potential-energy form.
 fn total_energy(bodies: &[Body]) -> f64 {

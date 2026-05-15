@@ -21,7 +21,7 @@
 //! | `mod.rs` | [`System`] struct, constructors |
 //! | `step` | `step()` and conservation-law tracking |
 //! | `bodies` | body CRUD, names, COM calibration |
-//! | `config` | getters/setters (θ, dt, integrator, softening, …) |
+//! | `config` | getters/setters (θ, dt, integrator, kernel, …) |
 //! | `metrics` | [`Metrics`] assembly and recommended-dt |
 //! | `orbital` | osculating-element cache |
 //! | `snapshot` | save/load via [`SimSnapshot`] |
@@ -101,9 +101,6 @@ pub struct System {
     /// Cached osculating orbital elements — one slot per body.
     pub(crate) orbital_cache: Vec<Option<OrbitalElements>>,
 
-    /// Global Plummer softening scale: `ε = ε_default · softening_scale`.
-    pub(crate) softening_scale: f64,
-
     /// Diagnostics subsystem.
     pub(crate) diagnostics: DiagnosticsComputer,
     pub(crate) last_diag: SimulationDiagnostics,
@@ -168,9 +165,6 @@ pub struct System {
 
     /// Minimum pairwise separation from the most recent step.
     pub(crate) r_min: f64,
-
-    /// Maximum effective pairwise softening length from the most recent step.
-    pub(crate) softening_max: f64,
 
     /// Optional close-encounter advisory threshold. When `Some(t)`, the
     /// step loop classifies `r_min` against `t` via
@@ -256,9 +250,9 @@ impl System {
     /// construction — the only way to "change units" is to rebuild
     /// the `System`.
     ///
-    /// Defaults for everything else (integrator, `dt`, θ, softening
-    /// scale, max octree depth) match the conventions of small-N
-    /// research scripts:
+    /// Defaults for everything else (integrator, `dt`, θ, kernel,
+    /// max octree depth) match the conventions of small-N research
+    /// scripts:
     ///
     /// | Parameter              | Default                     |
     /// |------------------------|-----------------------------|
@@ -361,7 +355,7 @@ impl System {
         };
 
         let theta = force_model.theta();
-        let (r_min, softening_max) = helpers::compute_closeness(&bodies);
+        let r_min = helpers::compute_closeness(&bodies);
 
         Self {
             bodies,
@@ -384,7 +378,6 @@ impl System {
             // precision run opt into IAS15 explicitly.
             integrator: make_integrator(IntegratorKind::Yoshida4),
             orbital_cache: Vec::new(),
-            softening_scale: 1.0,
             diagnostics: DiagnosticsComputer::new(),
             last_diag: SimulationDiagnostics::default(),
             last_step_degraded: false,
@@ -413,7 +406,6 @@ impl System {
             abs_angular_momentum_error: 0.0,
             names,
             r_min,
-            softening_max,
             close_encounter_threshold: None,
             last_encounter_flag: crate::physics::encounter::EncounterFlag::Far,
             hamiltonian_perturbations: Vec::new(),
@@ -466,14 +458,6 @@ impl System {
     pub fn with_max_depth(mut self, max_depth: usize) -> Self {
         let theta = self.force_model.theta();
         self.set_force_model(Box::new(GravityForceModel::new(theta, max_depth)));
-        self
-    }
-
-    /// Global softening scale (multiplies each body's ε at pairwise evaluation).
-    #[inline]
-    #[must_use]
-    pub fn with_softening_scale(mut self, scale: f64) -> Self {
-        self.set_softening_scale(scale);
         self
     }
 

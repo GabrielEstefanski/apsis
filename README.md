@@ -131,14 +131,14 @@ Then:
 import apsis
 import apsis_1pn  # the 1PN force, distributed as an independent package
 
-sun = apsis.Body.star(mass=1.0).unsoftened()
+sun = apsis.Body.star(mass=1.0)
 mercury = apsis.Body.rocky(
     mass=1.66e-7, position=(0.387, 0.0), velocity=(0.0, 1.61),
-).unsoftened()
+)
 
 sys = apsis.System(
     bodies=[sun, mercury], units=apsis.units.SOLAR,
-    integrator="ias15", dt=1e-3, exact_gravity=True,
+    integrator="ias15", dt=1e-3,
 )
 sys.add_hamiltonian_perturbation(
     apsis_1pn.PostNewtonian1PN.for_units(units=apsis.units.SOLAR_CANONICAL),
@@ -213,8 +213,7 @@ use apsis::domain::body::Body;
 let sun     = Body::star(1.0);
 let mercury = Body::rocky(3e-6)
     .at(0.307, 0.0)
-    .with_velocity(0.0, 1.98)
-    .unsoftened();                    // see "Fine-physics" below
+    .with_velocity(0.0, 1.98);
 ```
 
 See [`crates/apsis/examples/`](crates/apsis/examples/)
@@ -247,10 +246,11 @@ core internals. Adding a force is adding a crate.
 
 ## Fine-physics guardrail
 
-The default material-scaled Plummer softening (`ε ≈ 0.02 AU` on the Sun)
-introduces a numerical apsidal precession that is **≈ 2 × 10³ larger** than
-the 43 arcsec/century GR effect for Mercury. It is invisible at the
-integrator level — energy still conserves to machine precision.
+A Plummer-softened kernel with `ε ≈ 0.02 AU` (a typical cluster-scale
+ε for a solar-mass body) introduces a numerical apsidal precession
+**≈ 2 × 10³ larger** than the 43 arcsec/century GR effect for Mercury.
+It is invisible at the integrator level — energy still conserves to
+machine precision.
 
 This class of error is otherwise difficult to detect: the standard
 conservation invariants (energy, angular momentum) remain satisfied bit-for-bit
@@ -259,10 +259,11 @@ The only upstream signal is a quantitative comparison against an analytic
 prediction — which is exactly the step a researcher is likely to skip when
 the simulator *looks* correct under every usual check.
 
-The library surfaces the trap at the type level. Perturbations whose
-derivation depends on the bit-exact `1/r` kernel (GR, tidal dissipation)
-or on a smooth Hamiltonian (any symplectic-splitting derivation)
-override
+The library surfaces the trap at the type level. The default kernel
+is `NewtonKernel::exact()` (ε = 0); fine-physics scenarios stay safe
+without opting in. Perturbations whose derivation depends on the
+bit-exact `1/r` kernel (GR, tidal dissipation) or on a smooth
+Hamiltonian (any symplectic-splitting derivation) override
 
 ```rust
 fn kernel_requirements(&self) -> KernelRequirements {
@@ -270,18 +271,10 @@ fn kernel_requirements(&self) -> KernelRequirements {
 }
 ```
 
-on the `Operator` trait. Registering such an operator into a system
-with softened bodies emits a `warn_diag!` diagnostic at registration
-time, with per-body softening statistics naming the violated
-invariant. Dismiss by
-
-```rust
-let sun = Body::star(1.0).unsoftened();             // per body
-let sys = System::from_template(..).with_exact_gravity();   // whole system
-```
-
-Both helpers exist because a reviewer reading fluent-builder code should read
-the *intent*, not the field assignment.
+on the `Operator` trait. Registering such an operator on top of a
+softened kernel — opted into via `System::with_kernel(Arc::new(NewtonKernel::new(ε > 0)))`,
+typically for cluster work — emits a `warn_diag!` diagnostic at
+registration time naming the violated invariant.
 
 ## What this library is NOT
 
@@ -316,7 +309,7 @@ What is verified in CI:
   derived in Everhart (1985).
 - **13 tests in the 1PN plugin**: 7 unit (sign convention, magnitude,
   additivity, speed-of-light limit), 4 in the Mercury-precession gate,
-  and 2 debug-mode contract (softened-system-warns, unsoftened-system-silent).
+  and 2 debug-mode contract (softened-kernel-warns, exact-kernel-silent).
 - **Release-mode Mercury gate**: `cargo test --release -p apsis-1pn
   -- --ignored` asserts Mercury's precession within 100 ppm of GR over
   500 orbits. Achieved figure on developer hardware: **~1 ppm** (at

@@ -18,13 +18,13 @@ Preconditions are expressed at the type level and surfaced at runtime, ensuring 
 
 ## ⚠️ Critical precondition
 
-Attaching 1PN to a softened-gravity system **invalidates the physical model**.
+1PN is derived around the bit-exact Newtonian potential. Default `System::new(...)` uses `NewtonKernel::exact()` (ε = 0) and the registration is silent. Attaching 1PN on top of a softened kernel **invalidates the physical model**.
 
 For Mercury-like orbits, the numerical apsidal precession induced by Plummer softening alone is **~2000× larger than the relativistic signal, and inverts its sign**. Energy and angular momentum stay conserved at machine precision while the trajectory is physically wrong.
 
 **This is not a numerical error — it is a model violation.**
 
-Call `Body::unsoftened()` on every body or `System::with_exact_gravity()` system-wide. The contract is enforced once, in the core: a violation emits a structured warning at `add_hamiltonian_perturbation` time naming the failed invariant. The warning is the deliberate behaviour — apsis does not silently correct invalid physical configurations. Surfacing the violation is the contract; auto-fixing would erase it.
+The contract is enforced once, in the core: opting into a softened kernel via `System::with_kernel(Arc::new(NewtonKernel::new(ε > 0)))` emits a structured warning at `add_hamiltonian_perturbation` time naming the failed invariant. The warning is the deliberate behaviour — apsis does not silently correct invalid physical configurations. Surfacing the violation is the contract; auto-fixing would erase it.
 
 ## Validation signal
 
@@ -60,8 +60,8 @@ use apsis::units::UnitSystem;
 use apsis_1pn::PostNewtonian1PN;
 
 let units = UnitSystem::solar_canonical();
-let sun = Body::star(1.0).unsoftened();
-let mercury = Body::rocky(1.66e-7).at(0.387, 0.0).with_velocity(0.0, 1.61).unsoftened();
+let sun = Body::star(1.0);
+let mercury = Body::rocky(1.66e-7).at(0.387, 0.0).with_velocity(0.0, 1.61);
 
 let mut sys = System::new(vec![sun, mercury], units)
     .with_integrator(IntegratorKind::Ias15)
