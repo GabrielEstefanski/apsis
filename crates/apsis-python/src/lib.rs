@@ -6,6 +6,7 @@ mod body;
 mod convert;
 mod errors;
 mod integrator;
+mod operators;
 mod perturbation;
 mod stats;
 mod system;
@@ -22,5 +23,9 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     system::register(m)?;
     trajectory::register(m)?;
     units::register(m)?;
+
+    #[cfg(feature = "gr")]
+    operators::gr::register(m)?;
+
     Ok(())
 }
