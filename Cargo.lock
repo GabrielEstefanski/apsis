@@ -306,6 +306,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "apsis-python"
+version = "0.1.0"
+dependencies = [
+ "apsis",
+ "apsis-1pn",
+ "apsis-py-core",
+ "numpy",
+ "pyo3",
+]
+
+[[package]]
 name = "apsis-radiation"
 version = "0.1.0"
 dependencies = [

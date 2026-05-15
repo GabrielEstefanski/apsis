@@ -1,0 +1,21 @@
+[package]
+name = "apsis-python"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+readme = "README.md"
+description = "PyO3 cdylib backing the apsis Python distribution."
+
+[lib]
+name = "apsis_python"
+crate-type = ["cdylib"]
+
+[dependencies]
+apsis = { path = "../apsis" }
+apsis-py-core = { path = "../apsis-py-core" }
+pyo3 = { version = "0.23", features = ["extension-module", "abi3-py39"] }
+numpy = "0.23"
