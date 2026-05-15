@@ -102,10 +102,10 @@ External `apsis-plugin-X` crates retain the same surface:
 - Build a `Box<dyn HamiltonianOperator>`
 - Wrap via `apsis_py_core::box_into_capsule`
 - Return as `apsis.Perturbation` (constructed in plugin's own Python
-  glue using a 4-line template documented in `apsis-py-core`)
+  glue using the wrap template documented in `apsis-py-core`)
 - User attaches via `sys.add_hamiltonian_perturbation(plugin.MyForce.for_units(...))`
 
-The 4-line wrap-dance template lives in the `apsis-py-core` README;
+The wrap-dance template lives in the `apsis-py-core` README;
 plugin authors copy it into their own cdylib's source, where the
 `"apsis"` import name actually belongs.
 
