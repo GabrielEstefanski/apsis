@@ -8,10 +8,12 @@ pub mod header;
 pub mod hook;
 pub mod policy;
 pub mod provenance;
+pub mod reader;
 
 pub use header::Header;
 pub use hook::{FORMAT_VER, MAGIC, RecordHook};
 pub use policy::RecordPolicy;
+pub use reader::{Record, RecordError};
 
-// Submodules added in subsequent commits:
-// pub mod reader;
+#[cfg(test)]
+mod tests;
