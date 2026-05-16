@@ -1,0 +1,18 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "apsis"
+type: software
+authors:
+  - given-names: Gabriel
+    family-names: Braga Estefanski
+    email: gabrielbragaestefanski@gmail.com
+license: Apache-2.0
+version: 0.1.0-alpha.1
+date-released: "2026-05-13"
+url: "https://github.com/GabrielEstefanski/apsis"
+repository-code: "https://github.com/GabrielEstefanski/apsis"
+keywords:
+  - n-body
+  - astrophysics
+  - simulation
+  - gravity
