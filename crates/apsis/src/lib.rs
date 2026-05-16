@@ -17,16 +17,10 @@
 
 //! Gravity simulator core — headless simulation engine.
 //!
-//! This crate is the physics + simulation stack with **zero UI
-//! dependencies**. It is consumed by:
-//!
-//! * `apsis-app` — interactive GUI (egui/wgpu).
-//! * `benches/` — Criterion-driven IAS15 harness with versioned baselines.
-//! * Out-of-tree client crates (e.g. perturbation-force plugins like
-//!   `apsis-1pn`) against the public API surfaced here.
-//!
-//! The `app/render → core` read direction is enforced by the workspace
-//! split: nothing in this crate may import from the app crate.
+//! Zero UI dependencies, enforced by the `core-isolation` CI gate.
+//! Federated operator crates and downstream consumers (Python
+//! distribution, external visualisation shells, plugin authors)
+//! depend on the public extension API surfaced here.
 
 pub mod contract;
 pub mod core;
