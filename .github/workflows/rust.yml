@@ -19,7 +19,7 @@ jobs:
   # wrong.
   fmt-and-clippy:
     name: rustfmt + clippy
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -41,7 +41,7 @@ jobs:
   # ── Build + unit tests ───────────────────────────────────────────────────
   build-and-test:
     name: build + unit tests
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
     needs: fmt-and-clippy
     steps:
       - uses: actions/checkout@v4
@@ -65,7 +65,7 @@ jobs:
   # the public API offered was withdrawn without being ported.
   examples-build:
     name: examples build
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
     needs: fmt-and-clippy
     steps:
       - uses: actions/checkout@v4
@@ -86,7 +86,7 @@ jobs:
   # into apsis fails this step.
   core-isolation:
     name: core isolation (no UI deps)
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
     needs: fmt-and-clippy
     steps:
       - uses: actions/checkout@v4
@@ -107,7 +107,7 @@ jobs:
   # `from apsis.<operator> import X` even when attribute access works.
   python-build:
     name: maturin build + import smoke
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
     needs: fmt-and-clippy
     steps:
       - uses: actions/checkout@v4
@@ -155,7 +155,7 @@ jobs:
   # J2, …) attach to this job so the workflow surface stays compact.
   mercury-gate:
     name: release validation (mercury 1PN vs GR)
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
     needs: fmt-and-clippy
     steps:
       - uses: actions/checkout@v4
