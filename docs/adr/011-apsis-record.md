@@ -1,0 +1,269 @@
+# ADR-011 — Apsis Record: reproducibility-first binary certificate
+
+**Status:** Accepted
+**Date:** 2026-05-16
+**Supersedes:** the `.grav` save format (`crates/apsis/src/io/snapshot.rs`)
+
+---
+
+## Context
+
+The `.grav` save format, present from the first commit, was shaped for
+the apsis-app save browser: `save_id` doubled as the filename timestamp,
+the trail buffer was serialized in GPU std430 stride for direct upload,
+schema versions tracked GUI feature additions. Post apsis-app extraction
+(ADR-010), `.grav` has no in-tree consumer.
+
+The federation thesis (ADR-005) claims `Cargo.lock` captures a
+simulation's full physical model. Without a corresponding artifact for
+the numerical output, the reproducibility claim is incomplete: a
+reviewer cannot independently replay a published run.
+
+## Decision
+
+Introduce **Apsis Record** — a binary certificate of a simulation run.
+
+A `.apsis` file contains a TOML header, a stream of binary frames, and a
+BLAKE3 trailer. The header captures provenance (apsis git sha, BLAKE3
+hash of `Cargo.lock`, per-operator crate name + version + checksum +
+declared `KernelRequirements`, unit system, integrator config, kernel
+variant + softening, seed) and body metadata. Frames record dynamic
+state (Snapshot) and material physical events (collisions, escapes).
+The default policy emits initial + final bookend snapshots and every
+event; dense trajectory capture is opt-in.
+
+The writer is a `RecordHook` implementing `SimHook` — zero new
+extension surface, the existing hook system serves as the integration
+point. The reader is `Record::open(path)` returning lazy iterators
+over header, events, and optional dense trajectory.
+
+### File format
+
+```text
+File:
+  MAGIC      "APSR"           4 B
+  FMT_VER    u16 LE = 1       2 B
+  RSVD       u16 LE = 0       2 B
+  HDR_LEN    u64 LE           8 B
+  HEADER     UTF-8 TOML       N B
+  FRAME 0    (Snapshot @ t=0)        ← initial bookend, required
+  FRAME 1..N (Event | Snapshot per policy)
+  FRAME N+1  (Snapshot @ t=Tfinal)   ← final bookend, required
+  FRAME N+2  (Trailer)               ← required for valid record
+
+Frame:
+  KIND  u8      1 B    0=Snapshot · 1=Event · 0xFF=Trailer
+                       0x02–0x0F reserved for core (bump FMT_VER on use)
+                       0x10–0xFE reserved for operator-emitted events
+                                 (opt-in via plugin protocol, post-v0.1)
+  T     f64 LE  8 B    sim time
+  LEN   u32 LE  4 B    payload bytes
+  DATA  …       N B
+
+Snapshot payload:
+  n_bodies u32 LE
+  per body i = 0..n_bodies (order matches Header.bodies.list):
+    pos_x, pos_y, pos_z, vel_x, vel_y, vel_z   f64 LE × 6
+
+Event payload:
+  event_kind u8
+    0 = Collision: body_a_idx u32, body_b_idx u32, distance f64
+    1 = Escape:    body_idx u32,    radius f64
+
+Trailer payload:
+  step_count   u64 LE
+  frame_count  u64 LE
+  blake3       32 B    hash of bytes [0 .. start of trailer payload]
+```
+
+Header TOML schema:
+
+```toml
+[apsis]
+version = "0.1.0"
+git_sha = "abc123..."
+created_utc = "2026-05-16T11:23:45Z"
+
+[reproducibility]
+cargo_lock_blake3 = "deadbeef..."   # 64-char hex
+seed = 42
+
+[unit_system]
+G = 1.0
+length = "AU"; mass = "M_sun"; time = "yr/2pi"
+
+[integrator]
+kind = "IAS15"
+dt_mode = "Adaptive"
+initial_dt = 0.01
+epsilon = 1.0e-9        # kind-specific
+
+[kernel]
+variant = "Newton"           # or "Plummer"
+softening = 0.0              # required when variant = "Plummer"; absent otherwise
+
+[[operators]]
+name = "apsis-1pn"
+version = "0.1.0"
+crate_hash = "..."           # 64-char hex from Cargo.lock checksum
+[operators.requirements]      # what this operator declares it needs from the kernel
+kernel_exactness = "exact"   # "exact" | "softened_ok"
+kernel_continuity = "smooth" # "smooth" | "c0_ok"
+# Future requirement enum variants are added here; reader treats unknown
+# fields as a forward-compat warning, not an error.
+
+[bodies]
+count = 9
+[[bodies.list]]
+name = "sun"
+mass = 1.0
+density = 1.408
+physical_radius = 4.65e-3
+color = [255, 233, 100]
+q_pr = 0.0
+albedo = 0.5
+class = "Star"
+```
+
+### API
+
+```rust
+// Writer
+use apsis::records::{RecordHook, RecordPolicy};
+let mut sys = System::new(bodies, units);
+sys.hooks_mut().register(
+    0,
+    Box::new(RecordHook::new("run.apsis", RecordPolicy::default())?),
+);
+
+// Reader
+use apsis::records::Record;
+let rec = Record::open("run.apsis")?;
+rec.header().reproducibility.seed;
+for ev in rec.events() { /* … */ }
+let (initial, final_) = rec.bookends()?;
+```
+
+```rust
+pub enum RecordPolicy {
+    BookendsAndEvents,   // default — initial + final + events only
+    EveryNSteps(u32),    // bookends + Snapshot when steps() % N == 0
+    EveryTime(f64),      // bookends + Snapshot when t crosses k·Δt
+    Dense,               // every step — debug
+}
+```
+
+Cadence edge cases:
+
+- `EveryNSteps(N)`: Snapshot emitted after the post-step hook fires when
+  `system.steps() % N == 0`. The initial bookend at `t=0` is separate
+  from this counter.
+- `EveryTime(Δt)`: tracks the last snapshot's `t_last`; emits a Snapshot
+  when `t >= t_last + Δt` after a step completes. If a single step
+  crosses multiple intervals (large adaptive `dt`), one Snapshot is
+  emitted at the post-step time — not back-filled per interval.
+- `Dense`: a Snapshot for every step; the initial bookend is the t=0
+  snapshot, the final bookend is the last step's snapshot.
+
+Python (read-only in v0.1; write via Rust hook):
+
+```python
+from apsis.records import Record, RecordHook, RecordPolicy
+sys.hooks.register(0, RecordHook("run.apsis", RecordPolicy.bookends_and_events()))
+rec = Record("run.apsis")
+```
+
+### Deliberate format decisions
+
+- **Trailer required for `Record::open` to succeed.** An incomplete
+  record is not a certificate. `Record::open_partial` is a separate
+  entry point for crash forensics.
+- **BLAKE3 (not CRC) in trailer.** Reuses the same primitive as
+  `cargo_lock_blake3`; single hash dependency for both purposes.
+- **Body metadata in Header only, not Snapshot.** Snapshot frames carry
+  pos + vel only. v0.1 assumes static body inventory. Mass-dynamic
+  perturbations (radiation mass loss, etc.) would add a
+  `kind = MassUpdate` frame without breaking format.
+- **Little-endian everywhere** (`f64::to_le_bytes`). Portable across x86
+  and ARM.
+- **`format_ver = 1`** with policy "bump on breaking change". No
+  backward compat promise pre-apsis-1.0.
+
+## Consequences
+
+**Architectural wins:**
+
+- `{record, Cargo.lock}` is the content-addressable closure of an apsis
+  run: re-running with the same lockfile reproduces the byte-equal
+  frame stream. The federation thesis extends from the input side
+  (composition of crates) to the output side (the record).
+- The hook system gains a flagship in-tree consumer, validating the
+  extension surface for downstream uses (instrumentation, monitoring,
+  custom recording).
+- The bookend-by-default policy reflects the framing of a record as a
+  certificate, not a recording: small, diff-friendly, citable.
+- Frame kinds `0x10-0xFE` are reserved for operator-emitted events,
+  enabling per-operator event taxonomies post-v0.1 without format
+  renegotiation.
+
+**Cleanup carried by the same PR:**
+
+| path | LOC | reason |
+|---|---|---|
+| `crates/apsis/src/core/physics_thread.rs` | 1512 | real-time GUI orchestration |
+| `crates/apsis/src/core/precision_run/` | — | cascade with physics_thread |
+| `crates/apsis/src/core/trail/` | 27 | replaced by Snapshot frames |
+| `crates/apsis/src/core/system/snapshot.rs` | 87 | `.grav` bridge |
+| `crates/apsis/src/io/snapshot.rs` | ~1000 | `.grav` save format |
+| `crates/apsis/src/domain/field/` | 21 | UI overlay trait orphan |
+
+Total: ~2700 LOC of GUI-runtime infrastructure retired from the core.
+
+**Migration cost:**
+
+- `.grav` files become unreadable in v0.1. No published consumers
+  exist; apsis-app vendored its own `.grav` reader at extraction time.
+  External migration cost: zero.
+- `io::headless` migrates its snapshot output from `.grav` to `.apsis`;
+  the `run_config.snapshot_interval` field is reinterpreted as
+  `RecordPolicy::EveryTime`. CSV export (`io::recorder`) is unchanged.
+
+**Paper claim added (v0.1):**
+
+New subsection §"Reproducibility certificate" under Implementation, plus
+one sentence appended to §Summary:
+
+> The full simulation, from physical model (`Cargo.lock`-pinned operator
+> crates) to numerical output (an Apsis Record), is bit-exactly
+> reproducible from a single hash-pinned configuration.
+
+**Intentionally out of scope (v0.1):**
+
+| deferred | revisit when |
+|---|---|
+| Compression of dense trajectories | v0.2 if evidence warrants |
+| Streaming HTTP / remote records | not on roadmap |
+| Multi-file records | not on roadmap |
+| User-defined Event kinds beyond Collision/Escape | post-paper |
+| Bit-exact resume from snapshot (integrator scratch serialization) | REBOUND v5's hard problem; out of scope |
+| Python writer (direct, without Rust hook) | post-paper |
+| HDF5 / Parquet / NetCDF alternative formats | not planned |
+| Schema migration tools | no v0.1 → v0.2 migration; user re-runs |
+| `Diagnostic` frame (ΔE/L/P time series) | reserved kind, no emitter in v0.1 |
+| `Record::open` self-validation of operator/kernel compatibility | follow-up PR after this lands. Needs design pass on how the reader resolves the requirement enum without depending on the operator crates being present. Pre-paper, not post-paper. |
+
+## Naming
+
+`io::recorder::Recorder` (CSV stream) and `records::Record` (binary
+certificate) coexist. Different module, type, purpose; the CSV recorder
+streams data points (verb), the Apsis Record is an artifact (noun).
+
+## References
+
+- ADR-005 — federated perturbation operators (thesis the record extends)
+- ADR-008 — Kernel as System parameter (record captures kernel + softening)
+- ADR-009 — consolidated Python distribution
+- ADR-010 — apsis-app extraction (removed the historical `.grav` consumer)
+- REBOUND `SimulationArchive` v5.0 (2026-05) — prior art for binary
+  record format in the N-body context
+- BLAKE3 — <https://github.com/BLAKE3-team/BLAKE3>
