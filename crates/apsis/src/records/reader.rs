@@ -8,6 +8,7 @@ use crate::records::frame::{Frame, Trailer};
 use crate::records::header::Header;
 use crate::records::hook::{FORMAT_VER, MAGIC};
 
+#[derive(Debug)]
 pub struct Record {
     path: PathBuf,
     header: Header,
