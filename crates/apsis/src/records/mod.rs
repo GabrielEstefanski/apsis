@@ -3,8 +3,9 @@
 //! See `docs/adr/011-apsis-record.md` for the architectural decision and
 //! the full format specification.
 
+pub mod frame;
+
 // Submodules added in subsequent commits:
-// pub mod frame;
 // pub mod policy;
 // pub mod header;
 // pub mod provenance;
