@@ -28,5 +28,6 @@ pub mod domain;
 pub mod io;
 pub mod math;
 pub mod physics;
+pub mod records;
 pub mod templates;
 pub mod units;
