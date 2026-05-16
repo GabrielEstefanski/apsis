@@ -8,7 +8,7 @@
 //! ```
 //!
 //! Parses the TOML, builds the system from the named preset, then advances the
-//! integrator loop until `t >= duration`, writing `.grav` snapshots and CSV rows
+//! integrator loop until `t >= duration`, writing one Apsis Record + CSV rows
 //! at the configured intervals.
 //!
 //! # Output
@@ -17,28 +17,29 @@
 //!
 //! | File | Trigger |
 //! |------|---------|
-//! | `{sim_name}_{save_id}.grav`   | every `snapshot_interval` sim-time units |
+//! | `{sim_name}.apsis`            | written incrementally per `snapshot_interval`; trailer on completion |
 //! | `{sim_name}_bodies.csv`       | every `csv_interval` sim-time units |
 //! | `{sim_name}_system.csv`       | every `csv_interval` sim-time units |
 //!
 //! # Determinism
 //!
 //! Given the same `run.toml` and `seed > 0`, two runs on the same platform
-//! produce bit-identical trajectories.  `seed = 0` uses OS entropy and is
-//! intentionally non-deterministic.
+//! produce a bit-identical record frame stream. `seed = 0` uses OS entropy
+//! and is intentionally non-deterministic.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use crate::core::system::System;
 use crate::io::recorder::{RecordMetadata, SimRecorder};
 use crate::io::run_config::RunConfig;
+use crate::records::{RecordHook, RecordPolicy, provenance::header_from_system};
 use crate::templates::{catalog::TEMPLATES, instantiate::instantiate};
 use crate::units::UnitSystem;
 
 /// Run a headless batch simulation described by `config`.
 ///
 /// Progress is reported to stderr so it can be redirected independently of
-/// stdout.  Errors are returned as boxed `std::error::Error`.
+/// stdout. Errors are returned as boxed `std::error::Error`.
 pub fn run(config: &RunConfig) -> Result<(), Box<dyn std::error::Error>> {
     let out_dir = Path::new(&config.out_dir);
     std::fs::create_dir_all(out_dir)?;
@@ -60,12 +61,24 @@ pub fn run(config: &RunConfig) -> Result<(), Box<dyn std::error::Error>> {
     // the runtime contract is the dimensionless Hénon system, since every
     // preset's body velocities are calibrated for `G = 1`.
     let mut system = System::new(vec![], UnitSystem::canonical())
-        .with_theta(0.6) // standard accuracy
+        .with_theta(0.6)
         .with_dt(config.dt)
         .with_max_depth(32);
     system.set_seed(config.seed);
     system.set_integrator(config.integrator);
     system.add_named_bodies(named_bodies);
+
+    // ── Apsis Record (replaces the legacy .grav snapshot stream) ───────────────
+    let record_path = out_dir.join(format!("{}.apsis", config.sim_name));
+    let policy = if config.snapshot_interval > 0.0 {
+        RecordPolicy::EveryTime(config.snapshot_interval)
+    } else {
+        RecordPolicy::BookendsAndEvents
+    };
+    let header = header_from_system(&system, config.seed, None)?;
+    let hook = RecordHook::with_header(&record_path, header, policy)?;
+    system.hooks_mut().register(0, Box::new(hook));
+    eprintln!("[headless] record → {}", record_path.display());
 
     // ── Optional CSV recorder ──────────────────────────────────────────────────
     let base_path = out_dir.join(&config.sim_name);
@@ -85,11 +98,6 @@ pub fn run(config: &RunConfig) -> Result<(), Box<dyn std::error::Error>> {
         None
     };
 
-    // Scheduled targets
-    let mut next_snapshot = if config.snapshot_interval > 0.0 { 0.0 } else { f64::INFINITY };
-    let snap_interval =
-        if config.snapshot_interval > 0.0 { config.snapshot_interval } else { f64::INFINITY };
-
     let n_bodies = system.bodies().len();
     eprintln!(
         "[headless] preset={:?}  N={}  dt={}  duration={}  seed={}",
@@ -98,13 +106,12 @@ pub fn run(config: &RunConfig) -> Result<(), Box<dyn std::error::Error>> {
 
     // ── Main loop ──────────────────────────────────────────────────────────────
     let mut last_reported = 0.0;
-    let report_every = config.duration / 20.0; // ~5% progress ticks
+    let report_every = config.duration / 20.0;
 
     while system.t() < config.duration {
         system.step();
         let t = system.t();
 
-        // CSV recording
         if let Some(rec) = csv.as_mut()
             && rec.should_record(t)
         {
@@ -113,14 +120,6 @@ pub fn run(config: &RunConfig) -> Result<(), Box<dyn std::error::Error>> {
             rec.record(t, system.bodies(), &metrics, system.orbital_elements())?;
         }
 
-        // Snapshot saving
-        if t >= next_snapshot {
-            let path = save_snapshot(&mut system, out_dir, &config.sim_name)?;
-            eprintln!("[headless] snapshot → {}", path.display());
-            next_snapshot += snap_interval;
-        }
-
-        // Progress reporting
         if t - last_reported >= report_every {
             let pct = (t / config.duration * 100.0).min(100.0);
             eprintln!("[headless] {pct:.1}%  t={t:.4e}  steps={}", system.steps());
@@ -128,9 +127,9 @@ pub fn run(config: &RunConfig) -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    // Final snapshot
-    let path = save_snapshot(&mut system, out_dir, &config.sim_name)?;
-    eprintln!("[headless] final snapshot → {}", path.display());
+    // Dropping the system drops its hook registry, which fires
+    // `RecordHook::drop` and writes the trailer + final bookend.
+    drop(system);
 
     if let Some(mut rec) = csv {
         rec.flush()?;
@@ -141,19 +140,6 @@ pub fn run(config: &RunConfig) -> Result<(), Box<dyn std::error::Error>> {
         );
     }
 
-    eprintln!("[headless] done  t={:.4e}  steps={}", system.t(), system.steps());
+    eprintln!("[headless] done");
     Ok(())
-}
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-fn save_snapshot(
-    system: &mut System,
-    out_dir: &Path,
-    sim_name: &str,
-) -> Result<PathBuf, Box<dyn std::error::Error>> {
-    let mut snap = system.to_snapshot();
-    snap.sim_name = sim_name.to_owned();
-    let path = snap.save_to_dir(out_dir)?;
-    Ok(path)
 }

@@ -24,9 +24,8 @@
 //! | `config` | getters/setters (θ, dt, integrator, kernel, …) |
 //! | `metrics` | [`Metrics`] assembly and recommended-dt |
 //! | `orbital` | osculating-element cache |
-//! | `snapshot` | save/load via [`SimSnapshot`] |
 //! | `perturbations` | non-gravitational force registration |
-//! | `helpers` | free functions (naming, closeness, trail count) |
+//! | `helpers` | free functions (naming, closeness) |
 
 pub(crate) mod bodies;
 pub(crate) mod config;
@@ -34,7 +33,6 @@ pub(crate) mod helpers;
 pub(crate) mod metrics;
 pub(crate) mod orbital;
 pub(crate) mod perturbations;
-pub(crate) mod snapshot;
 pub(crate) mod step;
 #[cfg(test)]
 mod tests;
