@@ -4,9 +4,11 @@
 //! the full format specification.
 
 pub mod frame;
+pub mod policy;
+
+pub use policy::RecordPolicy;
 
 // Submodules added in subsequent commits:
-// pub mod policy;
 // pub mod header;
 // pub mod provenance;
 // pub mod hook;
