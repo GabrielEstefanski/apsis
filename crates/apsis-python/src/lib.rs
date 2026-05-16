@@ -8,6 +8,7 @@ mod errors;
 mod integrator;
 mod operators;
 mod perturbation;
+mod records;
 mod stats;
 mod system;
 mod trajectory;
@@ -19,6 +20,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     body::register(m)?;
     errors::register(m)?;
     integrator::register(m)?;
+    records::register(m)?;
     stats::register(m)?;
     system::register(m)?;
     trajectory::register(m)?;
