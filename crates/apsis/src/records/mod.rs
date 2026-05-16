@@ -5,12 +5,13 @@
 
 pub mod frame;
 pub mod header;
+pub mod hook;
 pub mod policy;
 pub mod provenance;
 
 pub use header::Header;
+pub use hook::{FORMAT_VER, MAGIC, RecordHook};
 pub use policy::RecordPolicy;
 
 // Submodules added in subsequent commits:
-// pub mod hook;
 // pub mod reader;
