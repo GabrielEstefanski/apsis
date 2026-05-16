@@ -81,10 +81,9 @@
 //!
 //! Angular continuity across step boundaries — the `π → −π` wrap that
 //! visualisations need to unwrap for smooth animation — is the
-//! responsibility of the presentation layer (e.g. `apsis-app`'s
-//! `orbit_smoother`), not this module. The element values returned here
-//! are always principal-value angles in `[-π, π]` enforced by
-//! [`crate::math::wrap_pi`].
+//! responsibility of the presentation layer, not this module. The
+//! element values returned here are always principal-value angles in
+//! `[-π, π]` enforced by [`crate::math::wrap_pi`].
 //!
 //! ## References
 //! - Murray & Dermott (1999). *Solar System Dynamics*. Cambridge.
@@ -682,13 +681,13 @@ pub fn hierarchical_primary(bodies: &[Body], idx: usize) -> Option<(usize, Hiera
 /// Returns `None` if the bodies are co-located (r < 1e-15) or have zero combined mass.
 /// Linear-in-state primitives from which all Keplerian elements derive.
 ///
-/// Exposing these lets external code (e.g. the render-side osculating-element
-/// smoother in `apsis-app`) apply transformations *before* the non-linear
-/// reconstruction into (a, e, ω). EMA on (a, e, sin ω, cos ω) is dimensionally
-/// noisier than EMA on these four scalars: ε is linear in (v², 1/r), the
-/// Laplace–Runge–Lenz components (ex, ey) are linear in (r, v), and h is
-/// bilinear in (r, v). They have no angular wraparound and no singularity at
-/// the parabolic limit.
+/// Exposing these lets external code (e.g. presentation-layer osculating-
+/// element smoothers) apply transformations *before* the non-linear
+/// reconstruction into (a, e, ω). EMA on (a, e, sin ω, cos ω) is
+/// dimensionally noisier than EMA on these four scalars: ε is linear in
+/// (v², 1/r), the Laplace–Runge–Lenz components (ex, ey) are linear in
+/// (r, v), and h is bilinear in (r, v). They have no angular wraparound
+/// and no singularity at the parabolic limit.
 #[derive(Debug, Clone, Copy)]
 pub struct OrbitInvariants {
     /// Specific orbital energy ε = ½v² − GM/r.
