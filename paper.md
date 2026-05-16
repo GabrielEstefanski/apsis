@@ -65,6 +65,10 @@ does not attempt to replace mature integrators or optimize
 numerical performance; its contribution is orthogonal: defining
 how physical models are structured, published, and composed.
 
+The full simulation, from physical model (`Cargo.lock`-pinned
+operator crates) to numerical output (an *Apsis Record*), is
+bit-exactly reproducible from a single hash-pinned configuration.
+
 # Statement of need
 
 In current practice, a force perturbation in a published N-body
@@ -309,6 +313,27 @@ violated, produce two formally distinct and quantitatively separable
 observable signatures, each caught independently by the registration
 check. This — not empirical superiority in any numerical regime — is
 the claim the mechanism supports.
+
+# Reproducibility certificate
+
+Each apsis simulation emits an *Apsis Record* — a binary certificate
+documenting the run's full provenance and physical state. The record
+contains the apsis-core git commit, a BLAKE3 hash of the project's
+`Cargo.lock`, the unit system, integrator configuration, kernel
+variant (and softening parameter when applicable), seed, every
+registered operator with its crate name + version + lockfile hash +
+declared `KernelRequirements`, and bookend snapshots of body state.
+Material physical events (collisions, escapes) are recorded inline.
+The certificate is a single binary file with a human-readable TOML
+header and a binary frame stream.
+
+The federation thesis — that a simulation's physical model is
+captured in `Cargo.lock` — is here extended to the run itself:
+`{record, Cargo.lock}` is the content-addressable closure of the
+experiment. A reviewer with both files reproduces the run
+bit-exactly. The default policy emits initial + final bookend
+snapshots and every material event, which keeps records small and
+diff-friendly; dense trajectory capture is an explicit policy opt-in.
 
 # Availability and reproducibility
 
