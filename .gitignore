@@ -1,12 +1,5 @@
 /target
-/target-3d
-/target-tests
-/target-demo
 .venv
-/memory
-/saves
-/records
-/out
 
 # Maturin-built extension modules (output of `maturin develop`).
 apsis/*.pyd
