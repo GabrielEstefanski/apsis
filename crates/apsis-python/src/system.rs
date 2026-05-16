@@ -175,6 +175,13 @@ impl PySystem {
         Ok(self.inner.integrate_until(t_end))
     }
 
+    /// Close any attached records and fire each hook's lifecycle-end
+    /// callback. Idempotent; called automatically when the System is
+    /// garbage-collected. Call explicitly for deterministic close.
+    fn finish(&mut self) {
+        self.inner.finish();
+    }
+
     /// Record the system state at a set of target times, returning a
     /// [`Trajectory`](crate::trajectory::PyTrajectory) of NumPy arrays
     /// ready for `matplotlib`, `pandas`, or any other Python-side

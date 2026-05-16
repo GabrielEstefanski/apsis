@@ -235,6 +235,9 @@ pub struct System {
     /// trail samplers, sub-step position renderers) that need a smooth
     /// curve between integrator step boundaries.
     pub(crate) last_dense_snapshot: Option<crate::physics::integrator::DenseSnapshot>,
+
+    /// Set on first [`System::finish`] call so subsequent ones are no-ops.
+    pub(crate) finished: bool,
 }
 
 impl System {
@@ -416,6 +419,7 @@ impl System {
             pending_com_shift: (0.0, 0.0),
             last_dense_snapshot: None,
             template_source: None,
+            finished: false,
         }
     }
 

@@ -63,6 +63,7 @@ fn write_then_open_round_trip() {
         let names = vec!["sun".to_string()];
         let ctx = make_ctx(&bodies, &names, 0.0, 0);
         hook.pre_step(&ctx);
+        hook.on_finish(&ctx);
     }
     let rec = Record::open(&path).unwrap();
     assert_eq!(rec.header().apsis.version, "0.1.0");
@@ -79,12 +80,11 @@ fn round_trip_with_post_step_advances() {
                 .unwrap();
         let bodies = vec![Body::star(1.0).at(0.0, 0.0).with_velocity(0.0, 0.0)];
         let names = vec!["sun".to_string()];
-        // pre_step at t=0 (writes header + initial bookend)
         hook.pre_step(&make_ctx(&bodies, &names, 0.0, 0));
-        // post_steps move time forward; cached snapshot used as final bookend
         for s in 1..=10 {
             hook.post_step(&make_ctx(&bodies, &names, s as f64 * 1e-3, s));
         }
+        hook.on_finish(&make_ctx(&bodies, &names, 10e-3, 10));
     }
     let rec = Record::open(&path).unwrap();
     let (init, fin) = rec.bookends().unwrap();

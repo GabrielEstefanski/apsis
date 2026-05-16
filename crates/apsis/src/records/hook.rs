@@ -17,12 +17,10 @@ pub struct RecordHook {
     header_written: bool,
     policy: RecordPolicy,
     t_last_snapshot: Option<f64>,
-    /// Cached pre-step / post-step snapshot used to write the final
-    /// bookend on `Drop`. Updated on every `post_step`; the most recent
-    /// value is the "final" state by definition.
-    last_state: Option<Snapshot>,
-    last_steps: u64,
     frame_count: u64,
+    /// Set once `on_finish` runs — `Drop` then skips its safety-net
+    /// flush, since the writer is already closed properly.
+    closed: bool,
 }
 
 impl RecordHook {
@@ -42,9 +40,8 @@ impl RecordHook {
             header_written: false,
             policy,
             t_last_snapshot: None,
-            last_state: None,
-            last_steps: 0,
             frame_count: 0,
+            closed: false,
         })
     }
 
@@ -96,12 +93,8 @@ impl RecordHook {
     }
 }
 
-// `expect` on each I/O call below is deliberate for v0.1: the hook is
-// invoked from inside the integrator step loop, which has no `Result`
-// channel. A failed write (disk full, permission flip mid-run) panics
-// the simulation rather than silently dropping frames and producing a
-// truncated record. Tradeoff revisited if the hook gains a fallible
-// `Command` return path post-v0.1.
+// Writes panic on I/O failure: the hook has no Result channel into
+// the integrator loop, and a silent partial record verifies as valid.
 impl SimHook for RecordHook {
     fn name(&self) -> &'static str {
         "RecordHook"
@@ -111,25 +104,19 @@ impl SimHook for RecordHook {
         if !self.header_written {
             self.write_file_header().expect("RecordHook: write header");
             let snap = Self::snapshot_from_ctx(ctx);
-            self.write_frame(&Frame::Snapshot(snap.clone()))
-                .expect("RecordHook: write initial bookend");
+            self.write_frame(&Frame::Snapshot(snap)).expect("RecordHook: write initial bookend");
             self.header_written = true;
             self.t_last_snapshot = Some(ctx.t);
-            self.last_state = Some(snap);
-            self.last_steps = ctx.steps;
         }
         Vec::new()
     }
 
     fn post_step(&mut self, ctx: &HookContext<'_>) -> Vec<Command> {
-        let snap = Self::snapshot_from_ctx(ctx);
         if self.policy.should_snapshot(ctx.t, ctx.steps, self.t_last_snapshot) {
-            self.write_frame(&Frame::Snapshot(snap.clone())).expect("RecordHook: write snapshot");
+            let snap = Self::snapshot_from_ctx(ctx);
+            self.write_frame(&Frame::Snapshot(snap)).expect("RecordHook: write snapshot");
             self.t_last_snapshot = Some(ctx.t);
         }
-        // Cache the most recent state for the final bookend on Drop.
-        self.last_state = Some(snap);
-        self.last_steps = ctx.steps;
         Vec::new()
     }
 
@@ -149,48 +136,36 @@ impl SimHook for RecordHook {
         self.write_frame(&f).expect("RecordHook: write escape");
         Vec::new()
     }
+
+    fn on_finish(&mut self, ctx: &HookContext<'_>) -> Vec<Command> {
+        if !self.header_written || self.closed {
+            return Vec::new();
+        }
+        // Final bookend (skip when already emitted at this t).
+        if self.t_last_snapshot != Some(ctx.t) {
+            let snap = Self::snapshot_from_ctx(ctx);
+            self.write_frame(&Frame::Snapshot(snap)).expect("RecordHook: write final bookend");
+        }
+        // Snapshot the hasher before writing the trailer so it isn't covered.
+        let frames_blake3 = self.hasher.clone().finalize();
+        let trailer = Trailer {
+            t: ctx.t,
+            step_count: ctx.steps,
+            frame_count: self.frame_count,
+            blake3: *frames_blake3.as_bytes(),
+        };
+        self.write_frame(&Frame::Trailer(trailer)).expect("RecordHook: write trailer");
+        self.writer.flush().expect("RecordHook: flush writer");
+        self.closed = true;
+        Vec::new()
+    }
 }
 
 impl Drop for RecordHook {
     fn drop(&mut self) {
-        if !self.header_written {
-            return;
-        }
-        // Write the final bookend Snapshot from the cached last state.
-        // If the last cached state is at the same instant as the previously
-        // emitted snapshot (the writer already emitted it under a non-bookend
-        // policy), skip the duplicate; otherwise emit. The cached `snap.t`
-        // is the exact same f64 we last stored in `t_last_snapshot`, so a
-        // bit-equal `==` is the right comparison — no tolerance, no rounding.
-        let cached = self.last_state.take();
-        let final_t = if let Some(snap) = cached {
-            let already_emitted = self.t_last_snapshot == Some(snap.t);
-            let snap_t = snap.t;
-            if !already_emitted {
-                let _ = self.write_frame(&Frame::Snapshot(snap));
-            }
-            snap_t
-        } else {
-            0.0
-        };
-
-        // Snapshot the hasher BEFORE writing the trailer. The trailer's
-        // payload carries this digest; the bytes we write next are the
-        // trailer itself, which is excluded from its own hash by
-        // construction. `frame_count` excludes the trailer (which is a
-        // sentinel, not data) so a reader gets the count of data frames
-        // directly without subtracting one.
-        let frames_blake3 = self.hasher.clone().finalize();
-        let trailer = Trailer {
-            t: final_t,
-            step_count: self.last_steps,
-            frame_count: self.frame_count,
-            blake3: *frames_blake3.as_bytes(),
-        };
-        let mut out = Vec::new();
-        if Frame::Trailer(trailer).write(&mut out).is_ok() {
-            let _ = self.writer.write_all(&out);
-        }
+        // Semantic close runs in `on_finish`. This is a flush-only
+        // safety net for paths that bypass it; the resulting record
+        // has no trailer and `Record::open` rejects it as malformed.
         let _ = self.writer.flush();
     }
 }

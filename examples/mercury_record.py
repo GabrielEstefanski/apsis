@@ -57,9 +57,7 @@ def main() -> None:
     sys.attach_record("mercury_1pn.apsis", seed=42)
 
     sys.integrate_for(N_ORBITS * period)
-
-    # Dropping ``sys`` flushes the RecordHook trailer.
-    del sys
+    sys.finish()  # flush trailer; idempotent, also fires on GC
 
     print("Record written to mercury_1pn.apsis")
 

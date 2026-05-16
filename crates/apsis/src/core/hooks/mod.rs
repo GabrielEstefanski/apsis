@@ -82,6 +82,12 @@ pub trait SimHook: Send {
     fn heartbeat(&mut self, _ctx: &HookContext<'_>) -> Vec<Command> {
         Vec::new()
     }
+
+    /// Fired once when the simulation lifecycle ends. Hooks holding
+    /// open resources flush them here. Returned commands are ignored.
+    fn on_finish(&mut self, _ctx: &HookContext<'_>) -> Vec<Command> {
+        Vec::new()
+    }
 }
 
 /// A hook with its dispatch priority. Lower priorities fire first.
@@ -169,6 +175,12 @@ impl HookRegistry {
             out.extend(entry.hook.heartbeat(ctx));
         }
         out
+    }
+
+    pub fn dispatch_finish(&mut self, ctx: &HookContext<'_>) {
+        for entry in &mut self.entries {
+            let _ = entry.hook.on_finish(ctx);
+        }
     }
 }
 
