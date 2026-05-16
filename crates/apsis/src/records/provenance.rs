@@ -53,7 +53,7 @@ pub fn header_from_system(
         if eps_sq > 0.0 { Some(eps_sq.sqrt()) } else { None }
     };
 
-    let apsis_sha = option_env!("APSIS_GIT_COMMIT").unwrap_or("").to_string();
+    let apsis_sha: &str = option_env!("APSIS_GIT_COMMIT").unwrap_or("");
 
     let mut operators = Vec::new();
     operators.extend(sys.hamiltonian_perturbations().iter().filter_map(|op| {
@@ -62,7 +62,7 @@ pub fn header_from_system(
         Some(OperatorMeta {
             name: cit.crate_name.to_string(),
             version: cit.crate_version.to_string(),
-            crate_hash: operator_crate_hash(cit.crate_name, &lock_index, &apsis_sha),
+            crate_hash: operator_crate_hash(cit.crate_name, &lock_index, apsis_sha),
             requirements: KernelRequirementsMeta {
                 kernel_exactness: req.required_exactness,
                 kernel_continuity: req.min_continuity,
@@ -82,7 +82,7 @@ pub fn header_from_system(
         Some(OperatorMeta {
             name: cit.crate_name.to_string(),
             version: cit.crate_version.to_string(),
-            crate_hash: operator_crate_hash(cit.crate_name, &lock_index, &apsis_sha),
+            crate_hash: operator_crate_hash(cit.crate_name, &lock_index, apsis_sha),
             requirements: KernelRequirementsMeta {
                 kernel_exactness: req.required_exactness,
                 kernel_continuity: req.min_continuity,
@@ -109,7 +109,7 @@ pub fn header_from_system(
     Ok(Header {
         apsis: Apsis {
             version: env!("CARGO_PKG_VERSION").to_string(),
-            git_sha: if apsis_sha.is_empty() { "unknown".to_string() } else { apsis_sha.clone() },
+            git_sha: if apsis_sha.is_empty() { "unknown" } else { apsis_sha }.to_string(),
             created_utc: rfc3339_utc_now(),
         },
         reproducibility: Reproducibility { cargo_lock_blake3: lock_hash, seed },
@@ -121,7 +121,7 @@ pub fn header_from_system(
         },
         integrator: IntegratorMeta {
             kind: sys.integrator_kind().label().to_string(),
-            dt_mode: format!("{:?}", sys.dt_mode()),
+            dt_mode: sys.dt_mode().label().to_string(),
             initial_dt: sys.dt(),
             params: serde_json::Map::new(),
         },

@@ -88,13 +88,7 @@ fn round_trip_with_post_step_advances() {
     }
     let rec = Record::open(&path).unwrap();
     let (init, fin) = rec.bookends().unwrap();
-    match init {
-        crate::records::frame::Frame::Snapshot(s) => assert_eq!(s.t, 0.0),
-        other => panic!("expected initial Snapshot, got {other:?}"),
-    }
-    match fin {
-        crate::records::frame::Frame::Snapshot(s) => assert!((s.t - 10e-3).abs() < 1e-12),
-        other => panic!("expected final Snapshot, got {other:?}"),
-    }
+    assert_eq!(init.t, 0.0);
+    assert!((fin.t - 10e-3).abs() < 1e-12);
     let _ = std::fs::remove_file(&path);
 }

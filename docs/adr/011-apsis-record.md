@@ -202,14 +202,17 @@ sole entry point.
 ### Deliberate format decisions
 
 - **Trailer required for `Record::open` to succeed.** An incomplete
-  record is not a certificate. `Record::open_partial` is a separate
-  entry point for crash forensics.
-- **BLAKE3 (not CRC) in trailer.** Reuses the same primitive as
-  `cargo_lock_blake3`; single hash dependency for both purposes.
+  record is not a certificate.
+- **BLAKE3 trailer over the frame stream only.** Header is plaintext
+  TOML carrying per-run metadata (`created_utc`); covering it would
+  couple the content hash to wall-clock time and break the "same
+  `{seed, config}` → byte-equal trailer" contract. The same primitive
+  hashes `Cargo.lock` separately in the header (`cargo_lock_blake3`):
+  one algorithm, two scopes, neither composed.
 - **Body metadata in Header only, not Snapshot.** Snapshot frames carry
-  pos + vel only. v0.1 assumes static body inventory. Mass-dynamic
-  perturbations (radiation mass loss, etc.) would add a
-  `kind = MassUpdate` frame without breaking format.
+  pos + vel only. Static body inventory is the current contract;
+  mass-dynamic perturbations would add a `MassUpdate` frame kind
+  without breaking format.
 - **Little-endian everywhere** (`f64::to_le_bytes`). Portable across x86
   and ARM.
 - **`format_ver = 1`** with policy "bump on breaking change". No
@@ -229,8 +232,8 @@ sole entry point.
 - The bookend-by-default policy reflects the framing of a record as a
   certificate, not a recording: small, diff-friendly, citable.
 - Frame kinds `0x10-0xFE` are reserved for operator-emitted events,
-  enabling per-operator event taxonomies post-v0.1 without format
-  renegotiation.
+  giving per-operator event taxonomies a stable space without forcing
+  a format renegotiation when they are introduced.
 
 **Cleanup carried by the same PR:**
 
@@ -263,20 +266,16 @@ one sentence appended to §Summary:
 > crates) to numerical output (an Apsis Record), is bit-exactly
 > reproducible from a single hash-pinned configuration.
 
-**Intentionally out of scope (v0.1):**
+**Intentionally out of scope:**
 
-| deferred | revisit when |
+| deferred | rationale |
 |---|---|
-| Compression of dense trajectories | v0.2 if evidence warrants |
-| Streaming HTTP / remote records | not on roadmap |
-| Multi-file records | not on roadmap |
-| User-defined Event kinds beyond Collision/Escape | post-paper |
-| Bit-exact resume from snapshot (integrator scratch serialization) | REBOUND v5's hard problem; out of scope |
-| Python writer (direct, without Rust hook) | post-paper |
-| HDF5 / Parquet / NetCDF alternative formats | not planned |
-| Schema migration tools | no v0.1 → v0.2 migration; user re-runs |
-| `Diagnostic` frame (ΔE/L/P time series) | reserved kind, no emitter in v0.1 |
-| `Record::open` self-validation of operator/kernel compatibility | follow-up PR after this lands. Needs design pass on how the reader resolves the requirement enum without depending on the operator crates being present. Pre-paper, not post-paper. |
+| Bit-exact resume from snapshot | requires serialising integrator scratch state; orthogonal to the certificate scope |
+| `Record::open` self-validation of operator/kernel compatibility | needs a separate design pass on how the reader resolves the `KernelRequirements` enum without depending on the operator crates being installed |
+| User-defined Event kinds beyond Collision / Escape | reserved frame-kind range (`0x10–0xFE`) is in place; no in-tree producer yet |
+| `Diagnostic` frame (ΔE / L / P time series) | reserved kind, no emitter at this stage |
+| Alternative formats (HDF5, Parquet, NetCDF) | one canonical binary; alternative formats can be derived by downstream tooling |
+| Compression of dense trajectories | uncompressed is sufficient at the body counts the validation portfolio addresses |
 
 ## Naming
 

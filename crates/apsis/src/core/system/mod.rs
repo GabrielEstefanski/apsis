@@ -225,15 +225,15 @@ pub struct System {
     pub(crate) stop_requested: bool,
 
     /// Accumulated world-space COM translation since the last call to
-    /// [`take_com_shift`](System::take_com_shift). The
-    /// [`TrailRecorder`](crate::core::trail::TrailRecorder) reads and clears
-    /// this each frame to keep trail positions aligned with the shifted bodies.
+    /// [`take_com_shift`](System::take_com_shift). Downstream visualisers
+    /// read and clear this each frame to keep overlays aligned with the
+    /// shifted bodies.
     pub(crate) pending_com_shift: (f32, f32),
 
     /// Dense-output snapshot from the most recent integration step.
-    /// Produced each step; consumed by the physics thread and forwarded to
-    /// [`RenderState`](crate::core::physics_thread::RenderState) for
-    /// sub-step position interpolation.
+    /// Produced each step; consumed by downstream interpolators (e.g.
+    /// trail samplers, sub-step position renderers) that need a smooth
+    /// curve between integrator step boundaries.
     pub(crate) last_dense_snapshot: Option<crate::physics::integrator::DenseSnapshot>,
 }
 

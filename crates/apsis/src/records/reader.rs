@@ -4,9 +4,9 @@ use std::fs::File;
 use std::io::{BufReader, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
-use crate::records::frame::{Frame, Trailer};
+use crate::records::format::{FORMAT_VER, MAGIC};
+use crate::records::frame::{Frame, Snapshot, Trailer};
 use crate::records::header::Header;
-use crate::records::hook::{FORMAT_VER, MAGIC};
 
 #[derive(Debug)]
 pub struct Record {
@@ -64,17 +64,25 @@ impl Record {
         &self.trailer
     }
 
-    pub fn bookends(&self) -> Result<(Frame, Frame), RecordError> {
+    /// Initial + final bookend Snapshots. The format contract guarantees
+    /// both frames are Snapshots (initial bookend is written before any
+    /// other frame, final bookend is written immediately before the
+    /// trailer); an open record that omits either is malformed and
+    /// returns [`RecordError::MissingBookend`].
+    pub fn bookends(&self) -> Result<(Snapshot, Snapshot), RecordError> {
         let mut iter = self.frames()?;
-        let first = iter.next().ok_or(RecordError::Empty)??;
-        let mut last_snap: Option<Frame> = None;
+        let first = match iter.next() {
+            Some(Ok(Frame::Snapshot(s))) => s,
+            Some(Ok(_)) | None => return Err(RecordError::MissingBookend),
+            Some(Err(e)) => return Err(e),
+        };
+        let mut last: Option<Snapshot> = None;
         for f in iter {
-            let f = f?;
-            if matches!(&f, Frame::Snapshot(_)) {
-                last_snap = Some(f);
+            if let Frame::Snapshot(s) = f? {
+                last = Some(s);
             }
         }
-        let last = last_snap.ok_or(RecordError::Empty)?;
+        let last = last.ok_or(RecordError::MissingBookend)?;
         Ok((first, last))
     }
 
@@ -135,7 +143,7 @@ pub enum RecordError {
     BadHeaderUtf8,
     HeaderParse(String),
     MissingTrailer,
-    Empty,
+    MissingBookend,
 }
 
 impl std::fmt::Display for RecordError {
@@ -149,7 +157,9 @@ impl std::fmt::Display for RecordError {
             Self::BadHeaderUtf8 => write!(f, "header section is not valid UTF-8"),
             Self::HeaderParse(msg) => write!(f, "header TOML parse: {msg}"),
             Self::MissingTrailer => write!(f, "record has no trailer (truncated or partial)"),
-            Self::Empty => write!(f, "record contains no frames"),
+            Self::MissingBookend => {
+                write!(f, "record is missing one or both bookend Snapshots (malformed)")
+            },
         }
     }
 }

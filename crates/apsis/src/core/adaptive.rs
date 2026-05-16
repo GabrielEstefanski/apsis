@@ -74,6 +74,18 @@ pub enum DtMode {
     Adaptive,
 }
 
+impl DtMode {
+    /// Stable short label for serialisation / display. Used by
+    /// `apsis::records` to write `integrator.dt_mode` in the record
+    /// header without coupling to `Debug` formatting.
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Fixed => "Fixed",
+            Self::Adaptive => "Adaptive",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct AccelerationStats {
     pub max_acc: f64,

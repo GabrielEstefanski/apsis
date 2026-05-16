@@ -2,20 +2,15 @@
 
 use std::fs::File;
 use std::io::{BufWriter, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use crate::core::hooks::{CollisionEvent, Command, EscapeEvent, HookContext, SimHook};
+use crate::records::format::{FORMAT_VER, MAGIC};
 use crate::records::frame::{BodyState, Event, Frame, Snapshot, Trailer};
 use crate::records::header::Header;
 use crate::records::policy::RecordPolicy;
 
-/// File-format version embedded after the magic. Bumping requires the
-/// `tests::schema_version` pin + an ADR update.
-pub const FORMAT_VER: u16 = 1;
-pub const MAGIC: &[u8; 4] = b"APSR";
-
 pub struct RecordHook {
-    path: PathBuf,
     writer: BufWriter<File>,
     hasher: blake3::Hasher,
     header: Header,
@@ -41,7 +36,6 @@ impl RecordHook {
     ) -> std::io::Result<Self> {
         let file = File::create(path.as_ref())?;
         Ok(Self {
-            path: path.as_ref().to_path_buf(),
             writer: BufWriter::new(file),
             hasher: blake3::Hasher::new(),
             header,
@@ -52,11 +46,6 @@ impl RecordHook {
             last_steps: 0,
             frame_count: 0,
         })
-    }
-
-    /// The file the record is being written to.
-    pub fn path(&self) -> &Path {
-        &self.path
     }
 
     fn write_file_header(&mut self) -> std::io::Result<()> {
@@ -168,17 +157,16 @@ impl Drop for RecordHook {
             return;
         }
         // Write the final bookend Snapshot from the cached last state.
-        // If the last cached state is at the same time as t_last_snapshot
-        // (i.e. the writer already emitted it under a non-bookend policy),
-        // skip the duplicate; otherwise emit.
+        // If the last cached state is at the same instant as the previously
+        // emitted snapshot (the writer already emitted it under a non-bookend
+        // policy), skip the duplicate; otherwise emit. The cached `snap.t`
+        // is the exact same f64 we last stored in `t_last_snapshot`, so a
+        // bit-equal `==` is the right comparison — no tolerance, no rounding.
         let cached = self.last_state.take();
         let final_t = if let Some(snap) = cached {
-            let must_emit_bookend = match self.t_last_snapshot {
-                None => true,
-                Some(t) => (snap.t - t).abs() > f64::EPSILON,
-            };
+            let already_emitted = self.t_last_snapshot == Some(snap.t);
             let snap_t = snap.t;
-            if must_emit_bookend {
+            if !already_emitted {
                 let _ = self.write_frame(&Frame::Snapshot(snap));
             }
             snap_t
@@ -212,6 +200,7 @@ mod tests {
     use super::*;
     use crate::core::hooks::{HookPhase, HookPhaseKind};
     use crate::domain::body::Body;
+    use crate::records::format::MAGIC;
     use crate::records::header::{
         Apsis, BodiesMeta, IntegratorMeta, KernelMeta, Reproducibility, UnitSystemMeta,
     };
