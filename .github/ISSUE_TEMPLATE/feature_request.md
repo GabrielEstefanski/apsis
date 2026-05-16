@@ -26,5 +26,4 @@ What you tried that did not work, or workarounds that are unsatisfactory.
 - [ ] Core (`apsis`)
 - [ ] Operator crate (existing or new)
 - [ ] Python distribution (`apsis-python`)
-- [ ] App (`apsis-app`)
 - [ ] CI / docs / tooling

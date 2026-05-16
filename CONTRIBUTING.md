@@ -54,7 +54,7 @@ Reference issues and PRs by number.
 
 Types in use: `feat`, `fix`, `refactor`, `chore`, `docs`, `ci`, `perf`.
 Scopes follow workspace structure (`python`, `kernel`, `examples`,
-`apsis-1pn`, `apsis-radiation`, `apsis-central`, `apsis-app`, `ci`, …).
+`apsis-1pn`, `apsis-radiation`, `apsis-central`, `ci`, …).
 
 ## Pull requests
 
