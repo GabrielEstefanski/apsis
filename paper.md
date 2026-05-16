@@ -330,10 +330,14 @@ header and a binary frame stream.
 The federation thesis — that a simulation's physical model is
 captured in `Cargo.lock` — is here extended to the run itself:
 `{record, Cargo.lock}` is the content-addressable closure of the
-experiment. A reviewer with both files reproduces the run
-bit-exactly. The default policy emits initial + final bookend
-snapshots and every material event, which keeps records small and
-diff-friendly; dense trajectory capture is an explicit policy opt-in.
+experiment. The record's frame stream and the trailer's BLAKE3 are
+bit-exactly reproducible across replays with the same configuration;
+the only per-run difference is the header's wall-clock
+`created_utc` field, which is metadata and excluded from the content
+hash. A reviewer with both files reproduces the run. The default
+policy emits initial + final bookend snapshots and every material
+event, which keeps records small and diff-friendly; dense trajectory
+capture is an explicit policy opt-in.
 
 # Availability and reproducibility
 

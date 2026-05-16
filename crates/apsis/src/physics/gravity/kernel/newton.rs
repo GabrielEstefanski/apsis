@@ -72,6 +72,10 @@ impl Kernel for NewtonKernel {
     fn epsilon_squared(&self) -> f64 {
         self.epsilon * self.epsilon
     }
+
+    fn variant_name(&self) -> &'static str {
+        "Newton"
+    }
 }
 
 #[cfg(test)]

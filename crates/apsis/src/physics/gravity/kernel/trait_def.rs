@@ -74,4 +74,18 @@ pub trait Kernel: Send + Sync {
     fn epsilon_squared(&self) -> f64 {
         0.0
     }
+
+    /// Short, stable label for the kernel implementation, surfaced in
+    /// the Apsis Record header (`kernel.variant`). Concrete impls
+    /// override with a non-empty static string; the trait's default
+    /// covers downstream user kernels with a coarse "Custom" fallback.
+    ///
+    /// The label identifies the *implementation*, not the regime —
+    /// `NewtonKernel` returns `"Newton"` regardless of `ε`. Whether a
+    /// run is softened is read from the header's `kernel.softening`
+    /// field (`Some(ε)` vs absent), populated from
+    /// [`Self::epsilon_squared`].
+    fn variant_name(&self) -> &'static str {
+        "Custom"
+    }
 }

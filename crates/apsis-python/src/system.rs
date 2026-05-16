@@ -524,19 +524,8 @@ impl PySystem {
             .map_err(|e| crate::errors::unit_system_mismatch_to_pyerr(*e))
     }
 
-    // ── Provenance ───────────────────────────────────────────────────────
+    // ── Records ──────────────────────────────────────────────────────────
 
-    /// Reference list for the registered operator stack. Returns one
-    /// dictionary per citation, in registration order, with keys:
-    ///
-    /// - ``crate_name`` (str)
-    /// - ``crate_version`` (str)
-    /// - ``commit_hash`` (str | None) — full SHA when the implementing
-    ///   crate was built from a git checkout, ``None`` otherwise
-    /// - ``doi`` (str | None) — bare DOI suffix (e.g. ``10.1086/153180``)
-    /// - ``bibtex`` (str) — full BibTeX entry / entries for the
-    ///   underlying paper(s)
-    ///
     /// Attach an Apsis Record writer to this system. Subsequent
     /// ``step()`` calls write to ``path``; the file is closed (with a
     /// trailer) when the System is dropped or the record hook is
@@ -586,6 +575,19 @@ impl PySystem {
         Ok(())
     }
 
+    // ── Provenance ───────────────────────────────────────────────────────
+
+    /// Reference list for the registered operator stack. Returns one
+    /// dictionary per citation, in registration order, with keys:
+    ///
+    /// - ``crate_name`` (str)
+    /// - ``crate_version`` (str)
+    /// - ``commit_hash`` (str | None) — full SHA when the implementing
+    ///   crate was built from a git checkout, ``None`` otherwise
+    /// - ``doi`` (str | None) — bare DOI suffix (e.g. ``10.1086/153180``)
+    /// - ``bibtex`` (str) — full BibTeX entry / entries for the
+    ///   underlying paper(s)
+    ///
     /// Operators that don't publish a citation (test fakes, internal
     /// tooling, default ``None``) are silently skipped. The returned
     /// list is empty when no operators are registered, or when none of

@@ -48,16 +48,21 @@ pub fn header_from_system(
     let units = sys.units();
     let kernel = sys.kernel();
     let kernel_variant = kernel_variant_name(kernel.as_ref());
+    let kernel_softening = {
+        let eps_sq = kernel.epsilon_squared();
+        if eps_sq > 0.0 { Some(eps_sq.sqrt()) } else { None }
+    };
+
+    let apsis_sha = option_env!("APSIS_GIT_COMMIT").unwrap_or("").to_string();
 
     let mut operators = Vec::new();
     operators.extend(sys.hamiltonian_perturbations().iter().filter_map(|op| {
         let cit = op.citation()?;
         let req = op.kernel_requirements();
-        let crate_hash = lock_index.get(cit.crate_name).map(|(_, h)| h.clone()).unwrap_or_default();
         Some(OperatorMeta {
             name: cit.crate_name.to_string(),
             version: cit.crate_version.to_string(),
-            crate_hash,
+            crate_hash: operator_crate_hash(cit.crate_name, &lock_index, &apsis_sha),
             requirements: KernelRequirementsMeta {
                 kernel_exactness: req.required_exactness,
                 kernel_continuity: req.min_continuity,
@@ -74,11 +79,10 @@ pub fn header_from_system(
             return None;
         }
         let req = op.kernel_requirements();
-        let crate_hash = lock_index.get(cit.crate_name).map(|(_, h)| h.clone()).unwrap_or_default();
         Some(OperatorMeta {
             name: cit.crate_name.to_string(),
             version: cit.crate_version.to_string(),
-            crate_hash,
+            crate_hash: operator_crate_hash(cit.crate_name, &lock_index, &apsis_sha),
             requirements: KernelRequirementsMeta {
                 kernel_exactness: req.required_exactness,
                 kernel_continuity: req.min_continuity,
@@ -105,7 +109,7 @@ pub fn header_from_system(
     Ok(Header {
         apsis: Apsis {
             version: env!("CARGO_PKG_VERSION").to_string(),
-            git_sha: option_env!("APSIS_GIT_SHA").unwrap_or("unknown").to_string(),
+            git_sha: if apsis_sha.is_empty() { "unknown".to_string() } else { apsis_sha.clone() },
             created_utc: rfc3339_utc_now(),
         },
         reproducibility: Reproducibility { cargo_lock_blake3: lock_hash, seed },
@@ -116,15 +120,48 @@ pub fn header_from_system(
             time: units.time_label().to_string(),
         },
         integrator: IntegratorMeta {
-            kind: format!("{:?}", sys.integrator_kind()),
+            kind: sys.integrator_kind().label().to_string(),
             dt_mode: format!("{:?}", sys.dt_mode()),
             initial_dt: sys.dt(),
             params: serde_json::Map::new(),
         },
-        kernel: KernelMeta { variant: kernel_variant, softening: None },
+        kernel: KernelMeta { variant: kernel_variant, softening: kernel_softening },
         operators,
         bodies: BodiesMeta { count: body_meta.len(), list: body_meta },
     })
+}
+
+/// Resolve an operator's `crate_hash` entry for the record header.
+///
+/// Three sources, in priority order:
+///
+/// 1. **Registry checksum.** Operators pulled from crates.io / a git
+///    registry have a `checksum` field in `Cargo.lock`. This is the
+///    canonical content hash; emit as-is.
+/// 2. **Workspace path dep.** Operators that live in the same Cargo
+///    workspace as apsis core have no `checksum` in the lockfile.
+///    Fall back to the workspace's git SHA prefixed with `workspace:`
+///    so the field still identifies the source state — reproducing the
+///    run requires checking out apsis at that SHA, which is exactly
+///    what the lockfile + workspace path dep imply.
+/// 3. **No source state known.** Path dep + no git (tarball, vendored,
+///    sandboxed CI). Emit empty string; the runtime treats it as
+///    "source unknown" and the reproducibility claim is weakened to
+///    "the lockfile + the file tree at build time".
+///
+/// The `workspace:<sha>` form is machine-parseable: a verifier sees the
+/// prefix and knows the hash is a workspace-scope SHA, not a per-crate
+/// content hash.
+fn operator_crate_hash(
+    crate_name: &str,
+    lock_index: &HashMap<String, (String, String)>,
+    apsis_sha: &str,
+) -> String {
+    match lock_index.get(crate_name) {
+        Some((_, checksum)) if !checksum.is_empty() => checksum.clone(),
+        Some(_) if !apsis_sha.is_empty() => format!("workspace:{apsis_sha}"),
+        _ => String::new(),
+    }
 }
 
 fn resolve_lock_path(explicit: Option<&Path>) -> Result<PathBuf, ProvenanceError> {
@@ -170,13 +207,13 @@ fn parse_lock(bytes: &[u8]) -> Result<HashMap<String, (String, String)>, Provena
     Ok(out)
 }
 
-/// Extract a short kernel variant name from the concrete type. v0.1
-/// uses `std::any::type_name`; a `Kernel::variant_name(&self)` trait
-/// method is the natural follow-up when more than two kernels ship.
+/// Short kernel-implementation label for the record header. Delegates
+/// to [`Kernel::variant_name`], which each impl defines as a stable
+/// static string. The label identifies the implementation; the regime
+/// (softened vs exact) is read from `kernel.softening` populated from
+/// [`Kernel::epsilon_squared`].
 fn kernel_variant_name(kernel: &dyn crate::physics::gravity::kernel::Kernel) -> String {
-    let name = std::any::type_name_of_val(kernel);
-    let leaf = name.rsplit("::").next().unwrap_or(name);
-    leaf.trim_end_matches("Kernel").to_string()
+    kernel.variant_name().to_string()
 }
 
 /// Minimal RFC 3339 timestamp without pulling chrono. Format:
@@ -252,6 +289,41 @@ version = "0.1.0"
         assert!(s.ends_with('Z'));
         assert_eq!(&s[4..5], "-");
         assert_eq!(&s[10..11], "T");
+    }
+
+    fn lock(entries: &[(&str, &str, &str)]) -> HashMap<String, (String, String)> {
+        entries
+            .iter()
+            .map(|(n, v, c)| ((*n).to_string(), ((*v).to_string(), (*c).to_string())))
+            .collect()
+    }
+
+    #[test]
+    fn operator_crate_hash_prefers_registry_checksum() {
+        let idx = lock(&[("apsis-1pn", "0.1.0", "deadbeef".repeat(8).as_str())]);
+        let h = operator_crate_hash("apsis-1pn", &idx, "wsha");
+        assert_eq!(h, "deadbeef".repeat(8));
+    }
+
+    #[test]
+    fn operator_crate_hash_falls_back_to_workspace_sha_when_no_checksum() {
+        let idx = lock(&[("apsis-1pn", "0.1.0", "")]);
+        let h = operator_crate_hash("apsis-1pn", &idx, "abc123");
+        assert_eq!(h, "workspace:abc123");
+    }
+
+    #[test]
+    fn operator_crate_hash_empty_when_no_checksum_and_no_workspace_sha() {
+        let idx = lock(&[("apsis-1pn", "0.1.0", "")]);
+        let h = operator_crate_hash("apsis-1pn", &idx, "");
+        assert_eq!(h, "");
+    }
+
+    #[test]
+    fn operator_crate_hash_empty_when_crate_not_in_lockfile() {
+        let idx = lock(&[]);
+        let h = operator_crate_hash("unlisted-crate", &idx, "abc123");
+        assert_eq!(h, "");
     }
 
     #[test]

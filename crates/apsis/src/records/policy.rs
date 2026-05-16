@@ -10,6 +10,8 @@ pub enum RecordPolicy {
     /// Bookends + a `Snapshot` whenever `steps % N == 0`.
     EveryNSteps(u32),
     /// Bookends + a `Snapshot` whenever sim time crosses a multiple of `dt`.
+    /// Caller is expected to pass a strictly positive `dt`; values `<= 0`
+    /// collapse to "fire every step", silently equivalent to [`Self::Dense`].
     EveryTime(f64),
     /// A `Snapshot` every step. Debug mode.
     Dense,

@@ -73,9 +73,14 @@ impl RecordHook {
         prefix.extend_from_slice(&0u16.to_le_bytes());
         prefix.extend_from_slice(&header_len.to_le_bytes());
 
-        self.hasher.update(&prefix);
+        // The trailer's BLAKE3 covers the frame stream only — the header
+        // is plaintext + re-parseable, and `created_utc` is per-run
+        // wall-clock metadata. Hashing the header would couple the
+        // content-addressable trailer to the timestamp, breaking the
+        // "same {seed, config} → byte-equal frame stream + trailer"
+        // contract the reproducibility gate (records::tests::reproducibility)
+        // exercises.
         self.writer.write_all(&prefix)?;
-        self.hasher.update(toml_bytes);
         self.writer.write_all(toml_bytes)?;
         Ok(())
     }
@@ -102,6 +107,12 @@ impl RecordHook {
     }
 }
 
+// `expect` on each I/O call below is deliberate for v0.1: the hook is
+// invoked from inside the integrator step loop, which has no `Result`
+// channel. A failed write (disk full, permission flip mid-run) panics
+// the simulation rather than silently dropping frames and producing a
+// truncated record. Tradeoff revisited if the hook gains a fallible
+// `Command` return path post-v0.1.
 impl SimHook for RecordHook {
     fn name(&self) -> &'static str {
         "RecordHook"
@@ -178,13 +189,15 @@ impl Drop for RecordHook {
         // Snapshot the hasher BEFORE writing the trailer. The trailer's
         // payload carries this digest; the bytes we write next are the
         // trailer itself, which is excluded from its own hash by
-        // construction.
-        let pre_trailer_hash = self.hasher.clone().finalize();
+        // construction. `frame_count` excludes the trailer (which is a
+        // sentinel, not data) so a reader gets the count of data frames
+        // directly without subtracting one.
+        let frames_blake3 = self.hasher.clone().finalize();
         let trailer = Trailer {
             t: final_t,
             step_count: self.last_steps,
-            frame_count: self.frame_count + 1,
-            blake3: *pre_trailer_hash.as_bytes(),
+            frame_count: self.frame_count,
+            blake3: *frames_blake3.as_bytes(),
         };
         let mut out = Vec::new();
         if Frame::Trailer(trailer).write(&mut out).is_ok() {

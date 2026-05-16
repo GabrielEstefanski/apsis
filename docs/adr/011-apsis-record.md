@@ -72,9 +72,16 @@ Event payload:
 
 Trailer payload:
   step_count   u64 LE
-  frame_count  u64 LE
-  blake3       32 B    hash of bytes [0 .. start of trailer payload]
+  frame_count  u64 LE   number of data frames (Snapshot + Event), excludes the trailer
+  blake3       32 B    BLAKE3 of the frame stream only (Snapshot + Event bytes)
 ```
+
+The trailer's `blake3` covers the frame stream, not the header or the
+trailer itself. The header is plaintext + re-parseable, and
+`created_utc` is per-run wall-clock metadata; hashing it would couple
+the content-addressable trailer to the timestamp and break the
+"same `{seed, config}` → byte-equal frame stream + trailer"
+contract that grounds the paper claim.
 
 Header TOML schema:
 
@@ -89,14 +96,16 @@ cargo_lock_blake3 = "deadbeef..."   # 64-char hex
 seed = 42
 
 [unit_system]
-G = 1.0
+g = 1.0
 length = "AU"; mass = "M_sun"; time = "yr/2pi"
 
 [integrator]
-kind = "IAS15"
+kind = "Ias15"
 dt_mode = "Adaptive"
 initial_dt = 0.01
-epsilon = 1.0e-9        # kind-specific
+[integrator.params]
+epsilon = 1.0e-9        # kind-specific; nested so unknown integrators
+                        # can carry arbitrary JSON without schema churn
 
 [kernel]
 variant = "Newton"           # or "Plummer"
@@ -129,20 +138,24 @@ class = "Star"
 
 ```rust
 // Writer
-use apsis::records::{RecordHook, RecordPolicy};
+use apsis::records::{Header, RecordHook, RecordPolicy, provenance::header_from_system};
 let mut sys = System::new(bodies, units);
-sys.hooks_mut().register(
-    0,
-    Box::new(RecordHook::new("run.apsis", RecordPolicy::default())?),
-);
+let header = header_from_system(&sys, seed, /* lock_path */ None)?;
+let hook = RecordHook::with_header("run.apsis", header, RecordPolicy::default())?;
+sys.hooks_mut().register(0, Box::new(hook));
 
 // Reader
 use apsis::records::Record;
 let rec = Record::open("run.apsis")?;
 rec.header().reproducibility.seed;
-for ev in rec.events() { /* … */ }
+for ev in rec.events()? { /* … */ }
 let (initial, final_) = rec.bookends()?;
 ```
+
+The `Header` argument is mandatory and explicit so the lockfile-hash
++ operator-provenance gathering is a separate, testable step.
+`provenance::header_from_system` is the canonical builder; tooling that
+constructs a `Header` from a manifest can bypass it.
 
 ```rust
 pub enum RecordPolicy {
@@ -165,13 +178,26 @@ Cadence edge cases:
 - `Dense`: a Snapshot for every step; the initial bookend is the t=0
   snapshot, the final bookend is the last step's snapshot.
 
-Python (read-only in v0.1; write via Rust hook):
+Python:
 
 ```python
-from apsis.records import Record, RecordHook, RecordPolicy
-sys.hooks.register(0, RecordHook("run.apsis", RecordPolicy.bookends_and_events()))
-rec = Record("run.apsis")
+import apsis
+
+# Write — single keyword API on System. Default policy: bookends + events.
+sys = apsis.System(bodies=..., units=..., integrator="ias15", dt=1e-3)
+sys.attach_record("run.apsis", seed=42)
+# Variants: sys.attach_record(path, every_steps=100)
+#           sys.attach_record(path, every_time=0.1)
+#           sys.attach_record(path, dense=True)
+
+# Read — apsis.Record exposes header (TOML string), events(), snapshot_count()
+rec = apsis.Record("run.apsis")
 ```
+
+Writing in Python is mediated by the Rust hook — the lockfile-hash
+provenance is computed at file creation time by the Rust binary. There
+is no Python-side `RecordHook` class; `System.attach_record` is the
+sole entry point.
 
 ### Deliberate format decisions
 
