@@ -227,8 +227,8 @@ cross-implementation parity scenario.
 The Rust workspace is a UI-free physics core plus a federation of
 independently citable force crates. Python users see a single
 `apsis` distribution that bundles every internal operator behind
-one import. The core does not know the app or the Python binding
-exists; CI enforces the separation.
+one import. The core does not depend on bindings or downstream
+consumers; CI enforces the separation.
 
 | crate | role | dependencies |
 |---|---|---|
@@ -238,13 +238,17 @@ exists; CI enforces the separation.
 | [`apsis-central`](crates/apsis-central/) | Central-potential perturbations (Pattern B, Tamayo 2019). | **Only** `apsis`. |
 | [`apsis-py-core`](crates/apsis-py-core/) | Capsule transport + extractors (rlib) — used by the apsis Python distribution and any external `apsis-plugin-X` cdylib. | `apsis`, `pyo3`. |
 | [`apsis-python`](crates/apsis-python/) | PyO3 cdylib backing the `apsis` Python distribution. Bundles every internal operator behind feature flags. | `apsis`, `apsis-py-core`, operator crates. |
-| [`apsis-app`](crates/apsis-app/) | Optional interactive egui/wgpu shell. Not part of the library's validated surface. | `apsis`, `egui`, `wgpu`, `eframe`. |
 
 Python source lives at the repository root in [`apsis/`](apsis/);
 maturin builds the cdylib in `crates/apsis-python` via the root
 `pyproject.toml`. Adding an internal force is adding a Cargo crate
 and a feature flag; adding an external force is publishing
 `apsis-plugin-X` against the public extension API.
+
+The interactive visualisation shell lives in a separate repository
+at [`GabrielEstefanski/apsis-app`](https://github.com/GabrielEstefanski/apsis-app);
+it is a downstream consumer of the public `apsis` API and is not
+part of the library's validated surface or release cadence.
 
 ## Fine-physics guardrail
 

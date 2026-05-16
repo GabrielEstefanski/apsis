@@ -2,7 +2,6 @@
 resolver = "2"
 members = [
     "crates/apsis",
-    "crates/apsis-app",
     "crates/apsis-1pn",
     "crates/apsis-py-core",
     "crates/apsis-python",
@@ -17,7 +16,6 @@ members = [
 # it explicitly.
 default-members = [
     "crates/apsis",
-    "crates/apsis-app",
     "crates/apsis-1pn",
     "crates/apsis-radiation",
     "crates/apsis-central",
@@ -43,12 +41,6 @@ rand = "0.10.1"
 rayon = "1.12.0"
 bytemuck = { version = "1.14", features = ["derive"] }
 glam = { version = "0.30", features = ["bytemuck"] }
-eframe = "0.34.1"
-egui = "0.34.1"
-egui-phosphor = { version = "0.12", default-features = false, features = ["regular", "fill"] }
-wgpu = "29.0.1"
-winit = "0.30.13"
-pollster = "0.4.0"
 proptest = "1.5"
 approx = "0.5"
 pretty_assertions = "1.4"
@@ -57,7 +49,6 @@ criterion = "0.8.2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 tracing-tracy = "0.11"
-egui_kittest = "0.34.1"
 
 # ── Profiles ─────────────────────────────────────────────────────────────────
 

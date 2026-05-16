@@ -4,10 +4,11 @@
 
 `apsis` is an open-source N-body gravitational simulator implemented
 in Rust. The project's published contribution is the `apsis`
-library; the interactive visualisation shell `apsis-app` is an
-optional side consumer, not part of the library's validated public
-surface (see the workspace [`README.md`](../README.md) for the paper-level
-positioning).
+library; the interactive visualisation shell lives in a separate
+repository ([`GabrielEstefanski/apsis-app`](https://github.com/GabrielEstefanski/apsis-app))
+as a downstream consumer of the public API, not part of the
+library's validated surface (see the workspace
+[`README.md`](../README.md) for the paper-level positioning).
 
 The solver is **3D-aware** as of the v0.1 alpha: `Vec3` value type,
 per-body `z` / `vz`, 3D-aware direct N-body kernel, IAS15 dense
@@ -65,7 +66,10 @@ The project is a Cargo workspace split by role:
 | [`apsis-central`](../crates/apsis-central/) | Central-potential perturbations (Tamayo 2019, Pattern B). |
 | [`apsis-py-core`](../crates/apsis-py-core/) | Capsule transport + extractors (rlib). Used by the `apsis` Python distribution and any external `apsis-plugin-X` cdylib. |
 | [`apsis-python`](../crates/apsis-python/) | PyO3 cdylib backing the `apsis` Python distribution. Bundles every internal operator behind feature flags. |
-| [`apsis-app`](../crates/apsis-app/) | Optional interactive shell: egui/wgpu event loop, camera, panels, and GPU-side rendering. Not part of the validated surface. |
+
+The interactive visualisation shell lives in a separate
+repository at [`GabrielEstefanski/apsis-app`](https://github.com/GabrielEstefanski/apsis-app);
+it is a downstream consumer of the public `apsis` API.
 
 The Python package source lives at the repository root in
 [`apsis/`](../apsis/); maturin builds the cdylib via the root
