@@ -266,15 +266,22 @@ one sentence appended to §Summary:
 > crates) to numerical output (an Apsis Record), is bit-exactly
 > reproducible from a single hash-pinned configuration.
 
-**Intentionally out of scope:**
+**Roadmap (next iteration):**
 
-| deferred | rationale |
+| item | shape |
 |---|---|
-| Bit-exact resume from snapshot | requires serialising integrator scratch state; orthogonal to the certificate scope |
-| `Record::open` self-validation of operator/kernel compatibility | needs a separate design pass on how the reader resolves the `KernelRequirements` enum without depending on the operator crates being installed |
-| User-defined Event kinds beyond Collision / Escape | reserved frame-kind range (`0x10–0xFE`) is in place; no in-tree producer yet |
-| `Diagnostic` frame (ΔE / L / P time series) | reserved kind, no emitter at this stage |
-| Alternative formats (HDF5, Parquet, NetCDF) | one canonical binary; alternative formats can be derived by downstream tooling |
+| `Diagnostic` frame emitter | second built-in `SimHook` (`EnergyTrackerHook`) that consumes the reserved frame kind and writes ΔE, ΔL, ΔP at a configurable cadence |
+| Mid-run snapshot resume | header schema extended with per-integrator scratch state (IAS15 b-coefficients, dt history, Mercurius hybrid mode) so a record can be opened and the simulation continued bit-exactly from any Snapshot |
+| Semantic `Record::diff` API | structured comparison categorising differences by operator (name/version/hash), integrator config, kernel variant, and trajectory; richer than byte-diff because the header is typed |
+| Header enrichment | `rustc_version`, `generated_by`, OS `kernel_version` for full build-environment provenance |
+| `Record::open` operator/kernel compatibility validation | reader runs the same `KernelRequirements` check the registry runs, against the header's operator list |
+| User-defined Event kinds | reserved range (`0x10–0xFE`) is in place; plugin protocol wiring follows when an in-tree producer needs it |
+
+**Out of scope:**
+
+| | rationale |
+|---|---|
+| Alternative formats (HDF5, Parquet, NetCDF) | one canonical binary; alternative formats are downstream tooling territory |
 | Compression of dense trajectories | uncompressed is sufficient at the body counts the validation portfolio addresses |
 
 ## Naming
