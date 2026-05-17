@@ -274,6 +274,25 @@ class System:
     def integrate_until(self, t_end: float) -> int:
         """Advance until ``t >= t_end``. Returns step count."""
 
+    def finish(self) -> None:
+        """Close attached records and fire each hook's lifecycle-end callback.
+        Idempotent; also fires automatically on garbage collection."""
+
+    def attach_record(
+        self,
+        path: str,
+        *,
+        seed: int | None = None,
+        every_steps: int | None = None,
+        every_time: float | None = None,
+        dense: bool = False,
+    ) -> None:
+        """Attach an Apsis Record writer to this system. Subsequent steps
+        write to ``path``; the file is closed (with a trailer) on
+        :meth:`finish` or garbage collection. At most one of
+        ``every_steps`` / ``every_time`` / ``dense`` may be set; default
+        is bookend snapshots + events only."""
+
     def sample(
         self,
         *,
@@ -565,6 +584,41 @@ class UnitSystem:
     def __hash__(self) -> int: ...
     def __repr__(self) -> str: ...
     def __str__(self) -> str: ...
+
+# ── Record (Apsis Record reader) ──────────────────────────────────────────────
+
+# Tuple shapes for events surfaced by :meth:`Record.events`:
+#  - ("collision", t, body_a, body_b, distance)
+#  - ("escape",    t, body, radius)
+_CollisionTuple = tuple[str, float, int, int, float]
+_EscapeTuple = tuple[str, float, int, float]
+_EventTuple = _CollisionTuple | _EscapeTuple
+
+class Record:
+    """Read-only view of an Apsis Record (``.apsis``) file.
+
+    Writing is mediated by :meth:`System.attach_record` (which builds
+    a header from the live System state and registers a Rust-side
+    writer hook). The reader surface here is for downstream analysis
+    and post-hoc inspection.
+    """
+
+    def __init__(self, path: str) -> None:
+        """Open a record. Raises ``IOError`` on missing magic, version
+        mismatch, truncation, missing trailer, or missing bookend."""
+
+    @property
+    def header(self) -> str:
+        """Raw TOML header as a string. Parse with ``tomllib`` (3.11+)
+        for structured access."""
+
+    def events(self) -> list[_EventTuple]:
+        """All event tuples in time order."""
+
+    def snapshot_count(self) -> int:
+        """Number of dense Snapshot frames (initial bookend + per-policy
+        snapshots + final bookend)."""
+
 
 # ── units submodule ───────────────────────────────────────────────────────────
 
