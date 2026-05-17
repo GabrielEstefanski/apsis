@@ -65,6 +65,24 @@ impl PyRecord {
             .map_err(|e| pyo3::exceptions::PyIOError::new_err(format!("dense: {e}")))?;
         Ok(iter.count())
     }
+
+    /// Diagnostic frames in time order. Each tuple is
+    /// `(t, d_energy_rel, d_lz_rel)`. Empty when the record was written
+    /// without a diagnostic cadence.
+    fn diagnostics(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let list = pyo3::types::PyList::empty(py);
+        let iter = self
+            .inner
+            .diagnostics()
+            .map_err(|e| pyo3::exceptions::PyIOError::new_err(format!("diagnostics: {e}")))?;
+        for d in iter {
+            let d = d.map_err(|e| {
+                pyo3::exceptions::PyIOError::new_err(format!("diagnostic read: {e}"))
+            })?;
+            list.append((d.t, d.d_energy_rel, d.d_lz_rel))?;
+        }
+        Ok(list.into())
+    }
 }
 
 pub(crate) fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {

@@ -538,20 +538,37 @@ impl PySystem {
     /// trailer) when the System is dropped or the record hook is
     /// otherwise destroyed.
     ///
-    /// Cadence — at most one of the keyword arguments should be set:
+    /// Snapshot cadence — at most one of these keyword arguments:
     ///
     /// - ``every_steps``: emit a Snapshot when ``steps() % N == 0``
     /// - ``every_time``: emit a Snapshot when sim time crosses a
     ///   multiple of ``Δt``
     /// - ``dense``: emit a Snapshot every step (debug mode)
     ///
+    /// Diagnostic cadence (optional, independent) — at most one of:
+    ///
+    /// - ``diagnostics_every_steps``: emit a Diagnostic frame (ΔE/E,
+    ///   ΔLz/Lz) when ``steps() % N == 0``
+    /// - ``diagnostics_every_time``: emit a Diagnostic frame when sim
+    ///   time crosses a multiple of ``Δt``
+    ///
     /// Default: bookends + events only (initial + final + collisions /
-    /// escapes), the minimum sufficient certificate of the run.
+    /// escapes); no diagnostic frames.
     ///
     /// The header is gathered from the System's current state
     /// (operators, kernel, units, integrator, seed) and includes a
     /// BLAKE3 hash of the workspace ``Cargo.lock``.
-    #[pyo3(signature = (path, *, seed = None, every_steps = None, every_time = None, dense = false))]
+    #[pyo3(signature = (
+        path,
+        *,
+        seed = None,
+        every_steps = None,
+        every_time = None,
+        dense = false,
+        diagnostics_every_steps = None,
+        diagnostics_every_time = None,
+    ))]
+    #[allow(clippy::too_many_arguments)]
     fn attach_record(
         &mut self,
         path: String,
@@ -559,8 +576,12 @@ impl PySystem {
         every_steps: Option<u32>,
         every_time: Option<f64>,
         dense: bool,
+        diagnostics_every_steps: Option<u32>,
+        diagnostics_every_time: Option<f64>,
     ) -> PyResult<()> {
-        use apsis::records::{RecordHook, RecordPolicy, provenance::header_from_system};
+        use apsis::records::{
+            DiagnosticCadence, RecordHook, RecordPolicy, provenance::header_from_system,
+        };
         let policy = match (every_steps, every_time, dense) {
             (None, None, false) => RecordPolicy::BookendsAndEvents,
             (Some(n), None, false) => RecordPolicy::EveryNSteps(n),
@@ -572,12 +593,23 @@ impl PySystem {
                 ));
             },
         };
+        let diagnostics = match (diagnostics_every_steps, diagnostics_every_time) {
+            (None, None) => DiagnosticCadence::Off,
+            (Some(n), None) => DiagnosticCadence::EveryNSteps(n),
+            (None, Some(dt)) => DiagnosticCadence::EveryTime(dt),
+            (Some(_), Some(_)) => {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "attach_record: set at most one of diagnostics_every_steps / diagnostics_every_time",
+                ));
+            },
+        };
         let seed = seed.unwrap_or(self.inner.seed());
         let header = header_from_system(&self.inner, seed, None).map_err(|e| {
             pyo3::exceptions::PyIOError::new_err(format!("apsis record header: {e}"))
         })?;
         let hook = RecordHook::with_header(&path, header, policy)
-            .map_err(|e| pyo3::exceptions::PyIOError::new_err(format!("apsis record open: {e}")))?;
+            .map_err(|e| pyo3::exceptions::PyIOError::new_err(format!("apsis record open: {e}")))?
+            .with_diagnostics(diagnostics);
         self.inner.hooks_mut().register(0, Box::new(hook));
         Ok(())
     }
