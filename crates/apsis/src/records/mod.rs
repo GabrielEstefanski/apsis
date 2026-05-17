@@ -14,7 +14,7 @@ pub mod reader;
 pub use format::{FORMAT_VER, MAGIC};
 pub use header::Header;
 pub use hook::RecordHook;
-pub use policy::RecordPolicy;
+pub use policy::{DiagnosticCadence, RecordPolicy};
 pub use reader::{Record, RecordError};
 
 #[cfg(test)]

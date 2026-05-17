@@ -6,9 +6,9 @@ use std::path::Path;
 
 use crate::core::hooks::{CollisionEvent, Command, EscapeEvent, HookContext, SimHook};
 use crate::records::format::{FORMAT_VER, MAGIC};
-use crate::records::frame::{BodyState, Event, Frame, Snapshot, Trailer};
+use crate::records::frame::{BodyState, Diagnostic, Event, Frame, Snapshot, Trailer};
 use crate::records::header::Header;
-use crate::records::policy::RecordPolicy;
+use crate::records::policy::{DiagnosticCadence, RecordPolicy};
 
 pub struct RecordHook {
     writer: BufWriter<File>,
@@ -16,7 +16,9 @@ pub struct RecordHook {
     header: Header,
     header_written: bool,
     policy: RecordPolicy,
+    diagnostics: DiagnosticCadence,
     t_last_snapshot: Option<f64>,
+    t_last_diagnostic: Option<f64>,
     frame_count: u64,
     /// Set once `on_finish` runs — `Drop` then skips its safety-net
     /// flush, since the writer is already closed properly.
@@ -39,10 +41,19 @@ impl RecordHook {
             header,
             header_written: false,
             policy,
+            diagnostics: DiagnosticCadence::Off,
             t_last_snapshot: None,
+            t_last_diagnostic: None,
             frame_count: 0,
             closed: false,
         })
+    }
+
+    /// Enable periodic emission of `Diagnostic` frames (ΔE/E, ΔLz/Lz)
+    /// at the given cadence. Default is [`DiagnosticCadence::Off`].
+    pub fn with_diagnostics(mut self, cadence: DiagnosticCadence) -> Self {
+        self.diagnostics = cadence;
+        self
     }
 
     fn write_file_header(&mut self) -> std::io::Result<()> {
@@ -91,6 +102,14 @@ impl RecordHook {
             .collect();
         Snapshot { t: ctx.t, bodies }
     }
+
+    fn diagnostic_from_ctx(ctx: &HookContext<'_>) -> Diagnostic {
+        Diagnostic {
+            t: ctx.t,
+            d_energy_rel: ctx.rel_energy_error,
+            d_lz_rel: ctx.rel_angular_momentum_error,
+        }
+    }
 }
 
 // Writes panic on I/O failure: the hook has no Result channel into
@@ -107,6 +126,12 @@ impl SimHook for RecordHook {
             self.write_frame(&Frame::Snapshot(snap)).expect("RecordHook: write initial bookend");
             self.header_written = true;
             self.t_last_snapshot = Some(ctx.t);
+            if self.diagnostics != DiagnosticCadence::Off {
+                let d = Self::diagnostic_from_ctx(ctx);
+                self.write_frame(&Frame::Diagnostic(d))
+                    .expect("RecordHook: write initial diagnostic");
+                self.t_last_diagnostic = Some(ctx.t);
+            }
         }
         Vec::new()
     }
@@ -116,6 +141,11 @@ impl SimHook for RecordHook {
             let snap = Self::snapshot_from_ctx(ctx);
             self.write_frame(&Frame::Snapshot(snap)).expect("RecordHook: write snapshot");
             self.t_last_snapshot = Some(ctx.t);
+        }
+        if self.diagnostics.should_emit(ctx.t, ctx.steps, self.t_last_diagnostic) {
+            let d = Self::diagnostic_from_ctx(ctx);
+            self.write_frame(&Frame::Diagnostic(d)).expect("RecordHook: write diagnostic");
+            self.t_last_diagnostic = Some(ctx.t);
         }
         Vec::new()
     }

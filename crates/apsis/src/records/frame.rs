@@ -217,11 +217,7 @@ mod tests {
 
     #[test]
     fn diagnostic_round_trip() {
-        let d = Frame::Diagnostic(Diagnostic {
-            t: 5.0,
-            d_energy_rel: -3.1e-13,
-            d_lz_rel: 1.2e-14,
-        });
+        let d = Frame::Diagnostic(Diagnostic { t: 5.0, d_energy_rel: -3.1e-13, d_lz_rel: 1.2e-14 });
         assert_eq!(round_trip(&d), d);
     }
 

@@ -1,3 +1,4 @@
+mod diagnostics;
 mod header_validation;
 mod policy;
 mod reproducibility;
