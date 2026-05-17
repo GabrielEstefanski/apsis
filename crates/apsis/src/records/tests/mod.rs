@@ -1,4 +1,5 @@
 mod diagnostics;
+mod diff;
 mod header_validation;
 mod policy;
 mod reproducibility;
