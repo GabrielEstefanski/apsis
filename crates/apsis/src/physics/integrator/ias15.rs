@@ -1510,6 +1510,101 @@ impl Integrator for Ias15 {
         // satisfies it.
         true
     }
+
+    fn resume_state(&self) -> Vec<u8> {
+        ias15_resume::encode(self)
+    }
+
+    fn restore_resume_state(
+        &mut self,
+        bytes: &[u8],
+    ) -> Result<(), crate::physics::integrator::traits::ResumeError> {
+        ias15_resume::decode_into(self, bytes)
+    }
+}
+
+mod ias15_resume {
+    use super::Ias15;
+    use crate::math::Vec3;
+    use crate::physics::integrator::traits::ResumeError;
+
+    /// Layout: `magic(b"I15")` ‖ `version(u8 = 1)` ‖ `n(u32 LE)` ‖
+    /// `dt_next(f64 LE)` ‖ `dt_last_accepted(f64 LE)` ‖ `dt_dir_prev(i8)` ‖
+    /// per-body `[b, e, csb]` as 21 f64 each ‖ per-body `[csx, csv]` as
+    /// 6 f64 each. Picard scratch buffers (`pic_x0`/`pic_v0`/`pic_b6_old`)
+    /// and the rejection snapshot are intra-step and excluded.
+    const MAGIC: &[u8; 3] = b"I15";
+    const VERSION: u8 = 1;
+    const PER_BODY_BYTES: usize = 21 * 8 * 3 + 6 * 8;
+
+    pub fn encode(s: &Ias15) -> Vec<u8> {
+        let n = s.b.len();
+        let mut out = Vec::with_capacity(4 + 4 + 8 + 8 + 1 + n * PER_BODY_BYTES);
+        out.extend_from_slice(MAGIC);
+        out.push(VERSION);
+        out.extend_from_slice(&(n as u32).to_le_bytes());
+        out.extend_from_slice(&s.dt_next.to_le_bytes());
+        out.extend_from_slice(&s.dt_last_accepted.to_le_bytes());
+        out.push(s.dt_dir_prev as u8);
+        for i in 0..n {
+            for coeffs in [&s.b[i], &s.e[i], &s.csb[i]] {
+                for v in coeffs {
+                    out.extend_from_slice(&v.x.to_le_bytes());
+                    out.extend_from_slice(&v.y.to_le_bytes());
+                    out.extend_from_slice(&v.z.to_le_bytes());
+                }
+            }
+            for v in [&s.csx[i], &s.csv[i]] {
+                out.extend_from_slice(&v.x.to_le_bytes());
+                out.extend_from_slice(&v.y.to_le_bytes());
+                out.extend_from_slice(&v.z.to_le_bytes());
+            }
+        }
+        out
+    }
+
+    pub fn decode_into(s: &mut Ias15, bytes: &[u8]) -> Result<(), ResumeError> {
+        if bytes.len() < 25 || &bytes[..3] != MAGIC || bytes[3] != VERSION {
+            return Err(ResumeError::UnsupportedFormat);
+        }
+        let n = u32::from_le_bytes(bytes[4..8].try_into().unwrap()) as usize;
+        let needed = 25 + n * PER_BODY_BYTES;
+        if bytes.len() < needed {
+            return Err(ResumeError::Truncated);
+        }
+        if !s.b.is_empty() && s.b.len() != n {
+            return Err(ResumeError::BodyCountMismatch { expected: s.b.len(), found: n });
+        }
+        s.ensure_capacity(n);
+        s.dt_next = f64::from_le_bytes(bytes[8..16].try_into().unwrap());
+        s.dt_last_accepted = f64::from_le_bytes(bytes[16..24].try_into().unwrap());
+        s.dt_dir_prev = bytes[24] as i8;
+        let mut off = 25;
+        let read_vec3 = |off: usize| {
+            Vec3::new(
+                f64::from_le_bytes(bytes[off..off + 8].try_into().unwrap()),
+                f64::from_le_bytes(bytes[off + 8..off + 16].try_into().unwrap()),
+                f64::from_le_bytes(bytes[off + 16..off + 24].try_into().unwrap()),
+            )
+        };
+        for i in 0..n {
+            for buf in [&mut s.b[i], &mut s.e[i], &mut s.csb[i]] {
+                for slot in buf.iter_mut() {
+                    *slot = read_vec3(off);
+                    off += 24;
+                }
+            }
+            s.csx[i] = read_vec3(off);
+            off += 24;
+            s.csv[i] = read_vec3(off);
+            off += 24;
+        }
+        // Force a fresh start-of-step force evaluation on the next call:
+        // the cached FSAL acc belongs to whatever System invoked us last,
+        // not to the post-restore configuration.
+        s.invalidate_force_cache();
+        Ok(())
+    }
 }
 
 impl Ias15 {
