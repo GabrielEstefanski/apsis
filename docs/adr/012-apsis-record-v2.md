@@ -51,10 +51,10 @@ remain readable through the v0.1 code path; the reader dispatches on
 
 ### Mid-run snapshot resume
 
-A `ResumeState` frame kind (`0x03`) carries per-integrator scratch
+A `ResumeState` frame kind (`0x04`) carries per-integrator scratch
 state. The writer emits one alongside every Snapshot frame when the
-hook is constructed with `RecordPolicy::with_resume(...)`. Default
-policies omit ResumeState frames — they are several KB per snapshot
+hook is constructed with `RecordHook::with_resume_capture(true)`.
+Default omits ResumeState frames — they are several KB per snapshot
 for IAS15, so opting in is explicit.
 
 `Record::resume_from(snapshot_idx) -> Result<System, _>` reads the

@@ -5,7 +5,7 @@ use std::io::{BufReader, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
 use crate::records::format::{FORMAT_VER, MAGIC};
-use crate::records::frame::{Diagnostic, Frame, Snapshot, Trailer};
+use crate::records::frame::{Diagnostic, Frame, ResumeState, Snapshot, Trailer};
 use crate::records::header::Header;
 
 #[derive(Debug)]
@@ -120,6 +120,17 @@ impl Record {
         let frames = self.frames()?;
         Ok(frames.filter_map(|f| match f {
             Ok(Frame::Diagnostic(d)) => Some(Ok(d)),
+            Ok(_) => None,
+            Err(e) => Some(Err(e)),
+        }))
+    }
+
+    pub fn resume_states(
+        &self,
+    ) -> Result<impl Iterator<Item = Result<ResumeState, RecordError>>, RecordError> {
+        let frames = self.frames()?;
+        Ok(frames.filter_map(|f| match f {
+            Ok(Frame::ResumeState(rs)) => Some(Ok(rs)),
             Ok(_) => None,
             Err(e) => Some(Err(e)),
         }))

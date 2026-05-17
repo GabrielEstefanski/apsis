@@ -56,6 +56,7 @@ fn make_ctx<'a>(bodies: &'a [Body], names: &'a [String], t: f64, steps: u64) -> 
         rel_energy_error: 0.0,
         rel_angular_momentum_error: 0.0,
         phase: HookPhase(HookPhaseKind::PreStep),
+        resume_state: None,
     }
 }
 

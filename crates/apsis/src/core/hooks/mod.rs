@@ -88,6 +88,15 @@ pub trait SimHook: Send {
     fn on_finish(&mut self, _ctx: &HookContext<'_>) -> Vec<Command> {
         Vec::new()
     }
+
+    /// Whether this hook reads [`HookContext::resume_state`]. When any
+    /// registered hook returns `true`, the orchestrator calls
+    /// [`Integrator::resume_state`](crate::physics::integrator::traits::Integrator::resume_state)
+    /// before dispatch so the bytes are available; otherwise the field
+    /// is `None` and the serialisation work is skipped.
+    fn wants_resume_state(&self) -> bool {
+        false
+    }
 }
 
 /// A hook with its dispatch priority. Lower priorities fire first.
@@ -129,6 +138,14 @@ impl HookRegistry {
 
     pub fn len(&self) -> usize {
         self.entries.len()
+    }
+
+    /// `true` when at least one registered hook reports
+    /// [`SimHook::wants_resume_state`]. Read by the orchestrator before
+    /// dispatch to decide whether to serialise the integrator's
+    /// scratch state.
+    pub fn any_wants_resume_state(&self) -> bool {
+        self.entries.iter().any(|e| e.hook.wants_resume_state())
     }
 
     /// Dispatch `pre_step` to every hook and collect commands in order.
@@ -223,6 +240,7 @@ mod tests {
             rel_energy_error: 0.0,
             rel_angular_momentum_error: 0.0,
             phase: HookPhase(HookPhaseKind::PreStep),
+            resume_state: None,
         };
         reg.dispatch_pre_step(&ctx);
 
@@ -246,6 +264,7 @@ mod tests {
             rel_energy_error: 0.0,
             rel_angular_momentum_error: 0.0,
             phase: HookPhase(HookPhaseKind::PostStep),
+            resume_state: None,
         };
         assert!(reg.dispatch_post_step(&ctx).is_empty());
     }

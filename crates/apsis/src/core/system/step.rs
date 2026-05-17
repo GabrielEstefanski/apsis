@@ -30,7 +30,13 @@ impl System {
         // ── 1. pre_step hooks (observe pre-integration state) ────────────────
         let pre_cmds = if !self.hooks.is_empty() {
             let mut hooks = take_hooks(self);
-            let ctx = build_hook_context(self, HookPhaseKind::PreStep);
+            let resume_state = if hooks.any_wants_resume_state() {
+                Some(self.integrator.resume_state())
+            } else {
+                None
+            };
+            let mut ctx = build_hook_context(self, HookPhaseKind::PreStep);
+            ctx.resume_state = resume_state;
             let cmds = hooks.dispatch_pre_step(&ctx);
             drop(ctx);
             restore_hooks(self, hooks);
@@ -235,8 +241,14 @@ impl System {
             let heartbeat_interval = hooks.heartbeat_interval;
             let fire_heartbeat =
                 heartbeat_interval > 0 && self.steps.is_multiple_of(heartbeat_interval);
+            let resume_state = if hooks.any_wants_resume_state() {
+                Some(self.integrator.resume_state())
+            } else {
+                None
+            };
 
-            let ctx = build_hook_context(self, HookPhaseKind::PostStep);
+            let mut ctx = build_hook_context(self, HookPhaseKind::PostStep);
+            ctx.resume_state = resume_state;
             let mut cmds = Vec::new();
 
             let event_ctx = HookContext { phase: HookPhase(HookPhaseKind::Event), ..ctx.clone() };
@@ -452,6 +464,7 @@ fn build_hook_context(system: &System, phase: HookPhaseKind) -> HookContext<'_> 
         rel_energy_error: system.rel_energy_error,
         rel_angular_momentum_error: system.rel_angular_momentum_error,
         phase: HookPhase(phase),
+        resume_state: None,
     }
 }
 

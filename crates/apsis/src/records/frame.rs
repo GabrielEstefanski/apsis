@@ -8,6 +8,7 @@ pub const KIND_SNAPSHOT: u8 = 0x00;
 pub const KIND_COLLISION: u8 = 0x01;
 pub const KIND_ESCAPE: u8 = 0x02;
 pub const KIND_DIAGNOSTIC: u8 = 0x03;
+pub const KIND_RESUME_STATE: u8 = 0x04;
 pub const KIND_TRAILER: u8 = 0xFF;
 
 /// Per-body dynamic state.
@@ -37,6 +38,16 @@ pub struct Diagnostic {
     pub d_lz_rel: f64,
 }
 
+/// Per-integrator scratch state captured at the moment of a Snapshot.
+/// Format is integrator-internal; consumers route by the record header's
+/// `integrator.kind` to the matching [`Integrator::restore_resume_state`]
+/// implementation.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ResumeState {
+    pub t: f64,
+    pub bytes: Vec<u8>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Trailer {
     pub t: f64,
@@ -50,6 +61,7 @@ pub enum Frame {
     Snapshot(Snapshot),
     Event(Event),
     Diagnostic(Diagnostic),
+    ResumeState(ResumeState),
     Trailer(Trailer),
 }
 
@@ -89,6 +101,13 @@ impl Frame {
                 write_header(w, KIND_DIAGNOSTIC, d.t, payload_len as u32)?;
                 w.write_all(&d.d_energy_rel.to_le_bytes())?;
                 w.write_all(&d.d_lz_rel.to_le_bytes())?;
+            },
+            Frame::ResumeState(rs) => {
+                let n = rs.bytes.len() as u32;
+                let payload_len = 4 + rs.bytes.len();
+                write_header(w, KIND_RESUME_STATE, rs.t, payload_len as u32)?;
+                w.write_all(&n.to_le_bytes())?;
+                w.write_all(&rs.bytes)?;
             },
             Frame::Trailer(tr) => {
                 let payload_len = 8 + 8 + 32;
@@ -155,6 +174,11 @@ impl Frame {
                 let d_lz_rel = f64::from_le_bytes(payload[8..16].try_into().unwrap());
                 Frame::Diagnostic(Diagnostic { t, d_energy_rel, d_lz_rel })
             },
+            KIND_RESUME_STATE => {
+                let n = u32::from_le_bytes(payload[..4].try_into().unwrap()) as usize;
+                let bytes = payload[4..4 + n].to_vec();
+                Frame::ResumeState(ResumeState { t, bytes })
+            },
             KIND_TRAILER => {
                 let step_count = u64::from_le_bytes(payload[..8].try_into().unwrap());
                 let frame_count = u64::from_le_bytes(payload[8..16].try_into().unwrap());
@@ -219,6 +243,21 @@ mod tests {
     fn diagnostic_round_trip() {
         let d = Frame::Diagnostic(Diagnostic { t: 5.0, d_energy_rel: -3.1e-13, d_lz_rel: 1.2e-14 });
         assert_eq!(round_trip(&d), d);
+    }
+
+    #[test]
+    fn resume_state_round_trip() {
+        let rs = Frame::ResumeState(ResumeState {
+            t: 7.25,
+            bytes: vec![0xDE, 0xAD, 0xBE, 0xEF, 0x01, 0x02, 0x03],
+        });
+        assert_eq!(round_trip(&rs), rs);
+    }
+
+    #[test]
+    fn resume_state_empty_payload_round_trips() {
+        let rs = Frame::ResumeState(ResumeState { t: 0.0, bytes: vec![] });
+        assert_eq!(round_trip(&rs), rs);
     }
 
     #[test]
