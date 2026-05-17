@@ -47,6 +47,73 @@ fn truncated_header_errors() {
 }
 
 #[test]
+fn incompatible_kernel_errors_at_open() {
+    use crate::physics::gravity::kernel::{Continuity, Exactness};
+    use crate::records::frame::{Frame, Snapshot, Trailer};
+    use crate::records::header::{
+        Apsis, BodiesMeta, Header, IntegratorMeta, KernelMeta, KernelRequirementsMeta,
+        OperatorMeta, Reproducibility, UnitSystemMeta,
+    };
+
+    // 1PN-class operator declares it needs an exact kernel; the record's
+    // kernel reports Softened. Record::open should refuse rather than let
+    // a re-run silently produce wrong physics.
+    let header = Header {
+        apsis: Apsis {
+            version: "0.1.0".into(),
+            git_sha: "x".into(),
+            created_utc: "2026-05-17T00:00:00Z".into(),
+            rustc_version: "".into(),
+            generated_by: "test".into(),
+        },
+        reproducibility: Reproducibility { cargo_lock_blake3: "00".repeat(32), seed: 0 },
+        unit_system: UnitSystemMeta {
+            g: 1.0,
+            length: "AU".into(),
+            mass: "M_sun".into(),
+            time: "yr/2pi".into(),
+        },
+        integrator: IntegratorMeta {
+            kind: "Ias15".into(),
+            dt_mode: "Fixed".into(),
+            initial_dt: 1e-3,
+            params: Default::default(),
+        },
+        kernel: KernelMeta {
+            variant: "Plummer".into(),
+            softening: Some(1.0e-3),
+            exactness: Some(Exactness::Softened),
+            continuity: Some(Continuity::Smooth),
+        },
+        operators: vec![OperatorMeta {
+            name: "apsis-1pn".into(),
+            version: "0.1.0".into(),
+            crate_hash: "".into(),
+            requirements: KernelRequirementsMeta {
+                kernel_exactness: Some(Exactness::Exact),
+                kernel_continuity: Some(Continuity::Smooth),
+            },
+        }],
+        bodies: BodiesMeta { count: 0, list: vec![] },
+    };
+    let toml = header.to_toml().unwrap();
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(b"APSR");
+    bytes.extend_from_slice(&1u16.to_le_bytes());
+    bytes.extend_from_slice(&0u16.to_le_bytes());
+    bytes.extend_from_slice(&(toml.len() as u64).to_le_bytes());
+    bytes.extend_from_slice(toml.as_bytes());
+    Frame::Snapshot(Snapshot { t: 0.0, bodies: vec![] }).write(&mut bytes).unwrap();
+    Frame::Trailer(Trailer { t: 0.0, step_count: 0, frame_count: 1, blake3: [0; 32] })
+        .write(&mut bytes)
+        .unwrap();
+    let p = write_bytes("incompatible_kernel", &bytes);
+    let err = Record::open(&p).unwrap_err();
+    assert!(matches!(err, RecordError::IncompatibleKernel { .. }), "got {err:?}");
+    let _ = std::fs::remove_file(&p);
+}
+
+#[test]
 fn missing_trailer_errors() {
     use crate::records::frame::{Frame, Snapshot};
     use crate::records::header::{
@@ -74,7 +141,12 @@ fn missing_trailer_errors() {
             initial_dt: 1e-3,
             params: Default::default(),
         },
-        kernel: KernelMeta { variant: "Newton".into(), softening: None },
+        kernel: KernelMeta {
+            variant: "Newton".into(),
+            softening: None,
+            exactness: None,
+            continuity: None,
+        },
         operators: vec![],
         bodies: BodiesMeta { count: 0, list: vec![] },
     };

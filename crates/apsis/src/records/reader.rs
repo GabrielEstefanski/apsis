@@ -41,6 +41,8 @@ impl Record {
         let header: Header =
             Header::from_toml(header_str).map_err(|e| RecordError::HeaderParse(e.to_string()))?;
 
+        validate_operator_kernel(&header)?;
+
         let frames_start = (16 + header_len) as u64;
 
         let mut last_trailer: Option<Trailer> = None;
@@ -144,6 +146,47 @@ pub enum RecordError {
     HeaderParse(String),
     MissingTrailer,
     MissingBookend,
+    /// An operator's declared `KernelRequirements` are not satisfied by
+    /// the kernel the record reports. Surfaced at `Record::open` so the
+    /// caller fails fast rather than at re-run time.
+    IncompatibleKernel {
+        operator: String,
+        requirement: String,
+        actual: String,
+    },
+}
+
+/// Replays the registration-time `KernelRequirements` check against the
+/// kernel properties stored in the header. v0.1 records (no
+/// `kernel.exactness` / `kernel.continuity` fields) are skipped silently
+/// since the data needed to validate isn't present.
+fn validate_operator_kernel(header: &Header) -> Result<(), RecordError> {
+    use crate::physics::gravity::kernel::{Continuity, Exactness};
+
+    let actual_exactness: Option<Exactness> = header.kernel.exactness;
+    let actual_continuity: Option<Continuity> = header.kernel.continuity;
+
+    for op in &header.operators {
+        if let (Some(req), Some(actual)) = (op.requirements.kernel_exactness, actual_exactness)
+            && !actual.satisfies(req)
+        {
+            return Err(RecordError::IncompatibleKernel {
+                operator: op.name.clone(),
+                requirement: format!("exactness ≥ {req:?}"),
+                actual: format!("{actual:?}"),
+            });
+        }
+        if let (Some(req), Some(actual)) = (op.requirements.kernel_continuity, actual_continuity)
+            && !actual.satisfies(req)
+        {
+            return Err(RecordError::IncompatibleKernel {
+                operator: op.name.clone(),
+                requirement: format!("continuity ≥ {req:?}"),
+                actual: format!("{actual:?}"),
+            });
+        }
+    }
+    Ok(())
 }
 
 impl std::fmt::Display for RecordError {
@@ -159,6 +202,9 @@ impl std::fmt::Display for RecordError {
             Self::MissingTrailer => write!(f, "record has no trailer (truncated or partial)"),
             Self::MissingBookend => {
                 write!(f, "record is missing one or both bookend Snapshots (malformed)")
+            },
+            Self::IncompatibleKernel { operator, requirement, actual } => {
+                write!(f, "operator {operator}: requires {requirement}, kernel provides {actual}")
             },
         }
     }

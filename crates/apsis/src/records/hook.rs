@@ -202,7 +202,12 @@ mod tests {
                 initial_dt: 1e-3,
                 params: Default::default(),
             },
-            kernel: KernelMeta { variant: "Newton".into(), softening: None },
+            kernel: KernelMeta {
+                variant: "Newton".into(),
+                softening: None,
+                exactness: None,
+                continuity: None,
+            },
             operators: vec![],
             bodies: BodiesMeta { count: 0, list: vec![] },
         }
