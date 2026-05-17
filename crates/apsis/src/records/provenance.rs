@@ -111,6 +111,8 @@ pub fn header_from_system(
             version: env!("CARGO_PKG_VERSION").to_string(),
             git_sha: if apsis_sha.is_empty() { "unknown" } else { apsis_sha }.to_string(),
             created_utc: rfc3339_utc_now(),
+            rustc_version: option_env!("APSIS_RUSTC_VERSION").unwrap_or("").to_string(),
+            generated_by: format!("apsis {}", env!("CARGO_PKG_VERSION")),
         },
         reproducibility: Reproducibility { cargo_lock_blake3: lock_hash, seed },
         unit_system: UnitSystemMeta {

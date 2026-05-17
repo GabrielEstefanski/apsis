@@ -20,6 +20,21 @@ pub struct Apsis {
     pub version: String,
     pub git_sha: String,
     pub created_utc: String,
+    /// `rustc --version` output captured at build time. Empty when the
+    /// build script couldn't invoke rustc (vendored, sandboxed build).
+    /// f64 codegen varies between rustc releases; the field is part of
+    /// the reproducibility envelope, not just informational.
+    #[serde(default)]
+    pub rustc_version: String,
+    /// Tool that emitted this record. Defaults to `"apsis <version>"`
+    /// for records produced by the in-tree writer; downstream wrappers
+    /// (alternative bindings, custom binaries) override.
+    #[serde(default = "default_generated_by")]
+    pub generated_by: String,
+}
+
+fn default_generated_by() -> String {
+    format!("apsis {}", env!("CARGO_PKG_VERSION"))
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -113,6 +128,8 @@ mod tests {
                 version: "0.1.0".into(),
                 git_sha: "abc123".into(),
                 created_utc: "2026-05-16T11:23:45Z".into(),
+                rustc_version: "rustc 1.95.0".into(),
+                generated_by: "apsis 0.1.0".into(),
             },
             reproducibility: Reproducibility { cargo_lock_blake3: "deadbeef".into(), seed: 42 },
             unit_system: UnitSystemMeta {

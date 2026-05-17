@@ -58,6 +58,8 @@ fn missing_trailer_errors() {
             version: "0.1.0".into(),
             git_sha: "x".into(),
             created_utc: "2026-05-16T00:00:00Z".into(),
+            rustc_version: "".into(),
+            generated_by: "apsis-test".into(),
         },
         reproducibility: Reproducibility { cargo_lock_blake3: "00".repeat(32), seed: 0 },
         unit_system: UnitSystemMeta {
