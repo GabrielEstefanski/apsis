@@ -47,7 +47,8 @@ pub struct KernelProperties {
 /// Ordered so that [`Exact`] is strictest and [`Modified`] weakest;
 /// [`Exactness::satisfies`] uses the rank to test whether a provided
 /// exactness satisfies a required one.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Exactness {
     /// K(r) = 1/r exactly. Preserves Newtonian point-mass structure as
     /// assumed by any derivation from the Newtonian Hamiltonian.
@@ -86,7 +87,8 @@ impl Exactness {
 /// Ordered so that [`Smooth`] is the strongest guarantee and [`C0`] the
 /// weakest; [`Continuity::satisfies`] uses the rank to test whether a
 /// provided continuity class satisfies a required minimum.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Continuity {
     /// K ∈ C⁰ but not C¹. Force `F = −K'` may be discontinuous.
     C0,

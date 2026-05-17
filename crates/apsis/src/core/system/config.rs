@@ -129,6 +129,27 @@ impl System {
         self.integrator.kind()
     }
 
+    /// Active gravitational kernel (used by `apsis::records` to capture
+    /// the kernel variant in the record header).
+    pub fn kernel(&self) -> std::sync::Arc<dyn crate::physics::gravity::kernel::Kernel> {
+        self.force_model.kernel()
+    }
+
+    /// Read-only access to the registered Hamiltonian perturbations.
+    /// Used by `apsis::records` provenance to enumerate operators.
+    pub fn hamiltonian_perturbations(
+        &self,
+    ) -> &[Box<dyn crate::physics::integrator::HamiltonianOperator>] {
+        &self.hamiltonian_perturbations
+    }
+
+    /// Read-only access to the registered non-conservative perturbations.
+    pub fn non_conservative_perturbations(
+        &self,
+    ) -> &[Box<dyn crate::physics::integrator::NonConservativeOperator>] {
+        &self.non_conservative_perturbations
+    }
+
     /// Switch the integration algorithm. Takes effect on the next `step()`.
     ///
     /// ## Integrator–force compatibility

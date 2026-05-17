@@ -24,9 +24,8 @@
 //! | `config` | getters/setters (θ, dt, integrator, kernel, …) |
 //! | `metrics` | [`Metrics`] assembly and recommended-dt |
 //! | `orbital` | osculating-element cache |
-//! | `snapshot` | save/load via [`SimSnapshot`] |
 //! | `perturbations` | non-gravitational force registration |
-//! | `helpers` | free functions (naming, closeness, trail count) |
+//! | `helpers` | free functions (naming, closeness) |
 
 pub(crate) mod bodies;
 pub(crate) mod config;
@@ -34,7 +33,6 @@ pub(crate) mod helpers;
 pub(crate) mod metrics;
 pub(crate) mod orbital;
 pub(crate) mod perturbations;
-pub(crate) mod snapshot;
 pub(crate) mod step;
 #[cfg(test)]
 mod tests;
@@ -227,16 +225,19 @@ pub struct System {
     pub(crate) stop_requested: bool,
 
     /// Accumulated world-space COM translation since the last call to
-    /// [`take_com_shift`](System::take_com_shift). The
-    /// [`TrailRecorder`](crate::core::trail::TrailRecorder) reads and clears
-    /// this each frame to keep trail positions aligned with the shifted bodies.
+    /// [`take_com_shift`](System::take_com_shift). Downstream visualisers
+    /// read and clear this each frame to keep overlays aligned with the
+    /// shifted bodies.
     pub(crate) pending_com_shift: (f32, f32),
 
     /// Dense-output snapshot from the most recent integration step.
-    /// Produced each step; consumed by the physics thread and forwarded to
-    /// [`RenderState`](crate::core::physics_thread::RenderState) for
-    /// sub-step position interpolation.
+    /// Produced each step; consumed by downstream interpolators (e.g.
+    /// trail samplers, sub-step position renderers) that need a smooth
+    /// curve between integrator step boundaries.
     pub(crate) last_dense_snapshot: Option<crate::physics::integrator::DenseSnapshot>,
+
+    /// Set on first [`System::finish`] call so subsequent ones are no-ops.
+    pub(crate) finished: bool,
 }
 
 impl System {
@@ -418,6 +419,7 @@ impl System {
             pending_com_shift: (0.0, 0.0),
             last_dense_snapshot: None,
             template_source: None,
+            finished: false,
         }
     }
 

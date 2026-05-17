@@ -409,6 +409,31 @@ impl System {
         }
         self.steps - start_steps
     }
+
+    /// Fire `on_finish` on every registered hook. Idempotent. Invoked
+    /// automatically by `Drop` as a safety net.
+    pub fn finish(&mut self) {
+        if self.finished || self.hooks.is_empty() {
+            self.finished = true;
+            return;
+        }
+        let mut hooks = take_hooks(self);
+        let ctx = build_hook_context(self, HookPhaseKind::Finish);
+        hooks.dispatch_finish(&ctx);
+        drop(ctx);
+        restore_hooks(self, hooks);
+        self.finished = true;
+    }
+}
+
+impl Drop for System {
+    fn drop(&mut self) {
+        // Safety net for callers that forget the explicit close. Hooks
+        // holding open resources see this as their last chance to flush.
+        if !self.finished {
+            self.finish();
+        }
+    }
 }
 
 // ── Hook borrow helpers ───────────────────────────────────────────────────────

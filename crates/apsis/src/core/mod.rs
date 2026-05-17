@@ -7,13 +7,12 @@
 //! | Module             | Responsibility                                             |
 //! |--------------------|------------------------------------------------------------|
 //! | [`system`]         | [`System`]: central state, `step()` dispatch, body CRUD    |
-//! | [`physics_thread`] | Background thread, `PhysicsHandle`, `RenderState` publish  |
 //! | [`metrics`]        | [`Metrics`] data-transfer object                           |
 //! | [`calibration`]    | COM recentering helpers                                    |
 //! | [`adaptive`]       | [`DtController`], [`ThetaController`]                      |
 //! | [`diagnostics`]    | Per-step acceleration and jerk statistics                  |
 //! | [`log`]            | Structured event bus + `warn_diag!`/`info_diag!` macros    |
-//! | [`precision_run`]  | `PrecisionRunController` state machine for IAS15-class runs|
+//! | [`hooks`]          | `SimHook` extension surface for instrumentation/recording  |
 
 pub mod adaptive;
 pub mod calibration;
@@ -21,7 +20,4 @@ pub mod diagnostics;
 pub mod hooks;
 pub mod log;
 pub mod metrics;
-pub mod physics_thread;
-pub mod precision_run;
 pub mod system;
-pub mod trail;

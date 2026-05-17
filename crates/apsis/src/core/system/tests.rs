@@ -1270,62 +1270,6 @@ mod replay {
         }
         assert_bodies_bit_equal(sys_a.bodies(), sys_b.bodies(), "same-IC replay");
     }
-
-    #[test]
-    fn snapshot_midpoint_produces_identical_trajectory() {
-        const STEPS_BEFORE: u64 = 200;
-        const STEPS_AFTER: u64 = 300;
-
-        let mut reference = two_body_deterministic_system();
-        for _ in 0..(STEPS_BEFORE + STEPS_AFTER) {
-            reference.step();
-        }
-
-        let mut replayed = two_body_deterministic_system();
-        for _ in 0..STEPS_BEFORE {
-            replayed.step();
-        }
-        let snap = replayed.to_snapshot();
-        replayed.restore_from_snapshot(&snap);
-        for _ in 0..STEPS_AFTER {
-            replayed.step();
-        }
-
-        assert_bodies_bit_equal(reference.bodies(), replayed.bodies(), "snapshot replay");
-    }
-
-    #[test]
-    fn snapshot_file_roundtrip() {
-        use crate::io::snapshot::SimSnapshot;
-
-        let mut sys = two_body_deterministic_system();
-        for _ in 0..100 {
-            sys.step();
-        }
-
-        let mut snap = sys.to_snapshot();
-        snap.sim_name = "roundtrip-test".to_owned();
-
-        let dir = std::env::temp_dir();
-        let path = snap.save_to_dir(&dir).expect("snapshot write failed");
-
-        let loaded = SimSnapshot::load_from(&path).expect("snapshot load failed");
-        std::fs::remove_file(&path).ok();
-
-        assert_eq!(loaded.t.to_bits(), snap.t.to_bits(), "t");
-        assert_eq!(loaded.steps, snap.steps, "steps");
-        assert_eq!(loaded.dt.to_bits(), snap.dt.to_bits(), "dt");
-        assert_eq!(loaded.seed, snap.seed, "seed");
-        assert_eq!(loaded.sim_name, snap.sim_name, "sim_name");
-        assert_eq!(loaded.bodies.len(), snap.bodies.len(), "body count");
-        for (i, (l, s)) in loaded.bodies.iter().zip(snap.bodies.iter()).enumerate() {
-            assert_eq!(l.pos_x.to_bits(), s.pos_x.to_bits(), "body {i} x roundtrip");
-            assert_eq!(l.pos_y.to_bits(), s.pos_y.to_bits(), "body {i} y roundtrip");
-            assert_eq!(l.vel_x.to_bits(), s.vel_x.to_bits(), "body {i} vx roundtrip");
-            assert_eq!(l.vel_y.to_bits(), s.vel_y.to_bits(), "body {i} vy roundtrip");
-            assert_eq!(l.mass.to_bits(), s.mass.to_bits(), "body {i} mass roundtrip");
-        }
-    }
 }
 
 // ── Hook dispatch ─────────────────────────────────────────────────────────────

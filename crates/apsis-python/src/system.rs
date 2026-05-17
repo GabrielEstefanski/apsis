@@ -175,6 +175,13 @@ impl PySystem {
         Ok(self.inner.integrate_until(t_end))
     }
 
+    /// Close any attached records and fire each hook's lifecycle-end
+    /// callback. Idempotent; called automatically when the System is
+    /// garbage-collected. Call explicitly for deterministic close.
+    fn finish(&mut self) {
+        self.inner.finish();
+    }
+
     /// Record the system state at a set of target times, returning a
     /// [`Trajectory`](crate::trajectory::PyTrajectory) of NumPy arrays
     /// ready for `matplotlib`, `pandas`, or any other Python-side
@@ -522,6 +529,57 @@ impl PySystem {
         self.inner
             .add_hamiltonian_perturbation(boxed)
             .map_err(|e| crate::errors::unit_system_mismatch_to_pyerr(*e))
+    }
+
+    // ── Records ──────────────────────────────────────────────────────────
+
+    /// Attach an Apsis Record writer to this system. Subsequent
+    /// ``step()`` calls write to ``path``; the file is closed (with a
+    /// trailer) when the System is dropped or the record hook is
+    /// otherwise destroyed.
+    ///
+    /// Cadence — at most one of the keyword arguments should be set:
+    ///
+    /// - ``every_steps``: emit a Snapshot when ``steps() % N == 0``
+    /// - ``every_time``: emit a Snapshot when sim time crosses a
+    ///   multiple of ``Δt``
+    /// - ``dense``: emit a Snapshot every step (debug mode)
+    ///
+    /// Default: bookends + events only (initial + final + collisions /
+    /// escapes), the minimum sufficient certificate of the run.
+    ///
+    /// The header is gathered from the System's current state
+    /// (operators, kernel, units, integrator, seed) and includes a
+    /// BLAKE3 hash of the workspace ``Cargo.lock``.
+    #[pyo3(signature = (path, *, seed = None, every_steps = None, every_time = None, dense = false))]
+    fn attach_record(
+        &mut self,
+        path: String,
+        seed: Option<u64>,
+        every_steps: Option<u32>,
+        every_time: Option<f64>,
+        dense: bool,
+    ) -> PyResult<()> {
+        use apsis::records::{RecordHook, RecordPolicy, provenance::header_from_system};
+        let policy = match (every_steps, every_time, dense) {
+            (None, None, false) => RecordPolicy::BookendsAndEvents,
+            (Some(n), None, false) => RecordPolicy::EveryNSteps(n),
+            (None, Some(dt), false) => RecordPolicy::EveryTime(dt),
+            (None, None, true) => RecordPolicy::Dense,
+            _ => {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "attach_record: set at most one of every_steps / every_time / dense",
+                ));
+            },
+        };
+        let seed = seed.unwrap_or(self.inner.seed());
+        let header = header_from_system(&self.inner, seed, None).map_err(|e| {
+            pyo3::exceptions::PyIOError::new_err(format!("apsis record header: {e}"))
+        })?;
+        let hook = RecordHook::with_header(&path, header, policy)
+            .map_err(|e| pyo3::exceptions::PyIOError::new_err(format!("apsis record open: {e}")))?;
+        self.inner.hooks_mut().register(0, Box::new(hook));
+        Ok(())
     }
 
     // ── Provenance ───────────────────────────────────────────────────────
