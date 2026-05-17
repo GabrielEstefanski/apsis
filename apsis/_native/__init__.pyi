@@ -288,6 +288,7 @@ class System:
         dense: bool = False,
         diagnostics_every_steps: int | None = None,
         diagnostics_every_time: float | None = None,
+        capture_resume: bool = False,
     ) -> None:
         """Attach an Apsis Record writer to this system. Subsequent steps
         write to ``path``; the file is closed (with a trailer) on
@@ -300,7 +301,12 @@ class System:
         Diagnostic cadence — at most one of ``diagnostics_every_steps``
         / ``diagnostics_every_time`` may be set. When enabled, the
         record carries ``Diagnostic`` frames (``ΔE/E``, ``ΔLz/Lz``)
-        readable via :meth:`Record.diagnostics`."""
+        readable via :meth:`Record.diagnostics`.
+
+        ``capture_resume`` emits a ``ResumeState`` frame alongside every
+        ``Snapshot``, enabling mid-run restore via the Rust-side
+        ``apsis::records::restore_into`` API. Several KB per snapshot
+        for IAS15, so off by default."""
 
     def sample(
         self,

@@ -89,8 +89,15 @@ impl From<ResumeError> for RestoreError {
 
 /// Restore `sys` to the dynamic state captured at the n-th Snapshot
 /// frame of `record`. The System's body count, integrator kind, and
-/// units must already match the record; only body positions/velocities
-/// + integrator scratch + simulation time are mutated.
+/// units must already match the record; body positions/velocities,
+/// integrator scratch, `t`, and `steps` are mutated.
+///
+/// **Diagnostic baseline:** energy/Lz baselines are taken from the
+/// post-restore state, so subsequent `rel_energy_error` /
+/// `rel_angular_momentum_error` readings measure drift from
+/// `t = snapshot.t`, not from `t = 0` of the original record. Compare
+/// against the `Diagnostic` frames in the source record if you need
+/// continuity with the original timeline.
 pub fn restore_into(
     sys: &mut System,
     record: &Record,
@@ -143,6 +150,7 @@ pub fn restore_into(
         b.vel_z = s.vel[2];
     }
     sys.t = snap.t;
+    sys.steps = resume.step_count;
     sys.integrator.restore_resume_state(&resume.bytes)?;
     sys.refresh_energy_diagnostics();
     Ok(())

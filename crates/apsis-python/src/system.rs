@@ -567,6 +567,7 @@ impl PySystem {
         dense = false,
         diagnostics_every_steps = None,
         diagnostics_every_time = None,
+        capture_resume = false,
     ))]
     #[allow(clippy::too_many_arguments)]
     fn attach_record(
@@ -578,6 +579,7 @@ impl PySystem {
         dense: bool,
         diagnostics_every_steps: Option<u32>,
         diagnostics_every_time: Option<f64>,
+        capture_resume: bool,
     ) -> PyResult<()> {
         use apsis::records::{
             DiagnosticCadence, RecordHook, RecordPolicy, provenance::header_from_system,
@@ -609,7 +611,8 @@ impl PySystem {
         })?;
         let hook = RecordHook::with_header(&path, header, policy)
             .map_err(|e| pyo3::exceptions::PyIOError::new_err(format!("apsis record open: {e}")))?
-            .with_diagnostics(diagnostics);
+            .with_diagnostics(diagnostics)
+            .with_resume_capture(capture_resume);
         self.inner.hooks_mut().register(0, Box::new(hook));
         Ok(())
     }

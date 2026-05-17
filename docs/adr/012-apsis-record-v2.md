@@ -21,9 +21,12 @@ SimulationArchive:
 
 - **Mid-run resume.** REBOUND restores integrator scratch (IAS15
   b-coefficients, Kepler step state, Mercurius hybrid mode) from any
-  snapshot index; apsis cannot. For long runs that crashed, "re-run
-  from initial state" costs the wall-clock the failed run already
-  consumed.
+  snapshot index; apsis cannot. Branching a completed run from a
+  midpoint to explore alternate scenarios (e.g. perturbing a planet's
+  velocity at year 500 of a 1000-year run) requires re-integrating
+  from t=0. Recovery from a crashed run is a separate, harder problem
+  (`Record::open` rejects records without a trailer); v0.2 ships the
+  branch-from-checkpoint capability only.
 - **Diagnostic emitter.** Energy and angular-momentum drift over time
   is the first numerical-stability question any reader asks. Reserving
   a `Diagnostic` frame kind without shipping an emitter ships

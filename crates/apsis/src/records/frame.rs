@@ -41,10 +41,14 @@ pub struct Diagnostic {
 /// Per-integrator scratch state captured at the moment of a Snapshot.
 /// Format is integrator-internal; consumers route by the record header's
 /// `integrator.kind` to the matching [`Integrator::restore_resume_state`]
-/// implementation.
+/// implementation. `step_count` carries the System-level step counter
+/// at capture so a restored System fires periodic events (COM
+/// recentering at every 97 steps, heartbeats, …) on the same schedule
+/// the original run did.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ResumeState {
     pub t: f64,
+    pub step_count: u64,
     pub bytes: Vec<u8>,
 }
 
@@ -104,8 +108,9 @@ impl Frame {
             },
             Frame::ResumeState(rs) => {
                 let n = rs.bytes.len() as u32;
-                let payload_len = 4 + rs.bytes.len();
+                let payload_len = 8 + 4 + rs.bytes.len();
                 write_header(w, KIND_RESUME_STATE, rs.t, payload_len as u32)?;
+                w.write_all(&rs.step_count.to_le_bytes())?;
                 w.write_all(&n.to_le_bytes())?;
                 w.write_all(&rs.bytes)?;
             },
@@ -175,9 +180,10 @@ impl Frame {
                 Frame::Diagnostic(Diagnostic { t, d_energy_rel, d_lz_rel })
             },
             KIND_RESUME_STATE => {
-                let n = u32::from_le_bytes(payload[..4].try_into().unwrap()) as usize;
-                let bytes = payload[4..4 + n].to_vec();
-                Frame::ResumeState(ResumeState { t, bytes })
+                let step_count = u64::from_le_bytes(payload[..8].try_into().unwrap());
+                let n = u32::from_le_bytes(payload[8..12].try_into().unwrap()) as usize;
+                let bytes = payload[12..12 + n].to_vec();
+                Frame::ResumeState(ResumeState { t, step_count, bytes })
             },
             KIND_TRAILER => {
                 let step_count = u64::from_le_bytes(payload[..8].try_into().unwrap());
@@ -249,6 +255,7 @@ mod tests {
     fn resume_state_round_trip() {
         let rs = Frame::ResumeState(ResumeState {
             t: 7.25,
+            step_count: 12345,
             bytes: vec![0xDE, 0xAD, 0xBE, 0xEF, 0x01, 0x02, 0x03],
         });
         assert_eq!(round_trip(&rs), rs);
@@ -256,7 +263,7 @@ mod tests {
 
     #[test]
     fn resume_state_empty_payload_round_trips() {
-        let rs = Frame::ResumeState(ResumeState { t: 0.0, bytes: vec![] });
+        let rs = Frame::ResumeState(ResumeState { t: 0.0, step_count: 0, bytes: vec![] });
         assert_eq!(round_trip(&rs), rs);
     }
 

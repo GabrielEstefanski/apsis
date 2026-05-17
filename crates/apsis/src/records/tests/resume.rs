@@ -40,16 +40,13 @@ fn assert_bodies_bit_equal(a: &System, b: &System) {
 
 /// Run a recorded session for `total_steps` and return the opened
 /// record. Snapshot policy emits every `snap_every` steps with resume
-/// state captured alongside. `total_steps` MUST stay below 97 so the
-/// System's periodic COM recentering never fires and confuses the
-/// per-snapshot bit-equality contract.
+/// state captured alongside.
 fn record_session(
     kind: IntegratorKind,
     path: &std::path::Path,
     total_steps: usize,
     snap_every: u32,
 ) -> Record {
-    assert!(total_steps < 97, "guard against COM-recentering at step 97");
     let _ = std::fs::remove_file(path);
     let mut sys = System::new(sun_earth_jupiter(), UnitSystem::canonical())
         .with_integrator(kind)
@@ -108,6 +105,32 @@ fn ias15_resume_yields_bit_equal_continuation() {
 
     let mut straight = fresh_system(IntegratorKind::Ias15);
     for _ in 0..50 {
+        straight.step();
+    }
+
+    assert_bodies_bit_equal(&resumed, &straight);
+    let _ = std::fs::remove_file(&p);
+}
+
+#[test]
+fn whfast_resume_survives_com_recentering_boundary() {
+    // System recenters COM every 97 steps. Resume must restore sys.steps
+    // from the ResumeState payload so the periodic event fires at the
+    // same sim time as in the straight-through run, not at resumed-step 97.
+    let p = std::env::temp_dir().join("apsis-resume-whfast-com.apsis");
+    let record = record_session(IntegratorKind::WHFast, &p, 150, 10);
+    // Snapshots at steps 0/10/.../150 — idx 5 = step 50 (before COM at 97).
+    let remaining = 150 - 50;
+
+    let mut resumed = fresh_system(IntegratorKind::WHFast);
+    restore_into(&mut resumed, &record, 5).unwrap();
+    assert_eq!(resumed.steps(), 50, "restore_into must set sys.steps from ResumeState");
+    for _ in 0..remaining {
+        resumed.step();
+    }
+
+    let mut straight = fresh_system(IntegratorKind::WHFast);
+    for _ in 0..150 {
         straight.step();
     }
 

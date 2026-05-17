@@ -127,8 +127,12 @@ impl RecordHook {
             return;
         }
         let bytes = ctx.resume_state.clone().unwrap_or_default();
-        self.write_frame(&Frame::ResumeState(ResumeState { t: ctx.t, bytes }))
-            .expect("RecordHook: write resume state");
+        self.write_frame(&Frame::ResumeState(ResumeState {
+            t: ctx.t,
+            step_count: ctx.steps,
+            bytes,
+        }))
+        .expect("RecordHook: write resume state");
     }
 }
 
