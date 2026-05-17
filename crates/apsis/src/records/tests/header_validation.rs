@@ -37,7 +37,7 @@ fn unsupported_format_version_errors() {
 fn truncated_header_errors() {
     let mut bytes = Vec::new();
     bytes.extend_from_slice(b"APSR");
-    bytes.extend_from_slice(&1u16.to_le_bytes());
+    bytes.extend_from_slice(&crate::records::format::FORMAT_VER.to_le_bytes());
     bytes.extend_from_slice(&0u16.to_le_bytes());
     bytes.extend_from_slice(&100u64.to_le_bytes()); // claims 100 bytes; file ends
     let p = write_bytes("trunc", &bytes);
@@ -99,7 +99,7 @@ fn incompatible_kernel_errors_at_open() {
     let toml = header.to_toml().unwrap();
     let mut bytes = Vec::new();
     bytes.extend_from_slice(b"APSR");
-    bytes.extend_from_slice(&1u16.to_le_bytes());
+    bytes.extend_from_slice(&crate::records::format::FORMAT_VER.to_le_bytes());
     bytes.extend_from_slice(&0u16.to_le_bytes());
     bytes.extend_from_slice(&(toml.len() as u64).to_le_bytes());
     bytes.extend_from_slice(toml.as_bytes());
@@ -153,7 +153,7 @@ fn missing_trailer_errors() {
     let toml = header.to_toml().unwrap();
     let mut bytes = Vec::new();
     bytes.extend_from_slice(b"APSR");
-    bytes.extend_from_slice(&1u16.to_le_bytes());
+    bytes.extend_from_slice(&crate::records::format::FORMAT_VER.to_le_bytes());
     bytes.extend_from_slice(&0u16.to_le_bytes());
     bytes.extend_from_slice(&(toml.len() as u64).to_le_bytes());
     bytes.extend_from_slice(toml.as_bytes());

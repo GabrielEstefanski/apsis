@@ -67,14 +67,22 @@ module via a new `Integrator::resume_state(&self) -> ResumeStateBytes`
 + `Integrator::restore_from(&mut self, ResumeStateBytes)` trait pair
 (default no-op for stateless integrators).
 
-### `EnergyTrackerHook` — second built-in `SimHook`
+### Diagnostic emission opt-in on `RecordHook`
 
-Emits a `Diagnostic` frame (kind `0x02`) at a configurable cadence
-carrying ΔE/E, ΔLz/Lz, ΔP/P. Registered independently of
-`RecordHook` so the two compose: a user wanting full provenance +
-energy diagnostics registers both. Validates the hook system as
-genuine extension surface by giving it a second in-tree consumer
-whose purpose differs from the first.
+`RecordHook` gains a `with_diagnostics(DiagnosticCadence)` builder.
+When enabled, the hook emits a `Diagnostic` frame (kind `0x03`) at
+the configured cadence carrying ΔE/E and ΔLz/Lz — the two drifts
+named in §Context. Linear momentum is omitted: every integrator
+apsis ships uses pairwise Newton-third-law forces, so `Σ m·Δv` is
+conserved to roundoff and is a sanity gate rather than a drift
+diagnostic; sims set up with `move_to_center_of_momentum()` also
+have `|P₀| ≈ 0`, making any relative normalisation degenerate.
+
+Diagnostic cadence is intentionally orthogonal to snapshot cadence
+(`RecordPolicy`): a `BookendsAndEvents` policy with
+`DiagnosticCadence::EveryNSteps(100)` is the expected long-run
+configuration. Cadence options mirror `RecordPolicy`:
+`Off | EveryNSteps(u32) | EveryTime(f64)`, default `Off`.
 
 ### Semantic `Record::diff` API
 
@@ -169,11 +177,13 @@ files dispatch on the version field and read the older schema; the
 reserved `0x02–0x0F` core-kind range absorbs the new `Diagnostic` and
 `ResumeState` kinds.
 
-**Hook composition validated:** `EnergyTrackerHook` registered
-alongside `RecordHook` produces a record carrying both Snapshot and
-Diagnostic frames. The hook system's priority-ordered dispatch is now
-load-bearing in two distinct ways (write a certificate, emit
-diagnostics), not just one.
+**RecordHook gains a second responsibility:** writing snapshots +
+events (provenance) and emitting periodic conservation drifts
+(diagnostics). Both belong to "what this record captures from one
+run", which is the cohesive scope of the certificate. A second hook
+publishing Diagnostic frames was considered and rejected: two hooks
+writing the same `.apsis` file would need `Arc<Mutex<RecordWriter>>`
+coordination for a single-file output that has no other producer.
 
 **Paper claim strengthens:** the v0.1 claim was
 "`{record, Cargo.lock}` is the content-addressable closure of an apsis
