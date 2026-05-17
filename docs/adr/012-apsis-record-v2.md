@@ -57,15 +57,29 @@ hook is constructed with `RecordHook::with_resume_capture(true)`.
 Default omits ResumeState frames — they are several KB per snapshot
 for IAS15, so opting in is explicit.
 
-`Record::resume_from(snapshot_idx) -> Result<System, _>` reads the
-`Snapshot` + `ResumeState` pair at the given index and rebuilds a
-`System` whose subsequent `step()` calls produce a bit-equal
+`records::restore_into(&mut System, &Record, snapshot_idx)` reloads
+the n-th captured Snapshot + ResumeState pair into an existing
+System. The caller's System must already match the recorded run on
+body count, integrator kind, and units; only body positions/
+velocities + integrator scratch + simulation time are mutated.
+Subsequent `step()` calls on the restored System produce a bit-equal
 continuation of the original run.
 
+Full reconstruction (`Record::resume_from(snapshot_idx) -> System`)
+is deferred: it requires mapping `BodyMeta` back to constructor
+presets (luminosity and `class` taxonomy are write-only in the
+current `BodyMeta` schema) and walking the operator registry to
+re-instantiate Hamiltonian / non-conservative perturbations from
+their crate-hash entries. Both belong to a follow-up alongside the
+operator re-instantiation protocol.
+
 Per-integrator state serialisation lives in each integrator's own
-module via a new `Integrator::resume_state(&self) -> ResumeStateBytes`
-+ `Integrator::restore_from(&mut self, ResumeStateBytes)` trait pair
-(default no-op for stateless integrators).
+module via a new `Integrator::resume_state(&self) -> Vec<u8>` +
+`Integrator::restore_resume_state(&mut self, &[u8]) ->
+Result<(), ResumeError>` trait pair (default no-op for stateless
+integrators). v0.2 ships IAS15 (`b`/`e`/`csb`/`csx`/`csv` +
+`dt_next`/`dt_last_accepted`/`dt_dir_prev`), WHFast (`cs_pos`/
+`cs_vel`), and Mercurius (`alpha` + embedded IAS15 payload).
 
 ### Diagnostic emission opt-in on `RecordHook`
 
