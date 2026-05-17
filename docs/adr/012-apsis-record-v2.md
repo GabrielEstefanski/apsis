@@ -139,7 +139,7 @@ the `RecordDiff` as a human-readable report.
 
 ### Header enrichment
 
-Three new fields in `[apsis]` section:
+Two new fields in `[apsis]` section:
 
 ```toml
 [apsis]
@@ -148,23 +148,23 @@ git_sha = "..."             # existing
 created_utc = "..."         # existing
 rustc_version = "1.95.0 (cd5fbb0 2026-04-12)"   # NEW
 generated_by = "apsis 0.1.0"                     # NEW
-[apsis.platform]                                 # NEW (optional)
-os_kernel = "Linux 6.8.0-31-generic"             # NEW (omitted if detection unavailable)
 ```
 
-`rustc_version` captured by extending the existing `build.rs`. The
-field is mandatory in v0.2 readers; absent values cause
-`UnknownRustcVersion` (warning, not error — old records can still be
-opened, just without rustc provenance).
+`rustc_version` captured by extending the existing `build.rs`. f64
+codegen varies between rustc releases; the field is part of the
+reproducibility envelope, not just informational. Empty when the
+build script couldn't invoke rustc (vendored or sandboxed build).
 
-`generated_by` defaults to `format!("{} {}", CARGO_PKG_NAME,
-CARGO_PKG_VERSION)`. Future external tooling (Python apsis-py
-wrapper, custom Rust binaries) can override.
+`generated_by` defaults to `format!("apsis {}", CARGO_PKG_VERSION)`.
+Future external tooling (Python apsis-py wrapper, custom Rust
+binaries) can override.
 
-`os_kernel` is optional and per-platform: Linux reads from `uname`,
-macOS likewise, Windows from `GetVersionEx` (or skipped if no
-straightforward read). `hostname` deliberately omitted — privacy risk
-in published research.
+`hostname` deliberately omitted — privacy risk in published research.
+OS-level identifiers (`os_kernel` from `uname` / `GetVersionEx`) were
+considered and dropped: the reproducibility surface a verifier
+exercises is `{rustc_version, Cargo.lock, source SHA}`, not the host
+OS; OS-version skew within that envelope is already covered by the
+Rust toolchain pin.
 
 ### Reader-side operator/kernel validation
 
