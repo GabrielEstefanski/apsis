@@ -770,6 +770,53 @@ impl Integrator for Mercurius {
     fn hill_factor(&self) -> Option<f64> {
         Some(self.alpha())
     }
+
+    fn resume_state(&self) -> Vec<u8> {
+        mercurius_resume::encode(self)
+    }
+
+    fn restore_resume_state(
+        &mut self,
+        bytes: &[u8],
+    ) -> Result<(), crate::physics::integrator::traits::ResumeError> {
+        mercurius_resume::decode_into(self, bytes)
+    }
+}
+
+mod mercurius_resume {
+    use super::Mercurius;
+    use crate::physics::integrator::traits::{Integrator, ResumeError};
+
+    /// Layout: `magic(b"MER")` ‖ `version(u8 = 1)` ‖ `alpha(f64 LE)` ‖
+    /// `inner_len(u32 LE)` ‖ embedded `Ias15::resume_state()` bytes.
+    /// Particles_backup / dcrit / encounter_map / acc_int / acc_close
+    /// are intra-step scratch (rebuilt each outer step) and excluded;
+    /// COM state is reconstructed from body positions at restore time.
+    const MAGIC: &[u8; 3] = b"MER";
+    const VERSION: u8 = 1;
+
+    pub fn encode(s: &Mercurius) -> Vec<u8> {
+        let inner = s.ias15.resume_state();
+        let mut out = Vec::with_capacity(3 + 1 + 8 + 4 + inner.len());
+        out.extend_from_slice(MAGIC);
+        out.push(VERSION);
+        out.extend_from_slice(&s.alpha.to_le_bytes());
+        out.extend_from_slice(&(inner.len() as u32).to_le_bytes());
+        out.extend_from_slice(&inner);
+        out
+    }
+
+    pub fn decode_into(s: &mut Mercurius, bytes: &[u8]) -> Result<(), ResumeError> {
+        if bytes.len() < 16 || &bytes[..3] != MAGIC || bytes[3] != VERSION {
+            return Err(ResumeError::UnsupportedFormat);
+        }
+        s.alpha = f64::from_le_bytes(bytes[4..12].try_into().unwrap());
+        let inner_len = u32::from_le_bytes(bytes[12..16].try_into().unwrap()) as usize;
+        if bytes.len() < 16 + inner_len {
+            return Err(ResumeError::Truncated);
+        }
+        s.ias15.restore_resume_state(&bytes[16..16 + inner_len])
+    }
 }
 
 // ── CloseFieldForceModel ──────────────────────────────────────────────────────

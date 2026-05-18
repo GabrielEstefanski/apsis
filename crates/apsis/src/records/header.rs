@@ -20,6 +20,21 @@ pub struct Apsis {
     pub version: String,
     pub git_sha: String,
     pub created_utc: String,
+    /// `rustc --version` output captured at build time. Empty when the
+    /// build script couldn't invoke rustc (vendored, sandboxed build).
+    /// f64 codegen varies between rustc releases; the field is part of
+    /// the reproducibility envelope, not just informational.
+    #[serde(default)]
+    pub rustc_version: String,
+    /// Tool that emitted this record. Defaults to `"apsis <version>"`
+    /// for records produced by the in-tree writer; downstream wrappers
+    /// (alternative bindings, custom binaries) override.
+    #[serde(default = "default_generated_by")]
+    pub generated_by: String,
+}
+
+fn default_generated_by() -> String {
+    format!("apsis {}", env!("CARGO_PKG_VERSION"))
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -50,6 +65,15 @@ pub struct KernelMeta {
     pub variant: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub softening: Option<f64>,
+    /// Actual exactness of the kernel that wrote this record. Read by
+    /// `Record::open` to validate operator `KernelRequirements` without
+    /// reconstructing the kernel. `None` on v0.1 records (omitted from
+    /// the schema then); v0.2 writers always populate.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exactness: Option<Exactness>,
+    /// Actual continuity of the kernel. See `exactness` for v0.1 backward read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub continuity: Option<Continuity>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -113,6 +137,8 @@ mod tests {
                 version: "0.1.0".into(),
                 git_sha: "abc123".into(),
                 created_utc: "2026-05-16T11:23:45Z".into(),
+                rustc_version: "rustc 1.95.0".into(),
+                generated_by: "apsis 0.1.0".into(),
             },
             reproducibility: Reproducibility { cargo_lock_blake3: "deadbeef".into(), seed: 42 },
             unit_system: UnitSystemMeta {
@@ -127,7 +153,12 @@ mod tests {
                 initial_dt: 0.01,
                 params: serde_json::json!({"epsilon": 1.0e-9}).as_object().unwrap().clone(),
             },
-            kernel: KernelMeta { variant: "Newton".into(), softening: None },
+            kernel: KernelMeta {
+                variant: "Newton".into(),
+                softening: None,
+                exactness: Some(Exactness::Exact),
+                continuity: Some(Continuity::Smooth),
+            },
             operators: vec![OperatorMeta {
                 name: "apsis-1pn".into(),
                 version: "0.1.0".into(),
@@ -164,7 +195,12 @@ mod tests {
     #[test]
     fn kernel_softening_round_trip() {
         let mut h = sample();
-        h.kernel = KernelMeta { variant: "Plummer".into(), softening: Some(1.0e-4) };
+        h.kernel = KernelMeta {
+            variant: "Plummer".into(),
+            softening: Some(1.0e-4),
+            exactness: Some(Exactness::Softened),
+            continuity: Some(Continuity::Smooth),
+        };
         let s = h.to_toml().unwrap();
         let back: Header = Header::from_toml(&s).unwrap();
         assert_eq!(h.kernel, back.kernel);

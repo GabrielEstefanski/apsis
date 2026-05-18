@@ -296,6 +296,66 @@ impl Integrator for WHFast {
     fn kind(&self) -> IntegratorKind {
         IntegratorKind::WHFast
     }
+
+    fn resume_state(&self) -> Vec<u8> {
+        whfast_resume::encode(&self.cs_pos, &self.cs_vel)
+    }
+
+    fn restore_resume_state(
+        &mut self,
+        bytes: &[u8],
+    ) -> Result<(), crate::physics::integrator::traits::ResumeError> {
+        let (cs_pos, cs_vel) = whfast_resume::decode(bytes)?;
+        self.cs_pos = cs_pos;
+        self.cs_vel = cs_vel;
+        Ok(())
+    }
+}
+
+mod whfast_resume {
+    use crate::math::Vec3;
+    use crate::physics::integrator::traits::ResumeError;
+
+    /// Layout: `magic(b"WHF")` ‖ `version(u8 = 1)` ‖ `n(u32 LE)` ‖
+    /// per-body `[cs_pos.{x,y,z}, cs_vel.{x,y,z}]` as f64 LE.
+    const MAGIC: &[u8; 3] = b"WHF";
+    const VERSION: u8 = 1;
+
+    pub fn encode(cs_pos: &[Vec3], cs_vel: &[Vec3]) -> Vec<u8> {
+        debug_assert_eq!(cs_pos.len(), cs_vel.len());
+        let n = cs_pos.len();
+        let mut out = Vec::with_capacity(3 + 1 + 4 + n * 48);
+        out.extend_from_slice(MAGIC);
+        out.push(VERSION);
+        out.extend_from_slice(&(n as u32).to_le_bytes());
+        for (p, v) in cs_pos.iter().zip(cs_vel.iter()) {
+            for c in [p.x, p.y, p.z, v.x, v.y, v.z] {
+                out.extend_from_slice(&c.to_le_bytes());
+            }
+        }
+        out
+    }
+
+    pub fn decode(bytes: &[u8]) -> Result<(Vec<Vec3>, Vec<Vec3>), ResumeError> {
+        if bytes.len() < 8 || &bytes[..3] != MAGIC || bytes[3] != VERSION {
+            return Err(ResumeError::UnsupportedFormat);
+        }
+        let n = u32::from_le_bytes(bytes[4..8].try_into().unwrap()) as usize;
+        let needed = 8 + n * 48;
+        if bytes.len() < needed {
+            return Err(ResumeError::Truncated);
+        }
+        let mut cs_pos = Vec::with_capacity(n);
+        let mut cs_vel = Vec::with_capacity(n);
+        let mut off = 8;
+        for _ in 0..n {
+            let read = |off: usize| f64::from_le_bytes(bytes[off..off + 8].try_into().unwrap());
+            cs_pos.push(Vec3::new(read(off), read(off + 8), read(off + 16)));
+            cs_vel.push(Vec3::new(read(off + 24), read(off + 32), read(off + 40)));
+            off += 48;
+        }
+        Ok((cs_pos, cs_vel))
+    }
 }
 
 /// Half-kick on planet velocities, compensated against `cs_vel`.

@@ -286,12 +286,27 @@ class System:
         every_steps: int | None = None,
         every_time: float | None = None,
         dense: bool = False,
+        diagnostics_every_steps: int | None = None,
+        diagnostics_every_time: float | None = None,
+        capture_resume: bool = False,
     ) -> None:
         """Attach an Apsis Record writer to this system. Subsequent steps
         write to ``path``; the file is closed (with a trailer) on
-        :meth:`finish` or garbage collection. At most one of
-        ``every_steps`` / ``every_time`` / ``dense`` may be set; default
-        is bookend snapshots + events only."""
+        :meth:`finish` or garbage collection.
+
+        Snapshot cadence — at most one of ``every_steps`` /
+        ``every_time`` / ``dense`` may be set; default is bookend
+        snapshots + events only.
+
+        Diagnostic cadence — at most one of ``diagnostics_every_steps``
+        / ``diagnostics_every_time`` may be set. When enabled, the
+        record carries ``Diagnostic`` frames (``ΔE/E``, ``ΔLz/Lz``)
+        readable via :meth:`Record.diagnostics`.
+
+        ``capture_resume`` emits a ``ResumeState`` frame alongside every
+        ``Snapshot``, enabling mid-run restore via the Rust-side
+        ``apsis::records::restore_into`` API. Several KB per snapshot
+        for IAS15, so off by default."""
 
     def sample(
         self,
@@ -618,6 +633,11 @@ class Record:
     def snapshot_count(self) -> int:
         """Number of dense Snapshot frames (initial bookend + per-policy
         snapshots + final bookend)."""
+
+    def diagnostics(self) -> list[tuple[float, float, float]]:
+        """Diagnostic frames as ``(t, d_energy_rel, d_lz_rel)`` tuples in
+        time order. Empty when the record was written without a
+        diagnostic cadence."""
 
 
 # ── units submodule ───────────────────────────────────────────────────────────
