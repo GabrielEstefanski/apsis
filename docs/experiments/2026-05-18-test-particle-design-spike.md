@@ -136,7 +136,20 @@ do not gate.
 
 ## Results
 
-To fill post-implementation.
+### Baseline (pre-fix)
+
+Captured against `develop` tip (commit `4ddef70`):
+
+| Metric | Value | Notes |
+|---|---|---|
+| `\|dE/E\|` @ 50 orbits | `1.164 × 10⁻⁵` | matches issue body `~1.16e-5` |
+| `a_final` (vs μ_eff) | `1.1250` | identical to `a_initial` |
+| `\|Δa/a\|` | `< 1e-15` | already passes; trajectory physically stable |
+| `r_final`, `v_final` | `1.1317`, `0.8891` | |
+
+**Gate 1 — PASS.** Diagnosis has not shifted; proceed to
+implementation. Raw stdout and CSV under
+`validation/test-particle/`.
 
 ## References
 
