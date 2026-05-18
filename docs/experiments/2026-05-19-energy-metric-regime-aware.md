@@ -287,6 +287,35 @@ green. Diagnosis is stable; ready for implementation.
 
 Raw stdout under `validation/energy-metric/`.
 
+### Post-fix
+
+Captured 2026-05-19 against the `feat(system): regime-aware
+energy/Lz drift metric` commit:
+
+| Scenario | Pre-fix | Post-fix | Gate result |
+|---|---|---|---|
+| `radiation_dust.py` | `\|dE/E\| = 1.200 × 10⁻⁵` | `\|dE/E\| = NaN` (Python surface; core returns `None`) | **Gate 2 PASS** — regime detected |
+| `kepler_2body` | `\|dE/E\| = 3.775 × 10⁻¹⁵` | `\|dE/E\| = 3.775 × 10⁻¹⁵` | **Gate 2 PASS** — well-conditioned unchanged |
+| `mercury_precession_gate` | PASS | PASS | **Gate 3 PASS** — no regression |
+| `cargo test -p apsis --lib` | 558 / 558 | 566 / 566 (8 new `regime` unit tests) | **Gate 3 PASS** |
+
+NaN at the Python surface is a fallback the binding applies
+because the PyO3 accessor still returns `f64`; the proper
+`Optional[float]` parity lands in a follow-up commit alongside
+stubs and smoke tests.
+
+### Controller behaviour (Gate 4)
+
+Tested implicitly through the lib suite (which exercises the
+adaptive controller on Kepler / figure-8 / Pythagorean scenarios,
+all well-conditioned). No regression. The
+`DisabledPrecisionLimited` branch is exercised in unit tests on
+`DtController` (added alongside the integration above).
+
+Explicit degenerate-regime controller test deferred to the
+Python-binding commit, where the dust scenario can be exercised
+end-to-end with `adaptive_stats()` introspection.
+
 ## References
 
 - Issue #146 — `https://github.com/GabrielEstefanski/apsis/issues/146`

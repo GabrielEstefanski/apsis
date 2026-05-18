@@ -73,4 +73,43 @@ mod tests {
         let expected = f64::EPSILON.sqrt();
         assert_eq!(MIN_RELATIVE_DENOMINATOR, expected);
     }
+
+    // ── Integration tests: end-to-end regime detection through System ──
+
+    use crate::core::system::System;
+    use crate::domain::body::Body;
+    use crate::physics::integrator::IntegratorKind;
+    use crate::units::UnitSystem;
+
+    #[test]
+    fn well_conditioned_kepler_returns_some_rel_drift() {
+        let bodies = vec![
+            Body::star(1.0).at(0.0, 0.0).with_velocity(0.0, 0.0),
+            Body::rocky(1e-3).at(1.0, 0.0).with_velocity(0.0, 1.0),
+        ];
+        let mut sys = System::new(bodies, UnitSystem::canonical())
+            .with_integrator(IntegratorKind::Ias15)
+            .with_dt(1e-3);
+        for _ in 0..100 {
+            sys.step();
+        }
+        assert!(sys.energy_delta().is_some(), "Kepler regime must report Some(rel)");
+        assert!(sys.lz_delta().is_some(), "Kepler Lz regime must report Some(rel)");
+    }
+
+    #[test]
+    fn precision_limited_dust_returns_none_rel_drift() {
+        let bodies = vec![
+            Body::star(1.0).at(0.0, 0.0).with_velocity(0.0, 0.0),
+            Body::rocky(1e-15).at(1.0, 0.0).with_velocity(0.0, 1.0),
+        ];
+        let mut sys = System::new(bodies, UnitSystem::canonical())
+            .with_integrator(IntegratorKind::Ias15)
+            .with_dt(1e-3);
+        for _ in 0..10 {
+            sys.step();
+        }
+        assert_eq!(sys.energy_delta(), None, "dust scenario |E_initial| ~ 1e-15 must report None");
+        assert!(sys.abs_energy_drift().is_finite(), "abs drift remains finite");
+    }
 }
