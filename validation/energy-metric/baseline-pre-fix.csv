@@ -1,0 +1,6 @@
+scenario,regime,baseline_metric,baseline_value,expected_post_fix,notes
+radiation_dust.py,degenerate (|E_initial| ~ 5e-16),|dE/E|,1.200e-05,None,floor-inflated (~2000x); honest abs drift ~1e-17
+kepler_2body,well-conditioned (|E_initial| ~ 0.5),|dE/E|,3.775e-15,Some(3.775e-15) ±1 ULP,IAS15-Kepler typical noise floor
+mercury_precession_gate,well-conditioned,4.4 ppm,PASS,PASS,cross-check Gate 3 (must remain PASS)
+develop_tip,,,4ddef70+147,,post-#147 merge
+date,2026-05-19,,,,

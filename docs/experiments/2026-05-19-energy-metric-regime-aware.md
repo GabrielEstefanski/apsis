@@ -271,7 +271,21 @@ or near-cancellation regimes documented as
 
 ## Results
 
-To fill post-implementation.
+### Baseline (pre-fix)
+
+Captured against `develop` tip (commit `4ddef70` post-#147 merge):
+
+| Scenario | Regime | Metric | Value | Expected post-fix |
+|---|---|---|---|---|
+| `radiation_dust.py` | degenerate (`\|E_initial\| ≈ 5e-16`) | `\|dE/E\|` | `1.200 × 10⁻⁵` | `None` (regime degenerate); abs drift `~1e-17` |
+| `kepler_2body` | well-conditioned (`\|E_initial\| ≈ 0.5`) | `\|dE/E\|` | `3.775 × 10⁻¹⁵` | `Some(3.775e-15)` ±1 ULP |
+| `mercury_precession_gate` | well-conditioned | 4.4 ppm vs GR | PASS | PASS |
+
+**Gate 1 — PASS.** Dust value matches post-#147 develop tip;
+Kepler value matches IAS15 noise floor expectation; Mercury gate
+green. Diagnosis is stable; ready for implementation.
+
+Raw stdout under `validation/energy-metric/`.
 
 ## References
 
