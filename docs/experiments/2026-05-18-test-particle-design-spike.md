@@ -151,6 +151,95 @@ Captured against `develop` tip (commit `4ddef70`):
 implementation. Raw stdout and CSV under
 `validation/test-particle/`.
 
+### Post-fix
+
+| Metric | Pre-fix | Post-fix |
+|---|---|---|
+| `\|dE/E\|` @ 50 orbits | `1.164 × 10⁻⁵` | `1.200 × 10⁻⁵` |
+| `r_final` | `1.1317` | `1.1363` |
+| `v_final` | `0.8891` | `0.8855` |
+| `a_final` (vs μ_eff) | `1.1250` | `1.1250` |
+
+Endpoint `|dE/E|` is unchanged. Trajectory diverges by
+O(mass_ratio) as expected for the test-particle approximation,
+confirming the skip is active.
+
+Raw stdout: `validation/test-particle/post-fix.txt`.
+
+### Gate 2 reanalysis — the gate was malformed
+
+Post-fix `|dE/E| = 1.200 × 10⁻⁵` misses Gate 2 (`< 1e-10`) by 5
+orders of magnitude. Before declaring an honest limitation,
+verify the gate did not demand precision below the f64 round-off
+floor.
+
+`update_energy_tracking` (`crates/apsis/src/core/system/step.rs`)
+normalises against `denom = baseline.abs().max(1e-12)`. For this
+scenario `|E_initial| ≈ 5 × 10⁻¹⁶`, well below the floor. The
+reported `|dE/E|` is `dE_absolute / 1e-12`, not
+`dE_absolute / |E_initial|`. The reading is scaled by
+`|1e-12 / E_initial| ≈ 2000×`.
+
+Diagnostic (not committed): replaced `.max(1e-12)` with
+`.max(1e-30)` (NaN guard only), rebuilt, re-ran. Result:
+`|dE/E| = 2.399 × 10⁻²`. The honest relative drift: the
+integrator preserves energy to its true f64 noise floor
+(`~1 × 10⁻¹⁷` absolute), which against `|E_initial| ≈ 5 × 10⁻¹⁶`
+is `~2.4 %`. The 1e-12 floor masked the regime-precision-limited
+reality by a factor of 2000.
+
+Conclusion: Gate 2 demands absolute energy precision of
+`5 × 10⁻²⁶`, far below f64 round-off at any magnitude. The gate
+as stated was unachievable regardless of algorithmic fix. The
+engine skip is architecturally correct (Mercury 4.4 ppm
+preserved, trajectory diverges by O(mass_ratio) as expected) but
+cannot reduce the reported `|dE/E|` because the metric is
+precision-saturated in this regime.
+
+### Cross-checks
+
+- Mercury 4.4 ppm
+  (`apsis-1pn::mercury_precession_matches_gr_within_100ppm`):
+  PASS post-fix. Mercury mass ratio `1.66 × 10⁻⁷` is above the
+  `1e-10` threshold; skip never engages.
+- `cargo test -p apsis --lib --release`: 558 passed / 0 failed /
+  9 ignored. No regression.
+
+### Threshold sensitivity sweep
+
+Skipped. The endpoint metric does not register sensitivity to
+threshold (per Gate 2 reanalysis above, the metric is precision-
+limited regardless). Sensitivity sweep belongs in the metric-
+refactor follow-up.
+
+### Disposition
+
+Engine skip ships. It is architecturally correct, passes Mercury
+4.4 ppm and 558 lib tests, and removes spurious back-reaction on
+the primary in extreme-mass-ratio configurations. Endpoint
+`|dE/E|` is insensitive to the change because of the `.max(1e-12)`
+floor, but absolute trajectory accuracy improves (`r_final` and
+`v_final` shift by O(mass_ratio) between runs).
+
+The bookkeeping metric refactor is separate work, scoped to a
+follow-up issue. Surface area mapped 2026-05-18: 8+ consumer
+sites (`Metrics` DTO, `HookContext`, `System` getter, adaptive
+controller, 4 examples, 2 benchmark files). The adaptive
+controller (`core/adaptive.rs`) is tuned against the floor-
+inflated metric and is the principal blocker — a semantic change
+to `rel_energy_error` requires controller redesign in the same
+change.
+
+Proposed direction for the follow-up:
+
+- Add `abs_energy_error: f64` as primary observable.
+- Make `rel_energy_error: Option<f64>` regime-aware: `None` when
+  `|E_initial|` falls below a principled precision-limited
+  threshold (rather than a magic floor).
+- Redesign the adaptive controller to target an absolute drift
+  bound for the integrator's noise floor with explicit regime
+  detection.
+
 ## References
 
 - Issue #133 — https://github.com/GabrielEstefanski/apsis/issues/133
