@@ -372,6 +372,21 @@ impl System {
         self.force_model.set_exact_threshold(n);
     }
 
+    pub fn test_particle_threshold(&self) -> f64 {
+        self.force_model.test_particle_threshold()
+    }
+
+    /// Clamped to `[0.0, 1.0]`. `0.0` disables suppression.
+    pub fn set_test_particle_threshold(&mut self, threshold: f64) {
+        self.force_model.set_test_particle_threshold(threshold);
+    }
+
+    #[must_use]
+    pub fn with_test_particle_threshold(mut self, threshold: f64) -> Self {
+        self.set_test_particle_threshold(threshold);
+        self
+    }
+
     // ── Close-encounter advisory ─────────────────────────────────────────────
 
     /// Set the close-encounter advisory threshold.

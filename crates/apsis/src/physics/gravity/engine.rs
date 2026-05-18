@@ -39,6 +39,9 @@ use super::kernel::{G, Kernel, NewtonKernel};
 use super::simd;
 use super::tree::{DEFAULT_LEAF, DIRECT_MODE_THRESHOLD, EXACT_THRESHOLD, NO_CHILD, Node, Octree};
 
+/// Mass-ratio cutoff for back-reaction suppression in the direct path.
+pub const DEFAULT_TEST_PARTICLE_THRESHOLD: f64 = 1e-10;
+
 // ── Leaf-pair dispatch ───────────────────────────────────────────────────── //
 
 /// Implementation that processes the leaf-pair phase of the two-phase
@@ -126,6 +129,7 @@ pub struct BarnesHutEngine {
     tree: Octree,
     /// N ≤ this → exact O(N²); N > this → Barnes-Hut traversal.
     exact_threshold: usize,
+    test_particle_threshold: f64,
     kernel: Arc<dyn Kernel>,
     /// Resolved at engine construction (and every [`set_kernel`](Self::set_kernel))
     /// from the kernel identity + host AVX2 detection. Read once per body
@@ -152,6 +156,7 @@ impl BarnesHutEngine {
         Self {
             tree: Octree::new(max_depth),
             exact_threshold: EXACT_THRESHOLD,
+            test_particle_threshold: DEFAULT_TEST_PARTICLE_THRESHOLD,
             kernel,
             leaf_pair_kernel,
         }
@@ -195,6 +200,15 @@ impl BarnesHutEngine {
     /// Current exact-evaluation threshold.
     pub fn exact_threshold(&self) -> usize {
         self.exact_threshold
+    }
+
+    pub fn test_particle_threshold(&self) -> f64 {
+        self.test_particle_threshold
+    }
+
+    /// Clamped to `[0.0, 1.0]`. `0.0` disables suppression.
+    pub fn set_test_particle_threshold(&mut self, threshold: f64) {
+        self.test_particle_threshold = threshold.clamp(0.0, 1.0);
     }
 
     /// `true` iff the engine is configured so direct O(N²) summation
@@ -280,7 +294,10 @@ impl BarnesHutEngine {
         let kernel: &dyn Kernel = &*self.kernel;
 
         if n <= self.exact_threshold {
-            return (exact_eval(arrays, kernel, acc), WalkCounters::default());
+            return (
+                exact_eval(arrays, kernel, self.test_particle_threshold, acc),
+                WalkCounters::default(),
+            );
         }
 
         let nodes = self.tree.nodes();
@@ -478,7 +495,12 @@ impl BarnesHutEngine {
 /// is observable on the Mercury 1PN gate, which sits at the f64 noise floor.
 ///
 /// Returns the total gravitational potential energy PE = Σᵢ<ⱼ mᵢ Φᵢⱼ.
-fn exact_eval(arrays: &BodyArrays, kernel: &dyn Kernel, acc: &mut [Vec3]) -> f64 {
+fn exact_eval(
+    arrays: &BodyArrays,
+    kernel: &dyn Kernel,
+    test_particle_threshold: f64,
+    acc: &mut [Vec3],
+) -> f64 {
     let n = arrays.len();
     let mut potential = 0.0_f64;
 
@@ -494,12 +516,16 @@ fn exact_eval(arrays: &BodyArrays, kernel: &dyn Kernel, acc: &mut [Vec3]) -> f64
             let mass_i = arrays.mass[i];
             let mass_j = arrays.mass[j];
 
-            acc[i].x += mass_j * dx * fac;
-            acc[i].y += mass_j * dy * fac;
-            acc[i].z += mass_j * dz * fac;
-            acc[j].x -= mass_i * dx * fac;
-            acc[j].y -= mass_i * dy * fac;
-            acc[j].z -= mass_i * dz * fac;
+            if mass_j / mass_i >= test_particle_threshold {
+                acc[i].x += mass_j * dx * fac;
+                acc[i].y += mass_j * dy * fac;
+                acc[i].z += mass_j * dz * fac;
+            }
+            if mass_i / mass_j >= test_particle_threshold {
+                acc[j].x -= mass_i * dx * fac;
+                acc[j].y -= mass_i * dy * fac;
+                acc[j].z -= mass_i * dz * fac;
+            }
 
             let phi_ij = -G * mass_j * kernel.potential(r_sq);
             potential += mass_i * phi_ij;
