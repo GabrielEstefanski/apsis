@@ -165,8 +165,7 @@ Run the following on `develop` tip and record current outputs:
    `1.200e-5`, the post-#147 value).
 2. `examples/kepler_2body.rs` — `|dE/E|` reading (non-degenerate;
    expect existing IAS15-Kepler typical value).
-3. `examples/figure_eight.rs` — `|dE/E|` reading (non-degenerate).
-4. Mercury 1PN precession gate
+3. Mercury 1PN precession gate
    (`apsis-1pn::mercury_precession_matches_gr_within_100ppm`) —
    PASS reading.
 
