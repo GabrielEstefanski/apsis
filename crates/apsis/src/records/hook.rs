@@ -115,10 +115,12 @@ impl RecordHook {
     }
 
     fn diagnostic_from_ctx(ctx: &HookContext<'_>) -> Diagnostic {
+        // Precision-limited regime serialises as NaN — readers detect
+        // with `.is_nan()`. Matches the CSV recorder convention.
         Diagnostic {
             t: ctx.t,
-            d_energy_rel: ctx.rel_energy_error.unwrap_or(0.0),
-            d_lz_rel: ctx.rel_angular_momentum_error.unwrap_or(0.0),
+            d_energy_rel: ctx.rel_energy_error.unwrap_or(f64::NAN),
+            d_lz_rel: ctx.rel_angular_momentum_error.unwrap_or(f64::NAN),
         }
     }
 

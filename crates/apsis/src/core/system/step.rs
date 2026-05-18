@@ -27,6 +27,12 @@ impl System {
     /// 6. Optional `heartbeat` tick when `steps % heartbeat_interval == 0`.
     /// 7. Apply post-step / event commands in insertion order.
     pub fn step(&mut self) {
+        // Prime the conservation baseline so the first hook fires with
+        // `rel_*_error = Some(0.0)`, not the uninitialised `None`.
+        if self.initial_energy.is_none() {
+            self.refresh_energy_diagnostics();
+        }
+
         // ── 1. pre_step hooks (observe pre-integration state) ────────────────
         let pre_cmds = if !self.hooks.is_empty() {
             let mut hooks = take_hooks(self);
