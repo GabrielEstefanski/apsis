@@ -8,21 +8,16 @@
 //! distribution, vendored source, sandboxed CI). The runtime treats an
 //! empty hash as "no commit known".
 //!
-//! # Why the dirty check (elevation over operator-crate convention)
+//! # Rerun policy
 //!
-//! The operator crates (apsis-1pn, apsis-radiation, apsis-central) capture
-//! `APSIS_<CRATE>_GIT_COMMIT` for `Operator::citation` without a dirty
-//! check. That is acceptable for human-facing citation strings, but the
-//! Apsis Record header carries `apsis.git_sha` as part of a paper-grade
-//! reproducibility claim: a reviewer holding `{record, Cargo.lock}` must
-//! be able to identify the source state bit-exactly. A SHA captured from
-//! a dirty working tree silently misidentifies the source. The `-dirty`
-//! suffix makes the discrepancy visible. Aligning the operator crates to
-//! the same standard is a future cleanup tracked separately.
-//!
-//! Re-runs only when `HEAD` or the index changes, not on every source
-//! edit, so the incremental build cost is one extra `git rev-parse` +
-//! one `git diff-index` per relevant change.
+//! The dirty-state check has to inspect the workdir, not just `.git/`
+//! state, because plain edits to source files don't touch `.git/index`
+//! until they are staged. The build script forces a rerun on every
+//! cargo invocation by declaring a nonexistent sentinel as a
+//! `rerun-if-changed` input — cargo emits a one-line warning about the
+//! missing file and reruns the script. Two `git` invocations per build
+//! is cheaper than a silently stale `-dirty` suffix in a paper-grade
+//! record header.
 
 use std::process::Command;
 
@@ -47,8 +42,16 @@ fn main() {
         }
     }
 
+    let rustc = Command::new(std::env::var("RUSTC").unwrap_or_else(|_| "rustc".into()))
+        .arg("--version")
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().to_string())
+        .unwrap_or_default();
+
     println!("cargo:rustc-env=APSIS_GIT_COMMIT={sha}");
-    println!("cargo:rerun-if-changed=../../.git/HEAD");
-    println!("cargo:rerun-if-changed=../../.git/index");
-    println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rustc-env=APSIS_RUSTC_VERSION={rustc}");
+    println!("cargo:rerun-if-changed=NONEXISTENT_BUILD_FORCE_RERUN");
 }

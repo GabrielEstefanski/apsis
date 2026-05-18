@@ -34,4 +34,10 @@ pub struct HookContext<'a> {
     pub rel_energy_error: f64,
     pub rel_angular_momentum_error: f64,
     pub phase: HookPhase,
+    /// Serialised integrator scratch, populated by the orchestrator
+    /// when at least one registered hook returns
+    /// [`SimHook::wants_resume_state`](super::SimHook::wants_resume_state)`
+    /// = true`. `None` otherwise — the field is per-step state, not a
+    /// permanent capability.
+    pub resume_state: Option<Vec<u8>>,
 }

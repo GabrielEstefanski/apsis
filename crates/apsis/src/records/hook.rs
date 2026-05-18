@@ -6,9 +6,9 @@ use std::path::Path;
 
 use crate::core::hooks::{CollisionEvent, Command, EscapeEvent, HookContext, SimHook};
 use crate::records::format::{FORMAT_VER, MAGIC};
-use crate::records::frame::{BodyState, Event, Frame, Snapshot, Trailer};
+use crate::records::frame::{BodyState, Diagnostic, Event, Frame, ResumeState, Snapshot, Trailer};
 use crate::records::header::Header;
-use crate::records::policy::RecordPolicy;
+use crate::records::policy::{DiagnosticCadence, RecordPolicy};
 
 pub struct RecordHook {
     writer: BufWriter<File>,
@@ -16,7 +16,10 @@ pub struct RecordHook {
     header: Header,
     header_written: bool,
     policy: RecordPolicy,
+    diagnostics: DiagnosticCadence,
+    capture_resume: bool,
     t_last_snapshot: Option<f64>,
+    t_last_diagnostic: Option<f64>,
     frame_count: u64,
     /// Set once `on_finish` runs — `Drop` then skips its safety-net
     /// flush, since the writer is already closed properly.
@@ -39,10 +42,29 @@ impl RecordHook {
             header,
             header_written: false,
             policy,
+            diagnostics: DiagnosticCadence::Off,
+            capture_resume: false,
             t_last_snapshot: None,
+            t_last_diagnostic: None,
             frame_count: 0,
             closed: false,
         })
+    }
+
+    /// Enable periodic emission of `Diagnostic` frames (ΔE/E, ΔLz/Lz)
+    /// at the given cadence. Default is [`DiagnosticCadence::Off`].
+    pub fn with_diagnostics(mut self, cadence: DiagnosticCadence) -> Self {
+        self.diagnostics = cadence;
+        self
+    }
+
+    /// Emit a `ResumeState` frame alongside every `Snapshot`. Required
+    /// for mid-run resume via [`crate::records::Record::resume_from`];
+    /// off by default because IAS15's serialised scratch is several KB
+    /// per snapshot.
+    pub fn with_resume_capture(mut self, enabled: bool) -> Self {
+        self.capture_resume = enabled;
+        self
     }
 
     fn write_file_header(&mut self) -> std::io::Result<()> {
@@ -91,6 +113,27 @@ impl RecordHook {
             .collect();
         Snapshot { t: ctx.t, bodies }
     }
+
+    fn diagnostic_from_ctx(ctx: &HookContext<'_>) -> Diagnostic {
+        Diagnostic {
+            t: ctx.t,
+            d_energy_rel: ctx.rel_energy_error,
+            d_lz_rel: ctx.rel_angular_momentum_error,
+        }
+    }
+
+    fn maybe_write_resume(&mut self, ctx: &HookContext<'_>) {
+        if !self.capture_resume {
+            return;
+        }
+        let bytes = ctx.resume_state.clone().unwrap_or_default();
+        self.write_frame(&Frame::ResumeState(ResumeState {
+            t: ctx.t,
+            step_count: ctx.steps,
+            bytes,
+        }))
+        .expect("RecordHook: write resume state");
+    }
 }
 
 // Writes panic on I/O failure: the hook has no Result channel into
@@ -100,6 +143,10 @@ impl SimHook for RecordHook {
         "RecordHook"
     }
 
+    fn wants_resume_state(&self) -> bool {
+        self.capture_resume
+    }
+
     fn pre_step(&mut self, ctx: &HookContext<'_>) -> Vec<Command> {
         if !self.header_written {
             self.write_file_header().expect("RecordHook: write header");
@@ -107,6 +154,13 @@ impl SimHook for RecordHook {
             self.write_frame(&Frame::Snapshot(snap)).expect("RecordHook: write initial bookend");
             self.header_written = true;
             self.t_last_snapshot = Some(ctx.t);
+            self.maybe_write_resume(ctx);
+            if self.diagnostics != DiagnosticCadence::Off {
+                let d = Self::diagnostic_from_ctx(ctx);
+                self.write_frame(&Frame::Diagnostic(d))
+                    .expect("RecordHook: write initial diagnostic");
+                self.t_last_diagnostic = Some(ctx.t);
+            }
         }
         Vec::new()
     }
@@ -116,6 +170,12 @@ impl SimHook for RecordHook {
             let snap = Self::snapshot_from_ctx(ctx);
             self.write_frame(&Frame::Snapshot(snap)).expect("RecordHook: write snapshot");
             self.t_last_snapshot = Some(ctx.t);
+            self.maybe_write_resume(ctx);
+        }
+        if self.diagnostics.should_emit(ctx.t, ctx.steps, self.t_last_diagnostic) {
+            let d = Self::diagnostic_from_ctx(ctx);
+            self.write_frame(&Frame::Diagnostic(d)).expect("RecordHook: write diagnostic");
+            self.t_last_diagnostic = Some(ctx.t);
         }
         Vec::new()
     }
@@ -186,6 +246,8 @@ mod tests {
                 version: "0.1.0".into(),
                 git_sha: "test".into(),
                 created_utc: "2026-05-16T00:00:00Z".into(),
+                rustc_version: "".into(),
+                generated_by: "apsis-test".into(),
             },
             reproducibility: Reproducibility { cargo_lock_blake3: "00".repeat(32), seed: 0 },
             unit_system: UnitSystemMeta {
@@ -200,7 +262,12 @@ mod tests {
                 initial_dt: 1e-3,
                 params: Default::default(),
             },
-            kernel: KernelMeta { variant: "Newton".into(), softening: None },
+            kernel: KernelMeta {
+                variant: "Newton".into(),
+                softening: None,
+                exactness: None,
+                continuity: None,
+            },
             operators: vec![],
             bodies: BodiesMeta { count: 0, list: vec![] },
         }
@@ -221,6 +288,7 @@ mod tests {
             rel_energy_error: 0.0,
             rel_angular_momentum_error: 0.0,
             phase: HookPhase(HookPhaseKind::PreStep),
+            resume_state: None,
         }
     }
 

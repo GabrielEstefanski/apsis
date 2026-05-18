@@ -52,6 +52,7 @@ pub fn header_from_system(
         let eps_sq = kernel.epsilon_squared();
         if eps_sq > 0.0 { Some(eps_sq.sqrt()) } else { None }
     };
+    let kernel_props = kernel.properties();
 
     let apsis_sha: &str = option_env!("APSIS_GIT_COMMIT").unwrap_or("");
 
@@ -111,6 +112,8 @@ pub fn header_from_system(
             version: env!("CARGO_PKG_VERSION").to_string(),
             git_sha: if apsis_sha.is_empty() { "unknown" } else { apsis_sha }.to_string(),
             created_utc: rfc3339_utc_now(),
+            rustc_version: option_env!("APSIS_RUSTC_VERSION").unwrap_or("").to_string(),
+            generated_by: format!("apsis {}", env!("CARGO_PKG_VERSION")),
         },
         reproducibility: Reproducibility { cargo_lock_blake3: lock_hash, seed },
         unit_system: UnitSystemMeta {
@@ -125,7 +128,12 @@ pub fn header_from_system(
             initial_dt: sys.dt(),
             params: serde_json::Map::new(),
         },
-        kernel: KernelMeta { variant: kernel_variant, softening: kernel_softening },
+        kernel: KernelMeta {
+            variant: kernel_variant,
+            softening: kernel_softening,
+            exactness: Some(kernel_props.exactness),
+            continuity: Some(kernel_props.continuity),
+        },
         operators,
         bodies: BodiesMeta { count: body_meta.len(), list: body_meta },
     })

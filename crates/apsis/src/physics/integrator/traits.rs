@@ -668,7 +668,47 @@ pub trait Integrator: Send {
     fn requires_deterministic_force(&self) -> bool {
         false
     }
+
+    /// Serialise the integrator's per-step scratch (predictor history,
+    /// Kepler accumulators, hybrid-mode flags, etc.) for inclusion in a
+    /// mid-run snapshot. Empty by default for stateless integrators.
+    fn resume_state(&self) -> Vec<u8> {
+        Vec::new()
+    }
+
+    /// Restore previously serialised scratch state. Default no-op accepts
+    /// only an empty payload — stateless integrators have nothing to
+    /// restore. Override to validate and deserialise.
+    fn restore_resume_state(&mut self, bytes: &[u8]) -> Result<(), ResumeError> {
+        if bytes.is_empty() { Ok(()) } else { Err(ResumeError::UnsupportedFormat) }
+    }
 }
+
+/// Errors returned by [`Integrator::restore_resume_state`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ResumeError {
+    /// Payload version, magic, or schema is unrecognised.
+    UnsupportedFormat,
+    /// Payload ended before all expected fields had been read.
+    Truncated,
+    /// Body count encoded in the payload disagrees with the System's
+    /// current `bodies.len()`.
+    BodyCountMismatch { expected: usize, found: usize },
+}
+
+impl std::fmt::Display for ResumeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UnsupportedFormat => write!(f, "unsupported resume-state format"),
+            Self::Truncated => write!(f, "resume-state payload truncated"),
+            Self::BodyCountMismatch { expected, found } => {
+                write!(f, "resume-state body count mismatch: expected {expected}, found {found}")
+            },
+        }
+    }
+}
+
+impl std::error::Error for ResumeError {}
 
 /// Per-integrator lifetime counters exposed by [`Integrator::adaptive_stats`].
 ///

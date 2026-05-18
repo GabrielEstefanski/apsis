@@ -60,6 +60,9 @@ pub mod whfast;
 pub mod wisdom_holman;
 pub mod yoshida4;
 
+#[cfg(test)]
+mod tests_resume;
+
 // ── Re-exports ────────────────────────────────────────────────────────────────
 
 pub use citation::{Citation, render_provenance};

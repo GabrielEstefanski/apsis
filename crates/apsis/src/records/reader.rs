@@ -5,7 +5,7 @@ use std::io::{BufReader, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
 use crate::records::format::{FORMAT_VER, MAGIC};
-use crate::records::frame::{Frame, Snapshot, Trailer};
+use crate::records::frame::{Diagnostic, Frame, ResumeState, Snapshot, Trailer};
 use crate::records::header::Header;
 
 #[derive(Debug)]
@@ -40,6 +40,8 @@ impl Record {
             std::str::from_utf8(&header_buf).map_err(|_| RecordError::BadHeaderUtf8)?;
         let header: Header =
             Header::from_toml(header_str).map_err(|e| RecordError::HeaderParse(e.to_string()))?;
+
+        validate_operator_kernel(&header)?;
 
         let frames_start = (16 + header_len) as u64;
 
@@ -112,6 +114,28 @@ impl Record {
         }))
     }
 
+    pub fn diagnostics(
+        &self,
+    ) -> Result<impl Iterator<Item = Result<Diagnostic, RecordError>>, RecordError> {
+        let frames = self.frames()?;
+        Ok(frames.filter_map(|f| match f {
+            Ok(Frame::Diagnostic(d)) => Some(Ok(d)),
+            Ok(_) => None,
+            Err(e) => Some(Err(e)),
+        }))
+    }
+
+    pub fn resume_states(
+        &self,
+    ) -> Result<impl Iterator<Item = Result<ResumeState, RecordError>>, RecordError> {
+        let frames = self.frames()?;
+        Ok(frames.filter_map(|f| match f {
+            Ok(Frame::ResumeState(rs)) => Some(Ok(rs)),
+            Ok(_) => None,
+            Err(e) => Some(Err(e)),
+        }))
+    }
+
     fn frames(&self) -> Result<FrameIter, RecordError> {
         let mut file = BufReader::new(File::open(&self.path)?);
         file.seek(SeekFrom::Start(self.frames_start))?;
@@ -144,6 +168,47 @@ pub enum RecordError {
     HeaderParse(String),
     MissingTrailer,
     MissingBookend,
+    /// An operator's declared `KernelRequirements` are not satisfied by
+    /// the kernel the record reports. Surfaced at `Record::open` so the
+    /// caller fails fast rather than at re-run time.
+    IncompatibleKernel {
+        operator: String,
+        requirement: String,
+        actual: String,
+    },
+}
+
+/// Replays the registration-time `KernelRequirements` check against the
+/// kernel properties stored in the header. v0.1 records (no
+/// `kernel.exactness` / `kernel.continuity` fields) are skipped silently
+/// since the data needed to validate isn't present.
+fn validate_operator_kernel(header: &Header) -> Result<(), RecordError> {
+    use crate::physics::gravity::kernel::{Continuity, Exactness};
+
+    let actual_exactness: Option<Exactness> = header.kernel.exactness;
+    let actual_continuity: Option<Continuity> = header.kernel.continuity;
+
+    for op in &header.operators {
+        if let (Some(req), Some(actual)) = (op.requirements.kernel_exactness, actual_exactness)
+            && !actual.satisfies(req)
+        {
+            return Err(RecordError::IncompatibleKernel {
+                operator: op.name.clone(),
+                requirement: format!("exactness ≥ {req:?}"),
+                actual: format!("{actual:?}"),
+            });
+        }
+        if let (Some(req), Some(actual)) = (op.requirements.kernel_continuity, actual_continuity)
+            && !actual.satisfies(req)
+        {
+            return Err(RecordError::IncompatibleKernel {
+                operator: op.name.clone(),
+                requirement: format!("continuity ≥ {req:?}"),
+                actual: format!("{actual:?}"),
+            });
+        }
+    }
+    Ok(())
 }
 
 impl std::fmt::Display for RecordError {
@@ -159,6 +224,9 @@ impl std::fmt::Display for RecordError {
             Self::MissingTrailer => write!(f, "record has no trailer (truncated or partial)"),
             Self::MissingBookend => {
                 write!(f, "record is missing one or both bookend Snapshots (malformed)")
+            },
+            Self::IncompatibleKernel { operator, requirement, actual } => {
+                write!(f, "operator {operator}: requires {requirement}, kernel provides {actual}")
             },
         }
     }

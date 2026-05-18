@@ -19,6 +19,8 @@ fn minimal_header() -> Header {
             version: "0.1.0".into(),
             git_sha: "test".into(),
             created_utc: "2026-05-16T00:00:00Z".into(),
+            rustc_version: "".into(),
+            generated_by: "apsis-test".into(),
         },
         reproducibility: Reproducibility { cargo_lock_blake3: "00".repeat(32), seed: 0 },
         unit_system: UnitSystemMeta {
@@ -33,7 +35,12 @@ fn minimal_header() -> Header {
             initial_dt: 1e-3,
             params: Default::default(),
         },
-        kernel: KernelMeta { variant: "Newton".into(), softening: None },
+        kernel: KernelMeta {
+            variant: "Newton".into(),
+            softening: None,
+            exactness: None,
+            continuity: None,
+        },
         operators: vec![],
         bodies: BodiesMeta { count: 0, list: vec![] },
     }
@@ -49,6 +56,7 @@ fn make_ctx<'a>(bodies: &'a [Body], names: &'a [String], t: f64, steps: u64) -> 
         rel_energy_error: 0.0,
         rel_angular_momentum_error: 0.0,
         phase: HookPhase(HookPhaseKind::PreStep),
+        resume_state: None,
     }
 }
 
