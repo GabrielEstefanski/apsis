@@ -1,0 +1,9 @@
+[apsis WARN] integrator requires deterministic force; switching force model to direct O(N²) { integrator="ias15" exact_threshold_before=64 exact_threshold_after=10000 hint="select velocity_verlet or yoshida4 for real-time playback" }
+Dust grain at 1 AU, β = 0.1
+  Newtonian period      = 6.2832 (canonical units)
+  effective period      = 6.6231  (μ_eff = 1 - β = 0.9)
+  expected period ratio = 1.0541
+  after 50 Newtonian periods:
+    r = 1.1317  v = 0.8891
+    a (against μ_eff): initial = 1.1250, final = 1.1250
+  |dE/E| = 1.164e-05

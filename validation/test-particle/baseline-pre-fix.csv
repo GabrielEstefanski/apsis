@@ -1,0 +1,19 @@
+metric,value,notes
+scenario,radiation_dust.py,Burns 1979 dust grain @ 1 AU; β=0.1; IAS15 + apsis-radiation
+beta,0.1,
+n_orbits,50,
+mass_primary_msun,1.0,Sun
+mass_secondary_msun,1.0e-15,cosmic dust grain
+mass_ratio,1.0e-15,m_dust / m_sun
+integrator,ias15,
+dt_initial,1e-3,
+units,SOLAR_CANONICAL,μ_eff = 1 - β = 0.9; period_eff = 6.6231 (T_G)
+a_initial,1.1250,against μ_eff
+a_final,1.1250,against μ_eff; |Δa/a| effectively zero
+r_final,1.1317,
+v_final,0.8891,
+abs_dE_over_E,1.164e-05,extremely high vs IAS15-Kepler ~1e-13
+gate_1_diagnosis_match,PASS,issue body says ~1.16e-5; baseline confirms
+commit,4ddef70,develop tip at baseline capture
+date,2026-05-18,
+notes,gate 1 from docs/experiments/2026-05-18-test-particle-design-spike.md PASSES,proceed to Layer 2 implementation

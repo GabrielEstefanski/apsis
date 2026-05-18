@@ -60,6 +60,14 @@ pub trait ForceModel: Send {
     /// No-op for force models that do not use a BH tree.
     fn set_exact_threshold(&mut self, _n: usize) {}
 
+    /// Mass-ratio cutoff for back-reaction suppression. `0.0` if not supported.
+    fn test_particle_threshold(&self) -> f64 {
+        0.0
+    }
+
+    /// No-op for force models without a direct pairwise loop.
+    fn set_test_particle_threshold(&mut self, _threshold: f64) {}
+
     /// Access the underlying Barnes-Hut engine for spatial queries.
     ///
     /// Returns `None` for force models that do not use a Barnes-Hut tree
@@ -199,6 +207,14 @@ impl ForceModel for GravityForceModel {
 
     fn set_exact_threshold(&mut self, n: usize) {
         self.engine.set_exact_threshold(n);
+    }
+
+    fn test_particle_threshold(&self) -> f64 {
+        self.engine.test_particle_threshold()
+    }
+
+    fn set_test_particle_threshold(&mut self, threshold: f64) {
+        self.engine.set_test_particle_threshold(threshold);
     }
 
     fn bh_engine(&self) -> Option<&BarnesHutEngine> {
