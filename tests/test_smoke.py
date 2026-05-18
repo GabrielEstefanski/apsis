@@ -688,11 +688,56 @@ def test_stats_object_carries_all_headline_diagnostics() -> None:
     assert s.steps > 0
     assert s.dt > 0
     assert s.energy < 0  # bound Kepler orbit
+    assert s.energy_drift is not None
     assert abs(s.energy_drift) < 1e-12
     assert s.kinetic_energy > 0
     assert s.potential_energy < 0
     assert s.integrator == apsis.IntegratorKind.IAS15
     assert s.force_evaluations > 0
+
+
+def _dust_system() -> apsis.System:
+    """Extreme mass ratio that drives ``|E_0|`` below the conditioning floor.
+
+    A 1e-15 secondary against a unit primary makes the total energy
+    ``E ≈ −0.5 · m₂ ≈ 5e-16`` — below ``sqrt(f64::EPSILON) ≈ 1.5e-8``,
+    so the relative drift metric is not well-defined and the binding
+    must report ``None``.
+    """
+    sun = apsis.Body.star(mass=1.0)
+    dust = (apsis.Body.rocky(mass=1e-15)
+            .at((1.0, 0.0))
+            .with_velocity((0.0, 1.0)))
+    return apsis.System(
+        bodies=[sun, dust],
+        units=apsis.units.CANONICAL,
+        integrator="ias15",
+        dt=1e-3,
+    )
+
+
+def test_energy_delta_is_none_when_baseline_below_conditioning_floor() -> None:
+    """``sys.energy_delta`` is ``None`` in the regime where ``|E_0|`` is too small
+    for the relative form to mean anything; the absolute drift remains finite."""
+    sys = _dust_system()
+    sys.integrate_for(0.1)
+
+    assert sys.energy_delta is None
+    abs_drift = sys.abs_energy_drift
+    assert isinstance(abs_drift, float)
+    assert np.isfinite(abs_drift)
+
+
+def test_stats_energy_drift_is_none_in_dust_regime() -> None:
+    """``Stats.energy_drift`` mirrors the system accessor — ``None`` in the
+    precision-limited regime, with ``abs_energy_drift`` still finite."""
+    sys = _dust_system()
+    sys.integrate_for(0.1)
+    s = sys.stats
+
+    assert s.energy_drift is None
+    assert isinstance(s.abs_energy_drift, float)
+    assert np.isfinite(s.abs_energy_drift)
 
 
 def test_trajectory_carries_dt_history() -> None:

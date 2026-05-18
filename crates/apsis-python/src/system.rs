@@ -343,11 +343,18 @@ impl PySystem {
     }
 
     /// Relative energy drift, $\delta E / E_0 = (E - E_0) / |E_0|$.
-    /// `E_0` is captured at the first step of the simulation; this is
-    /// the cheapest single-number diagnostic of integrator quality.
+    /// `None` when $|E_0|$ is below the conditioning floor
+    /// (`sqrt(f64::EPSILON)`); use `abs_energy_drift` for the absolute
+    /// signal in that regime.
     #[getter]
-    fn energy_delta(&self) -> f64 {
-        self.inner.energy_delta().unwrap_or(f64::NAN)
+    fn energy_delta(&self) -> Option<f64> {
+        self.inner.energy_delta()
+    }
+
+    /// Absolute energy drift, $E - E_0$. Always finite.
+    #[getter]
+    fn abs_energy_drift(&self) -> f64 {
+        self.inner.abs_energy_drift()
     }
 
     /// Kinetic energy at the most recent step,
@@ -376,12 +383,18 @@ impl PySystem {
 
     /// Relative angular-momentum drift,
     /// $\delta L_z / L_{z,0} = (L_z - L_{z,0}) / |L_{z,0}|$.
-    /// Falls back to absolute drift when `L_{z,0}` is below an
-    /// internal numerical threshold (figure-8-style choreographies
-    /// where total angular momentum is zero by construction).
+    /// `None` when $|L_{z,0}|$ is below the conditioning floor
+    /// (`sqrt(f64::EPSILON)`); figure-8 choreographies and other
+    /// $L_z = 0$ configurations report through `abs_lz_drift` instead.
     #[getter]
-    fn lz_delta(&self) -> f64 {
-        self.inner.lz_delta().unwrap_or(f64::NAN)
+    fn lz_delta(&self) -> Option<f64> {
+        self.inner.lz_delta()
+    }
+
+    /// Absolute angular-momentum drift, $L_z - L_{z,0}$. Always finite.
+    #[getter]
+    fn abs_lz_drift(&self) -> f64 {
+        self.inner.abs_lz_drift()
     }
 
     /// Current controller time step. For self-adaptive integrators
@@ -667,12 +680,15 @@ impl PySystem {
     fn __repr__(&self) -> String {
         let m = self.inner.metrics();
         format!(
-            "System(integrator={:?}, n_bodies={}, t={}, dt={}, dE/E0={:.3e})",
+            "System(integrator={:?}, n_bodies={}, t={}, dt={}, dE={})",
             kind_slug(m.integrator_kind),
             self.inner.bodies().len(),
             m.t,
             m.dt,
-            m.rel_energy_error.unwrap_or(f64::NAN),
+            match m.rel_energy_error {
+                Some(rel) => format!("{:.3e}", rel),
+                None => format!("{:.3e} (abs, |E0|≈0)", m.abs_energy_error),
+            },
         )
     }
 }
