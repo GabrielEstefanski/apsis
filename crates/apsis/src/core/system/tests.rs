@@ -112,7 +112,7 @@ mod energy {
         let mut peak: f64 = 0.0;
         for _ in 0..total_steps {
             sys.step();
-            peak = peak.max(sys.metrics().rel_energy_error.abs());
+            peak = peak.max(sys.metrics().rel_energy_error.unwrap().abs());
         }
         peak
     }
@@ -1174,7 +1174,7 @@ mod benchmarks {
         let mut peak: f64 = 0.0;
         for _ in 0..STEPS {
             sys.step();
-            peak = peak.max(sys.metrics().rel_energy_error.abs());
+            peak = peak.max(sys.metrics().rel_energy_error.unwrap().abs());
         }
         assert!(peak < TOL, "Y4 peak |δE/E₀| = {peak:.3e} > {TOL:.0e} over t=1.0");
     }
@@ -1235,7 +1235,8 @@ mod benchmarks {
             let m = sys.metrics();
             println!(
                 "\nt = {t_snap:.1}  (step {target})  δE/E₀ = {:.3e}  L_z = {:.3e}",
-                m.rel_energy_error, m.angular_momentum_z,
+                m.rel_energy_error.unwrap_or(f64::NAN),
+                m.angular_momentum_z,
             );
             for (i, b) in sys.bodies().iter().enumerate() {
                 println!(

@@ -94,7 +94,7 @@ fn main() {
                 k,
                 d_omega,
                 arcsec,
-                sys.energy_delta().abs(),
+                sys.energy_delta().unwrap_or(f64::NAN).abs(),
             );
         }
     }

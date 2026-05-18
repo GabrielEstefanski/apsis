@@ -207,10 +207,23 @@ impl ThetaController {
     }
 }
 
+/// Whether the dt controller has a well-conditioned relative-error
+/// signal to feed back on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FeedbackMode {
+    /// Relative error is defined; controller adjusts dt against
+    /// `target_rel_energy_error`.
+    Active,
+    /// `|E_initial|` is below the conditioning threshold; controller
+    /// disables feedback and returns `user_dt` unchanged.
+    DisabledPrecisionLimited,
+}
+
 #[derive(Debug, Clone)]
 pub struct DtController {
     pub config: DtAdaptationConfig,
     last_dt: f64,
+    feedback_mode: FeedbackMode,
 }
 
 impl DtController {
@@ -227,17 +240,23 @@ impl DtController {
                 dt_slew_fraction: config.dt_slew_fraction.clamp(0.02, 1.0),
             },
             last_dt: 0.0,
+            feedback_mode: FeedbackMode::Active,
         }
     }
 
     pub fn reset(&mut self) {
         self.last_dt = 0.0;
+        self.feedback_mode = FeedbackMode::Active;
+    }
+
+    pub fn feedback_mode(&self) -> FeedbackMode {
+        self.feedback_mode
     }
 
     pub fn update(
         &mut self,
         proposed_dt: f64,
-        rel_energy_error: f64,
+        rel_energy_error: Option<f64>,
         stats: AccelerationStats,
     ) -> f64 {
         let cfg = &self.config;
@@ -245,16 +264,26 @@ impl DtController {
         let clamp = |dt: f64| dt.clamp(cfg.min_dt, cfg.max_dt);
 
         if !cfg.enabled {
+            self.feedback_mode = FeedbackMode::Active;
             let dt = clamp(proposed_dt);
             self.last_dt = dt;
             return dt;
         }
 
+        let Some(rel) = rel_energy_error else {
+            self.feedback_mode = FeedbackMode::DisabledPrecisionLimited;
+            let dt = clamp(proposed_dt);
+            self.last_dt = dt;
+            return dt;
+        };
+
+        self.feedback_mode = FeedbackMode::Active;
+
         let prev = if self.last_dt > 0.0 { self.last_dt } else { clamp(proposed_dt) };
 
         let mut dt = clamp(proposed_dt).min(prev);
 
-        let ratio = (rel_energy_error.abs() / cfg.target_rel_energy_error).max(1e-12);
+        let ratio = (rel.abs() / cfg.target_rel_energy_error).max(1e-12);
 
         let energy_scale =
             if ratio > 1.0 { 1.0 / (1.0 + 0.5 * (ratio - 1.0)) } else { 1.0 + 0.2 * (1.0 - ratio) };

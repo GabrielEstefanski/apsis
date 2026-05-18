@@ -117,8 +117,8 @@ impl RecordHook {
     fn diagnostic_from_ctx(ctx: &HookContext<'_>) -> Diagnostic {
         Diagnostic {
             t: ctx.t,
-            d_energy_rel: ctx.rel_energy_error,
-            d_lz_rel: ctx.rel_angular_momentum_error,
+            d_energy_rel: ctx.rel_energy_error.unwrap_or(0.0),
+            d_lz_rel: ctx.rel_angular_momentum_error.unwrap_or(0.0),
         }
     }
 
@@ -285,8 +285,8 @@ mod tests {
             t,
             dt: 1e-3,
             steps,
-            rel_energy_error: 0.0,
-            rel_angular_momentum_error: 0.0,
+            rel_energy_error: None,
+            rel_angular_momentum_error: None,
             phase: HookPhase(HookPhaseKind::PreStep),
             resume_state: None,
         }

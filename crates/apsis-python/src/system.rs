@@ -347,7 +347,7 @@ impl PySystem {
     /// the cheapest single-number diagnostic of integrator quality.
     #[getter]
     fn energy_delta(&self) -> f64 {
-        self.inner.energy_delta()
+        self.inner.energy_delta().unwrap_or(f64::NAN)
     }
 
     /// Kinetic energy at the most recent step,
@@ -381,7 +381,7 @@ impl PySystem {
     /// where total angular momentum is zero by construction).
     #[getter]
     fn lz_delta(&self) -> f64 {
-        self.inner.lz_delta()
+        self.inner.lz_delta().unwrap_or(f64::NAN)
     }
 
     /// Current controller time step. For self-adaptive integrators
@@ -672,7 +672,7 @@ impl PySystem {
             self.inner.bodies().len(),
             m.t,
             m.dt,
-            m.rel_energy_error,
+            m.rel_energy_error.unwrap_or(f64::NAN),
         )
     }
 }
@@ -768,8 +768,8 @@ fn record_state(sys: &CoreSystem, buf: &mut TrajectoryBuffers) {
     buf.t.push(m.t);
     buf.energy.push(m.total_energy);
     buf.dt.push(m.dt);
-    buf.energy_drift.push(m.rel_energy_error);
-    buf.lz_drift.push(m.rel_angular_momentum_error);
+    buf.energy_drift.push(m.rel_energy_error.unwrap_or(f64::NAN));
+    buf.lz_drift.push(m.rel_angular_momentum_error.unwrap_or(f64::NAN));
     for b in sys.bodies() {
         buf.x.push(b.pos_x);
         buf.y.push(b.pos_y);

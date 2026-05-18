@@ -35,6 +35,6 @@ fn main() {
     const T_END: f64 = 10.0;
     for t_target in [1.0_f64, 2.0, 3.0, 4.0, 5.0, 6.0, 8.0, T_END] {
         sys.integrate_until(t_target);
-        println!("  t = {:>5.2}   dE/E = {:+.3e}", sys.t(), sys.energy_delta(),);
+        println!("  t = {:>5.2}   dE/E = {:+.3e}", sys.t(), sys.energy_delta().unwrap_or(f64::NAN),);
     }
 }

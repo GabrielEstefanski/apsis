@@ -19,9 +19,12 @@ impl System {
             kinetic,
             potential,
             total_energy: total,
+            initial_energy: self.initial_energy.unwrap_or(total),
+            abs_energy_error: self.abs_energy_error,
             rel_energy_error: self.rel_energy_error,
 
             angular_momentum_z: lz,
+            initial_angular_momentum_z: self.initial_angular_momentum.unwrap_or(lz),
             rel_angular_momentum_error: self.rel_angular_momentum_error,
             abs_angular_momentum_error: self.abs_angular_momentum_error,
 
@@ -71,10 +74,9 @@ impl System {
         self.integrator.adaptive_stats()
     }
 
-    /// Current relative energy error `δE/E₀` (signed). The same value
-    /// is available via [`Metrics::rel_energy_error`] but this
-    /// accessor avoids the allocation-cost of a full metrics build.
-    pub fn rel_energy_error(&self) -> f64 {
+    /// Relative energy drift `(E − E₀) / |E₀|`, or `None` when
+    /// `|E₀| < MIN_RELATIVE_DENOMINATOR` (precision-limited regime).
+    pub fn rel_energy_error(&self) -> Option<f64> {
         self.rel_energy_error
     }
 
@@ -89,13 +91,25 @@ impl System {
         total_energy(self.last_kinetic, self.last_potential)
     }
 
-    /// Relative energy drift `δE = (E − E₀) / |E₀|` at the last step.
-    ///
-    /// Alias for [`rel_energy_error`](Self::rel_energy_error); named to
-    /// match `energy()` for script ergonomics (`sys.energy()` /
-    /// `sys.energy_delta()`).
+    /// Initial total energy. Falls back to the current energy if the
+    /// first force evaluation has not run yet.
     #[inline]
-    pub fn energy_delta(&self) -> f64 {
+    pub fn initial_energy(&self) -> f64 {
+        self.initial_energy.unwrap_or_else(|| self.energy())
+    }
+
+    /// Absolute energy drift `E − E₀` (signed).
+    #[inline]
+    pub fn abs_energy_drift(&self) -> f64 {
+        self.abs_energy_error
+    }
+
+    /// Relative energy drift `(E − E₀) / |E₀|`, or `None` when
+    /// `|E₀| < MIN_RELATIVE_DENOMINATOR`. Alias for
+    /// [`rel_energy_error`](Self::rel_energy_error), named to match
+    /// `energy()`.
+    #[inline]
+    pub fn energy_delta(&self) -> Option<f64> {
         self.rel_energy_error
     }
 
@@ -116,9 +130,23 @@ impl System {
         angular_momentum_z(&self.bodies)
     }
 
-    /// Relative angular-momentum drift `δLz = (Lz − Lz₀) / |Lz₀|`.
+    /// Initial Lz. Falls back to the current Lz if the first state
+    /// evaluation has not run yet.
     #[inline]
-    pub fn lz_delta(&self) -> f64 {
+    pub fn initial_lz(&self) -> f64 {
+        self.initial_angular_momentum.unwrap_or_else(|| self.lz())
+    }
+
+    /// Absolute Lz drift `|Lz − Lz₀|`.
+    #[inline]
+    pub fn abs_lz_drift(&self) -> f64 {
+        self.abs_angular_momentum_error
+    }
+
+    /// Relative Lz drift `(Lz − Lz₀) / |Lz₀|`, or `None` when
+    /// `|Lz₀| < MIN_RELATIVE_DENOMINATOR`.
+    #[inline]
+    pub fn lz_delta(&self) -> Option<f64> {
         self.rel_angular_momentum_error
     }
 
