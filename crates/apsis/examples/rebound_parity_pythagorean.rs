@@ -22,7 +22,7 @@
 //! The full protocol — initial conditions, integrator settings, metrics,
 //! tolerances declared *a priori*, and the metric tier hierarchy — is
 //! specified in
-//! [`docs/experiments/2026-04-30-rebound-parity-pythagorean.md`](../../../../docs/experiments/2026-04-30-rebound-parity-pythagorean.md).
+//! [`paper/notebooks/2026-04-30-rebound-parity-pythagorean.md`](../../../../paper/notebooks/2026-04-30-rebound-parity-pythagorean.md).
 //!
 //! Constants in this file mirror the protocol's IC and run-parameter
 //! values. Changes here are protocol changes — update the notebook in
@@ -111,7 +111,7 @@ fn main() {
 
     writeln!(w, "# REBOUND parity — Pythagorean three-body (Burrau 1913) — apsis IAS15 side")
         .unwrap();
-    writeln!(w, "# protocol: docs/experiments/2026-04-30-rebound-parity-pythagorean.md").unwrap();
+    writeln!(w, "# protocol: paper/notebooks/2026-04-30-rebound-parity-pythagorean.md").unwrap();
     writeln!(w, "# integrator: IAS15 (apsis)").unwrap();
     writeln!(w, "# units: canonical (G = 1)").unwrap();
     writeln!(

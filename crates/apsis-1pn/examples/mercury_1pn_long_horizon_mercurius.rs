@@ -29,7 +29,7 @@
 //!
 //! Initial conditions, integrator settings, metrics, and tolerances declared
 //! *a priori* in
-//! [`docs/experiments/2026-05-13-mercury-1pn-long-horizon.md`](../../../docs/experiments/2026-05-13-mercury-1pn-long-horizon.md).
+//! [`paper/notebooks/2026-05-13-mercury-1pn-long-horizon.md`](../../../paper/notebooks/2026-05-13-mercury-1pn-long-horizon.md).
 
 use std::env;
 use std::fs::{File, create_dir_all};
@@ -86,7 +86,7 @@ fn main() {
     let mut w = BufWriter::new(file);
 
     writeln!(w, "# Long-horizon Mercury 1PN — apsis Mercurius side").unwrap();
-    writeln!(w, "# protocol: docs/experiments/2026-05-13-mercury-1pn-long-horizon.md").unwrap();
+    writeln!(w, "# protocol: paper/notebooks/2026-05-13-mercury-1pn-long-horizon.md").unwrap();
     writeln!(w, "# integrator: Mercurius (apsis), perturbation: PostNewtonian1PN::for_units(UnitSystem::solar_canonical())")
         .unwrap();
     writeln!(w, "# units: canonical Hénon (G = 1)").unwrap();

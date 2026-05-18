@@ -131,7 +131,7 @@ Pre-refactor versus post-controller-refactor:
 | $\max\!\lvert\Delta\mathbf{L}\rvert$ cross-impl | $4.2 \times 10^{-16}$ | $4.4 \times 10^{-16}$ | unchanged at 1 ULP |
 | $\max\!\lvert\Delta\mathbf{r}\rvert$ informational | $3.17 \times 10^{-7}$ | $9.44 \times 10^{-13}$ | phase drift 5+ orders better |
 
-All 12 gated metrics of the figure-8 parity protocol (`docs/experiments/2026-04-26-rebound-parity-figure8.md`, §Hypothesis) pass at 1 ULP under the new controller.
+All 12 gated metrics of the figure-8 parity protocol (`paper/notebooks/2026-04-26-rebound-parity-figure8.md`, §Hypothesis) pass at 1 ULP under the new controller.
 
 ### Kepler parity regression
 
@@ -187,7 +187,7 @@ This is an observation worth including in the v0.1 paper's methods section: not 
 ## Files
 
 - This document: `docs/experiments/2026-04-26-ias15-warmstart-bug.md`.
-- Figure-8 parity protocol notebook: `docs/experiments/2026-04-26-rebound-parity-figure8.md`.
+- Figure-8 parity protocol notebook: `paper/notebooks/2026-04-26-rebound-parity-figure8.md`.
 - Figure-8 parity harness: `validation/rebound-parity/figure8/`.
 - IAS15 implementation: `crates/apsis/src/physics/integrator/ias15.rs`.
 - Integrator trait contract: `crates/apsis/src/physics/integrator/traits.rs`.

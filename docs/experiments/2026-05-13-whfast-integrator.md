@@ -28,7 +28,7 @@ WHFast is paper-baseline. With WHFast in the zoo, apsis covers the four canonica
 
 Three claims chain into this experiment:
 
-1. **The Mercury 1PN convergence experiment showed f64 round-off becomes visible at ~10⁸ perturbation evaluations** (`docs/experiments/2026-05-13-mercury-1pn-long-horizon.md` §Convergence experiment). That matches the regime where compensated summation pays off — `N_steps ≳ 10⁸` is where WH 1991's `O(ε·N)` floor crosses the science-relevant precision. WHFast's `O(ε·√N)` floor pushes the crossover by ~`√10⁸ ≈ 10⁴`, which is exactly the multi-Gyr Solar System integration regime planetary dynamics papers cite.
+1. **The Mercury 1PN convergence experiment showed f64 round-off becomes visible at ~10⁸ perturbation evaluations** (`paper/notebooks/2026-05-13-mercury-1pn-long-horizon.md` §Convergence experiment). That matches the regime where compensated summation pays off — `N_steps ≳ 10⁸` is where WH 1991's `O(ε·N)` floor crosses the science-relevant precision. WHFast's `O(ε·√N)` floor pushes the crossover by ~`√10⁸ ≈ 10⁴`, which is exactly the multi-Gyr Solar System integration regime planetary dynamics papers cite.
 
 2. **The integrator-zoo positioning thesis makes WHFast first** — it is the credential reviewers expect before they engage with novel integrators (Mercurius, federation contract). Without WHFast in the zoo, the integrator-of-integrators claim looks under-equipped.
 
@@ -116,7 +116,7 @@ Implementation tracks separately. Phase 2 of WHFast ships compensated summation 
 
 #### Tier 1 — Federation contract: WHFast + apsis-1pn matches Mercurius + apsis-1pn on the existing Mercury 1PN scenario *(hard gate)*
 
-Re-runs the long-horizon Mercury 1PN scenario (`docs/experiments/2026-05-13-mercury-1pn-long-horizon.md`) with WHFast in place of Mercurius, comparing cumulative `Δω` against the GR analytical prediction.
+Re-runs the long-horizon Mercury 1PN scenario (`paper/notebooks/2026-05-13-mercury-1pn-long-horizon.md`) with WHFast in place of Mercurius, comparing cumulative `Δω` against the GR analytical prediction.
 
 | Metric | Bound | Rationale |
 | --- | ---: | --- |
@@ -231,4 +231,4 @@ REBOUND does not implement DH correctors (its WHFast supports only Jacobi and Ba
 - Higham, N. J. (2002). *Accuracy and Stability of Numerical Algorithms* (2nd ed.). SIAM, §4.5 on Kahan / Neumaier compensated summation.
 - Existing apsis WH (1991): `crates/apsis/src/physics/integrator/wisdom_holman.rs`.
 - Mercurius implementation lab notebook: `docs/experiments/2026-05-13-mercurius-hybrid.md`.
-- Long-horizon Mercury 1PN: `docs/experiments/2026-05-13-mercury-1pn-long-horizon.md`.
+- Long-horizon Mercury 1PN: `paper/notebooks/2026-05-13-mercury-1pn-long-horizon.md`.

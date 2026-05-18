@@ -23,7 +23,7 @@
 //! The full protocol — initial conditions, integrator settings, metrics,
 //! tolerances declared *a priori*, and the metric tier hierarchy — is
 //! specified in
-//! [`docs/experiments/2026-04-26-rebound-parity-figure8.md`](../../../../docs/experiments/2026-04-26-rebound-parity-figure8.md).
+//! [`paper/notebooks/2026-04-26-rebound-parity-figure8.md`](../../../../paper/notebooks/2026-04-26-rebound-parity-figure8.md).
 //!
 //! Constants in this file (`R*`, `V*`, `MASS`, `PERIOD`, `N_PERIODS`,
 //! `SAMPLES_PER_PERIOD`, `DT_FRACTION_OF_PERIOD`) mirror the protocol's IC
@@ -112,7 +112,7 @@ fn main() {
     let mut w = BufWriter::new(file);
 
     writeln!(w, "# REBOUND parity — Figure-8 choreography — apsis IAS15 side").unwrap();
-    writeln!(w, "# protocol: docs/experiments/2026-04-26-rebound-parity-figure8.md").unwrap();
+    writeln!(w, "# protocol: paper/notebooks/2026-04-26-rebound-parity-figure8.md").unwrap();
     writeln!(w, "# integrator: IAS15 (apsis)").unwrap();
     writeln!(w, "# units: canonical (G = 1)").unwrap();
     writeln!(w, "# mass={MASS}, period={PERIOD:.18e}").unwrap();

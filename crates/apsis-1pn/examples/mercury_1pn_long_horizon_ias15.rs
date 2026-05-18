@@ -23,7 +23,7 @@
 //!
 //! Initial conditions, integrator settings, metrics, and tolerances declared
 //! *a priori* in
-//! [`docs/experiments/2026-05-13-mercury-1pn-long-horizon.md`](../../../docs/experiments/2026-05-13-mercury-1pn-long-horizon.md).
+//! [`paper/notebooks/2026-05-13-mercury-1pn-long-horizon.md`](../../../paper/notebooks/2026-05-13-mercury-1pn-long-horizon.md).
 //! Constants in this file (`A`, `E`, `M_MERCURY`, `N_ORBITS`, `DT0`) are
 //! the protocol's IC values — changes here are protocol changes; update the
 //! notebook in lockstep.
@@ -105,7 +105,7 @@ fn main() {
     let mut w = BufWriter::new(file);
 
     writeln!(w, "# Long-horizon Mercury 1PN — apsis IAS15 side").unwrap();
-    writeln!(w, "# protocol: docs/experiments/2026-05-13-mercury-1pn-long-horizon.md").unwrap();
+    writeln!(w, "# protocol: paper/notebooks/2026-05-13-mercury-1pn-long-horizon.md").unwrap();
     writeln!(w, "# integrator: IAS15 (apsis), perturbation: PostNewtonian1PN::for_units(UnitSystem::solar_canonical())")
         .unwrap();
     writeln!(w, "# units: canonical Hénon (G = 1)").unwrap();
