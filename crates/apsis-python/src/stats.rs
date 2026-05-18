@@ -92,11 +92,11 @@ impl PyStats {
     fn __repr__(&self) -> String {
         let de = match self.energy_drift {
             Some(rel) => format!("{:.3e}", rel),
-            None => format!("{:.3e} (abs, |E0|≈0)", self.abs_energy_drift),
+            None => format!("{:.3e} (abs, |E0|~0)", self.abs_energy_drift),
         };
         let dl = match self.lz_drift {
             Some(rel) => format!("{:.3e}", rel),
-            None => format!("{:.3e} (abs, |Lz0|≈0)", self.abs_lz_drift),
+            None => format!("{:.3e} (abs, |Lz0|~0)", self.abs_lz_drift),
         };
         format!(
             "Stats(t={:.6}, steps={}, dt={:.3e}, dE={}, dLz={}, integrator={:?})",

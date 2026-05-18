@@ -687,7 +687,7 @@ impl PySystem {
             m.dt,
             match m.rel_energy_error {
                 Some(rel) => format!("{:.3e}", rel),
-                None => format!("{:.3e} (abs, |E0|≈0)", m.abs_energy_error),
+                None => format!("{:.3e} (abs, |E0|~0)", m.abs_energy_error),
             },
         )
     }
