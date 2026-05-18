@@ -7,7 +7,7 @@
 [#85](https://github.com/GabrielEstefanski/apsis/pull/85) (REBOUND parity Tier 1),
 [#86](https://github.com/GabrielEstefanski/apsis/pull/86) (perturbation routing fix)
 **Lab notebooks:** `docs/experiments/2026-05-13-mercurius-hybrid.md`,
-`docs/experiments/2026-05-13-rebound-parity-mercurius.md`
+`paper/notebooks/2026-05-13-rebound-parity-mercurius.md`
 
 ---
 

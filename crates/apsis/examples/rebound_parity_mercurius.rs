@@ -21,7 +21,7 @@
 //!
 //! Initial conditions, integrator settings, metrics, and tolerances declared
 //! *a priori* in
-//! [`docs/experiments/2026-05-13-rebound-parity-mercurius.md`](../../../../docs/experiments/2026-05-13-rebound-parity-mercurius.md).
+//! [`paper/notebooks/2026-05-13-rebound-parity-mercurius.md`](../../../../paper/notebooks/2026-05-13-rebound-parity-mercurius.md).
 //! Constants in this file (`A_*`, `M_*`, `N_YEARS`, `DT_YEARS`,
 //! `ALPHA_HILL`) are the protocol's IC values — changes here are protocol
 //! changes; update the notebook in lockstep.
@@ -119,7 +119,7 @@ fn main() {
     let mut w = BufWriter::new(file);
 
     writeln!(w, "# REBOUND parity — Mercurius — apsis side").unwrap();
-    writeln!(w, "# protocol: docs/experiments/2026-05-13-rebound-parity-mercurius.md").unwrap();
+    writeln!(w, "# protocol: paper/notebooks/2026-05-13-rebound-parity-mercurius.md").unwrap();
     writeln!(w, "# integrator: Mercurius (apsis), alpha={ALPHA_HILL}").unwrap();
     writeln!(w, "# units: solar AU-year (G ≈ {g:.18e})").unwrap();
     writeln!(w, "# n_years={N_YEARS}, dt_years={DT_YEARS}, n_bodies={}", sys.bodies().len())

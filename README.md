@@ -338,12 +338,12 @@ What is verified in CI:
   - **Kepler-prograde ($e = 0.5$, 100 orbits):** seven gated metrics
     at 1–3 ULP; informational $\lvert\Delta r\rvert$ at
     $1.57 \times 10^{-9}$ (peak orbit 81).
-    Notebook: [`docs/experiments/2026-04-25-rebound-parity-kepler.md`](docs/experiments/2026-04-25-rebound-parity-kepler.md).
+    Notebook: [`paper/notebooks/2026-04-25-rebound-parity-kepler.md`](paper/notebooks/2026-04-25-rebound-parity-kepler.md).
   - **Figure-8 (Chenciner–Montgomery, 10 periods gated + 50 periods
     informational):** twelve gated metrics organised in three
     evidentiary tiers (hard physical invariants, construction-level
     sanity, geometric coherence) at 1 ULP.
-    Notebook: [`docs/experiments/2026-04-26-rebound-parity-figure8.md`](docs/experiments/2026-04-26-rebound-parity-figure8.md).
+    Notebook: [`paper/notebooks/2026-04-26-rebound-parity-figure8.md`](paper/notebooks/2026-04-26-rebound-parity-figure8.md).
   - **Pythagorean (Burrau 1913, 70 canonical t.u.):** structural
     invariants ($\mathbf{L}$, $\mathbf{P}$, $\mathbf{r}_\text{COM}$)
     at f64 round-off floor on both sides; energy bound exceeded
@@ -352,7 +352,7 @@ What is verified in CI:
     smooth-flow bound's derivation, not a parity defect. 98 % event
     alignment (44/45 close-encounter peaks matched within
     $3 \times 10^{-2}$ t.u.).
-    Notebook: [`docs/experiments/2026-04-30-rebound-parity-pythagorean.md`](docs/experiments/2026-04-30-rebound-parity-pythagorean.md).
+    Notebook: [`paper/notebooks/2026-04-30-rebound-parity-pythagorean.md`](paper/notebooks/2026-04-30-rebound-parity-pythagorean.md).
   - **Kepler-retrograde ($L_z < 0$; long-horizon $10^4$ orbits +
     100-orbit checkpoint):** ten gated metrics × two horizons; all
     twenty pass at 1–10 ULP. Closes the sign-convention coverage
@@ -360,13 +360,13 @@ What is verified in CI:
     GR-readiness review. Brouwer-law growth confirmed
     ($\sim 8\times$ across $100\times$ horizon, slightly below
     $\sqrt{N}$, consistent with IAS15's near-symplectic structure).
-    Notebook: [`docs/experiments/2026-05-01-rebound-parity-retrograde.md`](docs/experiments/2026-05-01-rebound-parity-retrograde.md).
+    Notebook: [`paper/notebooks/2026-05-01-rebound-parity-retrograde.md`](paper/notebooks/2026-05-01-rebound-parity-retrograde.md).
 - **Heuristic validation portfolio**: 13 scenarios × 3 fixed-step
   integrators × 100 substeps; 26 / 26 gated cells pass under the
   isclose-style two-sided Tier 2 bound. Per-cell utilization
   ($u = \text{peak}/\text{bound}$) emitted for regression-canary
   detection.
-  Notebook: [`docs/experiments/2026-05-01-recommended-dt-validation.md`](docs/experiments/2026-05-01-recommended-dt-validation.md).
+  Notebook: [`paper/notebooks/2026-05-01-recommended-dt-validation.md`](paper/notebooks/2026-05-01-recommended-dt-validation.md).
 - **Workspace isolation**: `cargo build -p apsis` resolves no
   UI dependency.
 
@@ -402,10 +402,10 @@ trail directly:
   - the four cross-implementation parity protocols against REBOUND's
     IAS15 — Kepler-prograde, figure-8, Pythagorean, and Kepler-retrograde
     with $10^4$-orbit long-horizon — anchoring the validation portfolio
-    ([`kepler`](docs/experiments/2026-04-25-rebound-parity-kepler.md),
-    [`figure8`](docs/experiments/2026-04-26-rebound-parity-figure8.md),
-    [`pythagorean`](docs/experiments/2026-04-30-rebound-parity-pythagorean.md),
-    [`retrograde`](docs/experiments/2026-05-01-rebound-parity-retrograde.md));
+    ([`kepler`](paper/notebooks/2026-04-25-rebound-parity-kepler.md),
+    [`figure8`](paper/notebooks/2026-04-26-rebound-parity-figure8.md),
+    [`pythagorean`](paper/notebooks/2026-04-30-rebound-parity-pythagorean.md),
+    [`retrograde`](paper/notebooks/2026-05-01-rebound-parity-retrograde.md));
   - the IAS15 controller architecture audit
     ([`2026-04-26-ias15-warmstart-bug.md`](docs/experiments/2026-04-26-ias15-warmstart-bug.md))
     documenting three controller divergences from Rein & Spiegel
@@ -421,7 +421,7 @@ trail directly:
   - the `recommended_dt` heuristic validation across thirteen
     scenarios with explicit Phase A → Phase B bound-formulation
     correction
-    ([`2026-05-01-recommended-dt-validation.md`](docs/experiments/2026-05-01-recommended-dt-validation.md)).
+    ([`2026-05-01-recommended-dt-validation.md`](paper/notebooks/2026-05-01-recommended-dt-validation.md)).
 - [`validation/`](validation/) — runnable cross-implementation harnesses
   one directory per reference tool (currently REBOUND), each with its
   own Python `run.py` orchestrator and a comparator that emits a

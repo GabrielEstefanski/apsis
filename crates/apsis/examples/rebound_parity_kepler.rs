@@ -20,7 +20,7 @@
 //!
 //! The full protocol — initial conditions, integrator settings, metrics, and
 //! tolerances declared *a priori* — is specified in
-//! [`docs/experiments/2026-04-25-rebound-parity-kepler.md`](../../../../docs/experiments/2026-04-25-rebound-parity-kepler.md).
+//! [`paper/notebooks/2026-04-25-rebound-parity-kepler.md`](../../../../paper/notebooks/2026-04-25-rebound-parity-kepler.md).
 //!
 //! Constants in this file (`A`, `E`, `M_PRIMARY`, `M_SECONDARY`, `N_ORBITS`)
 //! are the protocol's IC values. Changes here are protocol changes — update
@@ -106,7 +106,7 @@ fn main() {
     let mut w = BufWriter::new(file);
 
     writeln!(w, "# REBOUND parity — Kepler e=0.5 — apsis IAS15 side").unwrap();
-    writeln!(w, "# protocol: docs/experiments/2026-04-25-rebound-parity-kepler.md").unwrap();
+    writeln!(w, "# protocol: paper/notebooks/2026-04-25-rebound-parity-kepler.md").unwrap();
     writeln!(w, "# integrator: IAS15 (apsis)").unwrap();
     writeln!(w, "# units: canonical (G = 1)").unwrap();
     writeln!(w, "# a={A}, e={E}, m_primary={M_PRIMARY}, m_secondary={M_SECONDARY:e}").unwrap();
