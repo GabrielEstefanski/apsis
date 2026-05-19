@@ -20,6 +20,11 @@
 > soft-warn advisory at `System::set_integrator` reads that
 > predicate instead. The `requires_deterministic_force` contract
 > and the IAS15/BH pairing rule are untouched.
+>
+> The default integrator has also reverted to IAS15 — see
+> [ADR-013](013-default-integrator-ias15.md). The Yoshida-4 default
+> in §Decision below was a render-loop accommodation that the
+> post-ADR-010 topology no longer requires.
 
 ---
 
