@@ -452,29 +452,11 @@ impl std::error::Error for ResumeError {}
 
 /// Per-integrator lifetime counters exposed by [`Integrator::adaptive_stats`].
 ///
-/// Counts are **cumulative** from integrator construction. Compute rates in
-/// the caller (e.g. `rejections / substeps` as an acceptance-efficiency
-/// indicator, or `picard_iters / attempts` for mean inner-loop work).
-///
-/// # Instrumentation policy
-///
-/// Every counter here is incremented unconditionally at runtime — the
-/// cost is one `saturating_add` per accept/reject path, well below the
-/// Picard arithmetic that surrounds it. Enabling them by default makes
-/// the counters available to *any* caller (benchmarks, headless CSV,
-/// the lab notebooks under `validation/`) without recompilation, which
-/// is the only way to catch the slow-onset cumulative failures that
-/// motivated the figure-8 cascade investigation
-/// (`docs/experiments/2026-04-26-ias15-warmstart-bug.md`): a regression
-/// in those counters can be diagnosed from a single CSV column rather
-/// than from a recompile-and-rerun loop.
-///
-/// More expensive per-step trace data — b-coefficient norms after
-/// warmstart, cross-term-vs-diagonal contribution ratios, the
-/// step-size ratio history — sit behind the optional `ias15-diag`
-/// Cargo feature, since their per-step overhead is non-trivial and
-/// they are useful only when actively investigating a controller
-/// regression.
+/// Counts are **cumulative** from integrator construction. Always-on:
+/// one `saturating_add` per accept/reject path. See
+/// [`docs/integrator.md`](../../docs/integrator.md) §"Diagnostic
+/// counters in AdaptiveStats" for the healthy regime each counter
+/// implies and how to interpret elevated values.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct AdaptiveStats {
     /// Accepted sub-steps.
@@ -483,35 +465,21 @@ pub struct AdaptiveStats {
     /// Sum of `rejections_picard` + `rejections_truncation`.
     pub rejections: u64,
     /// Rejections caused by Picard predictor–corrector non-convergence.
-    /// A high ratio vs. `rejections_truncation` means the step size
-    /// routinely exceeds the local Lipschitz bound (stiff / high-e regime).
     pub rejections_picard: u64,
-    /// Rejections where Picard converged but truncation error exceeded
-    /// `ε`. This is the "well-behaved" rejection class handled by the
-    /// standard `(ε/err)^(1/7)` controller.
+    /// Rejections where Picard converged but truncation error exceeded `ε`.
     pub rejections_truncation: u64,
     /// Total Picard iterations across all attempts (accepted + rejected).
     pub picard_iters: u64,
-    /// Accepted sub-steps that hit the `DT_MIN` escape or deadline
-    /// without meeting tolerance. Should be zero in healthy scenes.
+    /// Accepted sub-steps that hit the `DT_MIN` floor without meeting
+    /// tolerance.
     pub degraded: u64,
-    /// Picard predictor–corrector early-exits via the stagnation guard
-    /// (residual stopped decreasing for two consecutive iterations,
-    /// counted as success-by-saturation). Healthy scenes should see
-    /// `picard_stagnations / substeps ≪ 1`; a sustained high ratio
-    /// indicates the warmstart is biasing `b` outside Picard's basin
-    /// of attraction — which on the figure-8 cascade was the
-    /// *symptom* of the missing-cross-terms warmstart bug.
+    /// Picard early-exits via the stagnation guard (residual stopped
+    /// decreasing for two consecutive iterations, accepted as
+    /// success-by-saturation).
     pub picard_stagnations: u64,
-    /// Number of "shrink → grow" reversals in the controller's `dt_next`.
-    /// A reversal is counted whenever `dt_next` increases after an
-    /// accept whose previous accept's `dt_next` had decreased. The
-    /// frequency reveals controller chatter: a healthy run on a smooth
-    /// regime sees `shrink_grow_cycles / substeps ≈ 0`; a run plagued
-    /// by wrong-warmstart bias oscillates as the controller alternately
-    /// over- and under-shrinks. Together with `picard_stagnations` this
-    /// is the cheapest "is something off?" signal the orchestrator can
-    /// surface without enabling the `ias15-diag` feature.
+    /// "Shrink → grow" reversals in the controller's `dt_next`: a
+    /// reversal is counted whenever `dt_next` increases after an
+    /// accept whose previous accept's `dt_next` had decreased.
     pub shrink_grow_cycles: u64,
 }
 

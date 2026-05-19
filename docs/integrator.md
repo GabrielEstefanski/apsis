@@ -107,11 +107,6 @@ occurrences verbatim, then every power of two ($4, 8, 16, \ldots$).
 This keeps the signal visible at low frequency without drowning stderr
 on pathological scenes.
 
-Degraded accepts triggered by the cooperative deadline (physics-thread
-budget exhausted) do not emit a log — they are expected in interactive
-precision runs and not a scenario indictment. Both causes still
-accumulate into the unified `degraded` counter.
-
 ### Diagnostic counters in `AdaptiveStats`
 
 `AdaptiveStats` (returned by `Integrator::adaptive_stats()`) carries
@@ -125,7 +120,7 @@ unconditionally (no feature flag, single `saturating_add` per accept):
 | `picard_iters` / `attempts` | $\sim 2$–$3$ | Predictor–corrector is starting too far from the converged $b$ |
 | `picard_stagnations` | $\ll$ `substeps` | Picard residual saturating above `PICARD_TOL` — typically a sign of warmstart bias against the true $b$ |
 | `shrink_grow_cycles` | $\ll$ `substeps` | Controller chatter; the dt proposal alternates between shrinking and growing on consecutive accepts |
-| `degraded` | $0$ | Floor or deadline escape clauses fired |
+| `degraded` | $0$ | `DT_MIN` floor escape clause fired |
 
 A run that disagrees on any of these by orders of magnitude from the
 healthy regime is a controller-health regression, even when the gated
