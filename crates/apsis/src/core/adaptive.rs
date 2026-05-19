@@ -314,3 +314,49 @@ impl DtController {
         self.last_dt
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn config() -> DtAdaptationConfig {
+        DtAdaptationConfig {
+            enabled: true,
+            min_dt: 1e-9,
+            max_dt: 1e6,
+            target_rel_energy_error: 1e-6,
+            accel_epsilon: 0.1,
+            grow_limit: 1.2,
+            shrink_limit: 0.5,
+            dt_slew_fraction: 0.1,
+        }
+    }
+
+    fn stats() -> AccelerationStats {
+        AccelerationStats { max_acc: 1.0, jerk: 0.0 }
+    }
+
+    #[test]
+    fn feedback_mode_active_when_rel_error_is_some() {
+        let mut ctrl = DtController::new(config());
+        ctrl.update(1e-3, Some(1e-9), stats());
+        assert_eq!(ctrl.feedback_mode(), FeedbackMode::Active);
+    }
+
+    #[test]
+    fn feedback_mode_disabled_when_rel_error_is_none() {
+        let mut ctrl = DtController::new(config());
+        let out = ctrl.update(1e-3, None, stats());
+        assert_eq!(ctrl.feedback_mode(), FeedbackMode::DisabledPrecisionLimited);
+        assert_eq!(out, 1e-3, "proposed_dt returned unchanged in precision-limited regime");
+    }
+
+    #[test]
+    fn feedback_mode_transitions_when_signal_recovers() {
+        let mut ctrl = DtController::new(config());
+        ctrl.update(1e-3, None, stats());
+        assert_eq!(ctrl.feedback_mode(), FeedbackMode::DisabledPrecisionLimited);
+        ctrl.update(1e-3, Some(1e-9), stats());
+        assert_eq!(ctrl.feedback_mode(), FeedbackMode::Active);
+    }
+}
