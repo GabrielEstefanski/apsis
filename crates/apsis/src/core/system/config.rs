@@ -281,15 +281,6 @@ impl System {
         self.integrator.hill_factor()
     }
 
-    /// Set a cooperative wall-clock deadline for subsequent [`System::step`]
-    /// calls. Adaptive integrators (IAS15) use this to short-circuit retry
-    /// spins when the surrounding batch loop has already exhausted its
-    /// budget. Passing `None` clears the deadline. Fixed-step integrators
-    /// ignore it.
-    pub fn set_step_deadline(&mut self, deadline: Option<std::time::Instant>) {
-        self.step_deadline = deadline;
-    }
-
     /// `true` if the system satisfies the Wisdom-Holman dominance criterion.
     pub fn is_wh_suitable(&self) -> bool {
         crate::physics::integrator::wisdom_holman::WisdomHolman::is_suitable_for(&self.bodies)

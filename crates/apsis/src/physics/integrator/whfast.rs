@@ -446,7 +446,6 @@ mod tests {
                 hamiltonian_perturbations: &hamiltonian,
                 non_conservative_perturbations: &non_conservative,
                 observers: &mut observers,
-                deadline: None,
             };
             integrator.step(bodies, &mut ctx, dt, &mut acc);
         }
@@ -622,7 +621,6 @@ mod tests {
             hamiltonian_perturbations: &hamiltonian,
             non_conservative_perturbations: &non_conservative,
             observers: &mut observers,
-            deadline: None,
         };
         let mut wh = WHFast::new();
         let result = wh.step(&mut bodies, &mut ctx, 0.01, &mut acc);

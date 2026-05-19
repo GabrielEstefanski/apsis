@@ -617,10 +617,9 @@ const PICARD_SHRINK: f64 = 0.5;
 /// drives the right shrink strategy (TD-004).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DtDecision {
-    /// Accept this attempt. `degraded = true` when the acceptance was
-    /// forced by an escape hatch (`DT_MIN` floor or cooperative deadline)
-    /// rather than convergence + tolerance actually being met; the caller
-    /// should then surface [`StepResult::degraded`].
+    /// Accept this attempt. `degraded = true` when acceptance was forced
+    /// by the `DT_MIN` floor rather than convergence + tolerance actually
+    /// being met; the caller should then surface [`StepResult::degraded`].
     Accept { degraded: bool },
     /// Picard predictor–corrector did not converge. Apply [`PICARD_SHRINK`]
     /// (a fixed halving); the truncation formula would under-estimate the
@@ -659,31 +658,22 @@ enum DtDecision {
 ///   the `DT_MIN` escape check.
 /// - `eps` — user's target tolerance; clamped to `[EPSILON_MIN, EPSILON_MAX]`
 ///   on the way in by [`Ias15::set_epsilon`].
-/// - `deadline_hit` — cooperative wall-clock budget has been exceeded;
-///   used to short-circuit retry spins in pathological scenes.
 ///
 /// # Decision table
 ///
-/// | `converged` | `trunc ≤ ε` | `dt ≤ DT_MIN` | `deadline` | → |
-/// |---|---|---|---|---|
-/// | T | T | — | — | `Accept { degraded: false }` |
-/// | F | — | T | — | `Accept { degraded: true }` |
-/// | T | F | T | — | `Accept { degraded: true }` |
-/// | — | — | — | T | `Accept { degraded: true }` |
-/// | F | — | F | F | `RejectPicard` |
-/// | T | F | F | F | `RejectTruncation` |
-fn decide_dt(
-    picard_converged: bool,
-    trunc_err: f64,
-    dt_try: f64,
-    eps: f64,
-    deadline_hit: bool,
-) -> DtDecision {
+/// | `converged` | `trunc ≤ ε` | `dt ≤ DT_MIN` | → |
+/// |---|---|---|---|
+/// | T | T | — | `Accept { degraded: false }` |
+/// | F | — | T | `Accept { degraded: true }` |
+/// | T | F | T | `Accept { degraded: true }` |
+/// | F | — | F | `RejectPicard` |
+/// | T | F | F | `RejectTruncation` |
+fn decide_dt(picard_converged: bool, trunc_err: f64, dt_try: f64, eps: f64) -> DtDecision {
     let on_merit = picard_converged && trunc_err <= eps;
     if on_merit {
         return DtDecision::Accept { degraded: false };
     }
-    if dt_try <= DT_MIN || deadline_hit {
+    if dt_try <= DT_MIN {
         return DtDecision::Accept { degraded: true };
     }
     if !picard_converged { DtDecision::RejectPicard } else { DtDecision::RejectTruncation }
@@ -766,8 +756,8 @@ pub struct Ias15 {
     /// + rejections_truncation_total)`.
     picard_iters_total: u64,
 
-    /// Cumulative count of degraded accepts (`DT_MIN` escape clause
-    /// or deadline fired). Should stay at zero for well-posed scenes.
+    /// Cumulative count of degraded accepts (`DT_MIN` escape clause).
+    /// Should stay at zero for well-posed scenes.
     degraded_total: u64,
 
     /// Cumulative count of Picard early-exits via the stagnation guard
@@ -1190,10 +1180,7 @@ impl Integrator for Ias15 {
             // as independent signals (TD-004) so the shrink strategy can
             // be picked correctly for each failure class; prior revisions
             // collapsed them with `max(…)` and underfed the controller.
-            let deadline_hit =
-                ctx.deadline.map(|d| std::time::Instant::now() >= d).unwrap_or(false);
-
-            match decide_dt(converged, trunc_err, dt_try, self.epsilon, deadline_hit) {
+            match decide_dt(converged, trunc_err, dt_try, self.epsilon) {
                 DtDecision::RejectPicard => {
                     self.rejections_picard_total = self.rejections_picard_total.saturating_add(1);
                     time_phase!(snapshot_restore, {
@@ -1256,37 +1243,25 @@ impl Integrator for Ias15 {
                     self.substeps_total = self.substeps_total.saturating_add(1);
                     if step_degraded {
                         self.degraded_total = self.degraded_total.saturating_add(1);
-                        // Distinguish the two causes reported by `decide_dt`:
-                        // `dt_try <= DT_MIN` means the adaptive controller
-                        // wanted to shrink further but saturated the floor,
-                        // which is a **scenario stiffness signal** — the
-                        // close-encounter geometry is beyond what IAS15 can
-                        // resolve at f64 precision. The deadline branch
-                        // (cooperative budget exhausted) is expected in
-                        // interactive precision runs and is not a scenario
-                        // indictment — silenced here; the cumulative counter
-                        // in `AdaptiveStats` still tracks it.
+                        // Floor saturation: the controller wanted to shrink
+                        // further but hit `DT_MIN`. A scenario-stiffness
+                        // signal — close-encounter geometry beyond what
+                        // IAS15 can resolve at f64 precision.
                         //
                         // Log rate: first three occurrences verbatim, then
-                        // every power of two (4, 8, 16, 32, ...). Exponentially
-                        // thins the emission rate while keeping a running
-                        // `floor_hit_count` in every event. Avoids drowning
-                        // stderr when a pathological scene hits the floor
-                        // thousands of times, without losing the initial
-                        // signal.
-                        if dt_try <= DT_MIN {
-                            let c = self.degraded_total;
-                            if c <= 3 || c.is_power_of_two() {
-                                crate::warn_diag!(
-                                    crate::core::log::Source::Integrator,
-                                    "IAS15 dt floor reached; controller accepted degraded step",
-                                    dt = dt_try,
-                                    floor = DT_MIN,
-                                    floor_hit_count = c,
-                                    substep = self.substeps_total,
-                                    hint = "scenario may be stiff — consider a softened kernel (NewtonKernel::new(ε > 0)), reducing N, or relaxing epsilon",
-                                );
-                            }
+                        // every power of two (4, 8, 16, ...). Keeps the
+                        // initial signal without drowning stderr.
+                        let c = self.degraded_total;
+                        if c <= 3 || c.is_power_of_two() {
+                            crate::warn_diag!(
+                                crate::core::log::Source::Integrator,
+                                "IAS15 dt floor reached; controller accepted degraded step",
+                                dt = dt_try,
+                                floor = DT_MIN,
+                                floor_hit_count = c,
+                                substep = self.substeps_total,
+                                hint = "scenario may be stiff — consider a softened kernel (NewtonKernel::new(ε > 0)), reducing N, or relaxing epsilon",
+                            );
                         }
                     }
 
@@ -1381,11 +1356,7 @@ impl Integrator for Ias15 {
                     self.dt_dir_prev = dt_dir_now;
                     self.dt_next = new_dt_next;
 
-                    let label = if step_degraded {
-                        if deadline_hit { "accept_deadline" } else { "accept_floor" }
-                    } else {
-                        "accept"
-                    };
+                    let label = if step_degraded { "accept_floor" } else { "accept" };
                     diag_emit_attempt(
                         self,
                         dt_try,
@@ -2574,17 +2545,14 @@ mod tests {
 
     // ── decide_dt pure-function tests (TD-004) ────────────────────────────
     //
-    // The controller's decision logic is factored out as a pure function
-    // on two floats + two bools so it can be exhaustively tested without
-    // standing up a `System`. Each case covers one row of the decision
-    // table documented on [`decide_dt`]; flipping an input and checking
-    // the output changes is how we'll catch regressions in future
-    // tuning work.
+    // The controller's decision logic is a pure function on two floats +
+    // one bool. Each case covers one row of the decision table on
+    // [`decide_dt`].
 
     #[test]
     fn decide_dt_accepts_on_merit() {
         // Picard converged AND truncation within tolerance → clean accept.
-        let d = decide_dt(true, 5e-10, 1e-3, 1e-9, false);
+        let d = decide_dt(true, 5e-10, 1e-3, 1e-9);
         assert_eq!(d, DtDecision::Accept { degraded: false });
     }
 
@@ -2592,14 +2560,14 @@ mod tests {
     fn decide_dt_rejects_picard_when_not_converged() {
         // Non-convergence dominates: even an incidentally-small trunc
         // must not let us accept divergent `b` coefficients.
-        let d = decide_dt(false, 1e-12, 1e-3, 1e-9, false);
+        let d = decide_dt(false, 1e-12, 1e-3, 1e-9);
         assert_eq!(d, DtDecision::RejectPicard);
     }
 
     #[test]
     fn decide_dt_rejects_truncation_when_converged_but_over_tol() {
         // Picard fine, but trunc_err above ε → standard controller path.
-        let d = decide_dt(true, 1e-6, 1e-3, 1e-9, false);
+        let d = decide_dt(true, 1e-6, 1e-3, 1e-9);
         assert_eq!(d, DtDecision::RejectTruncation);
     }
 
@@ -2607,29 +2575,12 @@ mod tests {
     fn decide_dt_dt_min_escape_degrades() {
         // At the floor, we accept regardless of error state so the
         // simulation progresses — but flagged degraded for the caller.
-        let d = decide_dt(false, 1.0, DT_MIN, 1e-9, false);
+        let d = decide_dt(false, 1.0, DT_MIN, 1e-9);
         assert_eq!(d, DtDecision::Accept { degraded: true });
 
         // Same floor, different failure class (trunc) — still degraded.
-        let d = decide_dt(true, 1.0, DT_MIN, 1e-9, false);
+        let d = decide_dt(true, 1.0, DT_MIN, 1e-9);
         assert_eq!(d, DtDecision::Accept { degraded: true });
-    }
-
-    #[test]
-    fn decide_dt_deadline_forces_degraded_accept() {
-        // Cooperative deadline passed: accept current attempt rather
-        // than spend more wall time shrinking.
-        let d = decide_dt(false, 1.0, 1e-3, 1e-9, true);
-        assert_eq!(d, DtDecision::Accept { degraded: true });
-    }
-
-    #[test]
-    fn decide_dt_deadline_does_not_demote_clean_accept() {
-        // On-merit result takes precedence over deadline — deadline is
-        // an escape hatch for *stuck* attempts, not a degrade-poisoner
-        // for attempts that converged within tolerance.
-        let d = decide_dt(true, 5e-10, 1e-3, 1e-9, true);
-        assert_eq!(d, DtDecision::Accept { degraded: false });
     }
 
     #[test]
@@ -2638,7 +2589,7 @@ mod tests {
         // following the threshold convention specified in Rein &
         // Spiegel (2015) §3.4. Flipping this would silently change
         // step-size distributions in benchmarks.
-        let d = decide_dt(true, 1e-9, 1e-3, 1e-9, false);
+        let d = decide_dt(true, 1e-9, 1e-3, 1e-9);
         assert_eq!(d, DtDecision::Accept { degraded: false });
     }
 

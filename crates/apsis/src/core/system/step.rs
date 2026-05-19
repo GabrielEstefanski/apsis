@@ -83,7 +83,6 @@ impl System {
             hamiltonian_perturbations: &self.hamiltonian_perturbations,
             non_conservative_perturbations: &self.non_conservative_perturbations,
             observers: &mut self.observers,
-            deadline: self.step_deadline,
         };
         let result = self.integrator.step(&mut self.bodies, &mut ctx, dt, &mut self.scratch_acc);
         self.last_potential = result.potential_energy;

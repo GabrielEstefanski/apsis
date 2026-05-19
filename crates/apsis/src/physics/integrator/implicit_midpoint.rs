@@ -372,7 +372,6 @@ mod tests {
                 hamiltonian_perturbations: &hamiltonian,
                 non_conservative_perturbations: &non_conservative,
                 observers: &mut observers,
-                deadline: None,
             };
             integrator.step(bodies, &mut ctx, dt, &mut acc);
         }
@@ -640,7 +639,6 @@ mod tests {
             hamiltonian_perturbations: &hamiltonian,
             non_conservative_perturbations: &non_conservative,
             observers: &mut observers,
-            deadline: None,
         };
         im.step(&mut bodies, &mut ctx, 1e-3, &mut acc);
     }
@@ -662,7 +660,6 @@ mod tests {
             hamiltonian_perturbations: &hamiltonian,
             non_conservative_perturbations: &non_conservative,
             observers: &mut observers,
-            deadline: None,
         };
         let result = im.step(&mut bodies, &mut ctx, 1e-3, &mut acc);
         assert_eq!(result.consumed_dt, 1e-3);

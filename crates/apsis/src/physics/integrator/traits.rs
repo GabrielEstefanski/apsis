@@ -252,18 +252,6 @@ pub struct IntegratorContext<'a> {
     /// audit trail emitters, etc.). Dispatched at synchronized state
     /// after the integrator has fully resolved the outer step.
     pub observers: &'a mut [Box<dyn Operator>],
-
-    /// Optional cooperative wall-clock deadline. Adaptive integrators
-    /// (IAS15) check this after each rejection in the retry loop; when
-    /// the deadline is passed they accept the current attempt rather
-    /// than spending more wall time shrinking `dt`, and mark the step
-    /// as [`StepResult::degraded`].
-    ///
-    /// This is a courtesy knob so the physics-thread batch loop stays
-    /// responsive to the UI even in a pathological scene; it does not
-    /// strictly bound the step because the current attempt is still
-    /// allowed to run to completion. Fixed-step integrators ignore it.
-    pub deadline: Option<std::time::Instant>,
 }
 
 // ── StepResult ────────────────────────────────────────────────────────────────
