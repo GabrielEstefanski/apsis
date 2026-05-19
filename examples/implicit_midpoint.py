@@ -92,11 +92,13 @@ def main() -> None:
     print(f"  predicted Δω (GR)                 = {predicted * arcsec:+.4f} arcsec")
     print(f"  measured  Δω (GR + truncation)    = {measured  * arcsec:+.4f} arcsec")
     print(f"  excess from 2nd-order truncation  = {(measured - predicted) * arcsec:+.4f} arcsec")
-    print(f"  |dE/E| = {abs(sys.energy_delta):.3e}  (symplectic: bounded)")
+    de_rel = sys.energy_delta
+    assert de_rel is not None, "Mercury 1PN is well-conditioned; energy_delta must be Some"
+    print(f"  |dE/E| = {abs(de_rel):.3e}  (symplectic: bounded)")
 
     # Symplectic A-stable: bounded |dE/E|, floor set by the implicit
     # solver's convergence tolerance (~10⁻¹³ measured).
-    assert abs(sys.energy_delta) < 1e-10, f"|dE/E| = {abs(sys.energy_delta):.3e} not bounded"
+    assert abs(de_rel) < 1e-10, f"|dE/E| = {abs(de_rel):.3e} not bounded"
 
 
 if __name__ == "__main__":

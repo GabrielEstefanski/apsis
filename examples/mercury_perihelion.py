@@ -82,7 +82,11 @@ def main() -> None:
     print(f"  predicted Δω = {predicted * arcsec_per_rad:+.4f} arcsec  ({predicted:+.6e} rad)")
     print(f"  measured  Δω = {measured  * arcsec_per_rad:+.4f} arcsec  ({measured:+.6e} rad)")
     print(f"  relative error = {rel_err:+.3e}")
-    print(f"  |dE/E| = {abs(sys.energy_delta):.3e}")
+    de_rel = sys.energy_delta
+    if de_rel is None:
+        print(f"  |dE|   = {sys.abs_energy_drift:.3e}  (|E0| below conditioning floor)")
+    else:
+        print(f"  |dE/E| = {abs(de_rel):.3e}")
 
     # Demo-level GR recovery at IAS15 + dt = 1e-3.
     assert abs(rel_err) < 1e-2, f"Mercury 1PN precession off by {rel_err:.3e}"
