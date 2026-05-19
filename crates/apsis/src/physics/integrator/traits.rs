@@ -69,14 +69,6 @@ impl IntegratorKind {
         }
     }
 
-    /// Whether per-step wall time is unbounded in the adversarial case.
-    /// `true` only for IAS15, whose adaptive controller can shrink `dt`
-    /// arbitrarily in stiff regimes; all other integrators in the zoo
-    /// have per-step cost bounded by the force evaluation.
-    pub fn is_adaptive(self) -> bool {
-        matches!(self, Self::Ias15)
-    }
-
     /// All known variants, ordered roughly by typical use frequency.
     pub const ALL: [IntegratorKind; 7] = [
         IntegratorKind::Ias15,
@@ -164,12 +156,10 @@ pub struct StepResult {
     /// (e.g. Wisdom–Holman → Yoshida4 when the dominance criterion fails).
     pub used_fallback: bool,
 
-    /// Dense-output snapshot for sub-step interpolation.
-    ///
-    /// IAS15 fills this with the accepted sub-step's b-coefficients, valid
-    /// over `[t − consumed_dt, t]`. Other integrators leave it `None`;
-    /// [`System::step`] supplies an Order-2 fallback using the pre-step
-    /// kinematics.
+    /// Dense-output snapshot for sub-step interpolation, valid over
+    /// `[t − consumed_dt, t]`. Integrators with dense output fill this;
+    /// others leave it `None` and [`System::step`] supplies an Order-2
+    /// fallback using the pre-step kinematics.
     pub step_snapshot: Option<super::dense::DenseSnapshot>,
 
     /// `true` when an adaptive integrator hit the `DT_MIN` floor and
@@ -278,6 +268,14 @@ pub trait Integrator: Send {
     /// Which algorithm this integrator represents.
     fn kind(&self) -> IntegratorKind;
 
+    /// `true` if per-step wall time is unbounded in the adversarial
+    /// case (controller may shrink `dt` arbitrarily). Default `false`;
+    /// override on schemes whose per-step cost is not bounded by the
+    /// force evaluation alone.
+    fn is_adaptive(&self) -> bool {
+        false
+    }
+
     /// Whether the integrator's internal controller decides the actual
     /// step size, treating `dt_hint` as a *hint* rather than a hard cap.
     /// The orchestrator reads this to decide whether to reset
@@ -297,8 +295,9 @@ pub trait Integrator: Send {
     /// Apply a uniform translation `(-dx, -dy)` to every body, routing
     /// the shift through whatever compensated-summation accumulators
     /// the integrator maintains. Default impl performs an uncompensated
-    /// subtraction; IAS15 overrides to preserve its Neumaier buffers
-    /// (necessary for bit-reproducibility across COM-recentering shifts).
+    /// subtraction; integrators carrying per-body compensation buffers
+    /// override to preserve them (necessary for bit-reproducibility
+    /// across COM-recentering shifts).
     fn recenter_bodies(&mut self, bodies: &mut [Body], dx: f64, dy: f64) {
         for b in bodies.iter_mut() {
             b.pos_x -= dx;
@@ -306,8 +305,8 @@ pub trait Integrator: Send {
         }
     }
 
-    /// Set the error tolerance for adaptive integrators (IAS15).
-    /// No-op for fixed-step integrators.
+    /// Set the error tolerance for adaptive integrators. No-op
+    /// otherwise.
     fn set_epsilon(&mut self, _eps: f64) {}
 
     /// Return the current error tolerance, if applicable.
@@ -316,8 +315,8 @@ pub trait Integrator: Send {
     }
 
     /// Set the Hill-radius multiplier for hybrid close-encounter
-    /// integrators (Mercurius). No-op for integrators without a
-    /// changeover-based encounter trigger.
+    /// integrators. No-op for integrators without a changeover-based
+    /// encounter trigger.
     fn set_hill_factor(&mut self, _alpha: f64) {}
 
     /// Return the active Hill-radius multiplier, if applicable.

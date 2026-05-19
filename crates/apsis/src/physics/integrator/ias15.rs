@@ -1468,6 +1468,10 @@ impl Integrator for Ias15 {
         })
     }
 
+    fn is_adaptive(&self) -> bool {
+        true
+    }
+
     fn requires_deterministic_force(&self) -> bool {
         // Picard predictor-corrector reaches its fixed point only when
         // f(x, v, t) is bit-reproducible across iterations. BH tree

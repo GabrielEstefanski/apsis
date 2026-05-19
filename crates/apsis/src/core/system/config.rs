@@ -188,7 +188,7 @@ impl System {
             );
         }
 
-        if kind.is_adaptive() && self.bodies.len() > ADAPTIVE_BODY_SOFT_WARN {
+        if integrator.is_adaptive() && self.bodies.len() > ADAPTIVE_BODY_SOFT_WARN {
             let kind_label = kind.slug();
             let n = self.bodies.len();
             crate::warn_diag!(
