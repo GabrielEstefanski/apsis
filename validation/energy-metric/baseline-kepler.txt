@@ -1,0 +1,8 @@
+[apsis WARN] integrator requires deterministic force; switching force model to direct O(N²) { integrator="ias15" exact_threshold_before=64 exact_threshold_after=10000 hint="select velocity_verlet or yoshida4 for real-time playback" }
+Kepler 2-body @ IAS15
+  t_end       = 1.0001e2
+  steps       = 5499
+  energy      = -5.000000e-1
+  dE/E        = +3.775e-15
+  Lz          = +5.000000e-1
+  dLz/Lz      = -5.000e-1

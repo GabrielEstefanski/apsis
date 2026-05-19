@@ -114,7 +114,11 @@ def main() -> None:
     print(f"  expected (additive)   Δω = {expected_sum * arcsec:+.4f} arcsec")
     print(f"  measured (composed)   Δω = {delta_both * arcsec:+.4f} arcsec")
     print(f"  composition error        = {rel_err:+.3e}")
-    print(f"  |dE/E| (composed run)    = {abs(sys_c.energy_delta):.3e}")
+    de_rel = sys_c.energy_delta
+    if de_rel is None:
+        print(f"  |dE|   (composed run)    = {sys_c.abs_energy_drift:.3e}  (|E0| below conditioning floor)")
+    else:
+        print(f"  |dE/E| (composed run)    = {abs(de_rel):.3e}")
     print(f"  c (canonical units)      = {C_SOLAR_UNITS:.3f}")
 
     # Cross-operator coupling (1PN ↔ central, both modifying apsidal rate

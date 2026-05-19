@@ -30,7 +30,7 @@ fn main() {
     println!(
         "  ended at t = {:.4}   dE/E = {:+.3e}   dLz/Lz = {:+.3e}",
         sys.t(),
-        sys.energy_delta(),
-        sys.lz_delta(),
+        sys.energy_delta().unwrap_or(f64::NAN),
+        sys.lz_delta().unwrap_or(f64::NAN),
     );
 }

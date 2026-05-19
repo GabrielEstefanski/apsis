@@ -2351,7 +2351,7 @@ mod tests {
         // short of the intended integration window.
         while sys.t() < total_time {
             sys.step();
-            let err = sys.metrics().rel_energy_error;
+            let err = sys.metrics().rel_energy_error.unwrap_or(0.0);
             peak = peak.max(err.abs());
             if sys.t() >= next_sample {
                 samples.push((sys.t(), err));
@@ -2432,7 +2432,7 @@ mod tests {
         let mut peak = 0.0_f64;
         for _ in 0..n_steps {
             sys.step();
-            peak = peak.max(sys.metrics().rel_energy_error.abs());
+            peak = peak.max(sys.metrics().rel_energy_error.unwrap().abs());
         }
 
         assert!(
@@ -2480,7 +2480,7 @@ mod tests {
         let mut peak = 0.0_f64;
         for _ in 0..n_steps {
             sys.step();
-            peak = peak.max(sys.metrics().rel_energy_error.abs());
+            peak = peak.max(sys.metrics().rel_energy_error.unwrap().abs());
         }
 
         assert!(
@@ -3077,7 +3077,7 @@ mod tests {
             let mut p = 0.0_f64;
             for _ in 0..n_steps {
                 sys.step();
-                p = p.max(sys.metrics().rel_energy_error.abs());
+                p = p.max(sys.metrics().rel_energy_error.unwrap().abs());
             }
             p
         };
@@ -3149,7 +3149,7 @@ mod tests {
             let mut p = 0.0_f64;
             for _ in 0..n_steps {
                 sys.step();
-                p = p.max(sys.metrics().rel_energy_error.abs());
+                p = p.max(sys.metrics().rel_energy_error.unwrap().abs());
             }
             p
         };

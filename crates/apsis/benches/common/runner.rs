@@ -76,7 +76,7 @@ pub fn run_for_validation(spec: &ScenarioSpec) -> ScenarioMetrics {
         // separately. Recording a zero here is still correct — it
         // reflects the actual behaviour of the run.
         let consumed = t_after - t_before;
-        let abs_err = sys.metrics().rel_energy_error.abs();
+        let abs_err = sys.metrics().abs_energy_error.abs();
         samples.push(t_after, consumed, abs_err);
     }
 

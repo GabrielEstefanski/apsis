@@ -73,7 +73,11 @@ def main() -> None:
     print(f"  after {N_ORBITS} Newtonian periods:")
     print(f"    r = {r_final:.4f}  v = {v_final:.4f}")
     print(f"    a (against μ_eff): initial = {a_initial:.4f}, final = {a_final:.4f}")
-    print(f"  |dE/E| = {abs(sys.energy_delta):.3e}")
+    de_rel = sys.energy_delta
+    if de_rel is None:
+        print(f"  |dE|   = {sys.abs_energy_drift:.3e}  (|E0| below conditioning floor)")
+    else:
+        print(f"  |dE/E| = {abs(de_rel):.3e}")
 
     # Smoke gate: catches unbinding and NaN integration.
     assert abs(a_final - a_initial) < 0.02, f"semi-major drift {a_final - a_initial:.3e}"

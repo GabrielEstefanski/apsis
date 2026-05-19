@@ -82,7 +82,8 @@ impl System {
             }
 
             self.initial_energy = None;
-            self.rel_energy_error = 0.0;
+            self.rel_energy_error = None;
+            self.abs_energy_error = 0.0;
             self.template_source = None;
         }
     }
@@ -102,7 +103,8 @@ impl System {
 
             if mass_changed {
                 self.initial_energy = None;
-                self.rel_energy_error = 0.0;
+                self.rel_energy_error = None;
+                self.abs_energy_error = 0.0;
             }
         }
     }
@@ -142,7 +144,8 @@ impl System {
         }
 
         self.initial_energy = None;
-        self.rel_energy_error = 0.0;
+        self.rel_energy_error = None;
+        self.abs_energy_error = 0.0;
         self.steps = 0;
         self.t = 0.0;
         self.last_potential = 0.0;

@@ -31,8 +31,8 @@ pub struct HookContext<'a> {
     pub t: f64,
     pub dt: f64,
     pub steps: u64,
-    pub rel_energy_error: f64,
-    pub rel_angular_momentum_error: f64,
+    pub rel_energy_error: Option<f64>,
+    pub rel_angular_momentum_error: Option<f64>,
     pub phase: HookPhase,
     /// Serialised integrator scratch, populated by the orchestrator
     /// when at least one registered hook returns

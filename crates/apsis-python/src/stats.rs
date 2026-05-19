@@ -44,7 +44,9 @@ pub(crate) struct PyStats {
     #[pyo3(get)]
     energy: f64,
     #[pyo3(get)]
-    energy_drift: f64,
+    energy_drift: Option<f64>,
+    #[pyo3(get)]
+    abs_energy_drift: f64,
     #[pyo3(get)]
     kinetic_energy: f64,
     #[pyo3(get)]
@@ -52,7 +54,9 @@ pub(crate) struct PyStats {
     #[pyo3(get)]
     lz: f64,
     #[pyo3(get)]
-    lz_drift: f64,
+    lz_drift: Option<f64>,
+    #[pyo3(get)]
+    abs_lz_drift: f64,
     #[pyo3(get)]
     integrator: PyIntegratorKind,
     #[pyo3(get)]
@@ -70,10 +74,12 @@ impl PyStats {
             dt: m.dt,
             energy: m.total_energy,
             energy_drift: m.rel_energy_error,
+            abs_energy_drift: m.abs_energy_error,
             kinetic_energy: m.kinetic,
             potential_energy: m.potential,
             lz: m.angular_momentum_z,
             lz_drift: m.rel_angular_momentum_error,
+            abs_lz_drift: m.abs_angular_momentum_error,
             integrator: PyIntegratorKind::from_core(m.integrator_kind),
             force_evaluations: m.steps * (m.integrator_kind.force_evals_per_step() as u64),
             integrator_kind: m.integrator_kind,
@@ -84,13 +90,21 @@ impl PyStats {
 #[pymethods]
 impl PyStats {
     fn __repr__(&self) -> String {
+        let de = match self.energy_drift {
+            Some(rel) => format!("{:.3e}", rel),
+            None => format!("{:.3e} (abs, |E0|~0)", self.abs_energy_drift),
+        };
+        let dl = match self.lz_drift {
+            Some(rel) => format!("{:.3e}", rel),
+            None => format!("{:.3e} (abs, |Lz0|~0)", self.abs_lz_drift),
+        };
         format!(
-            "Stats(t={:.6}, steps={}, dt={:.3e}, dE/E0={:.3e}, dLz/Lz0={:.3e}, integrator={:?})",
+            "Stats(t={:.6}, steps={}, dt={:.3e}, dE={}, dLz={}, integrator={:?})",
             self.t,
             self.steps,
             self.dt,
-            self.energy_drift,
-            self.lz_drift,
+            de,
+            dl,
             integrator_slug(self.integrator_kind),
         )
     }

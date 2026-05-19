@@ -27,6 +27,12 @@ impl System {
     /// 6. Optional `heartbeat` tick when `steps % heartbeat_interval == 0`.
     /// 7. Apply post-step / event commands in insertion order.
     pub fn step(&mut self) {
+        // Prime the conservation baseline so the first hook fires with
+        // `rel_*_error = Some(0.0)`, not the uninitialised `None`.
+        if self.initial_energy.is_none() {
+            self.refresh_energy_diagnostics();
+        }
+
         // ── 1. pre_step hooks (observe pre-integration state) ────────────────
         let pre_cmds = if !self.hooks.is_empty() {
             let mut hooks = take_hooks(self);
@@ -306,8 +312,9 @@ impl System {
             },
         };
 
-        let denom = baseline.abs().max(1e-12);
-        self.rel_energy_error = (total - baseline) / denom;
+        let delta = total - baseline;
+        self.abs_energy_error = delta;
+        self.rel_energy_error = crate::core::system::regime::regime_aware_rel(delta, baseline);
     }
 
     pub(crate) fn update_angular_momentum_tracking(&mut self) {
@@ -321,10 +328,10 @@ impl System {
             },
         };
 
-        self.abs_angular_momentum_error = (lz - baseline).abs();
-
-        let denom = baseline.abs().max(1e-12);
-        self.rel_angular_momentum_error = (lz - baseline) / denom;
+        let delta = lz - baseline;
+        self.abs_angular_momentum_error = delta.abs();
+        self.rel_angular_momentum_error =
+            crate::core::system::regime::regime_aware_rel(delta, baseline);
     }
 
     /// Event detection stub — collision detection will arrive with the basic

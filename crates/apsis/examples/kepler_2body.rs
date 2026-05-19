@@ -33,7 +33,7 @@ fn main() {
     println!("  t_end       = {:.4e}", sys.t());
     println!("  steps       = {}", steps);
     println!("  energy      = {:+.6e}", sys.energy());
-    println!("  dE/E        = {:+.3e}", sys.energy_delta());
+    println!("  dE/E        = {:+.3e}", sys.energy_delta().unwrap_or(f64::NAN));
     println!("  Lz          = {:+.6e}", sys.lz());
-    println!("  dLz/Lz      = {:+.3e}", sys.lz_delta());
+    println!("  dLz/Lz      = {:+.3e}", sys.lz_delta().unwrap_or(f64::NAN));
 }

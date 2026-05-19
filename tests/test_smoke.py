@@ -688,11 +688,75 @@ def test_stats_object_carries_all_headline_diagnostics() -> None:
     assert s.steps > 0
     assert s.dt > 0
     assert s.energy < 0  # bound Kepler orbit
+    assert s.energy_drift is not None
     assert abs(s.energy_drift) < 1e-12
+    assert s.lz_drift is not None
+    assert abs(s.lz_drift) < 1e-12
     assert s.kinetic_energy > 0
     assert s.potential_energy < 0
     assert s.integrator == apsis.IntegratorKind.IAS15
     assert s.force_evaluations > 0
+
+
+def _dust_system() -> apsis.System:
+    """Extreme mass ratio that drives ``|E_0|`` below the conditioning floor.
+
+    A 1e-15 secondary against a unit primary makes the total energy
+    ``E ≈ −0.5 · m₂ ≈ 5e-16`` — below ``sqrt(f64::EPSILON) ≈ 1.5e-8``,
+    so the relative drift metric is not well-defined and the binding
+    must report ``None``.
+    """
+    sun = apsis.Body.star(mass=1.0)
+    dust = (apsis.Body.rocky(mass=1e-15)
+            .at((1.0, 0.0))
+            .with_velocity((0.0, 1.0)))
+    return apsis.System(
+        bodies=[sun, dust],
+        units=apsis.units.CANONICAL,
+        integrator="ias15",
+        dt=1e-3,
+    )
+
+
+def test_drift_is_none_when_baseline_below_conditioning_floor() -> None:
+    """In the dust regime ``|E_0|, |L_{z,0}| < sqrt(eps)`` so the relative
+    drift is undefined for both energy and angular momentum; the binding
+    must report ``None`` for both and surface the absolute counterpart
+    as a finite float bounded by the system's own scale (a delta larger
+    than the total it tracks would mean the field is wired to something
+    other than ``current - baseline``)."""
+    sys = _dust_system()
+    sys.integrate_for(0.1)
+
+    assert sys.energy_delta is None
+    assert sys.lz_delta is None
+
+    assert isinstance(sys.abs_energy_drift, float)
+    assert np.isfinite(sys.abs_energy_drift)
+    assert abs(sys.abs_energy_drift) <= abs(sys.energy) + 1e-30
+
+    assert isinstance(sys.abs_lz_drift, float)
+    assert np.isfinite(sys.abs_lz_drift)
+    assert abs(sys.abs_lz_drift) <= abs(sys.lz) + 1e-30
+
+
+def test_stats_drift_mirrors_system_in_dust_regime() -> None:
+    """``Stats`` carries the same None-projection and finite absolute values
+    that the live system accessors report — same regime, same contract."""
+    sys = _dust_system()
+    sys.integrate_for(0.1)
+    s = sys.stats
+
+    assert s.energy_drift is None
+    assert s.lz_drift is None
+
+    assert isinstance(s.abs_energy_drift, float)
+    assert np.isfinite(s.abs_energy_drift)
+    assert s.abs_energy_drift == sys.abs_energy_drift
+
+    assert isinstance(s.abs_lz_drift, float)
+    assert np.isfinite(s.abs_lz_drift)
+    assert s.abs_lz_drift == sys.abs_lz_drift
 
 
 def test_trajectory_carries_dt_history() -> None:

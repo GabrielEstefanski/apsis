@@ -33,9 +33,12 @@ pub(crate) mod helpers;
 pub(crate) mod metrics;
 pub(crate) mod orbital;
 pub(crate) mod perturbations;
+pub(crate) mod regime;
 pub(crate) mod step;
 #[cfg(test)]
 mod tests;
+
+pub use regime::MIN_RELATIVE_DENOMINATOR;
 
 use crate::core::adaptive::{DtAdaptationConfig, DtController, DtMode, ThetaController};
 use crate::core::diagnostics::{DiagnosticsComputer, SimulationDiagnostics};
@@ -78,11 +81,14 @@ pub struct System {
     pub(crate) last_kinetic: f64,
     pub(crate) last_potential: f64,
 
-    /// Initial total energy (used as reference for relative error).
+    /// Initial total energy (used as reference for drift).
     pub(crate) initial_energy: Option<f64>,
 
-    /// Relative energy error (diagnostic only).
-    pub(crate) rel_energy_error: f64,
+    /// Absolute energy drift `E - E_initial` (signed).
+    pub(crate) abs_energy_error: f64,
+
+    /// Relative energy drift; `None` in precision-limited regime.
+    pub(crate) rel_energy_error: Option<f64>,
 
     /// Pluggable force model — default: Barnes-Hut gravity.
     ///
@@ -148,13 +154,13 @@ pub struct System {
     /// via [`set_g_factor`](Self::set_g_factor).
     pub(crate) g_factor: f64,
 
-    /// Initial angular momentum (z-component) — conservation baseline.
+    /// Initial Lz — conservation baseline.
     pub(crate) initial_angular_momentum: Option<f64>,
 
-    /// Relative angular momentum error.
-    pub(crate) rel_angular_momentum_error: f64,
+    /// Relative Lz drift; `None` in precision-limited regime.
+    pub(crate) rel_angular_momentum_error: Option<f64>,
 
-    /// Absolute angular momentum error.
+    /// Absolute Lz drift `|Lz - Lz_initial|`.
     pub(crate) abs_angular_momentum_error: f64,
 
     /// Human-readable label for each body, parallel to `bodies`.
@@ -364,7 +370,8 @@ impl System {
             last_kinetic: 0.0,
             last_potential: 0.0,
             initial_energy: None,
-            rel_energy_error: 0.0,
+            abs_energy_error: 0.0,
+            rel_energy_error: None,
             force_model,
             scratch_acc: Vec::new(),
             // Yoshida 4 is the default: 4th-order symplectic composition with
@@ -403,7 +410,7 @@ impl System {
             g_factor: units.g(),
             units,
             initial_angular_momentum: None,
-            rel_angular_momentum_error: 0.0,
+            rel_angular_momentum_error: None,
             abs_angular_momentum_error: 0.0,
             names,
             r_min,
@@ -492,8 +499,9 @@ impl System {
         self.total_mass = 0.0;
         self.initial_energy = None;
         self.initial_angular_momentum = None;
-        self.rel_energy_error = 0.0;
-        self.rel_angular_momentum_error = 0.0;
+        self.rel_energy_error = None;
+        self.abs_energy_error = 0.0;
+        self.rel_angular_momentum_error = None;
         self.abs_angular_momentum_error = 0.0;
         let template = kind.build(seed);
         let named = instantiate(&template);

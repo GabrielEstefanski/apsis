@@ -351,8 +351,15 @@ class System:
     @property
     def energy(self) -> float: ...
     @property
-    def energy_delta(self) -> float:
-        """Relative energy drift, ``(E - E_0) / |E_0|``."""
+    def energy_delta(self) -> float | None:
+        """Relative energy drift, ``(E - E_0) / |E_0|``.
+
+        ``None`` when ``|E_0|`` is below the conditioning floor
+        (``sqrt(f64::EPSILON)``); read :attr:`abs_energy_drift` for the
+        absolute signal in that regime."""
+    @property
+    def abs_energy_drift(self) -> float:
+        """Absolute energy drift, ``E - E_0``. Always finite."""
     @property
     def kinetic_energy(self) -> float: ...
     @property
@@ -361,8 +368,15 @@ class System:
     def lz(self) -> float:
         """Total z-component of angular momentum."""
     @property
-    def lz_delta(self) -> float:
-        """Relative angular-momentum drift."""
+    def lz_delta(self) -> float | None:
+        """Relative angular-momentum drift, ``(L_z - L_{z,0}) / |L_{z,0}|``.
+
+        ``None`` when ``|L_{z,0}|`` is below the conditioning floor;
+        figure-8 choreographies and other ``L_z = 0`` configurations
+        report through :attr:`abs_lz_drift` instead."""
+    @property
+    def abs_lz_drift(self) -> float:
+        """Absolute angular-momentum drift, ``L_z - L_{z,0}``. Always finite."""
     @property
     def dt(self) -> float:
         """Current controller time step (mutates with IAS15; constant for fixed-step schemes)."""
@@ -488,7 +502,12 @@ class Stats:
     @property
     def energy(self) -> float: ...
     @property
-    def energy_drift(self) -> float: ...
+    def energy_drift(self) -> float | None:
+        """Relative energy drift, or ``None`` when ``|E_0|`` is below the
+        conditioning floor — see :attr:`System.energy_delta`."""
+    @property
+    def abs_energy_drift(self) -> float:
+        """Absolute energy drift, ``E - E_0``. Always finite."""
     @property
     def kinetic_energy(self) -> float: ...
     @property
@@ -496,7 +515,12 @@ class Stats:
     @property
     def lz(self) -> float: ...
     @property
-    def lz_drift(self) -> float: ...
+    def lz_drift(self) -> float | None:
+        """Relative angular-momentum drift, or ``None`` when ``|L_{z,0}|``
+        is below the conditioning floor — see :attr:`System.lz_delta`."""
+    @property
+    def abs_lz_drift(self) -> float:
+        """Absolute angular-momentum drift, ``L_z - L_{z,0}``. Always finite."""
     @property
     def integrator(self) -> IntegratorKind: ...
     @property

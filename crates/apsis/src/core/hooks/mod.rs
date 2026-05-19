@@ -237,8 +237,8 @@ mod tests {
             t: 0.0,
             dt: 0.0,
             steps: 0,
-            rel_energy_error: 0.0,
-            rel_angular_momentum_error: 0.0,
+            rel_energy_error: None,
+            rel_angular_momentum_error: None,
             phase: HookPhase(HookPhaseKind::PreStep),
             resume_state: None,
         };
@@ -261,8 +261,8 @@ mod tests {
             t: 0.0,
             dt: 0.0,
             steps: 0,
-            rel_energy_error: 0.0,
-            rel_angular_momentum_error: 0.0,
+            rel_energy_error: None,
+            rel_angular_momentum_error: None,
             phase: HookPhase(HookPhaseKind::PostStep),
             resume_state: None,
         };
