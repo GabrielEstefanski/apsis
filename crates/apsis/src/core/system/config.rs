@@ -144,48 +144,23 @@ impl System {
 
     /// Switch the integration algorithm. Takes effect on the next `step()`.
     ///
-    /// ## Integrator–force compatibility
+    /// Auto-corrects the force model when the new integrator requires a
+    /// deterministic force (raises the BH exact threshold; correction is
+    /// silent — audit via `force_model().exact_threshold()`).
     ///
-    /// Some integrators (IAS15) require the force model to be a
-    /// deterministic function of state — bit-reproducible across
-    /// Picard iterations. Barnes-Hut's position-dependent tree
-    /// rebuild violates that invariant and, at large N, cascades into
-    /// controller rejections and `dt` collapse.
+    /// A scale advisory (`warn_diag!`) fires for adaptive integrators at
+    /// `N > ADAPTIVE_BODY_SOFT_WARN`. See `docs/integrator.md`
+    /// §Enforcement and [ADR-003] for the rationale.
     ///
-    /// This method is the **single enforcement point** for that rule.
-    /// Two diagnostic hooks fire here:
-    ///
-    /// * **Compatibility auto-correction** — if the new integrator
-    ///   requires a deterministic force and the current force model
-    ///   is not configured deterministically, the force model is
-    ///   auto-reconfigured (exact threshold raised so BH is bypassed)
-    ///   and a `warn_diag!` event is emitted. Downstream code
-    ///   never needs to re-check the pairing.
-    ///
-    /// * **Scale advisory for adaptive integrators** — if the new
-    ///   integrator is adaptive (per [`IntegratorKind::is_adaptive`])
-    ///   and the current body count is above
-    ///   [`ADAPTIVE_BODY_SOFT_WARN`], a second event is emitted
-    ///   warning that per-step wall time may spike. Hint, not a block.
+    /// [ADR-003]: ../../docs/adr/003-integrator-execution-profile.md
     pub fn set_integrator(&mut self, kind: IntegratorKind) {
         let integrator = make_integrator(kind);
 
         if integrator.requires_deterministic_force() && !self.force_model.is_deterministic() {
-            let prev_threshold = self.force_model.exact_threshold();
             // `usize::MAX` saturates to the engine's clamp ceiling,
             // which is the canonical "direct mode" threshold. See
             // `BarnesHutEngine::is_direct_mode`.
             self.force_model.set_exact_threshold(usize::MAX);
-            let new_threshold = self.force_model.exact_threshold();
-            let kind_label = kind.slug();
-            crate::warn_diag!(
-                crate::core::log::Source::System,
-                "integrator requires deterministic force; switching force model to direct O(N²)",
-                integrator = kind_label,
-                exact_threshold_before = prev_threshold,
-                exact_threshold_after = new_threshold,
-                hint = "select a non-adaptive integrator (e.g. yoshida4) if bounded per-step cost is required",
-            );
         }
 
         if integrator.is_adaptive() && self.bodies.len() > ADAPTIVE_BODY_SOFT_WARN {

@@ -79,12 +79,11 @@ constraint.
 the pairing rule. When the new integrator requires deterministic
 forces and the current force model is not deterministic, the force
 model is auto-reconfigured (exact threshold raised so BH is
-bypassed) and a `warn_diag!` event is emitted with structured
-fields (`integrator`, `exact_threshold_before`, `exact_threshold_after`).
+bypassed). The correction is silent — inspect
+`sys.force_model().exact_threshold()` to audit the post-state.
 
-Downstream code (physics thread, UI, benchmark runner) does not
-re-check the pairing. The invariant holds by construction after
-each `set_integrator` call.
+Downstream code does not re-check the pairing. The invariant holds
+by construction after each `set_integrator` call.
 
 A second advisory fires at the same call site if the new integrator
 is adaptive and the current body count is above
