@@ -120,9 +120,9 @@ pub fn pythagorean() -> ScenarioSpec {
 ///
 /// This is the first scenario in the harness with non-trivial N. Its
 /// purpose is to expose how the IAS15 phases scale with body count —
-/// specifically, the transition where `evaluate` (O(N²) pairwise sum
-/// below `EXACT_THRESHOLD = 64`) overtakes the other phases, and to
-/// give `update_g_and_b` (linear in N) a large enough body axis to
+/// specifically, the transition where `evaluate` (O(N²) pairwise sum)
+/// overtakes the other phases, and to give `update_g_and_b` (linear
+/// in N) a large enough body axis to
 /// make SIMD / SoA layout arguments testable rather than speculative.
 ///
 /// The seed is pinned (`0xc1a55e1` — "cluster seed") so the scenario

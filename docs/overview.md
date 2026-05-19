@@ -118,15 +118,19 @@ Each integrator declares its per-step cost class via
 
 | integrator | order | per-step cost | primary use |
 |---|---|---|---|
+| IAS15 | 15th (adaptive Gauss–Radau) | Adaptive | **Default**; paper-grade trajectory |
+| Mercurius | hybrid (WH + IAS15) | Bounded outer | Planetary systems with close encounters |
+| WHFast | 2nd (Keplerian, compensated) | Bounded | Long-horizon planetary integration |
+| Wisdom–Holman | mixed-order | Bounded | Hierarchical analytical Kepler drift |
+| Implicit Midpoint | 2nd (A-stable Gauss–Legendre) | Bounded | BH binaries / equal-mass / particle clouds |
+| Yoshida 4 | 4th (symplectic) | Bounded | Higher-order symplectic, fixed cost |
 | Velocity Verlet | 2nd (symplectic) | Bounded | Quick exploration, educational runs |
-| Yoshida 4 | 4th (symplectic) | Bounded | **Default**; interactive playback at any N |
-| Wisdom-Holman | mixed-order | Bounded | Informational only — carries four documented algorithmic defects (TD-008) |
-| IAS15 | 15th (adaptive Gauss-Radau) | Adaptive | Machine-precision off-line integration |
 
-See [`integrator.md`](integrator.md) for the detailed contract of each
-integrator, including the force-model determinism requirement that
-pairs IAS15 with direct-O(N²) gravity rather than Barnes-Hut; see
-[ADR-003](adr/003-integrator-execution-profile.md) for the rationale.
+See [`integrator.md`](integrator.md) for the per-integrator contract
+and the force-model determinism rule (IAS15 + direct summation is
+the coherent default; Barnes-Hut is opt-in via
+`set_exact_threshold(N)`). See [ADR-013](adr/013-default-integrator-ias15.md)
+for the default-choice rationale.
 
 ---
 

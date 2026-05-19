@@ -4,12 +4,14 @@
 //!
 //! | N | Strategy | Complexity |
 //! |---|---|---|
-//! | N ≤ [`EXACT_THRESHOLD`] | Direct O(N²) pairwise sum | exact |
-//! | N > [`EXACT_THRESHOLD`] | Barnes-Hut tree traversal | O(N log N), approximate |
+//! | N ≤ `exact_threshold` | Direct O(N²) pairwise sum | exact |
+//! | N > `exact_threshold` | Barnes-Hut tree traversal | O(N log N), approximate |
 //!
-//! For small N the tree overhead exceeds the savings, so `exact_eval` is always
-//! used.  For large N the BH approximation is controlled by the opening angle θ:
-//! a cell of width s at distance d is accepted as a point mass when `s/d < θ`.
+//! `exact_threshold` defaults to [`DIRECT_MODE_THRESHOLD`] (always-direct);
+//! callers opt into Barnes-Hut via
+//! [`BarnesHutEngine::set_exact_threshold`]. The BH approximation is
+//! controlled by the opening angle θ: a cell of width s at distance d
+//! is accepted as a point mass when `s/d < θ`.
 //!
 //! ## Barnes-Hut criterion
 //!
@@ -37,7 +39,7 @@ use rayon::prelude::*;
 use super::kernel::{G, Kernel, NewtonKernel};
 #[cfg(target_arch = "x86_64")]
 use super::simd;
-use super::tree::{DEFAULT_LEAF, DIRECT_MODE_THRESHOLD, EXACT_THRESHOLD, NO_CHILD, Node, Octree};
+use super::tree::{DEFAULT_LEAF, DIRECT_MODE_THRESHOLD, NO_CHILD, Node, Octree};
 
 /// Mass-ratio cutoff for back-reaction suppression in the direct path.
 pub const DEFAULT_TEST_PARTICLE_THRESHOLD: f64 = 1e-10;
@@ -155,7 +157,7 @@ impl BarnesHutEngine {
         let leaf_pair_kernel = LeafPairKernel::select(kernel.as_ref());
         Self {
             tree: Octree::new(max_depth),
-            exact_threshold: EXACT_THRESHOLD,
+            exact_threshold: DIRECT_MODE_THRESHOLD,
             test_particle_threshold: DEFAULT_TEST_PARTICLE_THRESHOLD,
             kernel,
             leaf_pair_kernel,
@@ -1116,7 +1118,7 @@ mod tests {
         assert!(max_rel <= 1e-1, "max per-body rel-err = {max_rel:.4e} exceeds 1e-1 at θ = 0.9");
     }
 
-    /// Tier 2 — Inclined Kepler. Two-body at i = 30° padded to N > EXACT_THRESHOLD
+    /// Tier 2 — Inclined Kepler. Two-body at i = 30° padded to the default exact-summation threshold
     /// so the BH branch is exercised. Integrate 100 orbital periods with
     /// Velocity Verlet at `dt = T/200`. Specific angular momentum `|L|/|L₀|`
     /// must drift no more than 1 × 10⁻³ — the Bug #4 bound from the WH
@@ -1150,7 +1152,7 @@ mod tests {
             },
         ];
 
-        // Pad to N > EXACT_THRESHOLD with massless test particles far from
+        // Pad to the default exact-summation threshold with massless test particles far from
         // the binary so they don't perturb the Kepler orbit. Using mass 1e-30
         // keeps Newton's law evaluating but the contribution to Lz drift is
         // negligible.
@@ -1452,6 +1454,7 @@ mod tests {
         let mut acc = vec![Vec3::ZERO; bodies.len()];
 
         let mut bh = BarnesHutEngine::new(16);
+        bh.set_exact_threshold(1);
         bh.build(&__arrays);
         let (_, counters_bh) = bh.evaluate_profile(&__arrays, theta, &mut acc);
 

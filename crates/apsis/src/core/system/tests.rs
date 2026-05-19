@@ -1386,32 +1386,31 @@ mod hook_dispatch {
 mod integrator_force_compat {
     use super::*;
 
-    /// Build a system large enough that BH would be active by default
-    /// (N > the engine's built-in `EXACT_THRESHOLD = 64`).
+    /// Build a system with N=80 and explicit opt-in to Barnes-Hut
+    /// (`set_exact_threshold(64)`). The pairing-rule tests below assume
+    /// BH is active so the auto-correction logic has something to act on.
     fn many_body_system() -> System {
-        // N=80 — comfortably above the 64 default but not expensive.
         let bodies: Vec<Body> = (0..80)
             .map(|i| {
                 let theta = i as f64 * 0.1;
                 Body::rocky(1.0).at(theta.cos(), theta.sin()).with_velocity(0.0, 0.0)
             })
             .collect();
-        System::new(bodies, UnitSystem::canonical())
+        let mut sys = System::new(bodies, UnitSystem::canonical())
             .with_theta(0.5)
             .with_dt(0.01)
-            .with_max_depth(10)
+            .with_max_depth(10);
+        sys.set_exact_threshold(64);
+        sys
     }
 
     #[test]
     fn ias15_selection_forces_deterministic_force_model() {
         let mut sys = many_body_system();
-        // Pre-condition: large N + default threshold → BH would be used.
-        // Switch to a non-precision integrator first so the default
-        // (Yoshida 4) does not retroactively affect the check.
         sys.set_integrator(IntegratorKind::VelocityVerlet);
         assert!(
             !sys.bh_engine().unwrap().is_direct_mode(),
-            "baseline: engine should start in BH mode at N=80 with default threshold"
+            "baseline: BH is active under the explicit opt-in from many_body_system"
         );
 
         sys.set_integrator(IntegratorKind::Ias15);

@@ -357,7 +357,7 @@
 //!   the integrate loop. The Barnes–Hut tree traversal uses Rayon, and
 //!   parallel reduction order is not guaranteed across runs — but this
 //!   is not exercised by any release-mode physics gate (every gate sits
-//!   under `EXACT_THRESHOLD` and uses direct O(N²) summation). A
+//!   under the engine's exact-summation default and uses direct O(N²)). A
 //!   perturbation author who introduces multi-threaded internal state
 //!   is outside the contract; the integrator does not protect against
 //!   this.
