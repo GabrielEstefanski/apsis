@@ -19,10 +19,9 @@ impl System {
     /// manual addition.
     ///
     /// Auto-naming uses the generic `"Body N"` prefix because [`Body`]
-    /// no longer carries a preset reference. Spawn UIs and template
-    /// loaders that know which preset produced the body should pass
-    /// the preset's `display_name` via [`add_named_body`] for
-    /// `"Rocky 1"`-style names.
+    /// no longer carries a preset reference. Callers that know which
+    /// preset produced the body should pass the preset's `display_name`
+    /// via [`add_named_body`] for `"Rocky 1"`-style names.
     pub fn add_body(&mut self, mut body: Body) {
         body.sync_physical_properties();
         self.total_mass += body.mass;

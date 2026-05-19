@@ -312,7 +312,6 @@ fn measure_i(n: usize) -> RowI {
             hamiltonian_perturbations: &hamiltonian,
             non_conservative_perturbations: &non_conservative,
             observers: &mut observers,
-            deadline: None,
         };
         for _ in 0..warmup {
             let _ = ias.step(&mut bodies, &mut ctx, DT, &mut acc);
@@ -339,7 +338,6 @@ fn measure_i(n: usize) -> RowI {
             hamiltonian_perturbations: &hamiltonian,
             non_conservative_perturbations: &non_conservative,
             observers: &mut observers,
-            deadline: None,
         };
         for _ in 0..measured {
             let r = ias.step(&mut bodies, &mut ctx, DT, &mut acc);

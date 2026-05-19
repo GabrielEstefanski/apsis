@@ -113,16 +113,15 @@ Inside `apsis`, the code is organised by responsibility:
 
 ## 4. Numerical integration
 
-Four integrators are available, each declared with an
-[`ExecutionProfile`](../crates/apsis/src/physics/integrator/traits.rs)
-that downstream code reads to decide how to drive them:
+Each integrator declares its per-step cost class via
+[`IntegratorKind::is_adaptive`](../crates/apsis/src/physics/integrator/traits.rs):
 
-| integrator | order | execution profile | primary use |
+| integrator | order | per-step cost | primary use |
 |---|---|---|---|
-| Velocity Verlet | 2nd (symplectic) | Real-time | Quick exploration, educational runs |
-| Yoshida 4 | 4th (symplectic) | Real-time | **Default**; interactive playback at any N |
-| Wisdom-Holman | mixed-order | Real-time | Informational only — carries four documented algorithmic defects (TD-008) |
-| IAS15 | 15th (adaptive Gauss-Radau) | Precision | Machine-precision off-line integration |
+| Velocity Verlet | 2nd (symplectic) | Bounded | Quick exploration, educational runs |
+| Yoshida 4 | 4th (symplectic) | Bounded | **Default**; interactive playback at any N |
+| Wisdom-Holman | mixed-order | Bounded | Informational only — carries four documented algorithmic defects (TD-008) |
+| IAS15 | 15th (adaptive Gauss-Radau) | Adaptive | Machine-precision off-line integration |
 
 See [`integrator.md`](integrator.md) for the detailed contract of each
 integrator, including the force-model determinism requirement that

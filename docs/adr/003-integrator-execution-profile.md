@@ -1,8 +1,25 @@
 # ADR-003 — Integrator Execution Profile and Force-Model Compatibility
 
-**Status:** Accepted
+**Status:** Accepted, partially superseded
 **Date:** 2026-04-23
 **Branch:** bench/ias15-structured-rings-quality
+
+---
+
+> **Supersession note — 2026-05-19.** This ADR was authored when
+> apsis shipped with an in-tree interactive shell (subsequently
+> extracted; see [ADR-010](010-extract-apsis-app.md)). The
+> render-loop framing in §Context and §Consequences reflects that
+> era. The structural decisions remain in force: integrators
+> advertise their cost class, force models advertise determinism,
+> and `System::set_integrator` is the single enforcement point.
+>
+> The `ExecutionProfile` enum and its trait method have since been
+> **removed**. The binary cost classification it encoded is now
+> exposed via `IntegratorKind::is_adaptive() -> bool`; the
+> soft-warn advisory at `System::set_integrator` reads that
+> predicate instead. The `requires_deterministic_force` contract
+> and the IAS15/BH pairing rule are untouched.
 
 ---
 

@@ -5,24 +5,16 @@ use crate::core::hooks::HookRegistry;
 use crate::core::system::System;
 use crate::domain::body::Body;
 use crate::physics::gravity::BarnesHutEngine;
-use crate::physics::integrator::traits::ExecutionProfile;
 use crate::physics::integrator::{ForceModel, IntegratorKind, make_integrator};
 
-/// Threshold above which selecting a [`ExecutionProfile::Precision`]
-/// integrator on the current system emits a scale advisory through
-/// `warn_diag!`.
+/// Body count above which selecting an adaptive integrator (per
+/// [`IntegratorKind::is_adaptive`]) emits a scale advisory through
+/// `warn_diag!`. Soft hint — the call still proceeds.
 ///
-/// The value is a soft hint — the call still proceeds. It exists
-/// because IAS15's per-step wall time grows quickly with body count,
-/// and by the time the user notices the interactive stutter, the
-/// cascade may already be hundreds of substeps deep. The advisory
-/// gives a cheaper signal.
-///
-/// 200 is at the low end of the regime where IAS15+direct becomes
-/// uncomfortably slow for a 60 Hz render loop (direct O(N²) at N=200
-/// is ~40 000 pair-evaluations per force call, ~50 µs typical, and
-/// IAS15 does ~14 force calls per accepted substep).
-pub(crate) const PRECISION_BODY_SOFT_WARN: usize = 200;
+/// IAS15 at N ≈ 200 with direct O(N²) is ~40 000 pair-evaluations
+/// per force call (~50 µs) times ~14 force calls per accepted
+/// substep; the cascade-to-DT_MIN failure mode grows from there.
+pub(crate) const ADAPTIVE_BODY_SOFT_WARN: usize = 200;
 
 impl System {
     /// Immutable slice of all bodies in the simulation.
@@ -81,7 +73,7 @@ impl System {
 
     // ── Gravitational scaling ──────────────────────────────────────────────────
 
-    /// Override the runtime `G` multiplier (GUI slider). The unit system stays
+    /// Override the runtime `G` multiplier. The unit system stays
     /// frozen; this scales `g_factor` on top of `units().g()`.
     pub fn set_g_factor(&mut self, g: f64) {
         self.g_factor = g.max(0.0);
@@ -168,14 +160,13 @@ impl System {
     ///   is not configured deterministically, the force model is
     ///   auto-reconfigured (exact threshold raised so BH is bypassed)
     ///   and a `warn_diag!` event is emitted. Downstream code
-    ///   (physics thread, UI) never needs to re-check the pairing.
+    ///   never needs to re-check the pairing.
     ///
-    /// * **Scale advisory for Precision-profile integrators** — if
-    ///   the new integrator's execution profile is `Precision` and
-    ///   the current body count is above
-    ///   [`PRECISION_BODY_SOFT_WARN`], a second event is emitted
-    ///   warning that interactive playback will not be real-time.
-    ///   This is a hint, not a block — the caller may proceed.
+    /// * **Scale advisory for adaptive integrators** — if the new
+    ///   integrator is adaptive (per [`IntegratorKind::is_adaptive`])
+    ///   and the current body count is above
+    ///   [`ADAPTIVE_BODY_SOFT_WARN`], a second event is emitted
+    ///   warning that per-step wall time may spike. Hint, not a block.
     pub fn set_integrator(&mut self, kind: IntegratorKind) {
         let integrator = make_integrator(kind);
 
@@ -193,22 +184,20 @@ impl System {
                 integrator = kind_label,
                 exact_threshold_before = prev_threshold,
                 exact_threshold_after = new_threshold,
-                hint = "select velocity_verlet or yoshida4 for real-time playback",
+                hint = "select a non-adaptive integrator (e.g. yoshida4) if bounded per-step cost is required",
             );
         }
 
-        if integrator.execution_profile() == ExecutionProfile::Precision
-            && self.bodies.len() > PRECISION_BODY_SOFT_WARN
-        {
+        if integrator.is_adaptive() && self.bodies.len() > ADAPTIVE_BODY_SOFT_WARN {
             let kind_label = kind.slug();
             let n = self.bodies.len();
             crate::warn_diag!(
                 crate::core::log::Source::System,
-                "Precision-profile integrator selected with many bodies; per-step wall time may spike",
+                "adaptive integrator selected with many bodies; per-step wall time may spike",
                 integrator = kind_label,
                 n_bodies = n,
-                soft_warn_threshold = PRECISION_BODY_SOFT_WARN,
-                hint = "consider yoshida4 for interactive playback; IAS15 is designed for offline precision runs",
+                soft_warn_threshold = ADAPTIVE_BODY_SOFT_WARN,
+                hint = "IAS15 is designed for offline reference runs; consider yoshida4 if bounded per-step cost is required",
             );
         }
 
@@ -279,15 +268,6 @@ impl System {
     /// integrators.
     pub fn mercurius_alpha(&self) -> Option<f64> {
         self.integrator.hill_factor()
-    }
-
-    /// Set a cooperative wall-clock deadline for subsequent [`System::step`]
-    /// calls. Adaptive integrators (IAS15) use this to short-circuit retry
-    /// spins when the surrounding batch loop has already exhausted its
-    /// budget. Passing `None` clears the deadline. Fixed-step integrators
-    /// ignore it.
-    pub fn set_step_deadline(&mut self, deadline: Option<std::time::Instant>) {
-        self.step_deadline = deadline;
     }
 
     /// `true` if the system satisfies the Wisdom-Holman dominance criterion.

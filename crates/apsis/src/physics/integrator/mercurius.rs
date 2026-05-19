@@ -92,7 +92,7 @@ use crate::math::Vec3;
 use crate::physics::integrator::ias15::Ias15;
 use crate::physics::integrator::kepler::kepler_step;
 use crate::physics::integrator::traits::{
-    ExecutionProfile, HierarchySignal, Integrator, IntegratorContext, IntegratorKind, StepResult,
+    HierarchySignal, Integrator, IntegratorContext, IntegratorKind, StepResult,
 };
 
 /// Default Hill-radius multiplier (REBOUND's `r_crit_hill`).
@@ -524,13 +524,7 @@ impl Mercurius {
     /// before IAS15 starts; non-encountering particles keep their
     /// post-Kepler positions but are restored at the end of the
     /// session (IAS15's free-drift on them is discarded).
-    fn encounter_step(
-        &mut self,
-        bodies: &mut [Body],
-        g_factor: f64,
-        dt: f64,
-        deadline: Option<std::time::Instant>,
-    ) {
+    fn encounter_step(&mut self, bodies: &mut [Body], g_factor: f64, dt: f64) {
         if !self.any_planet_in_encounter() {
             return;
         }
@@ -570,7 +564,6 @@ impl Mercurius {
             hamiltonian_perturbations: &hamiltonian_empty,
             non_conservative_perturbations: &non_conservative_empty,
             observers: &mut observers_empty,
-            deadline,
         };
 
         // Drive IAS15 over the outer window [0, dt]. The controller's
@@ -668,7 +661,6 @@ impl Integrator for Mercurius {
 
         let g_factor = ctx.g_factor;
         let mu = g_factor * bodies[0].mass;
-        let deadline = ctx.deadline;
 
         // ── Convert inertial → DH ──────────────────────────────────────
         self.inertial_to_dh(bodies);
@@ -701,7 +693,7 @@ impl Integrator for Mercurius {
         self.encounter_predict(bodies, dt);
 
         // ── 7. encounter_step(τ) ──────────────────────────────────────
-        self.encounter_step(bodies, g_factor, dt, deadline);
+        self.encounter_step(bodies, g_factor, dt);
 
         // ── 8. jump(τ/2) ───────────────────────────────────────────────
         self.jump_step(bodies, 0.5 * dt);
@@ -753,10 +745,6 @@ impl Integrator for Mercurius {
 
     fn kind(&self) -> IntegratorKind {
         IntegratorKind::Mercurius
-    }
-
-    fn execution_profile(&self) -> ExecutionProfile {
-        ExecutionProfile::Realtime
     }
 
     fn requires_deterministic_force(&self) -> bool {
@@ -937,7 +925,6 @@ mod tests {
                 hamiltonian_perturbations: &hamiltonian,
                 non_conservative_perturbations: &non_conservative,
                 observers: &mut observers,
-                deadline: None,
             };
             integrator.step(bodies, &mut ctx, dt, &mut acc);
         }
@@ -1000,7 +987,6 @@ mod tests {
             hamiltonian_perturbations: &hamiltonian,
             non_conservative_perturbations: &non_conservative,
             observers: &mut observers,
-            deadline: None,
         };
         let mut merc = Mercurius::new();
         let result = merc.step(&mut bodies, &mut ctx, 0.01, &mut acc);
@@ -1188,7 +1174,6 @@ mod tests {
                 hamiltonian_perturbations: &no_h,
                 non_conservative_perturbations: &nc,
                 observers: &mut obs_a,
-                deadline: None,
             };
             merc_a.step(&mut bodies_no_pert, &mut ctx_a, dt, &mut acc_a);
 
@@ -1198,7 +1183,6 @@ mod tests {
                 hamiltonian_perturbations: &with_h,
                 non_conservative_perturbations: &nc,
                 observers: &mut obs_b,
-                deadline: None,
             };
             merc_b.step(&mut bodies_with_pert, &mut ctx_b, dt, &mut acc_b);
         }
