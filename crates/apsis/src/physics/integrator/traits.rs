@@ -1,24 +1,5 @@
-//! Core integrator abstraction: trait, context, result, and kind enum.
-//!
-//! # Architecture
-//!
-//! ```text
-//! ┌────────────┐     ┌──────────────────┐     ┌───────────┐
-//! │ Integrator │────▶│ IntegratorContext │────▶│ ForceModel│
-//! │  (trait)   │     │  (force+params)  │     │  (trait)  │
-//! └────────────┘     └──────────────────┘     └───────────┘
-//!       │
-//!       ▼
-//! ┌────────────┐
-//! │ StepResult │  ← returned after each integration step
-//! └────────────┘
-//! ```
-//!
-//! The [`Integrator`] trait replaces the old `Integrator` enum, enabling
-//! new integration schemes to be added without touching the core.
-//!
-//! [`IntegratorKind`] is a plain enum retained for snapshot
-//! serialisation and `Metrics`.  It is **not** used for dispatch.
+//! [`Integrator`] trait, per-step [`IntegratorContext`], [`StepResult`],
+//! and the [`IntegratorKind`] enum used for serialisation and metrics.
 
 use crate::domain::body::Body;
 use crate::math::Vec3;
@@ -71,11 +52,11 @@ impl IntegratorKind {
         }
     }
 
-    /// Nominal number of force evaluations consumed per full time step.
-    ///
-    /// IAS15 is adaptive: each accepted substep uses ~7 evals with ~2 Picard
-    /// iterations; the quoted number is an amortised average — the true
-    /// count varies per step and is recorded in `Metrics`.
+    /// Nominal force evaluations per full step. Amortised averages for
+    /// adaptive schemes (IAS15 ~7 evals × ~2 Picard iters per substep)
+    /// and amortised lower bounds for hybrid schemes (Mercurius, no
+    /// active encounter; ImplicitMidpoint, `max_iterations = 10`). The
+    /// true per-step count is recorded in `Metrics`.
     pub fn force_evals_per_step(self) -> u32 {
         match self {
             Self::VelocityVerlet => 2,
@@ -83,15 +64,7 @@ impl IntegratorKind {
             Self::WisdomHolman => 1,
             Self::WHFast => 1,
             Self::Ias15 => 14,
-            // Mercurius: 2 K-weighted half-kicks + analytical Kepler drift +
-            // an IAS15 sub-integration whose cost is data-dependent. The
-            // quoted number is an amortised lower bound assuming no pair
-            // is in close encounter; engaging encounters add IAS15 substeps.
             Self::Mercurius => 2,
-            // ImplicitMidpoint: one force eval per fixed-point iteration
-            // plus one final eval at the end-state. Mean iteration count
-            // is 3-6 for non-stiff conservative gravity; quoted figure is
-            // an upper bound assuming `max_iterations = 10`.
             Self::ImplicitMidpoint => 11,
         }
     }
@@ -153,9 +126,6 @@ impl std::str::FromStr for IntegratorKind {
 // ── IntegratorContext ─────────────────────────────────────────────────────────
 
 /// Everything an integrator needs from the simulation besides bodies and dt.
-///
-/// Passed as `&mut` so the integrator can call `force.compute()` (which
-/// requires `&mut self` for tree rebuilds, etc.).
 pub struct IntegratorContext<'a> {
     /// The force model (e.g. Barnes-Hut gravity).
     pub force: &'a mut dyn ForceModel,
@@ -163,33 +133,22 @@ pub struct IntegratorContext<'a> {
     /// Gravitational scaling factor: `G_eff = G₀ · g_factor`.
     pub g_factor: f64,
 
-    /// Hamiltonian operators registered on the system. Each contributes
-    /// a force (via `accumulate_force`) and an energy term (via
-    /// `energy_contribution`). 1PN GR correction is the canonical
-    /// example. Symplectic integrators preserve their conservation
-    /// invariants when *only* operators of this class are registered.
+    /// Hamiltonian operators: contribute a force and an energy term.
+    /// Symplectic integrators preserve their invariants under these.
     pub hamiltonian_perturbations: &'a [Box<dyn HamiltonianOperator>],
 
-    /// Non-conservative operators registered on the system. Each
-    /// contributes a force but no Hamiltonian (drag, radiation
-    /// reaction, dissipative coupling). Symplectic integrators degrade
-    /// silently with these registered; the system emits a `warn_diag`
-    /// at registration time so the broken invariant is documented.
+    /// Non-conservative operators: force only, no Hamiltonian (drag,
+    /// radiation reaction). Break symplecticity by construction.
     pub non_conservative_perturbations: &'a [Box<dyn NonConservativeOperator>],
 
-    /// Pure observers registered on the system. No force, no energy,
-    /// just step-boundary `observe` calls (Shadow Hamiltonian tracker,
-    /// audit trail emitters, etc.). Dispatched at synchronized state
-    /// after the integrator has fully resolved the outer step.
+    /// Step-boundary observers, dispatched at synchronised state after
+    /// the integrator has resolved the outer step.
     pub observers: &'a mut [Box<dyn Operator>],
 }
 
 // ── StepResult ────────────────────────────────────────────────────────────────
 
 /// Output produced by a single integration step.
-///
-/// Centralises the physical diagnostics that `System` needs after each step,
-/// so no integrator-specific logic leaks into the orchestrator.
 pub struct StepResult {
     /// Simulated time actually advanced by this call. Fixed-step
     /// integrators always return the requested `dt`; adaptive
@@ -218,12 +177,9 @@ pub struct StepResult {
     /// bound. Fixed-step integrators always report `false`.
     pub degraded: bool,
 
-    /// Mass-distribution-based hierarchy regime classification, populated
-    /// only by integrators whose derivation depends on a hierarchical mass
-    /// distribution. `None` when the concept does not apply (VV, Y4, IAS15
-    /// have no hierarchy assumption); `Some(_)` for Wisdom-Holman with
-    /// values graded according to the WH derivation's small-parameter
-    /// regime. Observability only — no integrator branches on the value.
+    /// Hierarchy regime classification — `Some(_)` only for integrators
+    /// whose derivation depends on a hierarchical mass distribution
+    /// (Wisdom-Holman family); `None` otherwise.
     pub hierarchy_signal: Option<HierarchySignal>,
 }
 
@@ -239,18 +195,15 @@ pub struct StepResult {
 /// branches on the value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HierarchySignal {
-    /// Central body is dominant; the WH derivation operates inside its
-    /// validated regime. `m_0 ≥ max(m_i)` and `m_0 / Σ m_i ≥ 10`.
+    /// `m_0 ≥ max(m_i)` and `m_0 / Σ m_i ≥ 10`. Inside the validated
+    /// WH regime.
     Hierarchical,
-    /// Central body is the most massive but its dominance over the rest of
-    /// the system is approaching the threshold. The perturbation expansion
-    /// is at the edge of its small-parameter regime; observed energy drift
-    /// may exceed the WH 1991 published floor without indicating a defect.
-    /// `m_0 ≥ max(m_i)` and `5 ≤ m_0 / Σ m_i < 10`.
+    /// `m_0 ≥ max(m_i)` and `5 ≤ m_0 / Σ m_i < 10`. At the edge of the
+    /// small-parameter regime; expect WH energy drift above the 1991
+    /// published floor.
     Borderline,
-    /// Central body fails the dominance criterion. The WH derivation does
-    /// not apply; observed conservation should not be expected to match the
-    /// validated regime. `m_0 < max(m_i)` or `m_0 / Σ m_i < 5`.
+    /// `m_0 < max(m_i)` or `m_0 / Σ m_i < 5`. WH derivation does not
+    /// apply.
     Violated,
 }
 
@@ -298,24 +251,14 @@ impl HierarchySignal {
 /// # Contract
 ///
 /// - `step()` advances `bodies` by **at most** the requested `dt_hint`.
-///   - Fixed-step integrators consume exactly `dt_hint` and report
-///     [`controls_own_step_size`](Self::controls_own_step_size) as
-///     `false`.
-///   - Self-adaptive integrators (IAS15) treat `dt_hint` as a
-///     *first-call seed*; subsequent calls use the controller-chosen
-///     step. The caller loops until the desired simulation time is
-///     reached — the substep-granularity contract from Rein & Spiegel
-///     (2015) §2.3. The accepted size is reported via
-///     [`StepResult::consumed_dt`].
+///   Fixed-step schemes consume exactly `dt_hint`; self-adaptive
+///   schemes treat it as a first-call seed and report the accepted
+///   sub-step via [`StepResult::consumed_dt`] (Rein & Spiegel 2015 §2.3).
 /// - `step()` may call `ctx.force.compute()` one or more times.
-/// - `step()` must leave `acc` consistent with the final body positions
-///   (so that diagnostics can read it).
-/// - `step()` must apply `ctx.g_factor` scaling and `ctx.perturbations`
-///   at the appropriate points in the scheme.
-///
-/// `&mut self` is required because some integrators carry internal
-/// state across steps (Wisdom–Holman fallback, IAS15 predictor–
-/// corrector history).
+/// - `step()` leaves `acc` consistent with the final body positions.
+/// - `step()` applies `ctx.g_factor` and the operators in
+///   `ctx.{hamiltonian,non_conservative}_perturbations` at the
+///   appropriate points in the scheme.
 pub trait Integrator: Send {
     /// Advance the system by one time step.
     ///
@@ -389,22 +332,11 @@ pub trait Integrator: Send {
         None
     }
 
-    /// Whether the integrator requires the force model to be a
-    /// deterministic function of state — `f(x, v, t)` bit-reproducible
-    /// across calls with the same `(x, v, t)` to within f64 ULP.
-    ///
-    /// Implicit Picard predictor–corrector schemes (IAS15) need this:
-    /// position-dependent force discontinuities (Barnes-Hut tree
-    /// rebuilds) break the contraction needed for fixed-point
-    /// convergence. Low-order explicit / symplectic schemes absorb
-    /// force-evaluation noise at O(dt²) or better and return `false`.
-    ///
-    /// `System::set_integrator` reads this together with
-    /// [`ForceModel::is_deterministic`](crate::physics::integrator::force_model::ForceModel::is_deterministic)
-    /// and auto-reconfigures the force model when they conflict.
-    /// See [ADR-003] for the derivation and the IAS15+BH pairing rule.
-    ///
-    /// [ADR-003]: ../../docs/adr/003-integrator-execution-profile.md
+    /// `true` if the integrator's Picard fixed-point iteration requires
+    /// `f(x, v, t)` to be bit-reproducible across calls. Enforced at
+    /// `System::set_integrator` against
+    /// [`ForceModel::is_deterministic`](crate::physics::integrator::force_model::ForceModel::is_deterministic);
+    /// see [ADR-003](../../docs/adr/003-integrator-execution-profile.md).
     fn requires_deterministic_force(&self) -> bool {
         false
     }
