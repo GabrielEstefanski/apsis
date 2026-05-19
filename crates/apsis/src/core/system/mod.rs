@@ -367,12 +367,7 @@ impl System {
             rel_energy_error: None,
             force_model,
             scratch_acc: Vec::new(),
-            // Yoshida 4 is the default: 4th-order symplectic composition
-            // with bounded per-step cost. IAS15 is opt-in via
-            // `set_integrator` — its per-step cost is unbounded in stiff
-            // regimes (dt → DT_MIN cascades) and it is designed for
-            // offline reference runs. See ADR-003 for the rationale.
-            integrator: make_integrator(IntegratorKind::Yoshida4),
+            integrator: make_integrator(IntegratorKind::Ias15),
             orbital_cache: Vec::new(),
             diagnostics: DiagnosticsComputer::new(),
             last_diag: SimulationDiagnostics::default(),

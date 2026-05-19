@@ -65,16 +65,13 @@ pub(crate) const DEFAULT_LEAF: usize = 8;
 /// Sentinel value for an absent child pointer.
 pub(crate) const NO_CHILD: u32 = u32::MAX;
 
-/// For N ≤ this threshold the engine falls back to exact O(N²) evaluation,
-/// avoiding tree overhead that dominates at small particle counts.
-pub(crate) const EXACT_THRESHOLD: usize = 64;
-
 /// Upper clamp on the configurable exact-evaluation threshold, and the
-/// canonical "direct mode" threshold. When
+/// default value used by [`BarnesHutEngine::new`]. When
 /// [`BarnesHutEngine::set_exact_threshold`] is called with a value
 /// ≥ this constant, the engine's BH branch becomes unreachable for any
 /// practical N and the force computation is guaranteed deterministic
-/// (see [`BarnesHutEngine::is_direct_mode`]).
+/// (see [`BarnesHutEngine::is_direct_mode`]). Callers opt into Barnes-Hut
+/// by calling `set_exact_threshold(n)` with a smaller `n`.
 pub(crate) const DIRECT_MODE_THRESHOLD: usize = 10_000;
 
 /// Small padding added to the root bounding cube so that no body ever sits
