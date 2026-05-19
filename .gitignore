@@ -10,3 +10,9 @@ apsis/*.dylib
 __pycache__/
 *.pyc
 *.pyo
+
+# Editor / IDE config.
+.vscode/
+
+# Runtime record files (apsis-record binary format).
+*.apsis
