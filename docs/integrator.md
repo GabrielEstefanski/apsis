@@ -1,10 +1,10 @@
 # Integrators
 
-The simulator supports four integration schemes, chosen at runtime via
-`System::set_integrator` or the UI combo box. All share the same
-[`ForceModel`](../crates/apsis/src/physics/integrator/force_model.rs) interface
-and the same `IntegratorContext` plumbing — changing integrator
-never touches the force, perturbation, or diagnostic code.
+The simulator ships seven integration schemes, chosen at runtime via
+`System::set_integrator`. All share the same
+[`ForceModel`](../crates/apsis/src/physics/integrator/force_model.rs)
+interface and the same `IntegratorContext` plumbing — changing
+integrator never touches the force, perturbation, or diagnostic code.
 
 This document captures the contract (what each integrator is for,
 what it requires) rather than the numerical derivation (which lives
@@ -12,17 +12,22 @@ in the source-level doc-comments).
 
 ## Selection rubric
 
-| If you want...                               | Pick                         |
-| -------------------------------------------- | ---------------------------- |
-| Interactive playback at any N                | **Yoshida 4** (default)      |
-| Cheaper playback (lower accuracy OK)         | Velocity Verlet              |
-| Paper-grade Keplerian hierarchy              | Wisdom–Holman                |
-| Paper-grade trajectory with close encounters | **IAS15** (precision mode)   |
+| If you want...                                              | Pick                       |
+| ----------------------------------------------------------- | -------------------------- |
+| Paper-grade trajectory (incl. close encounters, high $e$)   | **IAS15** (default)        |
+| Paper-grade Keplerian hierarchy with close encounters       | Mercurius                  |
+| Long-horizon planetary integration with $\sqrt{N}$ round-off | WHFast                     |
+| Long-horizon Keplerian hierarchy (analytical Kepler drift)   | Wisdom–Holman              |
+| BH binaries / equal-mass / particle clouds (A-stable)        | Implicit Midpoint          |
+| 4th-order symplectic with bounded per-step cost              | Yoshida 4                  |
+| 2nd-order symplectic, cheapest per step                      | Velocity Verlet            |
 
-`Yoshida 4` is the default in both `System::new` and
-`PhysicsConfig::default`. It is 4th-order symplectic, has bounded
-per-step wall time at any realistic N, and conserves orbital energy
-at publication quality for bound orbits.
+`IAS15` is the default in `System::new`. The default force model is
+also direct O(N²) (always-direct), so defaults are coherent by
+construction: IAS15's deterministic-force contract is satisfied
+without any runtime correction. See [ADR-013](adr/013-default-integrator-ias15.md).
+Callers who want Barnes-Hut throughput opt in via
+`set_exact_threshold(N)`.
 
 ## Per-step cost: bounded vs adaptive
 
