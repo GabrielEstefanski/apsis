@@ -58,25 +58,6 @@ impl IntegratorKind {
         }
     }
 
-    /// Execution profile without constructing an integrator instance.
-    ///
-    /// Provides the UI with a cheap way to ask "is this a precision
-    /// integrator?" before deciding whether to show the Precision
-    /// Run panel, the setup modal, or the confirmation dialog.
-    /// Mirrors the value that [`Integrator::execution_profile`]
-    /// returns on the constructed instance.
-    pub fn execution_profile(self) -> ExecutionProfile {
-        match self {
-            Self::Ias15 => ExecutionProfile::Precision,
-            Self::VelocityVerlet
-            | Self::Yoshida4
-            | Self::WisdomHolman
-            | Self::WHFast
-            | Self::Mercurius
-            | Self::ImplicitMidpoint => ExecutionProfile::Realtime,
-        }
-    }
-
     /// Formal convergence order in the time step.
     pub fn order(self) -> u32 {
         match self {
@@ -112,59 +93,6 @@ impl IntegratorKind {
             // is 3-6 for non-stiff conservative gravity; quoted figure is
             // an upper bound assuming `max_iterations = 10`.
             Self::ImplicitMidpoint => 11,
-        }
-    }
-
-    /// One-line description shown in the UI tooltip.
-    pub fn description(self) -> &'static str {
-        match self {
-            Self::VelocityVerlet => {
-                "2nd-order symplectic leapfrog. Fast; energy oscillates around \
-                 the initial value. Phase error ∝ dt². Good for real-time \
-                 visualisation and short integrations."
-            },
-            Self::Yoshida4 => {
-                "4th-order symplectic composition (Forest–Ruth). 4 force evals \
-                 per step but phase error ∝ dt⁴ — allows 5–10× larger dt for \
-                 the same energy conservation. Required for publication-quality \
-                 long-term runs."
-            },
-            Self::WisdomHolman => {
-                "Mixed-variable symplectic map. Keplerian two-body motion is \
-                 solved analytically; perturbations are stepped numerically. \
-                 Designed for hierarchical planetary systems."
-            },
-            Self::WHFast => {
-                "Wisdom-Holman split with compensated summation on per-step \
-                 position and velocity accumulators (Rein & Tamayo 2015). \
-                 Round-off envelope reduced from O(N · ε) to O(√N · ε), \
-                 unlocking long-horizon planetary integration. Same \
-                 hierarchical-mass requirement as WH."
-            },
-            Self::Ias15 => {
-                "15th-order adaptive Gauss-Radau integrator (Rein & Spiegel \
-                 2015). Non-symplectic but conserves energy to machine \
-                 precision via step-size control; handles close encounters \
-                 and high eccentricities without artefacts. Default choice \
-                 for long-term, publication-quality integration."
-            },
-            Self::Mercurius => {
-                "Hybrid symplectic integrator (Rein et al. 2019). Wisdom-Holman \
-                 outer step with K-weighted planet-planet kicks; IAS15 \
-                 sub-integrates the (1-K)-weighted close-encounter residual \
-                 over the same outer interval. Localises encounter cost to \
-                 the encountering pair while preserving secular stability \
-                 elsewhere. Requires a hierarchical mass distribution."
-            },
-            Self::ImplicitMidpoint => {
-                "Single-stage Gauss-Legendre symplectic method (Hairer-Lubich-Wanner \
-                 2006, Chapter II.1.4). A-stable on the entire left half-plane and \
-                 time-symmetric. Iterates per step on the implicit midpoint state \
-                 (Picard, max 10 iterations by default; Newton-Krylov reserved in \
-                 the API). Makes no central-mass dominance assumption — accepts \
-                 BH binaries, equal-mass triples, particle clouds. Not L-stable; \
-                 dissipation-dominant extreme regimes need Radau IIA or BDF."
-            },
         }
     }
 
