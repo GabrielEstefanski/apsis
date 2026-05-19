@@ -96,6 +96,14 @@ impl IntegratorKind {
         }
     }
 
+    /// Whether per-step wall time is unbounded in the adversarial case.
+    /// `true` only for IAS15, whose adaptive controller can shrink `dt`
+    /// arbitrarily in stiff regimes; all other integrators in the zoo
+    /// have per-step cost bounded by the force evaluation.
+    pub fn is_adaptive(self) -> bool {
+        matches!(self, Self::Ias15)
+    }
+
     /// All known variants, in the order shown in the UI combo-box.
     pub const ALL: [IntegratorKind; 7] = [
         IntegratorKind::Ias15,
@@ -309,45 +317,6 @@ impl HierarchySignal {
     }
 }
 
-// ── ExecutionProfile ──────────────────────────────────────────────────────────
-
-/// How an integrator expects to be driven.
-///
-/// This is part of the *contract* an integrator advertises — not a hint.
-/// Consumers (physics thread, UI, benchmark) read it to choose their
-/// execution discipline and to adapt their feedback to the user.
-///
-/// Two profiles are recognised today:
-///
-/// * [`Realtime`](ExecutionProfile::Realtime) — per-step wall time is
-///   bounded by the force evaluation cost (O(N) or O(N log N) per step)
-///   and the user-facing `dt`. Safe to drive from a render loop at
-///   60 Hz. Fixed-step integrators (Velocity Verlet, Yoshida 4,
-///   Wisdom–Holman) fall here.
-///
-/// * [`Precision`](ExecutionProfile::Precision) — per-step wall time is
-///   unbounded in the adversarial case. IAS15's adaptive controller can
-///   shrink `dt` arbitrarily in a stiff regime, spending seconds to
-///   minutes on a single visible frame. These integrators must be run
-///   off the render thread to completion ("precision run" UI), with a
-///   progress indicator rather than a frame budget.
-///
-/// New integrators should default to `Realtime` unless their
-/// algorithmic structure makes per-step wall time unbounded.
-///
-/// # Future evolution
-///
-/// Two values is enough today. If a future integrator sits between
-/// these (e.g. FMM with amortised per-step cost that spikes on
-/// reorganisation), extend this enum rather than adding parallel flags.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ExecutionProfile {
-    /// Bounded per-step wall time; drive from a real-time loop.
-    Realtime,
-    /// Unbounded per-step wall time; run to completion off-thread.
-    Precision,
-}
-
 // ── Integrator trait ──────────────────────────────────────────────────────────
 
 /// A symplectic (or general) N-body integrator.
@@ -510,14 +479,6 @@ pub trait Integrator: Send {
     /// See [`AdaptiveStats`] for field semantics.
     fn adaptive_stats(&self) -> Option<AdaptiveStats> {
         None
-    }
-
-    /// Execution discipline this integrator requires of its caller.
-    /// Default is [`Realtime`](ExecutionProfile::Realtime); adaptive /
-    /// implicit schemes whose per-step wall time is unbounded should
-    /// return [`Precision`](ExecutionProfile::Precision).
-    fn execution_profile(&self) -> ExecutionProfile {
-        ExecutionProfile::Realtime
     }
 
     /// Whether this integrator requires the force model to be a

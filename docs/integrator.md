@@ -24,26 +24,25 @@ in the source-level doc-comments).
 per-step wall time at any realistic N, and conserves orbital energy
 at publication quality for bound orbits.
 
-## Execution profile — real-time vs precision
+## Per-step cost: bounded vs adaptive
 
-Every integrator declares an
-[`ExecutionProfile`](../crates/apsis/src/physics/integrator/traits.rs) that
-downstream code (physics thread, UI) reads to decide how to drive
-it.
+`IntegratorKind::is_adaptive()` distinguishes the cost classes the
+zoo exposes:
 
-| Integrator      | Profile     | Why                                                                 |
-| --------------- | ----------- | ------------------------------------------------------------------- |
-| Velocity Verlet | `Realtime`  | Fixed per-step cost, O(N²) or O(N log N) per step.                  |
-| Yoshida 4       | `Realtime`  | Same — 4 evals per step but still bounded.                          |
-| Wisdom–Holman   | `Realtime`  | Analytic Kepler + perturbation; no adaptation.                      |
-| IAS15           | `Precision` | Adaptive Gauss-Radau; `dt` can shrink unboundedly in stiff regimes. |
+| Integrator       | `is_adaptive` | Per-step cost                                              |
+| ---------------- | ------------- | ---------------------------------------------------------- |
+| Velocity Verlet  | `false`       | Bounded by force evaluation.                               |
+| Yoshida 4        | `false`       | Same — 4 evals per step, bounded.                          |
+| Wisdom-Holman    | `false`       | Analytic Kepler + perturbation; no adaptation.             |
+| WHFast           | `false`       | Same, with compensated summation.                          |
+| Mercurius        | `false`       | Outer step is bounded; IAS15 only fires on close encounter.|
+| Implicit Midpoint| `false`       | Fixed-step with bounded inner-iteration cap.               |
+| IAS15            | **`true`**    | Adaptive controller can shrink `dt` arbitrarily.           |
 
-`Precision` means the caller must expect unbounded per-step wall
-time. In practice this means running the integrator off-thread to
-completion with a progress indicator, not inside a 60 Hz render
-loop. REBOUND pairs IAS15 with a scripted `reb_integrate(sim, tmax)`
-entry point for the same reason: IAS15 is an offline precision tool,
-not a real-time one.
+Adaptive integrators (IAS15) advertise unbounded per-step wall time:
+a stiff regime can spend seconds on one logical step while the
+controller cascades toward `DT_MIN`. REBOUND pairs IAS15 with a
+scripted `reb_integrate(sim, tmax)` entry point for the same reason.
 
 ## Force-model determinism contract
 
@@ -88,10 +87,10 @@ re-check the pairing. The invariant holds by construction after
 each `set_integrator` call.
 
 A second advisory fires at the same call site if the new integrator
-is `Precision` and the current body count is above
-`PRECISION_BODY_SOFT_WARN` (200). This is a hint, not a block: the
-user may proceed with IAS15 at large N, but the soft warn surfaces
-the stutter expectation early rather than when the first frame drop
+is adaptive and the current body count is above
+`ADAPTIVE_BODY_SOFT_WARN` (200). Hint, not a block: the user may
+proceed with IAS15 at large N, but the soft warn surfaces the
+per-step-cost expectation early rather than when the first stall
 arrives.
 
 ## Scenario stiffness signal (IAS15 only)

@@ -1468,12 +1468,6 @@ impl Integrator for Ias15 {
         })
     }
 
-    fn execution_profile(&self) -> super::traits::ExecutionProfile {
-        // Adaptive Gauss-Radau with unbounded shrinking toward DT_MIN in
-        // stiff regimes; per-step wall time is not bounded by N alone.
-        super::traits::ExecutionProfile::Precision
-    }
-
     fn requires_deterministic_force(&self) -> bool {
         // Picard predictor-corrector reaches its fixed point only when
         // f(x, v, t) is bit-reproducible across iterations. BH tree

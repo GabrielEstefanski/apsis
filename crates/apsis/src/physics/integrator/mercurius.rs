@@ -92,7 +92,7 @@ use crate::math::Vec3;
 use crate::physics::integrator::ias15::Ias15;
 use crate::physics::integrator::kepler::kepler_step;
 use crate::physics::integrator::traits::{
-    ExecutionProfile, HierarchySignal, Integrator, IntegratorContext, IntegratorKind, StepResult,
+    HierarchySignal, Integrator, IntegratorContext, IntegratorKind, StepResult,
 };
 
 /// Default Hill-radius multiplier (REBOUND's `r_crit_hill`).
@@ -745,10 +745,6 @@ impl Integrator for Mercurius {
 
     fn kind(&self) -> IntegratorKind {
         IntegratorKind::Mercurius
-    }
-
-    fn execution_profile(&self) -> ExecutionProfile {
-        ExecutionProfile::Realtime
     }
 
     fn requires_deterministic_force(&self) -> bool {
