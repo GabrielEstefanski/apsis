@@ -67,8 +67,7 @@ impl System {
 
     /// Lightweight accessor for adaptive-integrator counters. Avoids
     /// the full [`Metrics`] assembly when the caller only needs the
-    /// adaptive state — useful inside the physics thread's hot loop
-    /// (e.g. Precision Run telemetry updates) where rebuilding every
+    /// adaptive state — useful in hot loops where rebuilding every
     /// observable every tick is wasteful.
     pub fn adaptive_stats(&self) -> Option<crate::physics::integrator::traits::AdaptiveStats> {
         self.integrator.adaptive_stats()

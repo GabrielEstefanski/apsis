@@ -25,16 +25,16 @@
 ///    constant while the physical step size adapts; still symplectic. Not
 ///    implemented here.
 ///
-/// `Adaptive` mode is provided as an **interactive convenience only**:
-/// exploring a new scenario, finding a stable dt, or running qualitative
-/// demonstrations. It must not be used for any run whose results are cited.
+/// `Adaptive` mode is provided as a **convenience for exploration and
+/// dt tuning only** — finding a stable dt, qualitative demonstrations.
+/// It must not be used for any run whose results are cited.
 ///
 /// # Selection guide
 ///
 /// | Mode | Energy error | Suitable for |
 /// |------|-------------|--------------|
 /// | [`Fixed`] | Bounded, oscillatory — O(dtᵖ) amplitude | Long-term integration, publication |
-/// | [`Adaptive`] | Potentially secular drift | Interactive exploration, dt tuning |
+/// | [`Adaptive`] | Potentially secular drift | Scenario exploration, dt tuning |
 ///
 /// # References
 ///
@@ -69,7 +69,7 @@ pub enum DtMode {
     /// The severity depends on the rate and magnitude of dt changes, but even
     /// small variations accumulate over long integrations.
     ///
-    /// **Use only for interactive exploration and initial condition setup.**
+    /// **Use only for scenario exploration and initial condition setup.**
     /// Switch to [`Fixed`] before any run whose output will be analysed or cited.
     Adaptive,
 }

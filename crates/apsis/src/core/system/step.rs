@@ -147,26 +147,16 @@ impl System {
         self.update_energy_tracking();
         self.update_angular_momentum_tracking();
 
-        // `current_dt` is the value passed to the integrator on the *next*
-        // call as its `dt_hint`, and is also surfaced to the UI / headless
-        // CSV as the simulation's "current step size". Three regimes:
+        // `current_dt` is the value passed to the integrator on the
+        // *next* call as its `dt_hint`, and is surfaced to downstream
+        // observers as the simulation's current step size. Three regimes:
         //
-        //   * Self-adaptive integrator (IAS15) — the integrator's own
-        //     controller has already chosen the next step. Reading it via
-        //     [`Integrator::proposed_next_dt`] keeps `current_dt` honest
-        //     about the cadence the simulation is actually running at,
-        //     rather than reporting `user_dt` perpetually. The hint we
-        //     pass on the next call is the same value we reported, but
-        //     by trait contract the integrator is free to refine it
-        //     against the controller's internal state.
-        //
-        //   * `DtMode::Adaptive` — the *external* `DtController` (used by
-        //     fixed-step schemes that want adaptive cadence) computes the
+        //   * Self-adaptive integrator (IAS15) — adopt the controller's
+        //     proposed next step via [`Integrator::proposed_next_dt`].
+        //   * `DtMode::Adaptive` — external `DtController` computes the
         //     next step from energy error and acceleration statistics.
-        //
         //   * `DtMode::Fixed` with a non-self-adaptive integrator — pin
-        //     `current_dt = user_dt` so the next step uses exactly the
-        //     user's chosen cadence (the symplectic schemes need this for
+        //     `current_dt = user_dt` (symplectic schemes need this for
         //     measure preservation).
         self.current_dt = if self.integrator.controls_own_step_size() {
             self.integrator.proposed_next_dt().unwrap_or(self.user_dt)

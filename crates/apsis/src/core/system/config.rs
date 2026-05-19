@@ -73,7 +73,7 @@ impl System {
 
     // ── Gravitational scaling ──────────────────────────────────────────────────
 
-    /// Override the runtime `G` multiplier (GUI slider). The unit system stays
+    /// Override the runtime `G` multiplier. The unit system stays
     /// frozen; this scales `g_factor` on top of `units().g()`.
     pub fn set_g_factor(&mut self, g: f64) {
         self.g_factor = g.max(0.0);
@@ -160,7 +160,7 @@ impl System {
     ///   is not configured deterministically, the force model is
     ///   auto-reconfigured (exact threshold raised so BH is bypassed)
     ///   and a `warn_diag!` event is emitted. Downstream code
-    ///   (physics thread, UI) never needs to re-check the pairing.
+    ///   never needs to re-check the pairing.
     ///
     /// * **Scale advisory for adaptive integrators** — if the new
     ///   integrator is adaptive (per [`IntegratorKind::is_adaptive`])

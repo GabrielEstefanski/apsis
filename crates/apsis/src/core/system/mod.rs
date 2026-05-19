@@ -109,10 +109,10 @@ pub struct System {
     pub(crate) diagnostics: DiagnosticsComputer,
     pub(crate) last_diag: SimulationDiagnostics,
 
-    /// `true` if the most recent step was accepted under duress (e.g. an
-    /// IAS15 sub-step that hit the `DT_MIN` floor without satisfying the
-    /// tolerance). Mirrors [`StepResult::degraded`]; surfaced via
-    /// [`Metrics::last_step_degraded`] so the UI can flag quality loss.
+    /// `true` if the most recent step was accepted under duress (an
+    /// IAS15 sub-step that hit the `DT_MIN` floor without satisfying
+    /// the tolerance). Mirrors [`StepResult::degraded`]; surfaced via
+    /// [`Metrics::last_step_degraded`].
     pub(crate) last_step_degraded: bool,
 
     /// Step counter.
@@ -143,8 +143,8 @@ pub struct System {
     pub(crate) units: UnitSystem,
 
     /// Effective `G` in canonical units. Seeded from `units.g()` at
-    /// construction; the GUI's "G slider" can rescale it independently
-    /// via [`set_g_factor`](Self::set_g_factor).
+    /// construction; callers may rescale it independently via
+    /// [`set_g_factor`](Self::set_g_factor).
     pub(crate) g_factor: f64,
 
     /// Initial Lz — conservation baseline.
@@ -220,7 +220,7 @@ pub struct System {
     pub(crate) hooks: HookRegistry,
 
     /// Set by a [`Command::Stop`](crate::core::hooks::Command::Stop) request.
-    /// Headless runners honour this; the GUI may ignore it.
+    /// Honoured by the run loop; downstream callers may inspect it.
     pub(crate) stop_requested: bool,
 
     /// Accumulated world-space COM translation since the last call to
@@ -367,16 +367,11 @@ impl System {
             rel_energy_error: None,
             force_model,
             scratch_acc: Vec::new(),
-            // Yoshida 4 is the default: 4th-order symplectic composition with
-            // bounded per-step wall time, safe to drive from the render loop
-            // at realistic body counts. IAS15 (15th-order adaptive) remains
-            // available via `set_integrator` but is intentionally *not* the
-            // default — its per-step cost is unbounded in stiff regimes
-            // (dt → DT_MIN cascades), which makes it unsuitable for
-            // interactive playback at N ≳ a few hundred. REBOUND itself uses
-            // IAS15 only in offline script mode; the integrator-execution-
-            // profile ADR captures the rationale. Callers that want a
-            // precision run opt into IAS15 explicitly.
+            // Yoshida 4 is the default: 4th-order symplectic composition
+            // with bounded per-step cost. IAS15 is opt-in via
+            // `set_integrator` — its per-step cost is unbounded in stiff
+            // regimes (dt → DT_MIN cascades) and it is designed for
+            // offline reference runs. See ADR-003 for the rationale.
             integrator: make_integrator(IntegratorKind::Yoshida4),
             orbital_cache: Vec::new(),
             diagnostics: DiagnosticsComputer::new(),

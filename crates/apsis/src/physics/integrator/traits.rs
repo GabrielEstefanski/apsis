@@ -17,8 +17,8 @@
 //! The [`Integrator`] trait replaces the old `Integrator` enum, enabling
 //! new integration schemes to be added without touching the core.
 //!
-//! [`IntegratorKind`] is a plain enum retained for UI display, snapshot
-//! serialisation, and `Metrics`.  It is **not** used for dispatch.
+//! [`IntegratorKind`] is a plain enum retained for snapshot
+//! serialisation and `Metrics`.  It is **not** used for dispatch.
 
 use crate::domain::body::Body;
 use crate::math::Vec3;
@@ -31,8 +31,8 @@ use crate::physics::integrator::operator::{
 
 /// Identifies an integration algorithm without carrying behaviour.
 ///
-/// Used for snapshot serialisation, UI combo-boxes, and `Metrics`.
-/// The actual stepping logic lives in structs that implement [`Integrator`].
+/// Used for snapshot serialisation and `Metrics`. The actual stepping
+/// logic lives in structs that implement [`Integrator`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IntegratorKind {
     VelocityVerlet,
@@ -45,7 +45,7 @@ pub enum IntegratorKind {
 }
 
 impl IntegratorKind {
-    /// Short human-readable label used in the UI.
+    /// Short human-readable label, suitable for diagnostic output.
     pub fn label(self) -> &'static str {
         match self {
             Self::VelocityVerlet => "Velocity Verlet (2nd)",
@@ -104,7 +104,7 @@ impl IntegratorKind {
         matches!(self, Self::Ias15)
     }
 
-    /// All known variants, in the order shown in the UI combo-box.
+    /// All known variants, ordered roughly by typical use frequency.
     pub const ALL: [IntegratorKind; 7] = [
         IntegratorKind::Ias15,
         IntegratorKind::Mercurius,
@@ -115,7 +115,7 @@ impl IntegratorKind {
         IntegratorKind::WisdomHolman,
     ];
 
-    /// Canonical string slug used in `run.toml` and CLI arguments.
+    /// Canonical string slug used in serialisation and CLI arguments.
     pub fn slug(self) -> &'static str {
         match self {
             Self::VelocityVerlet => "velocity_verlet",
@@ -156,12 +156,6 @@ impl std::str::FromStr for IntegratorKind {
 ///
 /// Passed as `&mut` so the integrator can call `force.compute()` (which
 /// requires `&mut self` for tree rebuilds, etc.).
-///
-/// # Design
-///
-/// This struct exists to **avoid coupling integrators to `System`**.
-/// An integrator never sees the full `System`; it only sees this narrow
-/// interface of force model + physical parameters.
 pub struct IntegratorContext<'a> {
     /// The force model (e.g. Barnes-Hut gravity).
     pub force: &'a mut dyn ForceModel,
@@ -197,17 +191,10 @@ pub struct IntegratorContext<'a> {
 /// Centralises the physical diagnostics that `System` needs after each step,
 /// so no integrator-specific logic leaks into the orchestrator.
 pub struct StepResult {
-    /// Simulated time actually advanced by this call, in the same units as
-    /// the `dt` input. For fixed-step integrators (VV, Y4, WH) this is
-    /// always equal to the requested `dt`. For adaptive integrators (IAS15)
-    /// the step is a single sub-step whose size is chosen by the error
-    /// controller; `consumed_dt` reports the accepted size — the caller is
-    /// responsible for re-invoking `step` until the desired budget is met.
-    ///
-    /// `System::step` advances `System::t` by **this value**, never by the
-    /// requested `dt`. This keeps `System::t` consistent with the physical
-    /// state of the bodies when an adaptive integrator accepts a sub-step
-    /// smaller than the caller's budget (Rein & Spiegel 2015, §2.3).
+    /// Simulated time actually advanced by this call. Fixed-step
+    /// integrators always return the requested `dt`; adaptive
+    /// integrators return the accepted sub-step size. `System::step`
+    /// advances `System::t` by this value (Rein & Spiegel 2015, §2.3).
     pub consumed_dt: f64,
 
     /// Gravitational potential energy at the end-of-step positions,
@@ -226,14 +213,9 @@ pub struct StepResult {
     /// kinematics.
     pub step_snapshot: Option<super::dense::DenseSnapshot>,
 
-    /// `true` when the integrator accepted a sub-step under duress rather
-    /// than on merit. For IAS15 this means the error controller wanted to
-    /// shrink `dt` further but hit the `DT_MIN` floor; the step was taken
-    /// anyway to avoid stalling the simulation, but the local truncation
-    /// bound `ε` was not actually satisfied. Fixed-step integrators (VV,
-    /// Y4, WH) always report `false`. Callers that care about energy-budget
-    /// quality can use this to surface a warning or log a degraded-step
-    /// event.
+    /// `true` when an adaptive integrator hit the `DT_MIN` floor and
+    /// accepted a sub-step without actually meeting its local error
+    /// bound. Fixed-step integrators always report `false`.
     pub degraded: bool,
 
     /// Mass-distribution-based hierarchy regime classification, populated
@@ -248,21 +230,13 @@ pub struct StepResult {
 // ── HierarchySignal ───────────────────────────────────────────────────────────
 
 /// Classification of a system's mass distribution against the dominance
-/// criterion underlying the Wisdom-Holman perturbation expansion.
+/// criterion underlying the Wisdom-Holman perturbation expansion (WH
+/// 1991 §III). Two predicates: the central body must be the most
+/// massive, and `m_0 / Σ_{i≥1} m_i` must clear a dominance threshold.
 ///
-/// The variants grade where the system sits relative to the WH derivation's
-/// small-parameter regime. Two ratios drive the classification:
-///
-/// 1. The central body must be the most massive (no other body more massive
-///    than `bodies[0]`).
-/// 2. The central-to-rest mass ratio `m_0 / Σ_{i≥1} m_i` must clear a
-///    dominance threshold for the perturbation series to converge in the
-///    asymptotic sense WH 1991 §III assumes.
-///
-/// The signal is observability-only. The integrator does not change
-/// behaviour based on it; the value is surfaced through [`StepResult`] so
-/// callers (UI, logging, validation) can detect when the system has left
-/// the validated regime.
+/// Observability only — surfaced through [`StepResult`] so callers can
+/// detect when the system has left the validated regime; no integrator
+/// branches on the value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HierarchySignal {
     /// Central body is dominant; the WH derivation operates inside its
@@ -307,7 +281,7 @@ impl HierarchySignal {
         }
     }
 
-    /// Short human-readable label, suitable for diagnostic output and UI.
+    /// Short human-readable label, suitable for diagnostic output.
     pub fn label(self) -> &'static str {
         match self {
             Self::Hierarchical => "hierarchical",
@@ -324,52 +298,24 @@ impl HierarchySignal {
 /// # Contract
 ///
 /// - `step()` advances `bodies` by **at most** the requested `dt_hint`.
-///   - Fixed-step integrators (VV, Y4, WH) always consume exactly
-///     `dt_hint`. They report
+///   - Fixed-step integrators consume exactly `dt_hint` and report
 ///     [`controls_own_step_size`](Self::controls_own_step_size) as
-///     `false` and leave [`proposed_next_dt`](Self::proposed_next_dt)
-///     at its `None` default.
+///     `false`.
 ///   - Self-adaptive integrators (IAS15) treat `dt_hint` as a
-///     *first-call seed* for their internal step controller; on
-///     subsequent calls the controller-chosen step is used instead.
-///     The accepted size of the single sub-step is reported via
-///     [`StepResult::consumed_dt`]. The caller loops until the desired
-///     simulation time is reached — the substep-granularity contract
-///     specified in Rein & Spiegel (2015) §2.3. These integrators
-///     report [`controls_own_step_size`](Self::controls_own_step_size)
-///     as `true` so the orchestrator can read their controller's
-///     next-step proposal via
-///     [`proposed_next_dt`](Self::proposed_next_dt) and surface it to
-///     the user / UI as the simulation's "current dt".
+///     *first-call seed*; subsequent calls use the controller-chosen
+///     step. The caller loops until the desired simulation time is
+///     reached — the substep-granularity contract from Rein & Spiegel
+///     (2015) §2.3. The accepted size is reported via
+///     [`StepResult::consumed_dt`].
 /// - `step()` may call `ctx.force.compute()` one or more times.
 /// - `step()` must leave `acc` consistent with the final body positions
 ///   (so that diagnostics can read it).
 /// - `step()` must apply `ctx.g_factor` scaling and `ctx.perturbations`
 ///   at the appropriate points in the scheme.
 ///
-/// # Why the hint-vs-cap distinction matters
-///
-/// Treating the orchestrator's `dt_hint` as a hard per-call cap silently
-/// pins a self-adaptive integrator to whatever step the user supplied as
-/// an initial guess: the controller can shrink below the cap on stiff
-/// regions but can never grow above it, even when the local truncation
-/// error would permit it. This was the IAS15 floor-cascade bug
-/// investigated in
-/// `docs/experiments/2026-04-26-ias15-warmstart-bug.md` — the integrator
-/// behaved like a fixed-step scheme with internal sub-stepping below the
-/// cap, producing correct trajectories at orders-of-magnitude unnecessary
-/// substep counts.
-///
-/// The two-method contract here makes the distinction explicit at the
-/// trait boundary: a future SABA, Hermite, or MERCURIUS implementation
-/// declares its discipline up front, and the orchestrator routes the
-/// hint vs cap accordingly.
-///
-/// # Mutability
-///
-/// `&mut self` is required because some integrators carry internal state
-/// across steps (e.g. Wisdom–Holman's fallback integrator, IAS15's
-/// predictor–corrector history).
+/// `&mut self` is required because some integrators carry internal
+/// state across steps (Wisdom–Holman fallback, IAS15 predictor–
+/// corrector history).
 pub trait Integrator: Send {
     /// Advance the system by one time step.
     ///
@@ -390,64 +336,26 @@ pub trait Integrator: Send {
     fn kind(&self) -> IntegratorKind;
 
     /// Whether the integrator's internal controller decides the actual
-    /// step size, treating the orchestrator's `dt_hint` as a *hint*
-    /// rather than a hard cap. `false` means the integrator consumes
-    /// exactly `dt_hint`; `true` means it picks its own step (possibly
-    /// after seeding from `dt_hint` on the first call).
-    ///
-    /// The orchestrator uses this to decide whether to reset its own
-    /// `current_dt` field after each step (fixed-step → reset to
-    /// `user_dt`; self-adaptive → adopt
-    /// [`proposed_next_dt`](Self::proposed_next_dt)) and whether to
-    /// surface a controller-driven step size in UI panels.
+    /// step size, treating `dt_hint` as a *hint* rather than a hard cap.
+    /// The orchestrator reads this to decide whether to reset
+    /// `current_dt` to `user_dt` after each step (fixed-step) or to
+    /// adopt [`proposed_next_dt`](Self::proposed_next_dt) (self-adaptive).
     fn controls_own_step_size(&self) -> bool {
         false
     }
 
     /// The step size the integrator's controller proposes for the next
-    /// call, if applicable. Returns `None` for fixed-step schemes; for
-    /// self-adaptive schemes it tracks the controller's most-recent
-    /// `dt_next` recommendation.
-    ///
-    /// The orchestrator may use this to update its `current_dt` field
-    /// so external observers (UI dt readout, headless CSV columns)
-    /// reflect the controller's actual cadence rather than the user's
-    /// initial guess.
+    /// call. `None` for fixed-step schemes; self-adaptive schemes
+    /// return their most-recent `dt_next` recommendation.
     fn proposed_next_dt(&self) -> Option<f64> {
         None
     }
 
-    /// Apply a uniform translation `(-dx, -dy)` to every body, routing the
-    /// shift through whatever compensated-summation accumulators the
-    /// integrator maintains for body position.
-    ///
-    /// # Why this matters — bit-reproducibility
-    ///
-    /// IAS15 carries a Neumaier-style compensation buffer (`csx`) that
-    /// pairs with each body's stored position. The pair `(x, csx)`
-    /// represents an extended-precision running sum: every accepted
-    /// substep updates `x` via `add_cs(p = body.pos_x, csp = csx, inp =
-    /// position increment)`, which preserves low-order bits across the
-    /// long integration horizons IAS15 advertises (~10⁹ orbits at f64
-    /// machine precision, per Rein & Spiegel 2015 §3).
-    ///
-    /// External translations of body position — most commonly the
-    /// periodic COM-recentering applied by `System::step` — disrupt this
-    /// invariant when written as a bare `body.pos_x -= dx`. The compensation
-    /// `csx` then references the rounding history of the *pre-shift*
-    /// running sum, but `body.pos_x` has been arbitrarily perturbed; the next
-    /// `add_cs` call wipes the prior compensation rather than continuing
-    /// to track it. For a single sub-ULP shift this loss is negligible,
-    /// but it accumulates into a bit-reproducibility gap on long runs and
-    /// undermines snapshot-replay determinism — exactly the property the
-    /// reproducibility ADR commits to.
-    ///
-    /// Routing the shift through `add_cs` (or its arithmetic equivalent)
-    /// preserves the invariant: the new `(x, csx)` pair is the
-    /// compensated representation of `(x_old, csx_old) - (dx, dy)`.
-    /// Default impl performs an uncompensated subtraction (correct for
-    /// integrators with no per-body compensation buffer); IAS15
-    /// overrides to use its own buffers.
+    /// Apply a uniform translation `(-dx, -dy)` to every body, routing
+    /// the shift through whatever compensated-summation accumulators
+    /// the integrator maintains. Default impl performs an uncompensated
+    /// subtraction; IAS15 overrides to preserve its Neumaier buffers
+    /// (necessary for bit-reproducibility across COM-recentering shifts).
     fn recenter_bodies(&mut self, bodies: &mut [Body], dx: f64, dy: f64) {
         for b in bodies.iter_mut() {
             b.pos_x -= dx;
@@ -481,67 +389,22 @@ pub trait Integrator: Send {
         None
     }
 
-    /// Whether this integrator requires the force model to be a
-    /// deterministic function of state — i.e. `f(x, v, t)` bit-reproducible
+    /// Whether the integrator requires the force model to be a
+    /// deterministic function of state — `f(x, v, t)` bit-reproducible
     /// across calls with the same `(x, v, t)` to within f64 ULP.
     ///
-    /// # Why this matters — Picard continuity
+    /// Implicit Picard predictor–corrector schemes (IAS15) need this:
+    /// position-dependent force discontinuities (Barnes-Hut tree
+    /// rebuilds) break the contraction needed for fixed-point
+    /// convergence. Low-order explicit / symplectic schemes absorb
+    /// force-evaluation noise at O(dt²) or better and return `false`.
     ///
-    /// High-order implicit methods (IAS15 in particular) solve an
-    /// implicit system by **Picard predictor–corrector iteration**
-    /// within each adaptive sub-step. The iteration converges iff its
-    /// operator is a contraction, which requires the force function
-    /// to be *continuous and deterministic in state across
-    /// iterations*:
+    /// `System::set_integrator` reads this together with
+    /// [`ForceModel::is_deterministic`](crate::physics::integrator::force_model::ForceModel::is_deterministic)
+    /// and auto-reconfigures the force model when they conflict.
+    /// See [ADR-003] for the derivation and the IAS15+BH pairing rule.
     ///
-    /// 1. Between iterations, body positions drift by a small amount —
-    ///    that is the point of the corrector.
-    /// 2. The corrector consults `ForceModel::compute` on the
-    ///    perturbed state.
-    /// 3. If the force function has position-dependent *topological*
-    ///    discontinuities (e.g. Barnes-Hut: a body near a cell
-    ///    boundary crosses leaves in response to sub-ULP drift → the
-    ///    multipole approximation for that body's far-field changes
-    ///    discretely), the Picard operator is not a contraction. The
-    ///    iteration oscillates at the discontinuity scale; the outer
-    ///    controller reads the oscillation as truncation error,
-    ///    rejects the step, shrinks `dt`, and cascades toward
-    ///    `DT_MIN` — regardless of how physically benign the scenario
-    ///    actually is.
-    ///
-    /// The pairing of IAS15 with direct O(N²) summation is therefore
-    /// a mathematical prerequisite of the method (Rein & Spiegel 2015
-    /// §2.1 explicitly assumes a deterministic force law for the
-    /// predictor–corrector convergence proof), not an implementation
-    /// shortcut.
-    ///
-    /// # Why other integrators do not need this
-    ///
-    /// Low-order explicit / symplectic schemes (Verlet, Yoshida,
-    /// WHFast) do not solve an implicit system. Their per-step error
-    /// bound absorbs force-evaluation noise at O(dt²) or better, so
-    /// Barnes-Hut's tree-rebuild variation is invisible at the
-    /// trajectory level. They return `false` and may be paired with
-    /// any force model.
-    ///
-    /// # Enforcement
-    ///
-    /// `System::set_integrator` reads this together with the force
-    /// model's [`is_deterministic`](crate::physics::integrator::force_model::ForceModel::is_deterministic)
-    /// and auto-reconfigures the force model (raises the exact
-    /// threshold so BH is bypassed) when they conflict. The
-    /// auto-correction emits a structured
-    /// [`warn_diag!`](crate::warn_diag) event so the user sees
-    /// exactly what changed and why.
-    ///
-    /// # Future evolution
-    ///
-    /// Returning a boolean here will eventually be upgraded to a
-    /// required `DeterminismLevel` (`Strict` / `Approximate { bound }`
-    /// / `Nondeterministic`), once a second non-trivial force model
-    /// (FMM with bounded multipole error, GPU kernel with reduction
-    /// noise) makes the distinction load-bearing. Until then the
-    /// boolean is sufficient and does not encode spurious precision.
+    /// [ADR-003]: ../../docs/adr/003-integrator-execution-profile.md
     fn requires_deterministic_force(&self) -> bool {
         false
     }
