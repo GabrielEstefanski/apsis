@@ -112,7 +112,12 @@ mod energy {
         let mut peak: f64 = 0.0;
         for _ in 0..total_steps {
             sys.step();
-            peak = peak.max(sys.metrics().rel_energy_error.unwrap().abs());
+            peak = peak.max(
+                sys.metrics()
+                    .rel_energy_error
+                    .expect("well-conditioned regime: rel_energy_error must be Some")
+                    .abs(),
+            );
         }
         peak
     }
@@ -1174,7 +1179,12 @@ mod benchmarks {
         let mut peak: f64 = 0.0;
         for _ in 0..STEPS {
             sys.step();
-            peak = peak.max(sys.metrics().rel_energy_error.unwrap().abs());
+            peak = peak.max(
+                sys.metrics()
+                    .rel_energy_error
+                    .expect("well-conditioned regime: rel_energy_error must be Some")
+                    .abs(),
+            );
         }
         assert!(peak < TOL, "Y4 peak |δE/E₀| = {peak:.3e} > {TOL:.0e} over t=1.0");
     }
