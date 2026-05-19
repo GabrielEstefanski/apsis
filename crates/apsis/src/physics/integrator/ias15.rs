@@ -2432,7 +2432,12 @@ mod tests {
         let mut peak = 0.0_f64;
         for _ in 0..n_steps {
             sys.step();
-            peak = peak.max(sys.metrics().rel_energy_error.unwrap().abs());
+            peak = peak.max(
+                sys.metrics()
+                    .rel_energy_error
+                    .expect("well-conditioned regime: rel_energy_error must be Some")
+                    .abs(),
+            );
         }
 
         assert!(
@@ -2480,7 +2485,12 @@ mod tests {
         let mut peak = 0.0_f64;
         for _ in 0..n_steps {
             sys.step();
-            peak = peak.max(sys.metrics().rel_energy_error.unwrap().abs());
+            peak = peak.max(
+                sys.metrics()
+                    .rel_energy_error
+                    .expect("well-conditioned regime: rel_energy_error must be Some")
+                    .abs(),
+            );
         }
 
         assert!(
@@ -3077,7 +3087,12 @@ mod tests {
             let mut p = 0.0_f64;
             for _ in 0..n_steps {
                 sys.step();
-                p = p.max(sys.metrics().rel_energy_error.unwrap().abs());
+                p = p.max(
+                    sys.metrics()
+                        .rel_energy_error
+                        .expect("well-conditioned regime: rel_energy_error must be Some")
+                        .abs(),
+                );
             }
             p
         };
@@ -3149,7 +3164,12 @@ mod tests {
             let mut p = 0.0_f64;
             for _ in 0..n_steps {
                 sys.step();
-                p = p.max(sys.metrics().rel_energy_error.unwrap().abs());
+                p = p.max(
+                    sys.metrics()
+                        .rel_energy_error
+                        .expect("well-conditioned regime: rel_energy_error must be Some")
+                        .abs(),
+                );
             }
             p
         };
