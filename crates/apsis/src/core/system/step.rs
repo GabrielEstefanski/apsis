@@ -2,9 +2,7 @@
 
 use crate::core::adaptive::{AccelerationStats, DtMode};
 use crate::core::calibration;
-use crate::core::hooks::{
-    CollisionEvent, Command, EscapeEvent, HookContext, HookPhase, HookPhaseKind, HookRegistry,
-};
+use crate::core::hooks::{Command, HookContext, HookPhase, HookPhaseKind, HookRegistry};
 use crate::core::system::System;
 use crate::core::system::helpers::compute_closeness;
 use crate::domain::body_arrays::BodyArrays;
@@ -22,10 +20,8 @@ impl System {
     /// 1. `pre_step` — observe pre-integration state, queue commands.
     /// 2. Apply pre-step commands.
     /// 3. Integrator advances bodies.
-    /// 4. Detect events (collisions, escapes) on the integrated state.
-    /// 5. Dispatch event hooks and `post_step`, collect commands.
-    /// 6. Optional `heartbeat` tick when `steps % heartbeat_interval == 0`.
-    /// 7. Apply post-step / event commands in insertion order.
+    /// 4. `post_step` — observe integrated state, queue commands.
+    /// 5. Apply post-step commands in insertion order.
     pub fn step(&mut self) {
         // Prime the conservation baseline so the first hook fires with
         // `rel_*_error = Some(0.0)`, not the uninitialised `None`.
@@ -227,15 +223,9 @@ impl System {
         }
         self.last_encounter_flag = new_flag;
 
-        // ── 3. Detect events and dispatch post-step hooks ────────────────────
+        // ── 3. Dispatch post-step hooks ──────────────────────────────────────
         if !self.hooks.is_empty() {
-            let collisions = self.detect_collisions();
-            let escapes = self.detect_escapes();
-
             let mut hooks = take_hooks(self);
-            let heartbeat_interval = hooks.heartbeat_interval;
-            let fire_heartbeat =
-                heartbeat_interval > 0 && self.steps.is_multiple_of(heartbeat_interval);
             let resume_state = if hooks.any_wants_resume_state() {
                 Some(self.integrator.resume_state())
             } else {
@@ -244,24 +234,8 @@ impl System {
 
             let mut ctx = build_hook_context(self, HookPhaseKind::PostStep);
             ctx.resume_state = resume_state;
-            let mut cmds = Vec::new();
-
-            let event_ctx = HookContext { phase: HookPhase(HookPhaseKind::Event), ..ctx.clone() };
-            for ev in &collisions {
-                cmds.extend(hooks.dispatch_collision(ev, &event_ctx));
-            }
-            for ev in &escapes {
-                cmds.extend(hooks.dispatch_escape(ev, &event_ctx));
-            }
-            cmds.extend(hooks.dispatch_post_step(&ctx));
-
-            if fire_heartbeat {
-                let hb_ctx = HookContext { phase: HookPhase(HookPhaseKind::Heartbeat), ..ctx };
-                cmds.extend(hooks.dispatch_heartbeat(&hb_ctx));
-            } else {
-                drop(ctx);
-            }
-            drop(event_ctx);
+            let cmds = hooks.dispatch_post_step(&ctx);
+            drop(ctx);
 
             restore_hooks(self, hooks);
             self.apply_commands(cmds);
@@ -323,63 +297,12 @@ impl System {
             crate::core::system::regime::regime_aware_rel(delta, baseline);
     }
 
-    /// Event detection stub — collision detection will arrive with the basic
-    /// merge model. Returns empty until a [`CollisionHandler`]-style component
-    /// is wired in.
-    fn detect_collisions(&self) -> Vec<CollisionEvent> {
-        Vec::new()
-    }
-
-    /// Event detection stub — escape detection will arrive with the boundary
-    /// condition component.
-    fn detect_escapes(&self) -> Vec<EscapeEvent> {
-        Vec::new()
-    }
-
-    /// Apply a batch of hook-produced commands in order.
-    ///
-    /// Removals and merges are re-sorted by index (descending) so `swap_remove`
-    /// on earlier indices cannot corrupt later ones. Other command kinds run
-    /// in insertion order.
+    /// Apply hook-produced commands in insertion order.
     pub(crate) fn apply_commands(&mut self, cmds: Vec<Command>) {
-        if cmds.is_empty() {
-            return;
-        }
-
-        // Split into removal-style and additive commands, preserving order
-        // within each class. Removals are applied last, sorted descending, so
-        // hook-side indices stay valid until we touch them.
-        let mut removals: Vec<usize> = Vec::new();
-        let mut additions: Vec<crate::domain::body::NamedBody> = Vec::new();
-        let mut merges: Vec<(usize, usize, crate::domain::body::Body, Option<String>)> = Vec::new();
-
         for cmd in cmds {
             match cmd {
-                Command::RemoveBody { index } => removals.push(index),
-                Command::AddBody(nb) => additions.push(nb),
-                Command::Merge { remove_a, remove_b, merged, merged_name } => {
-                    merges.push((remove_a, remove_b, merged, merged_name));
-                },
                 Command::Stop => self.stop_requested = true,
             }
-        }
-
-        // Merges: queue both indices for removal and add the merged body.
-        for (a, b, merged, name) in merges {
-            removals.push(a);
-            removals.push(b);
-            additions.push(crate::domain::body::NamedBody { body: merged, name });
-        }
-
-        // Remove in descending, deduplicated order.
-        removals.sort_unstable_by(|a, b| b.cmp(a));
-        removals.dedup();
-        for idx in removals {
-            self.remove_body(idx);
-        }
-
-        if !additions.is_empty() {
-            self.add_named_bodies(additions);
         }
     }
 

@@ -4,9 +4,9 @@ use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::Path;
 
-use crate::core::hooks::{CollisionEvent, Command, EscapeEvent, HookContext, SimHook};
+use crate::core::hooks::{Command, HookContext, SimHook};
 use crate::records::format::{FORMAT_VER, MAGIC};
-use crate::records::frame::{BodyState, Diagnostic, Event, Frame, ResumeState, Snapshot, Trailer};
+use crate::records::frame::{BodyState, Diagnostic, Frame, ResumeState, Snapshot, Trailer};
 use crate::records::header::Header;
 use crate::records::policy::{DiagnosticCadence, RecordPolicy};
 
@@ -179,23 +179,6 @@ impl SimHook for RecordHook {
             self.write_frame(&Frame::Diagnostic(d)).expect("RecordHook: write diagnostic");
             self.t_last_diagnostic = Some(ctx.t);
         }
-        Vec::new()
-    }
-
-    fn on_collision(&mut self, ev: &CollisionEvent, _ctx: &HookContext<'_>) -> Vec<Command> {
-        let f = Frame::Event(Event::Collision {
-            t: ev.t,
-            body_a: ev.i as u32,
-            body_b: ev.j as u32,
-            distance: ev.separation,
-        });
-        self.write_frame(&f).expect("RecordHook: write collision");
-        Vec::new()
-    }
-
-    fn on_escape(&mut self, ev: &EscapeEvent, _ctx: &HookContext<'_>) -> Vec<Command> {
-        let f = Frame::Event(Event::Escape { t: ev.t, body: ev.body as u32, radius: ev.radius });
-        self.write_frame(&f).expect("RecordHook: write escape");
         Vec::new()
     }
 

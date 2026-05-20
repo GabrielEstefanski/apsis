@@ -3,9 +3,9 @@
 //! Writing is intentionally Rust-only in v0.1 (the writer's `Header` includes
 //! a BLAKE3 hash of `Cargo.lock` that the Rust binary computes at file
 //! creation time). Python consumers open existing records, inspect provenance,
-//! and iterate events / dense snapshots.
+//! and iterate dense snapshots / diagnostics.
 
-use apsis::records::{Record, frame};
+use apsis::records::Record;
 use pyo3::prelude::*;
 
 #[pyclass(module = "apsis", name = "Record", frozen)]
@@ -30,30 +30,6 @@ impl PyRecord {
         self.inner.header().to_toml().map_err(|e| {
             pyo3::exceptions::PyValueError::new_err(format!("header re-serialise: {e}"))
         })
-    }
-
-    /// List of event tuples in time order. Each tuple is one of:
-    /// - `("collision", t, body_a, body_b, distance)`
-    /// - `("escape",    t, body, radius)`
-    fn events(&self, py: Python<'_>) -> PyResult<PyObject> {
-        let list = pyo3::types::PyList::empty(py);
-        let iter = self
-            .inner
-            .events()
-            .map_err(|e| pyo3::exceptions::PyIOError::new_err(format!("events: {e}")))?;
-        for ev in iter {
-            let ev =
-                ev.map_err(|e| pyo3::exceptions::PyIOError::new_err(format!("event read: {e}")))?;
-            match ev {
-                frame::Event::Collision { t, body_a, body_b, distance } => {
-                    list.append(("collision", t, body_a, body_b, distance))?;
-                },
-                frame::Event::Escape { t, body, radius } => {
-                    list.append(("escape", t, body, radius))?;
-                },
-            }
-        }
-        Ok(list.into())
     }
 
     /// Number of dense snapshots in the record (initial bookend + per-policy
