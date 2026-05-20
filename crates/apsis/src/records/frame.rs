@@ -5,8 +5,6 @@
 use std::io::{self, Read, Write};
 
 pub const KIND_SNAPSHOT: u8 = 0x00;
-pub const KIND_COLLISION: u8 = 0x01;
-pub const KIND_ESCAPE: u8 = 0x02;
 pub const KIND_DIAGNOSTIC: u8 = 0x03;
 pub const KIND_RESUME_STATE: u8 = 0x04;
 pub const KIND_TRAILER: u8 = 0xFF;
@@ -24,12 +22,6 @@ pub struct Snapshot {
     pub bodies: Vec<BodyState>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum Event {
-    Collision { t: f64, body_a: u32, body_b: u32, distance: f64 },
-    Escape { t: f64, body: u32, radius: f64 },
-}
-
 /// Relative drift `(X − X₀) / |X₀|` of conserved scalars at time `t`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Diagnostic {
@@ -42,9 +34,8 @@ pub struct Diagnostic {
 /// Format is integrator-internal; consumers route by the record header's
 /// `integrator.kind` to the matching [`Integrator::restore_resume_state`]
 /// implementation. `step_count` carries the System-level step counter
-/// at capture so a restored System fires periodic events (COM
-/// recentering at every 97 steps, heartbeats, …) on the same schedule
-/// the original run did.
+/// at capture so periodic schedules (e.g. COM recentering every 97
+/// steps) resume on the same cadence as the original run.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ResumeState {
     pub t: f64,
@@ -63,7 +54,6 @@ pub struct Trailer {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Frame {
     Snapshot(Snapshot),
-    Event(Event),
     Diagnostic(Diagnostic),
     ResumeState(ResumeState),
     Trailer(Trailer),
@@ -82,23 +72,6 @@ impl Frame {
                         w.write_all(&c.to_le_bytes())?;
                     }
                 }
-            },
-            Frame::Event(Event::Collision { t, body_a, body_b, distance }) => {
-                let payload_len = 1 + 4 + 4 + 8;
-                write_header(w, KIND_COLLISION, *t, payload_len as u32)?;
-                // Sub-kind byte reserved for forward compat with operator-emitted
-                // events (0x10–0xFE range, post-v0.1). Currently always 0.
-                w.write_all(&[0u8])?;
-                w.write_all(&body_a.to_le_bytes())?;
-                w.write_all(&body_b.to_le_bytes())?;
-                w.write_all(&distance.to_le_bytes())?;
-            },
-            Frame::Event(Event::Escape { t, body, radius }) => {
-                let payload_len = 1 + 4 + 8;
-                write_header(w, KIND_ESCAPE, *t, payload_len as u32)?;
-                w.write_all(&[0u8])?;
-                w.write_all(&body.to_le_bytes())?;
-                w.write_all(&radius.to_le_bytes())?;
             },
             Frame::Diagnostic(d) => {
                 let payload_len = 2 * 8;
@@ -162,18 +135,6 @@ impl Frame {
                 }
                 Frame::Snapshot(Snapshot { t, bodies })
             },
-            KIND_COLLISION => {
-                // payload[0] = sub-kind (currently always 0; reserved for future variants)
-                let body_a = u32::from_le_bytes(payload[1..5].try_into().unwrap());
-                let body_b = u32::from_le_bytes(payload[5..9].try_into().unwrap());
-                let distance = f64::from_le_bytes(payload[9..17].try_into().unwrap());
-                Frame::Event(Event::Collision { t, body_a, body_b, distance })
-            },
-            KIND_ESCAPE => {
-                let body = u32::from_le_bytes(payload[1..5].try_into().unwrap());
-                let radius = f64::from_le_bytes(payload[5..13].try_into().unwrap());
-                Frame::Event(Event::Escape { t, body, radius })
-            },
             KIND_DIAGNOSTIC => {
                 let d_energy_rel = f64::from_le_bytes(payload[..8].try_into().unwrap());
                 let d_lz_rel = f64::from_le_bytes(payload[8..16].try_into().unwrap());
@@ -231,18 +192,6 @@ mod tests {
             ],
         });
         assert_eq!(round_trip(&snap), snap);
-    }
-
-    #[test]
-    fn collision_round_trip() {
-        let ev = Frame::Event(Event::Collision { t: 12.4, body_a: 0, body_b: 3, distance: 1e-5 });
-        assert_eq!(round_trip(&ev), ev);
-    }
-
-    #[test]
-    fn escape_round_trip() {
-        let ev = Frame::Event(Event::Escape { t: 200.0, body: 7, radius: 1e6 });
-        assert_eq!(round_trip(&ev), ev);
     }
 
     #[test]

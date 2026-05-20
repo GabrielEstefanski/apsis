@@ -37,11 +37,9 @@
 
 pub mod commands;
 pub mod context;
-pub mod events;
 
 pub use commands::Command;
 pub use context::{HookContext, HookPhase, HookPhaseKind};
-pub use events::{CollisionEvent, EscapeEvent};
 
 /// A simulation hook. All methods default to no-ops so implementors only
 /// override the phases they care about.
@@ -64,16 +62,6 @@ pub trait SimHook: Send {
 
     /// Fired once after integration and event detection complete.
     fn post_step(&mut self, _ctx: &HookContext<'_>) -> Vec<Command> {
-        Vec::new()
-    }
-
-    /// Fired for each [`CollisionEvent`] detected after the step.
-    fn on_collision(&mut self, _event: &CollisionEvent, _ctx: &HookContext<'_>) -> Vec<Command> {
-        Vec::new()
-    }
-
-    /// Fired for each [`EscapeEvent`] detected after the step.
-    fn on_escape(&mut self, _event: &EscapeEvent, _ctx: &HookContext<'_>) -> Vec<Command> {
         Vec::new()
     }
 
@@ -154,26 +142,6 @@ impl HookRegistry {
         let mut out = Vec::new();
         for entry in &mut self.entries {
             out.extend(entry.hook.post_step(ctx));
-        }
-        out
-    }
-
-    pub fn dispatch_collision(
-        &mut self,
-        event: &CollisionEvent,
-        ctx: &HookContext<'_>,
-    ) -> Vec<Command> {
-        let mut out = Vec::new();
-        for entry in &mut self.entries {
-            out.extend(entry.hook.on_collision(event, ctx));
-        }
-        out
-    }
-
-    pub fn dispatch_escape(&mut self, event: &EscapeEvent, ctx: &HookContext<'_>) -> Vec<Command> {
-        let mut out = Vec::new();
-        for entry in &mut self.entries {
-            out.extend(entry.hook.on_escape(event, ctx));
         }
         out
     }

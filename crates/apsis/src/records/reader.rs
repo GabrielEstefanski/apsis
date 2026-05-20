@@ -88,18 +88,6 @@ impl Record {
         Ok((first, last))
     }
 
-    pub fn events(
-        &self,
-    ) -> Result<impl Iterator<Item = Result<crate::records::frame::Event, RecordError>>, RecordError>
-    {
-        let frames = self.frames()?;
-        Ok(frames.filter_map(|f| match f {
-            Ok(Frame::Event(e)) => Some(Ok(e)),
-            Ok(_) => None,
-            Err(e) => Some(Err(e)),
-        }))
-    }
-
     pub fn dense(
         &self,
     ) -> Result<

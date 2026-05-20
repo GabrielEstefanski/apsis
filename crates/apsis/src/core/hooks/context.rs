@@ -14,10 +14,8 @@ pub struct HookPhase(pub HookPhaseKind);
 pub enum HookPhaseKind {
     /// Before the integrator runs. Bodies still reflect the previous step.
     PreStep,
-    /// After integration and event detection.
+    /// After integration completes.
     PostStep,
-    /// Fired alongside an event (collision, escape, …).
-    Event,
     /// Lifecycle ending — hooks flush close-on-drop resources here.
     Finish,
 }

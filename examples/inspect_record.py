@@ -1,4 +1,4 @@
-"""Open an Apsis Record and print its provenance + event log.
+"""Open an Apsis Record and print its provenance + snapshot count.
 
 Demonstrates the read-only Python API. The header is the canonical TOML
 provenance block; this example prints it verbatim so the script runs on
@@ -27,13 +27,6 @@ def main() -> None:
 
     print("=== header (TOML) ===")
     print(rec.header)
-
-    print("=== events ===")
-    events = rec.events()
-    print(f"total: {len(events)}")
-    for ev in events[:10]:
-        print(" ", ev)
-
     print("=== snapshots ===")
     print(f"count: {rec.snapshot_count()}")
 

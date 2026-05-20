@@ -48,7 +48,6 @@ pub enum HeaderChange {
 /// records carry different body counts (no point-to-point pairing).
 #[derive(Debug, Clone, PartialEq)]
 pub struct FrameStreamDiff {
-    pub event_count: (usize, usize),
     pub diagnostic_count: (usize, usize),
     pub snapshot_count: (usize, usize),
     pub trajectory_rms_at_final: Option<f64>,
@@ -185,8 +184,6 @@ fn diff_operators(a: &Header, b: &Header) -> Vec<HeaderChange> {
 }
 
 fn diff_frames(a: &Record, b: &Record) -> Result<FrameStreamDiff, RecordError> {
-    let events_a = a.events()?.count();
-    let events_b = b.events()?.count();
     let diag_a = a.diagnostics()?.count();
     let diag_b = b.diagnostics()?.count();
     let snap_a = a.dense()?.count();
@@ -200,7 +197,6 @@ fn diff_frames(a: &Record, b: &Record) -> Result<FrameStreamDiff, RecordError> {
     let trailer_step_count = (a.trailer().step_count, b.trailer().step_count);
 
     Ok(FrameStreamDiff {
-        event_count: (events_a, events_b),
         diagnostic_count: (diag_a, diag_b),
         snapshot_count: (snap_a, snap_b),
         trajectory_rms_at_final: rms,

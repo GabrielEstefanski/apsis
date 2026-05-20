@@ -2,9 +2,7 @@
 
 use crate::core::adaptive::{AccelerationStats, DtMode};
 use crate::core::calibration;
-use crate::core::hooks::{
-    CollisionEvent, Command, EscapeEvent, HookContext, HookPhase, HookPhaseKind, HookRegistry,
-};
+use crate::core::hooks::{Command, HookContext, HookPhase, HookPhaseKind, HookRegistry};
 use crate::core::system::System;
 use crate::core::system::helpers::compute_closeness;
 use crate::domain::body_arrays::BodyArrays;
@@ -22,9 +20,8 @@ impl System {
     /// 1. `pre_step` — observe pre-integration state, queue commands.
     /// 2. Apply pre-step commands.
     /// 3. Integrator advances bodies.
-    /// 4. Detect events (collisions, escapes) on the integrated state.
-    /// 5. Dispatch event hooks and `post_step`, collect commands.
-    /// 6. Apply post-step / event commands in insertion order.
+    /// 4. `post_step` — observe integrated state, queue commands.
+    /// 5. Apply post-step commands in insertion order.
     pub fn step(&mut self) {
         // Prime the conservation baseline so the first hook fires with
         // `rel_*_error = Some(0.0)`, not the uninitialised `None`.
@@ -226,11 +223,8 @@ impl System {
         }
         self.last_encounter_flag = new_flag;
 
-        // ── 3. Detect events and dispatch post-step hooks ────────────────────
+        // ── 3. Dispatch post-step hooks ──────────────────────────────────────
         if !self.hooks.is_empty() {
-            let collisions = self.detect_collisions();
-            let escapes = self.detect_escapes();
-
             let mut hooks = take_hooks(self);
             let resume_state = if hooks.any_wants_resume_state() {
                 Some(self.integrator.resume_state())
@@ -240,18 +234,8 @@ impl System {
 
             let mut ctx = build_hook_context(self, HookPhaseKind::PostStep);
             ctx.resume_state = resume_state;
-            let mut cmds = Vec::new();
-
-            let event_ctx = HookContext { phase: HookPhase(HookPhaseKind::Event), ..ctx.clone() };
-            for ev in &collisions {
-                cmds.extend(hooks.dispatch_collision(ev, &event_ctx));
-            }
-            for ev in &escapes {
-                cmds.extend(hooks.dispatch_escape(ev, &event_ctx));
-            }
-            cmds.extend(hooks.dispatch_post_step(&ctx));
+            let cmds = hooks.dispatch_post_step(&ctx);
             drop(ctx);
-            drop(event_ctx);
 
             restore_hooks(self, hooks);
             self.apply_commands(cmds);
@@ -311,19 +295,6 @@ impl System {
         self.abs_angular_momentum_error = delta.abs();
         self.rel_angular_momentum_error =
             crate::core::system::regime::regime_aware_rel(delta, baseline);
-    }
-
-    /// Event detection stub — collision detection will arrive with the basic
-    /// merge model. Returns empty until a [`CollisionHandler`]-style component
-    /// is wired in.
-    fn detect_collisions(&self) -> Vec<CollisionEvent> {
-        Vec::new()
-    }
-
-    /// Event detection stub — escape detection will arrive with the boundary
-    /// condition component.
-    fn detect_escapes(&self) -> Vec<EscapeEvent> {
-        Vec::new()
     }
 
     /// Apply a batch of hook-produced commands in order.
