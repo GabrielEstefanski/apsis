@@ -297,50 +297,12 @@ impl System {
             crate::core::system::regime::regime_aware_rel(delta, baseline);
     }
 
-    /// Apply a batch of hook-produced commands in order.
-    ///
-    /// Removals and merges are re-sorted by index (descending) so `swap_remove`
-    /// on earlier indices cannot corrupt later ones. Other command kinds run
-    /// in insertion order.
+    /// Apply hook-produced commands in insertion order.
     pub(crate) fn apply_commands(&mut self, cmds: Vec<Command>) {
-        if cmds.is_empty() {
-            return;
-        }
-
-        // Split into removal-style and additive commands, preserving order
-        // within each class. Removals are applied last, sorted descending, so
-        // hook-side indices stay valid until we touch them.
-        let mut removals: Vec<usize> = Vec::new();
-        let mut additions: Vec<crate::domain::body::NamedBody> = Vec::new();
-        let mut merges: Vec<(usize, usize, crate::domain::body::Body, Option<String>)> = Vec::new();
-
         for cmd in cmds {
             match cmd {
-                Command::RemoveBody { index } => removals.push(index),
-                Command::AddBody(nb) => additions.push(nb),
-                Command::Merge { remove_a, remove_b, merged, merged_name } => {
-                    merges.push((remove_a, remove_b, merged, merged_name));
-                },
                 Command::Stop => self.stop_requested = true,
             }
-        }
-
-        // Merges: queue both indices for removal and add the merged body.
-        for (a, b, merged, name) in merges {
-            removals.push(a);
-            removals.push(b);
-            additions.push(crate::domain::body::NamedBody { body: merged, name });
-        }
-
-        // Remove in descending, deduplicated order.
-        removals.sort_unstable_by(|a, b| b.cmp(a));
-        removals.dedup();
-        for idx in removals {
-            self.remove_body(idx);
-        }
-
-        if !additions.is_empty() {
-            self.add_named_bodies(additions);
         }
     }
 

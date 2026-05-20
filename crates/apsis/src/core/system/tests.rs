@@ -1323,31 +1323,6 @@ mod hook_dispatch {
         assert_eq!(*log.lock().unwrap(), vec!["pre", "post", "pre", "post"]);
     }
 
-    struct RemoveFirstOnce {
-        fired: bool,
-    }
-
-    impl SimHook for RemoveFirstOnce {
-        fn post_step(&mut self, _ctx: &HookContext<'_>) -> Vec<Command> {
-            if self.fired {
-                return Vec::new();
-            }
-            self.fired = true;
-            vec![Command::RemoveBody { index: 0 }]
-        }
-    }
-
-    #[test]
-    fn remove_body_command_shrinks_system() {
-        let mut sys = two_body_circular_system(IntegratorKind::VelocityVerlet, 0.01);
-        assert_eq!(sys.bodies().len(), 2);
-
-        sys.hooks_mut().register(0, Box::new(RemoveFirstOnce { fired: false }));
-        sys.step();
-
-        assert_eq!(sys.bodies().len(), 1, "RemoveBody command must drop one body");
-    }
-
     struct StopAfterOne;
 
     impl SimHook for StopAfterOne {
