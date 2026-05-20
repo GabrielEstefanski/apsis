@@ -24,8 +24,7 @@ impl System {
     /// 3. Integrator advances bodies.
     /// 4. Detect events (collisions, escapes) on the integrated state.
     /// 5. Dispatch event hooks and `post_step`, collect commands.
-    /// 6. Optional `heartbeat` tick when `steps % heartbeat_interval == 0`.
-    /// 7. Apply post-step / event commands in insertion order.
+    /// 6. Apply post-step / event commands in insertion order.
     pub fn step(&mut self) {
         // Prime the conservation baseline so the first hook fires with
         // `rel_*_error = Some(0.0)`, not the uninitialised `None`.
@@ -233,9 +232,6 @@ impl System {
             let escapes = self.detect_escapes();
 
             let mut hooks = take_hooks(self);
-            let heartbeat_interval = hooks.heartbeat_interval;
-            let fire_heartbeat =
-                heartbeat_interval > 0 && self.steps.is_multiple_of(heartbeat_interval);
             let resume_state = if hooks.any_wants_resume_state() {
                 Some(self.integrator.resume_state())
             } else {
@@ -254,13 +250,7 @@ impl System {
                 cmds.extend(hooks.dispatch_escape(ev, &event_ctx));
             }
             cmds.extend(hooks.dispatch_post_step(&ctx));
-
-            if fire_heartbeat {
-                let hb_ctx = HookContext { phase: HookPhase(HookPhaseKind::Heartbeat), ..ctx };
-                cmds.extend(hooks.dispatch_heartbeat(&hb_ctx));
-            } else {
-                drop(ctx);
-            }
+            drop(ctx);
             drop(event_ctx);
 
             restore_hooks(self, hooks);

@@ -77,12 +77,6 @@ pub trait SimHook: Send {
         Vec::new()
     }
 
-    /// Periodic tick independent of step cadence. See
-    /// [`HookRegistry::heartbeat_interval`].
-    fn heartbeat(&mut self, _ctx: &HookContext<'_>) -> Vec<Command> {
-        Vec::new()
-    }
-
     /// Fired once when the simulation lifecycle ends. Hooks holding
     /// open resources flush them here. Returned commands are ignored.
     fn on_finish(&mut self, _ctx: &HookContext<'_>) -> Vec<Command> {
@@ -112,8 +106,6 @@ pub struct HookEntry {
 #[derive(Default)]
 pub struct HookRegistry {
     entries: Vec<HookEntry>,
-    /// Step interval for heartbeat ticks. `0` disables heartbeats.
-    pub heartbeat_interval: u64,
 }
 
 impl HookRegistry {
@@ -182,14 +174,6 @@ impl HookRegistry {
         let mut out = Vec::new();
         for entry in &mut self.entries {
             out.extend(entry.hook.on_escape(event, ctx));
-        }
-        out
-    }
-
-    pub fn dispatch_heartbeat(&mut self, ctx: &HookContext<'_>) -> Vec<Command> {
-        let mut out = Vec::new();
-        for entry in &mut self.entries {
-            out.extend(entry.hook.heartbeat(ctx));
         }
         out
     }

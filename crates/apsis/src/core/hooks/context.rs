@@ -16,8 +16,6 @@ pub enum HookPhaseKind {
     PreStep,
     /// After integration and event detection.
     PostStep,
-    /// Periodic tick, decoupled from step cadence.
-    Heartbeat,
     /// Fired alongside an event (collision, escape, …).
     Event,
     /// Lifecycle ending — hooks flush close-on-drop resources here.
