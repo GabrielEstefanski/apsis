@@ -10,47 +10,52 @@ as a downstream consumer of the public API, not part of the
 library's validated surface (see the workspace
 [`README.md`](../README.md) for the paper-level positioning).
 
-The solver is **3D-aware** as of the v0.1 alpha: `Vec3` value type,
-per-body `z` / `vz`, 3D-aware direct N-body kernel, IAS15 dense
-interpolation in 3D, orbital elements with inclination $i$ and node
-$\Omega$, and 3D-aware energy / angular-momentum / centre-of-mass
-observables. The previous 2D-only surface was frozen until the
-API-contract machinery had been exercised end-to-end against the
-Mercury perihelion test; the 3D port followed without breaking the
-contract surface.
+The solver is 3D: `Vec3` value type, per-body `z` / `vz`, 3D direct
+N-body kernel, IAS15 dense interpolation in 3D, orbital elements
+with inclination $i$ and node $\Omega$, and 3D energy /
+angular-momentum / centre-of-mass observables.
 
 ---
 
 ## 2. Physical model and assumptions
 
-The core physics follows classical Newtonian mechanics with an optional
-first-post-Newtonian correction supplied by an out-of-tree plugin.
+The core physics follows classical Newtonian mechanics, with optional
+perturbation operators (post-Newtonian corrections, radiation pressure,
+central forces) supplied by independent operator crates published
+against the public extension API.
 
 **Modelled:**
 
-- Universal gravitation (Newton's law of gravitation, `G = 1` in
-  simulation units).
+- Universal gravitation (Newton's law of gravitation). The
+  gravitational constant $G$ is derived from the active
+  [`UnitSystem`](../crates/apsis/src/units.rs); the canonical
+  (Hénon) unit system uses $G = 1$ by convention.
 - Isolated system boundary: no external forces beyond those registered
   explicitly via the operator extension point — see
   [`crates/apsis/src/physics/integrator/operator.rs`](../crates/apsis/src/physics/integrator/operator.rs)
   for the three-trait split (`Operator`, `HamiltonianOperator`,
   `NonConservativeOperator`).
-- Plummer-softened pairwise forces with per-body material-scaled
-  softening length — see [`softening.md`](softening.md) for the
-  derivation and the published convention this follows.
-- Relativistic corrections as an opt-in plugin (see
-  [`apsis-1pn`](../crates/apsis-1pn/)) — Schwarzschild
-  test-particle 1PN, applied pairwise.
+- Plummer softening as a property of the gravitational kernel
+  (`Kernel::Newton { softening }`), not of individual bodies — see
+  [`softening.md`](softening.md) for derivation and trustworthiness
+  regime. The default kernel is `Kernel::Newton::exact()` ($\epsilon = 0$);
+  softening is opt-in for cluster-scale work.
+- Operator-published perturbations: post-Newtonian corrections
+  ([`apsis-1pn`](../crates/apsis-1pn/), Schwarzschild test-particle 1PN),
+  radiation pressure and Poynting–Robertson drag
+  ([`apsis-radiation`](../crates/apsis-radiation/), Burns 1979),
+  central-force perturbations
+  ([`apsis-central`](../crates/apsis-central/), Tamayo 2019).
 
 **Not modelled:**
 
 - Collisions, mergers, or fragmentation (bodies are point masses even
   when the plugin layer measures their physical radius).
-- Radiation pressure beyond the experimental support in
-  `physics/radiation` (not part of the validated surface).
 - Hydrodynamics, stellar structure, or collisionless large-N.
-- Large-$N$ scaling beyond the currently validated regime
-  ($N \le 10^3$).
+- Large-$N$ scaling: published validation runs at $N \le 10^3$
+  bodies (horizons up to $10^4$ orbits for the long-horizon parity
+  gate); larger-$N$ behaviour is the subject of the v0.2 scaling
+  notebook.
 
 ---
 
@@ -60,7 +65,7 @@ The project is a Cargo workspace split by role:
 
 | crate | role |
 |---|---|
-| [`apsis`](../crates/apsis/) | The library: domain types, physics, integrators, `apsis::contract` formalisation, public API. Resolves no UI dependency — enforced in CI. |
+| [`apsis`](../crates/apsis/) | The library: domain types, physics, integrators, `apsis::contract` formalisation, public API. Pure library; no UI or rendering dependencies. |
 | [`apsis-1pn`](../crates/apsis-1pn/) | First downstream force crate: 1PN Schwarzschild correction (Anderson 1975). Reference implementation of the federation contract. Depends only on `apsis` through the public API. |
 | [`apsis-radiation`](../crates/apsis-radiation/) | Radiation pressure + Poynting–Robertson drag (Burns 1979). |
 | [`apsis-central`](../crates/apsis-central/) | Central-potential perturbations (Tamayo 2019, Pattern B). |
@@ -80,30 +85,29 @@ ships under one import.
 The dependency direction is monotone: every binding and every force
 crate depends on `apsis` through the public extension API only —
 never `pub(crate)`, never core internals. Adding a force is adding a
-crate. `cargo tree -p apsis` resolves zero UI dependencies. A CI job
-asserts this on every push.
+crate.
 
 ### 3.1 Core subsystems
 
 Inside `apsis`, the code is organised by responsibility:
 
 - [`domain/`](../crates/apsis/src/domain/) — `Body`,
-  `NamedBody`, `Material`, softening primitives, and the
-  `BodyField` plugin trait used by the UI to surface scalar fields
-  per body.
+  `NamedBody`, and the body-array layout used by the force kernels.
 - [`physics/`](../crates/apsis/src/physics/) — force
-  models (Barnes-Hut + Plummer kernel), integrators (Velocity
-  Verlet, Yoshida 4, Wisdom-Holman, IAS15), orbital elements,
-  energy and angular-momentum diagnostics, and the operator
-  extension traits (`HamiltonianOperator`,
-  `NonConservativeOperator`).
+  models (direct $O(N^2)$ + Barnes-Hut with a Newton kernel that
+  optionally carries Plummer softening), the integrator stack
+  (Velocity Verlet, Yoshida 4, Wisdom-Holman, WHFast, Mercurius,
+  Implicit Midpoint, IAS15), orbital elements, energy and
+  angular-momentum diagnostics, and the operator extension traits
+  (`HamiltonianOperator`, `NonConservativeOperator`).
 - [`core/`](../crates/apsis/src/core/) — the `System`
   orchestrator, adaptive dt/θ controllers, hook registry,
-  structured diagnostic event bus, trail ring buffer, and
-  metrics assembly.
-- [`io/`](../crates/apsis/src/io/) — snapshot
-  serialisation (`.grav` binary format), CSV recorder, headless
-  run configuration (`.toml`).
+  structured diagnostic event bus, and metrics assembly.
+- [`io/`](../crates/apsis/src/io/) — CSV recorder for headless runs.
+- [`records/`](../crates/apsis/src/records/) — the apsis-record
+  binary trajectory format: TOML provenance header, Snapshot /
+  Diagnostic / Event / ResumeState / Trailer frames, BLAKE3-covered
+  frame stream, byte-equal reproducibility gate.
 - [`templates/`](../crates/apsis/src/templates/) — the
   `TemplateKind` enum and builders for built-in presets (Solar
   System, TRAPPIST-1, figure-eight, etc.), consumed uniformly by
@@ -193,17 +197,15 @@ the federation thesis.
 
 ### 5.3 Unit-test surface
 
-Beyond the reference signals, the library ships an extensive unit-test
-surface covering: energy conservation on canonical scenarios (Kepler,
+Beyond the reference signals, the library ships a unit-test surface
+covering: energy conservation on canonical scenarios (Kepler,
 Pythagorean three-body, figure-eight); IAS15 determinism on seeded
 close encounters; conservation-contract assertions on the public API;
-direct unit tests pinning the IAS15 warmstart against the analytical
-Pascal-triangle transformation derived in Everhart (1985); the
-twelve `apsis::contract` tests covering kernel invariants, composition
-rules, and the failure model as executable specification; and 3D
-validation tests for orbital algebraic correctness and integrator
-behaviour. The 1PN plugin ships a further 13 tests including the
-Mercury-precession gate and softening-violation contract diagnostics.
+the IAS15 warmstart against the Pascal-triangle transformation
+(Everhart 1985); the twelve `apsis::contract` tests covering kernel
+invariants, composition rules, and the failure model. The 1PN plugin
+ships its own suite, including the Mercury-precession gate and
+softening-violation contract diagnostics.
 
 ---
 
@@ -211,22 +213,14 @@ Mercury-precession gate and softening-violation contract diagnostics.
 
 - **Wisdom-Holman carries documented algorithmic defects (TD-008)**
   and is not treated as a quality signal in validation runs.
-- **Single-precision trails.** The interactive trail buffer stores
-  positions as `f32` for GPU efficiency. This affects only the
-  visual history, not the physics — the integrator state is `f64`
-  throughout.
 - **Large-N is not the design centre.** The solver handles up to
   $\sim 10^3$ bodies comfortably in the currently validated regime;
   for collisionless $10^6+$-body problems, use GADGET or PKDGrav.
-- **Integrator zoo is deliberately narrow.** Only the four listed
-  above are provided. Higher-order composition methods (SABA),
-  fourth-order Hermite, and hybrid close-encounter switchers
-  (MERCURIUS) are out of current scope.
-- **Per-step cost of IAS15 is unbounded in stiff regimes.** This
-  is intrinsic to an adaptive high-order integrator; driving
-  IAS15 from a render loop at high N is not recommended. See
-  [ADR-003](adr/003-integrator-execution-profile.md) for the
-  rationale that led to the execution-profile contract.
+- **Per-step cost of IAS15 is unbounded in stiff regimes.** Intrinsic
+  to an adaptive high-order integrator. The soft warn at
+  `N > ADAPTIVE_BODY_SOFT_WARN` surfaces this at integrator selection
+  time; opt into a fixed-step integrator if a bounded per-step cost
+  is required. See [ADR-013](adr/013-default-integrator-ias15.md).
 
 ---
 
@@ -234,14 +228,7 @@ Mercury-precession gate and softening-violation contract diagnostics.
 
 | Topic | Document |
 | --- | --- |
-| Integrator contracts & execution profiles | [`integrator.md`](integrator.md) |
+| Integrator contracts & selection rubric | [`integrator.md`](integrator.md) |
 | Plummer softening derivation | [`softening.md`](softening.md) |
-| Wall-time budget vs steps-per-frame | [`adr/001-wall-time-budget.md`](adr/001-wall-time-budget.md) |
-| Sim-rate as primary speed control | [`adr/002-sim-rate-target.md`](adr/002-sim-rate-target.md) |
-| Integrator execution profile & force-model compatibility | [`adr/003-integrator-execution-profile.md`](adr/003-integrator-execution-profile.md) |
-| IAS15 per-phase wall-time breakdown (experiment) | [`experiments/2026-04-22-ias15-phase-profile.md`](experiments/2026-04-22-ias15-phase-profile.md) |
-| Picard noise-floor null result (experiment) | [`experiments/2026-04-22-picard-noise-floor.md`](experiments/2026-04-22-picard-noise-floor.md) |
-| Operational-domain benchmarks (experiment) | [`experiments/2026-04-24-operational-domain-benchmarks.md`](experiments/2026-04-24-operational-domain-benchmarks.md) |
-| Kepler cross-implementation parity protocol | [`experiments/2026-04-25-rebound-parity-kepler.md`](experiments/2026-04-25-rebound-parity-kepler.md) |
-| Figure-8 cross-implementation parity protocol | [`experiments/2026-04-26-rebound-parity-figure8.md`](experiments/2026-04-26-rebound-parity-figure8.md) |
-| IAS15 controller architecture audit | [`experiments/2026-04-26-ias15-warmstart-bug.md`](experiments/2026-04-26-ias15-warmstart-bug.md) |
+| Architectural decisions | [`adr/`](adr/) |
+| Reproducible experiments (lab notebooks) | [`experiments/`](experiments/) |

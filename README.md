@@ -2,37 +2,33 @@
 
 *A Federated Model for Composable N-Body Force Artifacts*
 
+[![License: Apache 2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+
 APSIS treats N-body force perturbations as first-class scientific
 artifacts. The model is *federated* in Rust: each force is an
 independent Cargo crate — developed, versioned, and cited
 separately, without central integration into a monolithic codebase.
 Python users see a single distribution: `pip install apsis` brings
-the core simulator and every operator submodule (`apsis.gr`,
-future `apsis.radiation`, …) under one import. A simulation's
+the core simulator and official operator submodules (`apsis.gr`,
+`apsis.radiation`, `apsis.central`, …) under one import. A simulation's
 physical model is in its dependency graph: `Cargo.toml` declares
 the forces, `Cargo.lock` pins them bit-precisely. The simulator is
 infrastructure for composing those artifacts.
 
-The core integrator is IAS15 (Rein & Spiegel, 2015), audited against
-the algorithmic specification §2–3 and validated against REBOUND's
-IAS15 across four parity scenarios — periodic 2-body (Kepler $e = 0.5$,
-100 orbits), periodic 3-body (Chenciner–Montgomery figure-8, 10 periods),
-chaotic 3-body (Pythagorean, 70 canonical t.u.), and sign-flipped
-2-body at long horizon (Kepler retrograde, $10^4$ orbits) — with all
-gated invariant metrics agreeing at **1 ULP** of f64 machine epsilon
-in regime. The first downstream artifact,
-[`apsis-1pn`](crates/apsis-1pn/), reproduces Mercury's perihelion
-precession to **~1 ppm** of the GR prediction over 500 orbits on
-developer hardware — at the f64 noise floor of the test-particle
-1PN approximation — gated in CI at 100 ppm to absorb cross-platform
-LLVM / libm variance.
+The numerical core ships seven integrators; IAS15 (Rein & Spiegel,
+2015) is the default. Cross-implementation parity is tested at **1
+ULP** of f64 (for the validated reference configuration) across four
+canonical regimes (Kepler $e = 0.5$, Chenciner–Montgomery figure-8,
+Pythagorean, $10^4$-orbit retrograde Kepler); under
+[`apsis.gr`](crates/apsis-1pn/) (post-Newtonian 1PN), Mercury's
+perihelion precession matches the analytic 1PN GR prediction to
+within **1 ppm**.
 
 > **Status.** Pre-release (`v0.1.0` alpha). 3D-aware physics core
-> (Vec3, inclined orbits, 3D observables). The Wisdom-Holman
-> integrator carries documented algorithmic defects (TD-008) and is
-> not treated as a quality signal in the validation portfolio.
-> Public API stabilised but not yet tagged; citation DOI pending
-> first Zenodo release.
+> (Vec3, inclined orbits, 3D observables). Multiple published operator
+> crates exercise the federation contract end-to-end. Public API
+> stabilised but not yet tagged; citation DOI pending first Zenodo
+> release.
 
 ---
 
@@ -47,7 +43,8 @@ reimplements the same effect from scratch. The framework — REBOUND
 and validated, but it absorbs every extension into a single binary
 with one citation covering everything.
 
-APSIS replaces that publication path. A force is a Cargo crate
+APSIS enables a publication path where perturbations become
+independently versioned scientific artifacts. A force is a Cargo crate
 declaring its physical preconditions on the gravitational kernel via
 the `KernelRequirements` type — the 1PN crate declares
 `exact_and_smooth()`; future crates declare a different combination
@@ -55,8 +52,8 @@ of exactness and continuity invariants depending on the physics. The
 core matches the declared requirements against the active kernel at
 `System::add_hamiltonian_perturbation` (or the non-conservative
 counterpart) and emits a structured diagnostic for each violated
-invariant. Forgetting a precondition surfaces as a registration
-warning, not as a wrong number in a paper.
+invariant. Forgetting a precondition surfaces during model
+registration rather than during post hoc numerical validation.
 
 Operationally: `Cargo.toml` declares the forces a paper uses,
 `Cargo.lock` pins them bit-precisely, and a follow-up paper extending
@@ -65,14 +62,12 @@ force-composition level, distinct from script-level reproducibility —
 the latter captures the configuration but not the physics
 implementation.
 
+The perturbation itself becomes an independently validated, citable,
+and reusable scientific unit.
+
 > APSIS does not attempt to replace mature integrators or optimize
 > numerical performance. Its contribution is orthogonal: defining how
 > physical models are structured, published, and composed.
-
-The IAS15 integrator and the Mercury ~1 ppm result are evidence
-that the contract machinery operates against numerics at the field's
-precision floor — not the headline claim. Use REBOUND/REBOUNDx when
-the simulator is the primary tool; use APSIS when the perturbation is.
 
 ## Kernel invariants
 
@@ -88,11 +83,9 @@ The APSIS core guarantees, independently of any registered perturbation:
   mutate the base force evaluation.
 
 These are the invariants `KernelRequirements` declarations are
-matched against (§ Statement of need); they hold across Velocity
-Verlet, Yoshida-4, and IAS15 for the entire lifetime of a `System`.
-The Wisdom-Holman implementation present in the workspace carries
-four documented algorithmic defects (TD-008) and is not treated as
-a quality signal in validation runs.
+matched against (§ Statement of need); they hold across every
+integrator the workspace ships for the entire lifetime of a
+`System`.
 
 The guarantees are formalised as executable specification in
 [`apsis::contract`](crates/apsis/src/contract.rs) — twelve CI tests
@@ -107,10 +100,10 @@ the formal treatment.
 
 APSIS is a runtime for composing physics distributed as crates.
 Internal forces are submodules of the apsis distribution
-(`apsis.gr`, future `apsis.radiation`, …); external forces ship as
-`apsis-plugin-X` packages with the same registration contract. The
-simulation script is a *composition* of physics, not a
-*configuration* of a monolith.
+(`apsis.gr`, `apsis.radiation`, `apsis.central`, …); external
+forces ship as `apsis-plugin-X` packages with the same registration
+contract. The simulation script is a *composition* of physics, not
+a *configuration* of a monolith.
 
 `pip install apsis` will work after the first PyPI release. Today,
 build from source via [`maturin`](https://github.com/PyO3/maturin):
@@ -188,12 +181,10 @@ in the terms a scientist uses to think about the simulation:
 
 ```rust
 use apsis::core::system::System;
-use apsis::physics::integrator::IntegratorKind;
 use apsis::templates::TemplateKind;
 
 fn main() {
     let mut sys = System::from_template(TemplateKind::SolarSystem)
-        .with_integrator(IntegratorKind::Ias15)
         .with_dt(1e-3);
 
     sys.integrate_for(100.0);
@@ -232,7 +223,7 @@ consumers; CI enforces the separation.
 
 | crate | role | dependencies |
 |---|---|---|
-| [`apsis`](crates/apsis/) | The library. Physics, integrators, public extension API. | Zero UI: `cargo tree -p apsis` resolves no `egui`/`wgpu`/`eframe`. |
+| [`apsis`](crates/apsis/) | The library. Physics, integrators, public extension API. | Pure library; no UI or rendering dependencies. |
 | [`apsis-1pn`](crates/apsis-1pn/) | First downstream force crate: 1PN Schwarzschild correction. Reference implementation of the federation contract. | **Only** `apsis`. |
 | [`apsis-radiation`](crates/apsis-radiation/) | Radiation pressure + Poynting–Robertson drag (Burns 1979). | **Only** `apsis`. |
 | [`apsis-central`](crates/apsis-central/) | Central-potential perturbations (Pattern B, Tamayo 2019). | **Only** `apsis`. |
@@ -284,48 +275,34 @@ registration time naming the violated invariant.
 
 ## What this library is NOT
 
-APSIS occupies a different *category* of system from the established
-N-body codes — not a feature-thin alternative to them. The
-[orthogonality declaration](#statement-of-need) makes this concrete:
-APSIS does not replace mature integrators or chase numerical performance.
-
 For research where the simulator is the primary tool — solar-system
-integration with extra forces, hybrid close-encounter regimes,
-collisionless large-N, stellar evolution, hydrodynamics — use REBOUND,
-MERCURIUS, NBODY6/7, or GADGET. APSIS is the tool when **the perturbation
-is the scientific contribution** and the question is how to publish,
-version, and compose it. APSIS trades ecosystem maturity for
-composability and publication clarity; the choice between the two is
-a property of the research question, not of the codebase.
+integration, hybrid close-encounter regimes, collisionless large-N,
+stellar evolution, hydrodynamics — use REBOUND, MERCURIUS, NBODY6/7,
+or GADGET. APSIS is the tool when the perturbation itself is the
+contribution.
 
-Out of current scope: symplectic compositions beyond Yoshida-4,
-MERCURIUS-style close-encounter switching, stellar evolution,
-hydrodynamics, collisionless large-N. Validated regime is currently
-$N \le 10^3$.
+Out of current scope: stellar evolution, hydrodynamics, collisionless
+large-N. Published validation runs at $N \le 10^3$ bodies (horizons
+up to $10^4$ orbits for the long-horizon parity gate); larger-$N$
+behaviour is the subject of the v0.2 scaling notebook.
 
 ## Validation
 
 What is verified in CI:
 
-- **241 unit tests** in the core covering energy conservation on canonical
-  scenarios (Kepler circular, Pythagorean three-body, figure-eight),
-  IAS15 determinism on seeded close encounters, conservation-contract
-  assertions on the public API, and direct unit tests pinning the IAS15
-  warmstart against the analytical Pascal-triangle transformation
-  derived in Everhart (1985).
-- **13 tests in the 1PN plugin**: 7 unit (sign convention, magnitude,
-  additivity, speed-of-light limit), 4 in the Mercury-precession gate,
-  and 2 debug-mode contract (softened-kernel-warns, exact-kernel-silent).
+- **Unit + integration test suite** across the workspace covering
+  energy conservation on canonical scenarios (Kepler circular,
+  Pythagorean three-body, figure-eight), IAS15 determinism on seeded
+  close encounters, and conservation-contract assertions on the
+  public API.
+- **Per-operator validation gates**: 1PN (Mercury precession),
+  radiation (Burns 1979 β-table dust decay), central-force
+  (Tamayo 2019 round-trip).
 - **Release-mode Mercury gate**: `cargo test --release -p apsis-1pn
-  -- --ignored` asserts Mercury's precession within 100 ppm of GR over
-  500 orbits. Achieved figure on developer hardware: **~1 ppm** (at
-  the f64 noise floor of the test-particle 1PN approximation; the
-  prior `9caaef2` controller refactor exposed a latent velocity-
-  prediction flaw that, once fixed, moved the residual error from a
-  4.4 ppm systematic bias to ~1 ppm stochastic round-off). The 100 ppm
-  threshold absorbs cross-platform LLVM / libm variance that pushes
-  the floor up to ~30 ppm on alternate runners — see
-  `docs/experiments/2026-04-28-ias15-velocity-prediction-bug.md`.
+  -- --ignored` asserts Mercury's precession within 100 ppm of the
+  analytic 1PN GR prediction over 500 orbits, with the achieved
+  figure ~1 ppm on the validated reference configuration. The 100
+  ppm CI threshold absorbs cross-platform LLVM / libm variance.
 - **Cross-implementation parity portfolio**: against REBOUND's IAS15
   on four canonical scenarios spanning periodic 2-body, periodic
   3-body, chaotic 3-body, and sign-flipped 2-body regimes. All gated
@@ -367,9 +344,6 @@ What is verified in CI:
   ($u = \text{peak}/\text{bound}$) emitted for regression-canary
   detection.
   Notebook: [`paper/notebooks/2026-05-01-recommended-dt-validation.md`](paper/notebooks/2026-05-01-recommended-dt-validation.md).
-- **Workspace isolation**: `cargo build -p apsis` resolves no
-  UI dependency.
-
 ## Further reading
 
 The repository carries the full methodological record a software paper
@@ -384,48 +358,12 @@ trail directly:
 - [`docs/softening.md`](docs/softening.md) — Plummer softening derivation,
   per-body scaling rule, and the regime in which it is trustworthy.
 - [`docs/adr/`](docs/adr/) — architectural decision records.
-  `001-wall-time-budget.md` on the interactive timestep model,
-  `002-sim-rate-target.md` on frame-pacing, and
-  `003-integrator-execution-profile.md` on why the default is
-  Yoshida-4 rather than IAS15 for render-loop contexts.
-- [`docs/experiments/`](docs/experiments/) — lab-notebook entries for
-  reproducible experiments run during development. Each entry pairs an
-  *a priori* protocol with the executed run and a post-mortem analysis.
-  The directory currently records, in chronological order:
-  - the IAS15 phase-profile breakdown
-    ([`2026-04-22-ias15-phase-profile.md`](docs/experiments/2026-04-22-ias15-phase-profile.md));
-  - a null result on the Picard noise floor
-    ([`2026-04-22-picard-noise-floor.md`](docs/experiments/2026-04-22-picard-noise-floor.md));
-  - the operational-domain benchmark suite that motivated the
-    versioned baseline harness
-    ([`2026-04-24-operational-domain-benchmarks.md`](docs/experiments/2026-04-24-operational-domain-benchmarks.md));
-  - the four cross-implementation parity protocols against REBOUND's
-    IAS15 — Kepler-prograde, figure-8, Pythagorean, and Kepler-retrograde
-    with $10^4$-orbit long-horizon — anchoring the validation portfolio
-    ([`kepler`](paper/notebooks/2026-04-25-rebound-parity-kepler.md),
-    [`figure8`](paper/notebooks/2026-04-26-rebound-parity-figure8.md),
-    [`pythagorean`](paper/notebooks/2026-04-30-rebound-parity-pythagorean.md),
-    [`retrograde`](paper/notebooks/2026-05-01-rebound-parity-retrograde.md));
-  - the IAS15 controller architecture audit
-    ([`2026-04-26-ias15-warmstart-bug.md`](docs/experiments/2026-04-26-ias15-warmstart-bug.md))
-    documenting three controller divergences from Rein & Spiegel
-    (2015) and their line-by-line resolution;
-  - the IAS15 velocity-prediction bug discovery and fix
-    ([`2026-04-28-ias15-velocity-prediction-bug.md`](docs/experiments/2026-04-28-ias15-velocity-prediction-bug.md)),
-    which moved Mercury's residual error from 4.4 ppm systematic
-    bias to ~1 ppm stochastic round-off;
-  - the 3D-port physics regression baseline and the
-    Material-as-physics-component design decision
-    ([`2026-04-29-3d-port-baseline.md`](docs/experiments/2026-04-29-3d-port-baseline.md),
-    [`2026-04-29-material-as-physics-component.md`](docs/experiments/2026-04-29-material-as-physics-component.md));
-  - the `recommended_dt` heuristic validation across thirteen
-    scenarios with explicit Phase A → Phase B bound-formulation
-    correction
-    ([`2026-05-01-recommended-dt-validation.md`](paper/notebooks/2026-05-01-recommended-dt-validation.md)).
-- [`validation/`](validation/) — runnable cross-implementation harnesses
-  one directory per reference tool (currently REBOUND), each with its
-  own Python `run.py` orchestrator and a comparator that emits a
-  structured JSON report alongside the CSV outputs.
+- [`docs/experiments/`](docs/experiments/) — lab notebooks pairing
+  *a priori* protocols with executed runs and post-mortem analysis.
+- [`paper/notebooks/`](paper/notebooks/) — reviewer-facing parity
+  and validation protocols cited from the paper.
+- [`validation/`](validation/) — runnable cross-implementation
+  harnesses (one directory per reference tool).
 
 ## License
 
