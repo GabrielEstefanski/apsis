@@ -17,9 +17,9 @@
 //!   versions of these quantities; the mapping happens at the field
 //!   layer, not here.
 //!
-//! A `use crate::core::...` or `use crate::io::...` line in this file
-//! is a review red flag: it inverts the layering and contaminates the
-//! domain with output concerns. Reverse imports of this module by the
+//! A `use crate::core::...` line in this file is a review red flag:
+//! it inverts the layering and contaminates the domain with
+//! orchestrator concerns. Reverse imports of this module by the
 //! layers above are correct and expected.
 //!
 //! ## Read-only contract

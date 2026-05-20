@@ -25,7 +25,6 @@
 pub mod contract;
 pub mod core;
 pub mod domain;
-pub mod io;
 pub mod math;
 pub mod physics;
 pub mod records;
