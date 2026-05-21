@@ -142,11 +142,11 @@ jobs:
       - name: examples run
         run: |
           . .venv/bin/activate
-          python examples/mercury_perihelion.py
-          python examples/radiation_dust.py
-          python examples/central_precession.py
-          python examples/federation_composition.py
-          python examples/implicit_midpoint.py
+          python python-examples/mercury_perihelion.py
+          python python-examples/radiation_dust.py
+          python python-examples/central_precession.py
+          python python-examples/federation_composition.py
+          python python-examples/implicit_midpoint.py
 
   # ── Release-mode validation: Mercury 1PN vs GR ───────────────────────────
   # Headline physics gate. Mercury 1PN reproduces the GR perihelion

@@ -12,7 +12,7 @@ semi-major axis is preserved over many orbits.
 
 Run::
 
-    python examples/radiation_dust.py
+    python python-examples/radiation_dust.py
 """
 
 from __future__ import annotations

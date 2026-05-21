@@ -105,7 +105,7 @@ select = ["E", "W", "F", "I", "B", "UP", "SIM", "RUF"]
 
 [tool.pytest.ini_options]
 minversion = "7.0"
-testpaths = ["tests"]
+testpaths = ["python-tests"]
 addopts = "-ra --strict-markers"
 
 [tool.pyright]

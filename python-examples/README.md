@@ -16,11 +16,11 @@ maturin develop --release
 ## Run
 
 ```bash
-python examples/mercury_perihelion.py
-python examples/radiation_dust.py
-python examples/central_precession.py
-python examples/federation_composition.py
-python examples/implicit_midpoint.py
+python python-examples/mercury_perihelion.py
+python python-examples/radiation_dust.py
+python python-examples/central_precession.py
+python python-examples/federation_composition.py
+python python-examples/implicit_midpoint.py
 ```
 
 ## What each example shows
@@ -34,7 +34,7 @@ python examples/implicit_midpoint.py
 | `implicit_midpoint.py`        | `apsis.gr` + integrator      | Mercury 1PN under the symplectic A-stable ImplicitMidpoint integrator              |
 
 Each script asserts on its measurable claim and exits non-zero if
-the claim breaks, so `python examples/<name>.py` doubles as a
+the claim breaks, so `python python-examples/<name>.py` doubles as a
 contract test.
 
 ## See also

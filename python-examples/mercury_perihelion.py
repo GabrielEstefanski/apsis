@@ -8,7 +8,7 @@ compares against the closed-form Schwarzschild prediction
 
 Run::
 
-    python examples/mercury_perihelion.py
+    python python-examples/mercury_perihelion.py
 """
 
 from __future__ import annotations

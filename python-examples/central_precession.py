@@ -11,7 +11,7 @@ construction patterns of ``apsis.central.CentralForce``:
 
 Run::
 
-    python examples/central_precession.py
+    python python-examples/central_precession.py
 """
 
 from __future__ import annotations
