@@ -17,7 +17,7 @@
 
 The v0.1 paper's central claim — that an apsis record's TOML provenance plus the workspace's `Cargo.lock` plus the rustc version is a complete recipe for reproducing the trajectory it describes — was, at the start of this experiment, defensible only at the physics-equivalent level (conserved-invariant agreement across platforms) and not at the bitwise level. A diagnostic cross-platform run on a c6i.large EC2 instance (Intel Xeon 8375C, Ice Lake) against an identically-configured AMD Ryzen 5 7600X Windows host showed energy preserved to the f64 floor in every parity scenario but trajectories diverging by ~1e+15 ULPs over 100 Kepler orbits — the signature of phase drift with conserved energy.
 
-The signature pointed at the adaptive step-size controller, not the force model. A single line of the IAS15 step-size optimizer (`crates/apsis/src/physics/integrator/ias15.rs:1981`) called `f64::powf(1.0/7.0)` on the dimensionless ratio in the IAS15 7th-root step-size formula (Rein & Spiegel 2015 §2.3 eq. 11). `f64::powf` routes to the platform's libc `pow`; the last-ULP outputs of glibc `pow` and Microsoft UCRT `pow` are not bitwise-equivalent. Replacing this single call with `libm::pow` (the `libm` crate's pure-Rust implementation, deterministic across x86_64 targets) restored full bitwise cross-platform reproducibility for all four parity scenarios (Kepler, figure-8, Pythagorean, retrograde Kepler) and the Mercury 1PN perihelion gate, validated independently by SHA256 of the output files.
+The signature pointed at the adaptive step-size controller, not the force model. A single line of the IAS15 step-size optimizer (`crates/apsis/src/physics/integrator/ias15.rs:1981`) called `f64::powf(1.0/7.0)` on the dimensionless ratio in the IAS15 7th-root step-size formula (Rein & Spiegel 2015 §2.3 eq. 11). `f64::powf` routes to the platform's libc `pow`; the last-ULP outputs of glibc `pow` and Microsoft UCRT `pow` are not bitwise-equivalent. Replacing this single call with `libm::pow` (the `libm` crate's pure-Rust implementation, deterministic across x86_64 targets) restored full bitwise cross-platform reproducibility for all four parity scenarios (Kepler, figure-8, Pythagorean, retrograde Kepler), validated independently by SHA256 of the output CSVs; the Mercury 1PN rate matched cross-platform to all displayed digits.
 
 The claim that paper artifacts now carry is conditional and scoped: "Bitwise cross-platform reproducibility is achievable when all libc-bound transcendentals in integration-critical paths are routed through deterministic alternatives. This experiment demonstrates the principle for IAS15 + direct summation + Newton kernel + 1PN operator on x86_64; extending it to WHFast (Kepler solver), Mercurius (Hill-radius switching), and the central-force operator requires the analogous audit-and-replace pass, tracked as issues #159–#161."
 
@@ -31,7 +31,7 @@ That contract is trivially provable intra-platform — the same machine running 
 
 A reviewer familiar with REBOUND, GADGET, AREPO, or PKDGRAV is aware that bitwise cross-platform reproducibility in scientific N-body codes is rare and typically not promised. The principled reasons are well-known: IEEE 754 does not bound transcendental output to the last ULP, libc/libm implementations differ between glibc and MSVC, LLVM does not promise identical instruction selection across targets, FMA changes rounding, and any chaotic regime amplifies microscopic differences exponentially. The expected outcome before this experiment, therefore, was *physics-equivalent reproducibility* (conserved invariants agree at the f64 floor across platforms; trajectories phase-drift) — a strictly weaker, but still publishable, claim.
 
-The experiment reported here found that the weaker outcome was an artifact of a single tractable call site. The stronger claim is recoverable, conditional on a stated methodology and a documented audit of remaining call sites.
+The experiment reported here found that the weaker outcome was an artifact of a single tractable call site. The stronger claim is recoverable, conditional on a stated methodology and an issue-tracked audit of remaining call sites.
 
 ### What this experiment is NOT testing
 
@@ -115,7 +115,9 @@ Both hosts executed against commit `06bd0a9`, with `rustc 1.94.1`, `Cargo.lock` 
 
 The Kepler scenario alone disambiguates the diagnosis: Kepler at e = 0.5 is integrable, so the trajectory cannot diverge from chaos amplification. Linear last-ULP round-off accumulation would yield ~10⁻¹² over 100 orbits, not ~10⁻⁸. Energy conserved at 11 ULPs (the IAS15 floor) rules out a force-evaluation discrepancy: were the per-step accelerations drifting, energy would track. The signature is consistent only with *step-size scheduling differing across platforms*: same forces, same integrator algebra, different `dt` sequence, integrable trajectory phase-drifts while staying on the same ellipse and conserving its energy.
 
-The adaptive step-size optimizer is the only place IAS15 makes a scheduling decision, and `crates/apsis/src/physics/integrator/ias15.rs:1981` was the only libc transcendental call in that path. The formula is Rein & Spiegel (2015) §2.3 eq. (11), the dimensionless 7th-root rule `dt_required = dt_trial · (ε_b / b̃_6)^(1/7)`:
+The adaptive step-size optimizer is the only place IAS15 makes a scheduling decision, and `crates/apsis/src/physics/integrator/ias15.rs:1981` was the only libc transcendental call in that path. The formula is Rein & Spiegel (2015) §2.3 eq. (11), the dimensionless 7th-root rule
+
+$$dt_\text{required} = dt_\text{trial} \cdot \left(\frac{\varepsilon_b}{\tilde{b}_6}\right)^{1/7}$$
 
 ```rust
 fn optimal_dt(&self, dt_current: f64, err: f64) -> f64 {
@@ -193,7 +195,7 @@ The Mercury rate after the fix is bit-identical across platforms. The remaining 
 
 ### 3D inclined Mercury — bit-equal across platforms, exposes a deterministic floor
 
-The `mercury_precession_3d_inclined_matches_gr_within_…ppm` integration test (Mercury at `i = 7°`, otherwise identical to the 2D gate) had been borderline against its original 100 ppm bound across several earlier branches; the gate docstring already noted *"the 3D inclined path on Linux glibc + libm has slightly more ULP-noise headroom and crosses the 100 ppm bound."* The libm fix is the right moment to discharge this borderline by replacing the gate's tuned-for-noise threshold with a measured floor.
+The `mercury_precession_3d_inclined_matches_gr_within_…ppm` integration test (Mercury at $i = 7°$, otherwise identical to the 2D gate) had been borderline against its original 100 ppm bound across several earlier branches; the gate docstring already noted *"the 3D inclined path on Linux glibc + libm has slightly more ULP-noise headroom and crosses the 100 ppm bound."* The libm fix lets the gate's tuned-for-noise threshold be replaced with a measured floor.
 
 Two independent measurements pinned the floor:
 
@@ -203,7 +205,7 @@ Two independent measurements pinned the floor:
 | `rel_err` at `dt = 1 × 10⁻⁴` (Windows local) | `1.15002196144801987 × 10⁻⁴` | identical to Linux across all 17 significant figures — bit-equal cross-platform |
 | `rel_err` at `dt = 1 × 10⁻⁵` (Windows local) | `9.58179991697756 × 10⁻⁵` | 10× smaller `dt`, only 1.2× reduction in error |
 
-For IAS15's 15th-order convergence (Rein & Spiegel 2015 §3), a 10× reduction in `dt` should reduce integration error by ~10¹⁵. The observed 1.2× ratio rules out integration error as the dominant source; the residual is a combination of the 1PN expansion's omitted higher-order terms (1.5PN, 2PN) and the 3D `compute_elements` extraction precision (the inclined branch extracts `ω` via `atan2(e·(h×n), e·n)`, whose cross-product cancellation is noisier than the 2D `atan2(e_y, e_x)` direct extraction).
+For IAS15's 15th-order convergence (Rein & Spiegel 2015 §3), a 10× reduction in $dt$ should reduce integration error by ~$10^{15}$. The observed 1.2× ratio rules out integration error as the dominant source; the residual is a combination of the 1PN expansion's omitted higher-order terms (1.5PN, 2PN) and the 3D `compute_elements` extraction precision (the inclined branch extracts $\omega$ via $\mathrm{atan2}(\vec{e} \cdot (\vec{h} \times \vec{n}), \vec{e} \cdot \vec{n})$, whose cross-product cancellation is noisier than the 2D $\mathrm{atan2}(e_y, e_x)$ direct extraction).
 
 The bit-equal cross-platform identity (Linux CI = Windows local to all 17 digits) further demonstrates that `compute_elements`' use of `f64::atan2` and `f64::acos` — both libc-bound — happens to return identical bits on these specific inputs across glibc and UCRT. This is empirical luck on this scenario, not a guarantee, and the same audit checklist applies to any future scenario that exercises a different region of those functions' domains.
 
@@ -224,7 +226,7 @@ The reason this holds, in retrospect, is that every other source of cross-platfo
 - **MXCSR defaults are IEEE-correct.** Glibc startup and UCRT startup both leave `MXCSR.DAZ = 0`, `MXCSR.FTZ = 0`.
 - **Chaos amplifies differences, not creates them.** Pythagorean is famously sensitive (Lyapunov time ~1 t.u.), but a chaotic system with bit-identical initial conditions and bit-identical update rules produces bit-identical output. With the libm fix removing the only stochastic input, Pythagorean's chaotic trajectory is reproducible.
 
-The `powf` call in the step-size controller was the single point of divergence. Once removed, the entire system is deterministic by construction.
+The `powf` call in the step-size controller was the single point of divergence. Once removed, the entire system is deterministic in this configuration.
 
 ---
 
@@ -263,7 +265,7 @@ Each requires the analogous one-line replacement plus an extension of the cross-
 ## References
 
 - Everhart, E. (1985). *An efficient integrator that uses Gauss-Radau spacings.* In Carusi & Valsecchi, eds., *Dynamics of Comets: Their Origin and Evolution*, pp. 185–202. Introduces the 15th-order RADAU integrator on Gauss-Radau spacings that IAS15 builds on; the specific step-size formula used here is Rein & Spiegel's, not Everhart's (R&S 2015 §2.3 explicitly state their controller "is different from and superior to the one proposed by Everhart 1985").
-- Rein, H., & Spiegel, D. S. (2015). *IAS15: a fast, adaptive, high-order integrator for gravitational dynamics, accurate to machine precision over a billion orbits.* MNRAS 446, 1424–1437. DOI: [10.1093/mnras/stu2164](https://doi.org/10.1093/mnras/stu2164). §2.3 "Step-size control", eq. (11) is the 7th-root rule `dt_required = dt_trial · (ε_b / b̃_6)^(1/7)` that this experiment exercised.
+- Rein, H., & Spiegel, D. S. (2015). *IAS15: a fast, adaptive, high-order integrator for gravitational dynamics, accurate to machine precision over a billion orbits.* MNRAS 446, 1424–1437. DOI: [10.1093/mnras/stu2164](https://doi.org/10.1093/mnras/stu2164). §2.3 "Step-size control", eq. (11) is the 7th-root rule $dt_\text{required} = dt_\text{trial} \cdot (\varepsilon_b / \tilde{b}_6)^{1/7}$ that this experiment exercised.
 - IEEE Std 754-2019. *IEEE Standard for Floating-Point Arithmetic.* §5.4.1 specifies correctly-rounded results for basic operations; §9.2 lists recommended-but-not-required correctly-rounded transcendentals.
 - `libm` crate: Rust port of MUSL libc's math library. <https://github.com/rust-lang/libm>.
 - Apsis-record format: `docs/adr/011-apsis-record.md`.
