@@ -242,7 +242,7 @@ impl CentralForce {
         let mu_source = g_code * src.mass;
 
         // Inversion: A = µ · ω̇ / [(1 + γ/2) · d^(γ+2) · n]
-        let denom = (1.0 + gamma / 2.0) * d.powf(gamma + 2.0) * n;
+        let denom = (1.0 + gamma / 2.0) * libm::pow(d, gamma + 2.0) * n;
         let a_central = mu_source * omega_dot / denom;
 
         Ok(Self { source, a_central, gamma, units })
@@ -402,7 +402,7 @@ impl HamiltonianOperator for CentralForce {
             // Per-axis: a = A · r^γ · r̂ = A · r^(γ−1) · (Δ).
             // Compute r^(γ−1) via r²^((γ−1)/2) so we avoid one sqrt
             // when γ is integer-friendly.
-            let prefac = self.a_central * r2.powf((self.gamma - 1.0) / 2.0);
+            let prefac = self.a_central * libm::pow(r2, (self.gamma - 1.0) / 2.0);
             acc[i].x += prefac * dx;
             acc[i].y += prefac * dy;
             acc[i].z += prefac * dz;
@@ -446,9 +446,9 @@ impl HamiltonianOperator for CentralForce {
                 continue;
             }
             let v_per_unit = if logarithmic {
-                -self.a_central * r.ln()
+                -self.a_central * libm::log(r)
             } else {
-                -self.a_central * r.powf(self.gamma + 1.0) / (self.gamma + 1.0)
+                -self.a_central * libm::pow(r, self.gamma + 1.0) / (self.gamma + 1.0)
             };
             v += b_i.mass * v_per_unit;
         }
@@ -662,7 +662,8 @@ mod tests {
         let d = (dx * dx + dy * dy + dz * dz).sqrt();
         let mu_src = g_code * bodies[0].mass;
 
-        let omega_dot_out = (1.0 + gamma / 2.0) * f.a_central() * d.powf(gamma + 2.0) * n / mu_src;
+        let omega_dot_out =
+            (1.0 + gamma / 2.0) * f.a_central() * libm::pow(d, gamma + 2.0) * n / mu_src;
         let rel = ((omega_dot_out - omega_dot_in) / omega_dot_in).abs();
         assert!(
             rel < 1e-12,
