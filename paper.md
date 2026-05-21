@@ -8,6 +8,7 @@ tags:
   - simulation software
 authors:
   - name: Gabriel Braga Estefanski
+    orcid: 0009-0009-1041-2715
     affiliation: 1
 affiliations:
  - name: Independent researcher
@@ -42,32 +43,42 @@ The mechanism is demonstrated end-to-end by `apsis-1pn`, an
 out-of-tree crate implementing the first-post-Newtonian
 Schwarzschild correction. With the contract enforced, `apsis-1pn`
 reproduces Mercury's perihelion precession to within
-$\sim 10^{-6}$ of the closed-form general-relativistic prediction
-over 500 orbital periods under the adaptive Gauss–Radau IAS15 scheme
-[@ReinSpiegel2015], at the f64 noise floor of the test-particle 1PN
-approximation. With the Plummer softening
-contract violated, the same machinery measures a precession three
-orders of magnitude larger and of the wrong sign — caught by the
-registration warning, never as a numerical artifact.
+$4.4 \times 10^{-6}$ relative agreement against the closed-form
+general-relativistic prediction over 500 orbital periods under the
+adaptive Gauss–Radau IAS15 scheme [@ReinSpiegel2015], at the f64
+noise floor of the test-particle 1PN approximation. With the
+Plummer softening contract violated, the same machinery measures a
+precession three orders of magnitude larger and of the wrong sign —
+caught by the registration warning, never as a numerical artifact.
+Beyond gravity-only parity, the federation architecture has been
+exercised with validated radiation [@Burns1979] and central-force
+[@Tamayo2020] modules, confirming that the contract surface is not
+specialised to Hamiltonian gravitational perturbations.
 
-The solver provides Velocity Verlet, Yoshida fourth-order, and
-IAS15 [@ReinSpiegel2015] alongside stable public traits for
-user-registered force models and perturbations. A Wisdom–Holman
-mixed-variable integrator is also present; it carries documented
-algorithmic defects (tracked as TD-008) and is not treated as a
-quality signal in the validation portfolio. Scope is narrow by
-intent: $N \le 10^3$ in the current validated regime. Large-N
-collisionless dynamics, stellar evolution, and hybrid
-close-encounter regimes — the domains of REBOUND [@ReinLiu2012],
-MERCURIUS [@ReinTamayoHernandezPapaloizou2019], and NBODY6/7
-[@Aarseth2003] — remain outside this library's claims. `apsis`
-does not attempt to replace mature integrators or optimize
-numerical performance; its contribution is orthogonal: defining
-how physical models are structured, published, and composed.
+The solver provides Velocity Verlet, Yoshida fourth-order,
+Wisdom–Holman in democratic-heliocentric coordinates
+[@WisdomHolman1991], implicit midpoint, the MERCURIUS hybrid
+[@ReinTamayoHernandezPapaloizou2019], and the adaptive Gauss–Radau
+IAS15 scheme [@ReinSpiegel2015], alongside stable public traits for
+user-registered force models and perturbations. The Wisdom–Holman
+implementation ships in its Phase 1 form (uncorrected leapfrog with
+Kepler drifts); the order-17 symplectic corrector of [@Wisdom2006]
+is deferred to a subsequent release and tracked as future work.
+Scope is narrow by intent: $N \le 10^3$ in the current validated
+regime. Large-N collisionless dynamics, stellar evolution, and
+dense close-encounter regimes — the domains of REBOUND
+[@ReinLiu2012] and NBODY6/7 [@Aarseth2003] — remain outside this
+library's claims. `apsis` does not attempt to replace mature
+integrators or optimize numerical performance; its contribution is
+orthogonal: defining how physical models are structured, published,
+and composed.
 
 The full simulation, from physical model (`Cargo.lock`-pinned
 operator crates) to numerical output (an *Apsis Record*), is
 bit-exactly reproducible from a single hash-pinned configuration.
+This claim is operationalised by an empirical cross-platform test
+over the full v0.1 federation portfolio (see §Cross-platform
+reproducibility).
 
 # Statement of need
 
@@ -237,6 +248,27 @@ continuity measurement, and warning emission required on both
 registrations. The full suite completes in under twenty seconds on
 a 2024-class x64 workstation.
 
+**Federation evidence beyond gravity.** Two additional first-party
+crates exercise the federation API on physics distinct from the
+Hamiltonian gravitational regime of `apsis-1pn`. `apsis-radiation`
+implements radiation-pressure and Poynting–Robertson forces per
+[@Burns1979] as a `NonConservativeOperator`, validated against the
+analytic $\beta$-parameter decay law for a Sun-orbiting dust grain
+(`crates/apsis-radiation/tests/dust_decay_gate.rs`).
+`apsis-central` implements the [@Tamayo2020] central-force
+perturbation with both a regime-based forward constructor and an
+observable-inversion constructor (`from_apsidal_rate`) that selects
+the coupling amplitude such that the resulting precession reproduces
+a target observable apsidal rate
+(`crates/apsis-central/tests/round_trip_gate.rs`). Together with
+`apsis-1pn`, the three operator crates cover three regimes the
+contract surface anticipates — Hamiltonian (gravitational),
+non-conservative (radiation), and observable-inversion (central).
+Each crate is an independent Cargo artifact, pinned by version in
+the simulation's `Cargo.lock` and matched against the active kernel
+at registration through the same `KernelRequirements` machinery
+exercised by `apsis-1pn`.
+
 **Executable contract surface.** The kernel-precondition mechanism
 demonstrated above is one of three guarantee classes the library
 publishes to a perturbation author. The full surface is formalised in
@@ -314,6 +346,37 @@ observable signatures, each caught independently by the registration
 check. This — not empirical superiority in any numerical regime — is
 the claim the mechanism supports.
 
+# Cross-platform reproducibility
+
+The `Cargo.lock`-as-experiment claim of §Summary is operationalised
+by an empirical cross-platform test. With the lockfile, the rustc
+toolchain version, and the source commit pinned, the full v0.1
+federation portfolio — `apsis-1pn` Mercury long-horizon under IAS15,
+the MERCURIUS hybrid on a Sun + four outer planets configuration
+with a Jupiter-crossing test particle, Wisdom–Holman on the same
+outer-planets initial conditions, the `apsis-central` round-trip
+gate, and the four-scenario REBOUND parity portfolio (Kepler,
+figure-8, Pythagorean, retrograde) — produces byte-identical
+trajectory output on heterogeneous x86_64 hosts (Windows on AMD
+Zen 4 against Linux on Intel Ice Lake). Verification covers
+per-column ULP agreement, file size, and SHA256 of the captured
+trajectory CSVs, all of which converge on bit-equality.
+
+The mechanism is the systematic replacement of every libc-bound
+transcendental on an integration-critical path
+(`sin`, `cos`, `cbrt`, `pow`, `log`, ...) with calls into the
+pure-Rust `libm` crate. `libc` math implementations across MSVC's
+UCRT and Linux glibc disagree on the last unit-in-the-last-place
+for these functions; routing through `libm` removes that source of
+divergence while preserving IEEE 754 correctness. Hardware-rounded
+arithmetic ($+$, $-$, $\times$, $\div$, $\sqrt{}$) is bit-identical
+across IEEE 754-conformant x86_64 implementations by mandate and
+does not require replacement.
+
+The empirical methodology and the audit checklist for any new
+integrator or operator joining the cross-platform portfolio are
+recorded in `paper/notebooks/2026-05-20-cross-platform-determinism.md`.
+
 # Reproducibility certificate
 
 Each apsis simulation emits an *Apsis Record* — a binary certificate
@@ -337,7 +400,9 @@ the only per-run difference is the header's wall-clock
 hash. A reviewer with both files reproduces the run. The default
 policy emits initial + final bookend snapshots and every material
 event, which keeps records small and diff-friendly; dense trajectory
-capture is an explicit policy opt-in.
+capture is an explicit policy opt-in. Record reproducibility has been
+verified bit-equal across the heterogeneous Windows/Linux x86_64
+hosts described in §Cross-platform reproducibility.
 
 # Availability and reproducibility
 
@@ -362,5 +427,12 @@ Zenodo (DOI forthcoming).
 I thank the authors of REBOUND, REBOUNDx, MERCURIUS, and NBODY6/7 for
 setting the standards of rigour against which this library's narrower
 claim is positioned.
+
+The author used an AI assistant for documentation drafting, code
+review, refactoring, and design-discussion support. All algorithmic
+decisions, physics interpretations, validation methodology, numerical
+implementations, and reported results are the author's responsibility.
+The AI assistant was not used for novel physics, mathematical
+derivations, or scientific decision-making.
 
 # References
