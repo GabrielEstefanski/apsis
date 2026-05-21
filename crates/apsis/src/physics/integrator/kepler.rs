@@ -33,7 +33,11 @@ fn stumpff_c(psi: f64) -> f64 {
     if psi.abs() < 1e-6 {
         return 0.5 - psi / 24.0 + psi * psi / 720.0;
     }
-    if psi > 0.0 { (1.0 - psi.sqrt().cos()) / psi } else { ((-psi).sqrt().cosh() - 1.0) / (-psi) }
+    if psi > 0.0 {
+        (1.0 - libm::cos(psi.sqrt())) / psi
+    } else {
+        (libm::cosh((-psi).sqrt()) - 1.0) / (-psi)
+    }
 }
 
 /// Stumpff function `s(ψ) = (√ψ − sin √ψ) / ψ^(3/2)`, continuously defined
@@ -45,10 +49,10 @@ fn stumpff_s(psi: f64) -> f64 {
     }
     if psi > 0.0 {
         let sq = psi.sqrt();
-        (sq - sq.sin()) / (psi * sq)
+        (sq - libm::sin(sq)) / (psi * sq)
     } else {
         let sq = (-psi).sqrt();
-        (sq.sinh() - sq) / ((-psi) * sq)
+        (libm::sinh(sq) - sq) / ((-psi) * sq)
     }
 }
 
@@ -145,7 +149,7 @@ pub fn kepler_step(r0: Vec3, v0: Vec3, dt: f64, mu: f64) -> (Vec3, Vec3) {
         let a = 1.0 / alpha; // a < 0
         let s = dt.signum() * (2.0 * mu * alpha.abs()).sqrt() * dt.abs()
             / (r0_norm * vr0 + dt.signum() * (mu * (-a)).sqrt() * (1.0 - r0_norm * alpha));
-        (2.0 * mu * alpha.abs()).sqrt() * s.tanh() / alpha.abs().sqrt()
+        (2.0 * mu * alpha.abs()).sqrt() * libm::tanh(s) / alpha.abs().sqrt()
     };
 
     // Newton–Raphson on the universal Kepler equation
