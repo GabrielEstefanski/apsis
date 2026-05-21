@@ -16,6 +16,7 @@ structured JSON dump for downstream notebook ingestion.
 from __future__ import annotations
 
 import argparse
+import io
 import json
 import math
 import re
@@ -229,7 +230,7 @@ def render_mercury(m: MercuryDiff) -> str:
 
 
 def main() -> int:
-    if hasattr(sys.stdout, "reconfigure"):
+    if isinstance(sys.stdout, io.TextIOWrapper):
         sys.stdout.reconfigure(encoding="utf-8")
     ap = argparse.ArgumentParser()
     ap.add_argument("--a", type=Path, default=ROOT / "windows",
