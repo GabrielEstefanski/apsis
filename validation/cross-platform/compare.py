@@ -26,7 +26,15 @@ from pathlib import Path
 
 ROOT = Path(__file__).parent
 
-PARITY_SCENARIOS = ["kepler", "figure8", "pythagorean", "retrograde"]
+PARITY_SCENARIOS = [
+    "kepler",
+    "figure8",
+    "pythagorean",
+    "retrograde",
+    "mercurius_outer_solar",
+    "whfast_outer_solar",
+    "central_pattern_b_long",
+]
 
 
 def ulp_distance(a: float, b: float) -> float:
