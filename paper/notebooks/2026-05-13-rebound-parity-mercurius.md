@@ -1,7 +1,7 @@
 # REBOUND parity — Mercurius
 
 **Date:** 2026-05-13
-**Subject:** Numerical agreement between apsis Mercurius (`crates/apsis/src/physics/integrator/mercurius.rs`) and REBOUND `MERCURIUS` (`integrator_mercurius.c`) on a Solar-System scenario with a Jupiter-crossing test particle. The paired Mercurius lab notebook (`docs/experiments/2026-05-13-mercurius-hybrid.md` §Tier 2) deferred this gate to a separate validation PR; this is that PR's notebook.
+**Subject:** Numerical agreement between apsis Mercurius (`crates/apsis/src/physics/integrator/mercurius.rs`) and REBOUND's MERCURIUS (Rein et al. 2019) on a Solar-System scenario with a Jupiter-crossing test particle. The paired Mercurius lab notebook (`docs/experiments/2026-05-13-mercurius-hybrid.md` §Tier 2) deferred this gate to a separate validation PR; this is that PR's notebook.
 
 **Status:** Protocol declared *a priori*, before any code lands. Bounds and scenario locked from the Mercurius lab notebook §Tier 2 specification, refined to the practical horizon and dt that fit the existing `validation/rebound-parity/` infrastructure.
 
@@ -282,4 +282,3 @@ Open follow-ups (separate PRs):
 - Rein, H., Hernandez, D. M., Tamayo, D., & Brown, G. (2019). *Hybrid symplectic integrators for planetary dynamics.* MNRAS, 489(4), 4632–4640.
 - Mercurius implementation lab notebook: `docs/experiments/2026-05-13-mercurius-hybrid.md`.
 - Kepler parity protocol template: `docs/experiments/2026-04-25-rebound-parity-kepler.md`.
-- REBOUND `integrator_mercurius.c` (canonical reference; copy at `~/Desktop/rebound/mercurius.c`).

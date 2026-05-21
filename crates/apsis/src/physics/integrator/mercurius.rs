@@ -6,7 +6,8 @@
 //!     symplectic integrators for planetary dynamics*, MNRAS **489**,
 //!     4632–4640. [arXiv:1908.03468](https://arxiv.org/abs/1908.03468)
 //!
-//! Faithful port of REBOUND's `integrator_mercurius.c` to apsis. The
+//! Implementation of the MERCURIUS hybrid integrator per Rein et al.
+//! 2019 (MNRAS 485, 1377–1393, DOI: 10.1093/mnras/stz769). The
 //! algorithm is a **rewind hybrid**: a Wisdom-Holman outer step
 //! advances every particle, an encounter detector identifies pairs
 //! that came within their critical radius during the step, those
