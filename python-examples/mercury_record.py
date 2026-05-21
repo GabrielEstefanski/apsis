@@ -1,6 +1,6 @@
 """Mercury 1PN run recorded as an Apsis Record.
 
-Builds the Mercury + 1PN system from ``examples/mercury_perihelion.py``
+Builds the Mercury + 1PN system from ``python-examples/mercury_perihelion.py``
 and attaches a record writer via :py:meth:`apsis.System.attach_record`.
 The resulting ``mercury_1pn.apsis`` carries the full provenance — apsis
 git sha, BLAKE3 hash of ``Cargo.lock``, every registered operator with
@@ -13,8 +13,8 @@ to reproduce this run bit-exactly.
 
 Run::
 
-    python examples/mercury_record.py
-    python examples/inspect_record.py mercury_1pn.apsis
+    python python-examples/mercury_record.py
+    python python-examples/inspect_record.py mercury_1pn.apsis
 
 Paper-grade reproducibility note: rebuild with a clean working tree
 (no ``-dirty`` suffix on ``git_sha``) before running publication

@@ -9,7 +9,7 @@ contributions.
 
 Run::
 
-    python examples/federation_composition.py
+    python python-examples/federation_composition.py
 """
 
 from __future__ import annotations

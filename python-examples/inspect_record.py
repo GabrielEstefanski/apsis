@@ -8,7 +8,7 @@ a third-party dep). Scripts that need structured access should add
 
 Run::
 
-    python examples/inspect_record.py mercury_1pn.apsis
+    python python-examples/inspect_record.py mercury_1pn.apsis
 """
 
 from __future__ import annotations

@@ -8,7 +8,7 @@ What this PR changes and why. Link the issue this closes if applicable
 - [ ] `cargo fmt --all` clean
 - [ ] `cargo clippy --workspace --all-targets -- -D warnings` clean
 - [ ] `cargo nextest run --workspace` passes
-- [ ] (Python changes only) `maturin develop --release` succeeds and `pytest tests/` passes
+- [ ] (Python changes only) `maturin develop --release` succeeds and `pytest python-tests/` passes
 - [ ] (Numerical claims) measurement reported with units; gate value justified
 
 ## References

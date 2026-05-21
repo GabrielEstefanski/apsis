@@ -21,7 +21,7 @@ Demonstrates:
 
 Run::
 
-    python examples/implicit_midpoint.py
+    python python-examples/implicit_midpoint.py
 """
 
 from __future__ import annotations
