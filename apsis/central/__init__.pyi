@@ -4,7 +4,7 @@ from apsis import Body, Perturbation, UnitSystem
 
 class CentralForce:
     """Central-potential perturbation `∝ r^γ` from a central body
-    (Tamayo et al. 2019, Pattern B)."""
+    (Tamayo et al. 2019)."""
 
     @staticmethod
     def from_raw(

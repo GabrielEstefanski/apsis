@@ -1,13 +1,13 @@
-"""Central-potential precession — Tamayo 2019, Patterns A and B.
+"""Central-potential precession — Tamayo 2019.
 
 A test particle around a central body, with an additional radial
 force ``∝ r^γ`` that drives apsidal precession. Demonstrates both
-construction patterns of ``apsis.central.CentralForce``:
+construction paths of ``apsis.central.CentralForce``:
 
-- **Pattern A (`from_raw`)**: pass the coupling ``a_central`` and
+- **Regime-based** (`from_raw`): pass the coupling ``a_central`` and
   exponent ``γ`` directly.
-- **Pattern B (`from_apsidal_rate`)**: pass the desired apsidal rate
-  ``ω̇`` and the operator inverts it to compute ``a_central``.
+- **Observable-inversion** (`from_apsidal_rate`): pass the desired
+  apsidal rate ``ω̇`` and the operator inverts it to compute ``a_central``.
 
 Run::
 
@@ -75,7 +75,7 @@ def measure_precession(sys: apsis.System, n_orbits: int) -> tuple[float, float]:
     return d, period
 
 
-def pattern_a() -> None:
+def regime_based() -> None:
     sys, _ = make_system()
     sys.add_hamiltonian_perturbation(
         CentralForce.from_raw(
@@ -87,11 +87,11 @@ def pattern_a() -> None:
     )
     measured, _ = measure_precession(sys, N_ORBITS)
     arcsec = measured * (180.0 / math.pi) * 3600.0
-    print(f"  Pattern A — from_raw(a_central={A_CENTRAL:.1e}, γ={GAMMA})")
+    print(f"  Regime-based — from_raw(a_central={A_CENTRAL:.1e}, γ={GAMMA})")
     print(f"    Δω over {N_ORBITS} orbits = {arcsec:+.4f} arcsec")
 
 
-def pattern_b() -> None:
+def observable_inversion() -> None:
     sys, bodies = make_system()
     target_omega_dot = 5e-8  # rad / canonical time unit
     sys.add_hamiltonian_perturbation(
@@ -109,19 +109,19 @@ def pattern_b() -> None:
     rel_err = (measured - expected) / expected
     arcsec_meas = measured * (180.0 / math.pi) * 3600.0
     arcsec_exp = expected * (180.0 / math.pi) * 3600.0
-    print(f"  Pattern B — from_apsidal_rate(ω̇={target_omega_dot:.1e}, γ={GAMMA})")
+    print(f"  Observable-inversion — from_apsidal_rate(ω̇={target_omega_dot:.1e}, γ={GAMMA})")
     print(f"    expected Δω = {arcsec_exp:+.4f} arcsec over {N_ORBITS} orbits")
     print(f"    measured Δω = {arcsec_meas:+.4f} arcsec  (rel err {rel_err:+.3e})")
-    # Pattern B inversion is near-circular; ~4 % drift at e = 0.05, γ = -3
-    # over 50 orbits sums O(e²), rate variation along the orbit, and
-    # perturbation back-reaction.
-    assert abs(rel_err) < 0.05, f"Pattern B round-trip off by {rel_err:.3e}"
+    # Inversion is near-circular; ~4 % drift at e = 0.05, γ = -3 over 50
+    # orbits sums O(e²), rate variation along the orbit, and perturbation
+    # back-reaction.
+    assert abs(rel_err) < 0.05, f"Observable-inversion round-trip off by {rel_err:.3e}"
 
 
 def main() -> None:
     print("apsis.central.CentralForce — apsidal precession demo")
-    pattern_a()
-    pattern_b()
+    regime_based()
+    observable_inversion()
 
 
 if __name__ == "__main__":

@@ -227,7 +227,7 @@ PR #168 added three new validation scenarios exercising those code paths end-to-
 | --- | --- | --- |
 | `mercurius_outer_solar` | `mercurius.rs` cbrt + `kepler.rs` Stumpff (every step) | reuses `crates/apsis/examples/rebound_parity_mercurius.rs` |
 | `whfast_outer_solar` | `kepler.rs` Stumpff (every WHFast sub-step) | `crates/apsis/examples/whfast_outer_solar.rs` |
-| `central_pattern_b_long` | `apsis-central` libm `pow` (every step the operator is active) | `crates/apsis-central/examples/central_pattern_b_long.rs` |
+| `central_observable_inversion_long` | `apsis-central` libm `pow` (every step the operator is active) | `crates/apsis-central/examples/central_observable_inversion_long.rs` |
 
 The first two share the Mercurius parity scenario's initial conditions: Sun + 4 outer planets + Jupiter-crossing test particle, 10⁴ yr at $dt = 0.01\ \text{yr}$, yearly sampling (6 bodies, 10001 samples). The central scenario is Sun + Mercury-like with $\gamma = -3$ (Schwarzschild-effective) targeting a Mercury-scale apsidal rate, integrated under IAS15 for 500 Mercury orbits with per-orbit sampling.
 
@@ -245,7 +245,7 @@ git SHA = `b974214` (`feat/cross-platform-portfolio-extension`).
 | --- | --- | --- | --- |
 | `mercurius_outer_solar` | 10001 / 10001 | 40 (6 bodies × 6 state + year/t + e_total + lz_total) | 0 |
 | `whfast_outer_solar` | 10001 / 10001 | 40 | 0 |
-| `central_pattern_b_long` | 501 / 501 | 16 (2 bodies × 6 + orbit/t + e_total + lz_total) | 0 |
+| `central_observable_inversion_long` | 501 / 501 | 16 (2 bodies × 6 + orbit/t + e_total + lz_total) | 0 |
 
 The four Phase 3 parity scenarios and the Mercury 1PN gate were rerun against the Phase 4 lockfile and continue to reproduce identically.
 
@@ -255,7 +255,7 @@ The four Phase 3 parity scenarios and the Mercury 1PN gate were rerun against th
 | --- | --- |
 | `mercurius_outer_solar.csv` | `42790C07486166F6A29DC70274F99698…` |
 | `whfast_outer_solar.csv` | `4167B1DABD038F7CD902759A4FF17EAC…` |
-| `central_pattern_b_long.csv` | `5AECC12F3167000CC1509FFDEA9F4C46…` |
+| `central_observable_inversion_long.csv` | `5AECC12F3167000CC1509FFDEA9F4C46…` |
 
 Per-column ULP, file size, and SHA256 converge on the same conclusion for the three new scenarios.
 
@@ -305,7 +305,7 @@ Application to the v0.1 release surface (Phase 4):
 
 - **WHFast Kepler drift** (`crates/apsis/src/physics/integrator/kepler.rs`): `sin`, `cos`, `cosh`, `sinh`, `tanh` in the Stumpff series — routed via `libm` in PR #165 (closed #159), verified by `whfast_outer_solar` and `mercurius_outer_solar`.
 - **Mercurius Hill-radius switching** (`crates/apsis/src/physics/integrator/mercurius.rs`): `cbrt` in the close-encounter detection threshold — routed via `libm::cbrt` in PR #166 (closed #160), verified by `mercurius_outer_solar`.
-- **apsis-central force law** (`crates/apsis-central/src/lib.rs`): `powf` × 4 and `ln` × 1 in the central-force prefactor and potential — routed via `libm` in PR #167 (closed #161), verified by `central_pattern_b_long`.
+- **apsis-central force law** (`crates/apsis-central/src/lib.rs`): `powf` × 4 and `ln` × 1 in the central-force prefactor and potential — routed via `libm` in PR #167 (closed #161), verified by `central_observable_inversion_long`.
 
 The audit checklist is satisfied for every integration-critical path in the v0.1 release surface. Future operators or integrators must run the checklist before joining the cross-platform portfolio.
 

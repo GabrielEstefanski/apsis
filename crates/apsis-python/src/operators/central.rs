@@ -1,5 +1,5 @@
 //! `apsis._native.central` — central-potential perturbations
-//! (Tamayo 2019, Pattern B), wrapping [`apsis_central::CentralForce`].
+//! (Tamayo 2019, observable-inversion), wrapping [`apsis_central::CentralForce`].
 
 use apsis_central::CentralForce;
 use apsis_py_core::extract_unit_system;

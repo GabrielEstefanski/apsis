@@ -29,8 +29,8 @@ Three concrete failures motivated revisiting the architecture:
    the apparent fix (correct ω formula) didn't help while softening
    silently broke the contract.
 
-2. The Mercury 1PN federation gate, the Pattern B central-force
-   round-trip gate, and most apsis-radiation tests had to opt out of
+2. The Mercury 1PN federation gate, the observable-inversion
+   central-force round-trip gate, and most apsis-radiation tests had to opt out of
    the default explicitly. The most-used scenarios fought the default
    the most.
 

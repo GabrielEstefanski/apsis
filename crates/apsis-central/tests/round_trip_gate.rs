@@ -1,6 +1,6 @@
 //! Synthetic round-trip gate for `CentralForce::from_apsidal_rate`.
 //!
-//! The Pattern B constructor inverts a target apsidal precession rate
+//! The observable-inversion constructor inverts a target apsidal precession rate
 //! ω̇ into the coupling `A` that produces it on a near-circular orbit.
 //! This gate closes the loop end-to-end: register at ω̇ = X, integrate
 //! for N orbits, fit ω̇ from the trajectory, assert |ω̇_measured −
@@ -9,7 +9,7 @@
 //! No reliance on any specific physics scenario (Mercury, Schwarzschild,
 //! …) — the gate verifies that the *inversion arithmetic plus the
 //! integrator* together reproduce whatever ω̇ the caller asks for.
-//! That is what "Pattern B" promises as a contract, independent of the
+//! That is what the observable-inversion constructor promises as a contract, independent of the
 //! force's physical interpretation.
 
 use std::f64::consts::TAU;
@@ -40,7 +40,7 @@ use apsis_central::CentralForce;
 /// `apsis-radiation`'s Burns 1979 gate.
 const ROUND_TRIP_TOLERANCE: f64 = 0.05;
 
-/// Pattern B contract: registering with `omega_dot = X` reproduces
+/// Observable-inversion contract: registering with `omega_dot = X` reproduces
 /// `omega_dot = X` within 5 % over 50 orbits at γ = -3, e = 0.1.
 /// Empirical agreement when written: 2.7 %.
 #[test]
@@ -60,7 +60,7 @@ fn from_apsidal_rate_synthetic_round_trip() {
     let receiver = Body::rocky(1e-10).at(r0, 0.0).with_velocity(0.0, v0);
     let bodies = vec![sun, receiver];
 
-    // Pattern B: pick a target ω̇ and let the operator invert.
+    // Observable inversion: pick a target ω̇ and let the operator invert.
     let omega_dot_in = 1.5e-3_f64; // rad / Gaussian time unit — large enough to
     // accumulate ~ 0.4 rad over 50 orbits, well above the IAS15 noise floor.
     let gamma = -3.0_f64;
@@ -104,7 +104,7 @@ fn from_apsidal_rate_synthetic_round_trip() {
     let rel = ((omega_dot_measured - omega_dot_in) / omega_dot_in).abs();
     assert!(
         rel < ROUND_TRIP_TOLERANCE,
-        "Pattern B round-trip: input ω̇ = {omega_dot_in:.4e}, measured ω̇ = {omega_dot_measured:.4e}, \
+        "Observable-inversion round-trip: input ω̇ = {omega_dot_in:.4e}, measured ω̇ = {omega_dot_measured:.4e}, \
          relative error = {rel:.4} (gate: {ROUND_TRIP_TOLERANCE})",
     );
 }

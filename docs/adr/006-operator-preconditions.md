@@ -141,17 +141,22 @@ Operators with dimensional parameters expose three constructor
 families (locked in `apsis::contract` § *Observable constructor
 convention*):
 
-* **Pattern A — Named regime** (`for_units(units)`,
+* **Regime-based constructor** (`for_units(units)`,
   `for_<regime>(...)`): the most common path. Unit system in,
   derived parameters out. `PostNewtonian1PN::for_units(units)`
   derives `c` exactly from `c_SI · T_scale / L_scale`.
-* **Pattern B — Observable inversion** (`from_<observable>(...)`):
+* **Observable-inversion constructor** (`from_<observable>(...)`):
   takes a measured observable and inverts to the operator's
   coupling. Reserved for future operators (central-force law from
   apsidal precession measurement, J2 from secular nodal regression).
 * **Raw escape** (`from_raw_<param>(...)`): explicit "I computed
   this externally". Pinned to a `UnitSystem` so the registration
   check still validates frame consistency.
+
+> **Naming note.** Earlier revisions of this ADR called these the
+> "Pattern A" and "Pattern B" constructors. The descriptive names
+> are preferred going forward to avoid the impression of provisional
+> taxonomy and to keep the public API self-explanatory.
 
 Every constructor family carries the `UnitSystem` so the operator
 publishes `Some(units)` from `declared_units`. Unit confusion is
@@ -181,7 +186,7 @@ the Rust path has.
 | Single `Result<(), PreconditionError>` covering all three families | Conflates orthogonal failure modes. The caller policy for "softening violates 1PN's exactness requirement" (acknowledge and proceed) differs from "operator built for IAU solar but System runs canonical solar" (must fix). One typed error per family keeps the policy choice clean. |
 | Static-only regime checks | A regime can change dynamically (eccentricity growth, mass ratio change via planet–planetesimal merger). Static-only would catch bad initial conditions but miss in-run drift. |
 | No dedup on regime warnings | A persistent violation across 10⁴ outer steps generates 10⁴ warnings — drowns the log. The dedup makes the warning a one-time signal: the *first* time the bound is crossed, the user sees it. |
-| Pattern A only, no raw escape | Raw escape exists for hypothetical experiments ("what if c were 5 % larger?") and for cases where `c` (or any param) is computed by neighbouring code so cross-checking with `units` would be redundant. Pattern A alone forces a workaround. |
+| Regime-based constructor only, no raw escape | Raw escape exists for hypothetical experiments ("what if c were 5 % larger?") and for cases where `c` (or any param) is computed by neighbouring code so cross-checking with `units` would be redundant. The regime-based path alone forces a workaround. |
 
 ---
 

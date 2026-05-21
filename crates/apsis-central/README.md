@@ -4,9 +4,9 @@ Out-of-tree perturbation crate for [`apsis`](../apsis). Generalized
 central force `a = A · r^γ` per Tamayo, Rein, Shi & Hernandez
 (2019, *MNRAS* 491, 2885).
 
-**Pattern B exemplar.** This crate is the federation's first
-implementation of the **observable-inversion constructor** locked in
-ADR-005 / ADR-006: [`CentralForce::from_apsidal_rate`] takes a
+**Observable-inversion exemplar.** This crate is the federation's
+first implementation of the **observable-inversion constructor**
+locked in ADR-005 / ADR-006: [`CentralForce::from_apsidal_rate`] takes a
 measured (or desired) apsidal precession rate `ω̇` and inverts it
 into the coupling `A` that produces it. The library is named after
 the apsidal axis; the highest-leverage feature reproduces an apsidal
@@ -33,7 +33,7 @@ radial contribution. Newton's third law applied to the source body
 (recoil scaled by `−m_recv / m_src`); momentum conservation is the
 test gate.
 
-## Pattern B — observable inversion
+## Observable inversion
 
 `CentralForce::from_apsidal_rate(source, target, ω̇, γ, &bodies, units)`
 applies the Tamayo 2019 inversion:
@@ -81,7 +81,7 @@ let sun = Body::star(1.0);
 let target = Body::rocky(1e-7).at(0.387, 0.0).with_velocity(0.0, 1.61);
 let bodies = vec![sun, target];
 
-// Pattern B: pick a desired ω̇ and let the operator compute the coupling.
+// Observable inversion: pick a desired ω̇ and let the operator compute the coupling.
 let force = CentralForce::from_apsidal_rate(
     0,                              // source
     1,                              // target
