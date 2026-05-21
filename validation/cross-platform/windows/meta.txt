@@ -1,0 +1,28 @@
+﻿=== rustc ===
+rustc 1.94.1 (e408947bf 2026-03-25)
+
+=== cargo ===
+cargo 1.94.1 (29ea6fb6a 2026-03-24)
+
+=== OS ===
+Microsoft Windows NT 10.0.26200.0
+
+=== CPU ===
+
+
+Name                      : AMD Ryzen 5 7600X 6-Core Processor             
+NumberOfCores             : 6
+NumberOfLogicalProcessors : 12
+MaxClockSpeed             : 4701
+
+
+
+
+=== Cargo.lock BLAKE3 ===
+(blake3 hashed at record-write time; see record header)
+
+=== Cargo.lock SHA256 (cross-check) ===
+F39E4946109916E8C8CCBE9D482502CCFB4166391BC8BCFFCF8302743A6EAFE1
+
+=== git ===
+06bd0a974e6873c70122d613cb22c4e9d3e2e4be
