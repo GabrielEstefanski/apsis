@@ -50,7 +50,7 @@ Three regimes drive the case for a hybrid:
 Rein, Hernandez, Tamayo & Brown (2019, *MNRAS* 489, 4632) describe
 MERCURIUS: a smooth `K(r/r_crit)` weighting routes each pairwise
 interaction between a WH-step "far" half and an IAS15-step "close"
-half. REBOUND ships the canonical implementation (`integrator_mercurius.c`).
+half. REBOUND ships the original implementation (Rein et al. 2019).
 
 ---
 
