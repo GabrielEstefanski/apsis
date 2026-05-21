@@ -226,7 +226,7 @@ consumers; CI enforces the separation.
 | [`apsis`](crates/apsis/) | The library. Physics, integrators, public extension API. | Pure library; no UI or rendering dependencies. |
 | [`apsis-1pn`](crates/apsis-1pn/) | First downstream force crate: 1PN Schwarzschild correction. Reference implementation of the federation contract. | **Only** `apsis`. |
 | [`apsis-radiation`](crates/apsis-radiation/) | Radiation pressure + Poynting–Robertson drag (Burns 1979). | **Only** `apsis`. |
-| [`apsis-central`](crates/apsis-central/) | Central-potential perturbations (Pattern B, Tamayo 2019). | **Only** `apsis`. |
+| [`apsis-central`](crates/apsis-central/) | Central-potential perturbations (observable-inversion exemplar, Tamayo 2019). | **Only** `apsis`. |
 | [`apsis-py-core`](crates/apsis-py-core/) | Capsule transport + extractors (rlib) — used by the apsis Python distribution and any external `apsis-plugin-X` cdylib. | `apsis`, `pyo3`. |
 | [`apsis-python`](crates/apsis-python/) | PyO3 cdylib backing the `apsis` Python distribution. Bundles every internal operator behind feature flags. | `apsis`, `apsis-py-core`, operator crates. |
 

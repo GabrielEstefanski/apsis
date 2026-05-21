@@ -1,7 +1,7 @@
 //! Generalized central force `a = A · r^γ` per Tamayo, Rein, Shi &
 //! Hernandez (2019, *MNRAS* 491, 2885). First federation-grade
-//! exemplar of the **observable-inversion constructor (Pattern B)**
-//! locked in [`apsis::contract`] and ADR-005 / ADR-006:
+//! exemplar of the **observable-inversion constructor** locked in
+//! [`apsis::contract`] and ADR-005 / ADR-006:
 //! [`CentralForce::from_apsidal_rate`] takes a measured apsidal
 //! precession rate ω̇ and inverts it into the coupling `A` that
 //! reproduces it on the supplied orbit.
@@ -38,7 +38,7 @@
 //! so [`System::energy`](apsis::core::system::System::energy) accounts for
 //! the radial contribution.
 //!
-//! # Observable inversion (Pattern B)
+//! # Observable inversion
 //!
 //! The Tamayo et al. 2019 result is that a near-circular orbit at
 //! instantaneous separation `d` and mean motion `n` precesses at
@@ -79,8 +79,8 @@
 //!     Body::rocky(1.66e-7).at(0.387, 0.0).with_velocity(0.0, 1.61);
 //! let bodies = vec![sun, mercury];
 //!
-//! // Pattern B: pick a desired apsidal rate ω̇ and let the operator
-//! // compute the coupling that reproduces it.
+//! // Observable inversion: pick a desired apsidal rate ω̇ and let
+//! // the operator compute the coupling that reproduces it.
 //! let omega_dot_desired = 5e-9; // rad per Gaussian time unit
 //! let force = CentralForce::from_apsidal_rate(
 //!     0,                              // source
@@ -154,9 +154,9 @@ impl CentralForce {
         Self { source, a_central, gamma, units }
     }
 
-    // ── Pattern B — observable inversion ─────────────────────────────────────
+    // ── Observable inversion ──────────────────────────────────────────────────
 
-    /// **Pattern B exemplar.** Construct from a desired apsidal
+    /// **Observable-inversion exemplar.** Construct from a desired apsidal
     /// precession rate `omega_dot` (radians per time, in `units`) on
     /// the orbit of `target` around `source`. Inverts the Tamayo
     /// et al. 2019 secular result:
@@ -596,7 +596,7 @@ mod tests {
         assert!(rel < 1e-6, "log branch: ax = {}, expected {}", acc[1].x, expected_ax);
     }
 
-    // ── Pattern B inversion error paths ─────────────────────────────────────
+    // ── Observable-inversion error paths ──────────────────────────────────────
 
     fn circular_pair() -> Vec<Body> {
         vec![Body::star(1.0), Body::rocky(1e-10).at(1.0, 0.0).with_velocity(0.0, 1.0)]
@@ -639,7 +639,7 @@ mod tests {
         assert!(matches!(err, ApsidalInversionError::UnboundOrbit { idx: 1 }));
     }
 
-    /// Pattern B happy path: round-trip the inversion algebraically.
+    /// Observable-inversion happy path: round-trip the inversion algebraically.
     /// Compute A from a desired ω̇, then plug A back into the forward
     /// formula and confirm it produces the same ω̇. This locks the
     /// inversion arithmetic without needing a long integration.

@@ -1,12 +1,12 @@
-"""Central-potential perturbations (Tamayo et al. 2019, Pattern B).
+"""Central-potential perturbations (Tamayo et al. 2019).
 
 Adds a power-law radial force `∝ r^γ` from a central body, on top of
-Newtonian gravity. Two construction patterns:
+Newtonian gravity. Two construction paths:
 
 ```python
 from apsis.central import CentralForce
 
-# Pattern A — explicit (a_central, γ):
+# Regime-based constructor — explicit (a_central, γ):
 sys.add_hamiltonian_perturbation(
     CentralForce.from_raw(
         source=0, a_central=5e-9, gamma=-3.0,
@@ -14,7 +14,8 @@ sys.add_hamiltonian_perturbation(
     ),
 )
 
-# Pattern B — invert a desired apsidal rate ω̇ for the target body:
+# Observable-inversion constructor — invert a desired apsidal rate ω̇
+# for the target body:
 sys.add_hamiltonian_perturbation(
     CentralForce.from_apsidal_rate(
         source=0, target=1, omega_dot=5e-9, gamma=-3.0,

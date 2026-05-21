@@ -188,7 +188,7 @@
 //! dimensional. There is no constructor path that produces a
 //! dimensional operator without a `UnitSystem` attached.
 //!
-//! ### Pattern A — Named regime (`for_units`, `for_<regime>`)
+//! ### Regime-based constructor (`for_units`, `for_<regime>`)
 //!
 //! Encodes a unit system or physical regime in the constructor name.
 //! `for_units` derives parameters from a supplied `UnitSystem`;
@@ -202,7 +202,7 @@
 //! Drag::for_iss_altitude_km(400.0)        // future
 //! ```
 //!
-//! ### Pattern B — Observable inversion (`from_<observable>`)
+//! ### Observable-inversion constructor (`from_<observable>`)
 //!
 //! Inverts a desired observable to compute the operator's coefficient.
 //! The user names what they measure; the constructor solves for the
@@ -232,8 +232,8 @@
 //! Use when the value is known-correct from neighbouring code (so
 //! cross-checking against `units` would be redundant) or for
 //! hypothetical experiments where the parameter is intentionally
-//! non-physical. Pattern A remains the default path in user-facing
-//! examples and downstream bindings.
+//! non-physical. The regime-based constructor remains the default
+//! path in user-facing examples and downstream bindings.
 //!
 //! ### Implementor checklist
 //!
@@ -242,11 +242,13 @@
 //! 1. Carry `UnitSystem` on every dimensional operator and override
 //!    `declared_units` to return `Some(units)` so the registration
 //!    panic catches mismatches.
-//! 2. Provide at least one Pattern A or Pattern B constructor — the
-//!    default path for users should not require raw numeric input.
+//! 2. Provide at least one regime-based or observable-inversion
+//!    constructor — the default path for users should not require
+//!    raw numeric input.
 //! 3. If a raw constructor is exposed, name it with the `from_raw_`
 //!    prefix and require a `UnitSystem` argument.
-//! 4. Default downstream binding examples use Pattern A or Pattern B.
+//! 4. Default downstream binding examples use the regime-based or
+//!    observable-inversion constructor.
 //! 5. If the operator's derivation assumes a physical regime (mass
 //!    ratio, eccentricity, v/c, …), declare the bound via
 //!    [`crate::physics::integrator::Operator::check_regime`] — see the

@@ -1,4 +1,4 @@
-//! Cross-platform parity — apsis-central Pattern B long horizon.
+//! Cross-platform parity — apsis-central observable-inversion long horizon.
 //!
 //! Sun + Mercury-like body, with [`CentralForce::from_apsidal_rate`]
 //! registered as a Hamiltonian perturbation at `γ = -3` (the
@@ -20,7 +20,7 @@
 //! ## Run
 //!
 //! ```text
-//! cargo run --release --example central_pattern_b_long -p apsis-central -- --output path/to/central.csv
+//! cargo run --release --example central_observable_inversion_long -p apsis-central -- --output path/to/central.csv
 //! ```
 
 use std::env;
@@ -41,7 +41,7 @@ const M_MERCURY: f64 = 1.660_114e-7;
 const A_MERCURY: f64 = 0.387_098; // AU
 const E_MERCURY: f64 = 0.205_63;
 
-/// Target apsidal precession rate (rad / yr) the Pattern B constructor
+/// Target apsidal precession rate (rad / yr) the observable-inversion constructor
 /// inverts into the operator's coupling `A`. Order of magnitude matches
 /// the GR 1PN Mercury rate (~43 arcsec/century ≈ 2.1 × 10⁻⁶ rad/yr) but
 /// the value is otherwise nominal — the scenario asserts cross-platform
@@ -81,7 +81,7 @@ fn main() {
         &bodies,
         units,
     )
-    .expect("Pattern B inversion: gamma = -3 is non-degenerate, indices valid, Mercury bound");
+    .expect("observable-inversion: gamma = -3 is non-degenerate, indices valid, Mercury bound");
 
     let mut sys =
         System::new(bodies, units).with_integrator(IntegratorKind::Ias15).with_dt(DT_YEARS);
@@ -94,8 +94,11 @@ fn main() {
     let file = File::create(&output_path).expect("failed to open output file");
     let mut w = BufWriter::new(file);
 
-    writeln!(w, "# Cross-platform parity — apsis-central Pattern B long horizon — apsis side")
-        .unwrap();
+    writeln!(
+        w,
+        "# Cross-platform parity — apsis-central observable-inversion long horizon — apsis side"
+    )
+    .unwrap();
     writeln!(w, "# integrator: IAS15 (apsis) + CentralForce (apsis-central)").unwrap();
     writeln!(w, "# units: solar AU-year (G ≈ {g:.18e})").unwrap();
     writeln!(
@@ -175,5 +178,5 @@ fn parse_output_path() -> PathBuf {
             return PathBuf::from(args.next().expect("--output requires a path argument"));
         }
     }
-    PathBuf::from("validation/cross-platform/windows/central_pattern_b_long.csv")
+    PathBuf::from("validation/cross-platform/windows/central_observable_inversion_long.csv")
 }

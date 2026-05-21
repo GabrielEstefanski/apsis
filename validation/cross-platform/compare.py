@@ -33,7 +33,7 @@ PARITY_SCENARIOS = [
     "retrograde",
     "mercurius_outer_solar",
     "whfast_outer_solar",
-    "central_pattern_b_long",
+    "central_observable_inversion_long",
 ]
 
 

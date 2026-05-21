@@ -68,7 +68,7 @@ The project is a Cargo workspace split by role:
 | [`apsis`](../crates/apsis/) | The library: domain types, physics, integrators, `apsis::contract` formalisation, public API. Pure library; no UI or rendering dependencies. |
 | [`apsis-1pn`](../crates/apsis-1pn/) | First downstream force crate: 1PN Schwarzschild correction (Anderson 1975). Reference implementation of the federation contract. Depends only on `apsis` through the public API. |
 | [`apsis-radiation`](../crates/apsis-radiation/) | Radiation pressure + Poynting–Robertson drag (Burns 1979). |
-| [`apsis-central`](../crates/apsis-central/) | Central-potential perturbations (Tamayo 2019, Pattern B). |
+| [`apsis-central`](../crates/apsis-central/) | Central-potential perturbations (Tamayo 2019, observable-inversion exemplar). |
 | [`apsis-py-core`](../crates/apsis-py-core/) | Capsule transport + extractors (rlib). Used by the `apsis` Python distribution and any external `apsis-plugin-X` cdylib. |
 | [`apsis-python`](../crates/apsis-python/) | PyO3 cdylib backing the `apsis` Python distribution. Bundles every internal operator behind feature flags. |
 

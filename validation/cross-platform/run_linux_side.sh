@@ -92,7 +92,7 @@ run_scenario "pythagorean"            "rebound_parity_pythagorean"  "apsis"
 run_scenario "retrograde"             "rebound_parity_retrograde"   "apsis"
 run_scenario "mercurius_outer_solar"  "rebound_parity_mercurius"    "apsis"
 run_scenario "whfast_outer_solar"     "whfast_outer_solar"          "apsis"
-run_scenario "central_pattern_b_long" "central_pattern_b_long"      "apsis-central"
+run_scenario "central_observable_inversion_long" "central_observable_inversion_long" "apsis-central"
 
 echo
 echo "── mercury 1PN ────────────────────────────────"

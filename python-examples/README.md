@@ -29,7 +29,7 @@ python python-examples/implicit_midpoint.py
 |-------------------------------|------------------------------|------------------------------------------------------------------------------------|
 | `mercury_perihelion.py`       | `apsis.gr`                   | Mercury perihelion advance matches the GR closed form over 100 orbits              |
 | `radiation_dust.py`           | `apsis.radiation`            | Dust grain at beta = 0.1 sees effective gravity reduced by (1 - beta), Burns 1979  |
-| `central_precession.py`       | `apsis.central`              | Pattern A (`from_raw`) + Pattern B (`from_apsidal_rate`, round-trip)               |
+| `central_precession.py`       | `apsis.central`              | Regime-based (`from_raw`) + observable-inversion (`from_apsidal_rate`, round-trip) |
 | `federation_composition.py`   | `apsis.gr` + `apsis.central` | Two operators registered on one System compose additively                          |
 | `implicit_midpoint.py`        | `apsis.gr` + integrator      | Mercury 1PN under the symplectic A-stable ImplicitMidpoint integrator              |
 
