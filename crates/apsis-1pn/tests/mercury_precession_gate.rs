@@ -399,8 +399,8 @@ fn mercury_precession_3d_inclined_matches_gr_within_100ppm() {
     let rel_err = (measured - predicted).abs() / predicted.abs();
     assert!(
         rel_err < 1e-4,
-        "Mercury 3D inclined precession off by {rel_err:.3e} — \
-         measured {measured:.3e} rad vs predicted {predicted:.3e} rad",
+        "Mercury 3D inclined precession off by {rel_err:.17e} — \
+         measured {measured:.17e} rad vs predicted {predicted:.17e} rad",
     );
 
     // ── Inclination and Ω are conserved by two-body 1PN ───────────────────
