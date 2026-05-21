@@ -309,7 +309,7 @@ impl Mercurius {
         dcrit = dcrit.max(v2.sqrt() * 0.4 * dt.abs());
         // 3. Hill-radius criterion (α-multiplied).
         if m_central > 0.0 {
-            let mass_ratio = (planet.mass / (3.0 * m_central)).max(0.0).cbrt();
+            let mass_ratio = libm::cbrt((planet.mass / (3.0 * m_central)).max(0.0));
             dcrit = dcrit.max(self.alpha * a.abs() * mass_ratio);
         }
         // 4. Physical radius criterion.
