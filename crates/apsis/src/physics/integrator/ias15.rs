@@ -1978,7 +1978,7 @@ impl Ias15 {
             // Grow conservatively rather than to infinity.
             return dt_current * DT_ZERO_ERR_GROWTH;
         }
-        let ratio = (self.epsilon / err).powf(1.0 / 7.0);
+        let ratio = libm::pow(self.epsilon / err, 1.0 / 7.0);
         dt_current * DT_SAFETY * ratio
     }
 
