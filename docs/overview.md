@@ -152,20 +152,14 @@ The library's headline physical validation is the Mercury perihelion
 precession test shipped by the `apsis-1pn` crate:
 
 - 500 Mercury orbits under IAS15 + 1PN + unsoftened gravity.
-- Measured perihelion drift: $+42.983$ arcsec/century.
+- Measured perihelion drift: $+42.991$ arcsec/century.
 - General-Relativistic prediction: $+43$ arcsec/century.
-- Relative error: $\approx 1$ part per million on developer hardware
-  (at the f64 noise floor of the test-particle 1PN approximation;
-  the prior `9caaef2` IAS15 controller refactor exposed a latent
-  velocity-prediction flaw that, once fixed, moved the residual
-  from a 4.4 ppm systematic bias to ~1 ppm stochastic round-off —
-  see [`experiments/2026-04-28-ias15-velocity-prediction-bug.md`](experiments/2026-04-28-ias15-velocity-prediction-bug.md)).
+- Relative error: $-2.8 \times 10^{-5}$ (28 ppm), reproduced
+  bit-identically across Windows and Linux on x86_64.
 
 This figure is asserted in CI via
 `cargo test --release -p apsis-1pn -- --ignored` at a 100-ppm
-threshold that absorbs cross-platform LLVM / libm variance, so any
-regression that would invalidate the paper's headline figure fails
-the build.
+threshold.
 
 ### 5.2 Cross-implementation parity — REBOUND IAS15
 
