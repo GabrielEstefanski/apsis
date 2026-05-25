@@ -22,7 +22,8 @@ canonical regimes (Kepler $e = 0.5$, Chenciner–Montgomery figure-8,
 Pythagorean, $10^4$-orbit retrograde Kepler); under
 [`apsis.gr`](crates/apsis-1pn/) (post-Newtonian 1PN), Mercury's
 perihelion precession matches the analytic 1PN GR prediction to
-within **1 ppm**.
+within **28 ppm**, reproduced bit-identically across Windows and
+Linux on x86_64.
 
 > **Status.** Pre-release (`v0.1.0` alpha). 3D-aware physics core
 > (Vec3, inclined orbits, 3D observables). Multiple published operator
@@ -162,10 +163,10 @@ Mercury + Sun + 1PN @ IAS15
   integrating    = 500 orbits  →  t = 756.63
   ...
 ── GR comparison over 500 orbits ──
-  predicted Δω      = +2.509427e-04 rad  (+51.7606 arcsec)
-  measured  Δω      = +2.509424e-04 rad  (+51.7606 arcsec)
-  relative error    = -1.076e-06
-  rate              = 42.983 arcsec/century  (GR expects 43)
+  predicted Δω      = +2.509976e-04 rad  (+51.7720 arcsec)
+  measured  Δω      = +2.509906e-04 rad  (+51.7705 arcsec)
+  relative error    = -2.802e-05
+  rate              = 42.991 arcsec/century  (GR expects 43)
 ```
 
 The same number is asserted in CI, gate-style:
@@ -301,8 +302,7 @@ What is verified in CI:
 - **Release-mode Mercury gate**: `cargo test --release -p apsis-1pn
   -- --ignored` asserts Mercury's precession within 100 ppm of the
   analytic 1PN GR prediction over 500 orbits, with the achieved
-  figure ~1 ppm on the validated reference configuration. The 100
-  ppm CI threshold absorbs cross-platform LLVM / libm variance.
+  figure 28 ppm bit-identical across Windows and Linux on x86_64.
 - **Cross-implementation parity portfolio**: against REBOUND's IAS15
   on four canonical scenarios spanning periodic 2-body, periodic
   3-body, chaotic 3-body, and sign-flipped 2-body regimes. All gated
