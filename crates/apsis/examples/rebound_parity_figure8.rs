@@ -23,7 +23,7 @@
 //! The full protocol — initial conditions, integrator settings, metrics,
 //! tolerances declared *a priori*, and the metric tier hierarchy — is
 //! specified in
-//! [`docs/experiments/2026-04-26-rebound-parity-figure8.md`](../../../../docs/experiments/2026-04-26-rebound-parity-figure8.md).
+//! [`paper/notebooks/2026-04-26-rebound-parity-figure8.md`](../../../../paper/notebooks/2026-04-26-rebound-parity-figure8.md).
 //!
 //! Constants in this file (`R*`, `V*`, `MASS`, `PERIOD`, `N_PERIODS`,
 //! `SAMPLES_PER_PERIOD`, `DT_FRACTION_OF_PERIOD`) mirror the protocol's IC
@@ -88,9 +88,9 @@ fn main() {
     // literals. Forcing additional correction here would introduce an
     // implementation-divergent f64 perturbation to ICs that should be
     // bit-identical between the apsis and REBOUND sides.
-    let body1 = Body::rocky(MASS).at(R1.0, R1.1).with_velocity(V1.0, V1.1).unsoftened();
-    let body2 = Body::rocky(MASS).at(R2.0, R2.1).with_velocity(V2.0, V2.1).unsoftened();
-    let body3 = Body::rocky(MASS).at(R3.0, R3.1).with_velocity(V3.0, V3.1).unsoftened();
+    let body1 = Body::rocky(MASS).at(R1.0, R1.1).with_velocity(V1.0, V1.1);
+    let body2 = Body::rocky(MASS).at(R2.0, R2.1).with_velocity(V2.0, V2.1);
+    let body3 = Body::rocky(MASS).at(R3.0, R3.1).with_velocity(V3.0, V3.1);
 
     // ── Integrator setup ────────────────────────────────────────────────── //
     let dt0 = PERIOD * DT_FRACTION_OF_PERIOD;
@@ -112,7 +112,7 @@ fn main() {
     let mut w = BufWriter::new(file);
 
     writeln!(w, "# REBOUND parity — Figure-8 choreography — apsis IAS15 side").unwrap();
-    writeln!(w, "# protocol: docs/experiments/2026-04-26-rebound-parity-figure8.md").unwrap();
+    writeln!(w, "# protocol: paper/notebooks/2026-04-26-rebound-parity-figure8.md").unwrap();
     writeln!(w, "# integrator: IAS15 (apsis)").unwrap();
     writeln!(w, "# units: canonical (G = 1)").unwrap();
     writeln!(w, "# mass={MASS}, period={PERIOD:.18e}").unwrap();
@@ -143,9 +143,9 @@ fn write_sample(w: &mut BufWriter<File>, sample: u64, sys: &System) {
         w,
         "{sample},{t:.18e},{x0:.18e},{y0:.18e},{vx0:.18e},{vy0:.18e},{x1:.18e},{y1:.18e},{vx1:.18e},{vy1:.18e},{x2:.18e},{y2:.18e},{vx2:.18e},{vy2:.18e},{e:.18e}",
         t = sys.t(),
-        x0 = b0.x, y0 = b0.y, vx0 = b0.vx, vy0 = b0.vy,
-        x1 = b1.x, y1 = b1.y, vx1 = b1.vx, vy1 = b1.vy,
-        x2 = b2.x, y2 = b2.y, vx2 = b2.vx, vy2 = b2.vy,
+        x0 = b0.pos_x, y0 = b0.pos_y, vx0 = b0.vel_x, vy0 = b0.vel_y,
+        x1 = b1.pos_x, y1 = b1.pos_y, vx1 = b1.vel_x, vy1 = b1.vel_y,
+        x2 = b2.pos_x, y2 = b2.pos_y, vx2 = b2.vel_x, vy2 = b2.vel_y,
         e = e_total,
     )
     .unwrap();
@@ -154,14 +154,15 @@ fn write_sample(w: &mut BufWriter<File>, sample: u64, sys: &System) {
 /// Total mechanical energy, computed inline so the formula is visible at
 /// the comparison site and matches REBOUND's `sim.energy()` convention
 /// exactly: KE = ½ Σ mᵢ vᵢ², PE = −Σᵢ<ⱼ G mᵢ mⱼ / rᵢⱼ, with G = 1 and
-/// no softening (verified by `Body::unsoftened()` on every body).
+/// no softening (default exact NewtonKernel, ε = 0).
 fn total_energy(bodies: &[Body]) -> f64 {
-    let ke: f64 = bodies.iter().map(|b| 0.5 * b.mass * (b.vx * b.vx + b.vy * b.vy)).sum();
+    let ke: f64 =
+        bodies.iter().map(|b| 0.5 * b.mass * (b.vel_x * b.vel_x + b.vel_y * b.vel_y)).sum();
     let mut pe = 0.0;
     for i in 0..bodies.len() {
         for j in (i + 1)..bodies.len() {
-            let dx = bodies[i].x - bodies[j].x;
-            let dy = bodies[i].y - bodies[j].y;
+            let dx = bodies[i].pos_x - bodies[j].pos_x;
+            let dy = bodies[i].pos_y - bodies[j].pos_y;
             let r = (dx * dx + dy * dy).sqrt();
             pe -= bodies[i].mass * bodies[j].mass / r;
         }

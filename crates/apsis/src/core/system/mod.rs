@@ -12,7 +12,7 @@
 //! |---|---|---|
 //! | Force engine | [`ForceModel`] | [`GravityForceModel`] (Barnes-Hut) |
 //! | Integrator | [`Integrator`] | [`VelocityVerlet`] |
-//! | Extra forces | [`PerturbationForce`] | none |
+//! | Extra forces | [`HamiltonianOperator`] / [`NonConservativeOperator`] | none |
 //!
 //! ## Module layout
 //!
@@ -21,12 +21,11 @@
 //! | `mod.rs` | [`System`] struct, constructors |
 //! | `step` | `step()` and conservation-law tracking |
 //! | `bodies` | body CRUD, names, COM calibration |
-//! | `config` | getters/setters (θ, dt, integrator, softening, …) |
+//! | `config` | getters/setters (θ, dt, integrator, kernel, …) |
 //! | `metrics` | [`Metrics`] assembly and recommended-dt |
 //! | `orbital` | osculating-element cache |
-//! | `snapshot` | save/load via [`SimSnapshot`] |
 //! | `perturbations` | non-gravitational force registration |
-//! | `helpers` | free functions (naming, closeness, trail count) |
+//! | `helpers` | free functions (naming, closeness) |
 
 pub(crate) mod bodies;
 pub(crate) mod config;
@@ -34,10 +33,12 @@ pub(crate) mod helpers;
 pub(crate) mod metrics;
 pub(crate) mod orbital;
 pub(crate) mod perturbations;
-pub(crate) mod snapshot;
+pub(crate) mod regime;
 pub(crate) mod step;
 #[cfg(test)]
 mod tests;
+
+pub use regime::MIN_RELATIVE_DENOMINATOR;
 
 use crate::core::adaptive::{DtAdaptationConfig, DtController, DtMode, ThetaController};
 use crate::core::diagnostics::{DiagnosticsComputer, SimulationDiagnostics};
@@ -45,7 +46,8 @@ use crate::core::hooks::HookRegistry;
 use crate::domain::body::Body;
 use crate::math::Vec3;
 use crate::physics::integrator::{
-    ForceModel, GravityForceModel, Integrator, IntegratorKind, PerturbationForce, make_integrator,
+    ForceModel, GravityForceModel, HamiltonianOperator, Integrator, IntegratorKind,
+    NonConservativeOperator, Operator, make_integrator,
 };
 use crate::physics::orbital::OrbitalElements;
 use crate::templates::instantiate::instantiate;
@@ -63,7 +65,7 @@ const DEFAULT_THETA: f64 = 0.6;
 /// adaptive dt via [`System::set_dt_mode`].
 const DEFAULT_DT: f64 = 1e-4;
 
-/// Default maximum quadtree depth. Covers scenes up to ~10⁹ spatial extent
+/// Default maximum octree depth. Covers scenes up to ~10⁹ spatial extent
 /// before degrading to leaf splits; rarely touched.
 const DEFAULT_MAX_DEPTH: usize = 32;
 
@@ -79,11 +81,14 @@ pub struct System {
     pub(crate) last_kinetic: f64,
     pub(crate) last_potential: f64,
 
-    /// Initial total energy (used as reference for relative error).
+    /// Initial total energy (used as reference for drift).
     pub(crate) initial_energy: Option<f64>,
 
-    /// Relative energy error (diagnostic only).
-    pub(crate) rel_energy_error: f64,
+    /// Absolute energy drift `E - E_initial` (signed).
+    pub(crate) abs_energy_error: f64,
+
+    /// Relative energy drift; `None` in precision-limited regime.
+    pub(crate) rel_energy_error: Option<f64>,
 
     /// Pluggable force model — default: Barnes-Hut gravity.
     ///
@@ -100,25 +105,15 @@ pub struct System {
     /// Cached osculating orbital elements — one slot per body.
     pub(crate) orbital_cache: Vec<Option<OrbitalElements>>,
 
-    /// Global Plummer softening scale: `ε = ε_default · softening_scale`.
-    pub(crate) softening_scale: f64,
-
     /// Diagnostics subsystem.
     pub(crate) diagnostics: DiagnosticsComputer,
     pub(crate) last_diag: SimulationDiagnostics,
 
-    /// `true` if the most recent step was accepted under duress (e.g. an
-    /// IAS15 sub-step that hit the `DT_MIN` floor without satisfying the
-    /// tolerance). Mirrors [`StepResult::degraded`]; surfaced via
-    /// [`Metrics::last_step_degraded`] so the UI can flag quality loss.
+    /// `true` if the most recent step was accepted under duress (an
+    /// IAS15 sub-step that hit the `DT_MIN` floor without satisfying
+    /// the tolerance). Mirrors [`StepResult::degraded`]; surfaced via
+    /// [`Metrics::last_step_degraded`].
     pub(crate) last_step_degraded: bool,
-
-    /// Optional cooperative deadline passed into [`IntegratorContext`] on
-    /// every [`System::step`] call. The physics-thread batch loop sets
-    /// this to its per-batch wall-clock cap so adaptive integrators can
-    /// short-circuit retry spins in pathological scenes. `None` means no
-    /// deadline (the default; fixed-step integrators always ignore it).
-    pub(crate) step_deadline: Option<std::time::Instant>,
 
     /// Step counter.
     pub(crate) steps: u64,
@@ -148,17 +143,17 @@ pub struct System {
     pub(crate) units: UnitSystem,
 
     /// Effective `G` in canonical units. Seeded from `units.g()` at
-    /// construction; the GUI's "G slider" can rescale it independently
-    /// via [`set_g_factor`](Self::set_g_factor).
+    /// construction; callers may rescale it independently via
+    /// [`set_g_factor`](Self::set_g_factor).
     pub(crate) g_factor: f64,
 
-    /// Initial angular momentum (z-component) — conservation baseline.
+    /// Initial Lz — conservation baseline.
     pub(crate) initial_angular_momentum: Option<f64>,
 
-    /// Relative angular momentum error.
-    pub(crate) rel_angular_momentum_error: f64,
+    /// Relative Lz drift; `None` in precision-limited regime.
+    pub(crate) rel_angular_momentum_error: Option<f64>,
 
-    /// Absolute angular momentum error.
+    /// Absolute Lz drift `|Lz - Lz_initial|`.
     pub(crate) abs_angular_momentum_error: f64,
 
     /// Human-readable label for each body, parallel to `bodies`.
@@ -168,11 +163,46 @@ pub struct System {
     /// Minimum pairwise separation from the most recent step.
     pub(crate) r_min: f64,
 
-    /// Maximum effective pairwise softening length from the most recent step.
-    pub(crate) softening_max: f64,
+    /// Optional close-encounter advisory threshold. When `Some(t)`, the
+    /// step loop classifies `r_min` against `t` via
+    /// [`crate::physics::encounter::EncounterFlag`] and emits a
+    /// `warn_diag!` event on the `Far`/`Approaching` → `Close`
+    /// transition. `None` (the default) disables the diagnostic.
+    pub(crate) close_encounter_threshold: Option<f64>,
 
-    /// Registered non-gravitational perturbation forces.
-    pub(crate) perturbations: Vec<Box<dyn PerturbationForce>>,
+    /// Encounter flag from the most recent step. Tracked across steps so
+    /// the warn-on-transition rule fires exactly once per descent into
+    /// the `Close` band; stays observable to external readers between
+    /// steps.
+    pub(crate) last_encounter_flag: crate::physics::encounter::EncounterFlag,
+
+    /// Hamiltonian-class perturbations (force = −∇V derivable, with
+    /// energy contribution summed into [`total_energy`](Self::total_energy)).
+    /// Symplectic integrators preserve invariants when only operators
+    /// of this class are registered.
+    pub(crate) hamiltonian_perturbations: Vec<Box<dyn HamiltonianOperator>>,
+
+    /// Non-conservative perturbations (force without a Hamiltonian:
+    /// drag, radiation reaction, dissipative coupling). Symplectic
+    /// integrators degrade silently when one of these is registered;
+    /// the registration site emits a `warn_diag` so the broken
+    /// invariant is documented.
+    pub(crate) non_conservative_perturbations: Vec<Box<dyn NonConservativeOperator>>,
+
+    /// Pure observers — read-only operators called at synchronized
+    /// step boundaries (Shadow Hamiltonian tracker, audit trail
+    /// emitters). Contribute no force, no energy.
+    pub(crate) observers: Vec<Box<dyn Operator>>,
+
+    /// Set of `(operator, bound)` pairs already reported via
+    /// `warn_diag` for regime-of-validity violations. The dedup state
+    /// is per-`System`-instance, lifetime-of-process: a violation that
+    /// is true at registration AND persists through dynamic checks
+    /// emits exactly one warning. Cleared by
+    /// [`reset_regime_warnings`](Self::reset_regime_warnings) when the
+    /// caller wants to re-arm the bus (e.g. after a deliberate
+    /// scenario change).
+    pub(crate) regime_warnings_emitted: std::collections::HashSet<(&'static str, &'static str)>,
 
     /// Reproducibility seed. Consumed by preset builders and cluster spawners.
     /// Persisted in snapshots so a run can be replayed exactly.
@@ -190,20 +220,23 @@ pub struct System {
     pub(crate) hooks: HookRegistry,
 
     /// Set by a [`Command::Stop`](crate::core::hooks::Command::Stop) request.
-    /// Headless runners honour this; the GUI may ignore it.
+    /// Honoured by the run loop; downstream callers may inspect it.
     pub(crate) stop_requested: bool,
 
     /// Accumulated world-space COM translation since the last call to
-    /// [`take_com_shift`](System::take_com_shift). The
-    /// [`TrailRecorder`](crate::core::trail::TrailRecorder) reads and clears
-    /// this each frame to keep trail positions aligned with the shifted bodies.
+    /// [`take_com_shift`](System::take_com_shift). Downstream visualisers
+    /// read and clear this each frame to keep overlays aligned with the
+    /// shifted bodies.
     pub(crate) pending_com_shift: (f32, f32),
 
     /// Dense-output snapshot from the most recent integration step.
-    /// Produced each step; consumed by the physics thread and forwarded to
-    /// [`RenderState`](crate::core::physics_thread::RenderState) for
-    /// sub-step position interpolation.
+    /// Produced each step; consumed by downstream interpolators (e.g.
+    /// trail samplers, sub-step position renderers) that need a smooth
+    /// curve between integrator step boundaries.
     pub(crate) last_dense_snapshot: Option<crate::physics::integrator::DenseSnapshot>,
+
+    /// Set on first [`System::finish`] call so subsequent ones are no-ops.
+    pub(crate) finished: bool,
 }
 
 impl System {
@@ -217,16 +250,16 @@ impl System {
     /// construction — the only way to "change units" is to rebuild
     /// the `System`.
     ///
-    /// Defaults for everything else (integrator, `dt`, θ, softening
-    /// scale, max quadtree depth) match the conventions of small-N
-    /// research scripts:
+    /// Defaults for everything else (integrator, `dt`, θ, kernel,
+    /// max octree depth) match the conventions of small-N research
+    /// scripts:
     ///
     /// | Parameter              | Default                     |
     /// |------------------------|-----------------------------|
     /// | Integrator             | Yoshida 4th order (symplectic) |
     /// | dt                     | `1e-4` simulation time units |
     /// | Barnes-Hut θ           | `0.6`                        |
-    /// | Max quadtree depth     | `32`                         |
+    /// | Max octree depth     | `32`                         |
     /// | Softening scale        | `1.0`                        |
     ///
     /// Override any of these with the fluent [`with_*`](Self::with_dt)
@@ -315,14 +348,14 @@ impl System {
         let total_mass = bodies.iter().map(|b| b.mass).sum();
         let names = {
             let mut acc: Vec<String> = Vec::with_capacity(bodies.len());
-            for b in &bodies {
-                acc.push(helpers::auto_name(b.material, &acc));
+            for _ in &bodies {
+                acc.push(helpers::auto_name(helpers::DEFAULT_NAME_PREFIX, &acc));
             }
             acc
         };
 
         let theta = force_model.theta();
-        let (r_min, softening_max) = helpers::compute_closeness(&bodies);
+        let r_min = helpers::compute_closeness(&bodies);
 
         Self {
             bodies,
@@ -330,26 +363,15 @@ impl System {
             last_kinetic: 0.0,
             last_potential: 0.0,
             initial_energy: None,
-            rel_energy_error: 0.0,
+            abs_energy_error: 0.0,
+            rel_energy_error: None,
             force_model,
             scratch_acc: Vec::new(),
-            // Yoshida 4 is the default: 4th-order symplectic composition with
-            // bounded per-step wall time, safe to drive from the render loop
-            // at realistic body counts. IAS15 (15th-order adaptive) remains
-            // available via `set_integrator` but is intentionally *not* the
-            // default — its per-step cost is unbounded in stiff regimes
-            // (dt → DT_MIN cascades), which makes it unsuitable for
-            // interactive playback at N ≳ a few hundred. REBOUND itself uses
-            // IAS15 only in offline script mode; the integrator-execution-
-            // profile ADR captures the rationale. Callers that want a
-            // precision run opt into IAS15 explicitly.
-            integrator: make_integrator(IntegratorKind::Yoshida4),
+            integrator: make_integrator(IntegratorKind::Ias15),
             orbital_cache: Vec::new(),
-            softening_scale: 1.0,
             diagnostics: DiagnosticsComputer::new(),
             last_diag: SimulationDiagnostics::default(),
             last_step_degraded: false,
-            step_deadline: None,
             steps: 0,
             t: 0.0,
             current_dt: dt,
@@ -370,18 +392,23 @@ impl System {
             g_factor: units.g(),
             units,
             initial_angular_momentum: None,
-            rel_angular_momentum_error: 0.0,
+            rel_angular_momentum_error: None,
             abs_angular_momentum_error: 0.0,
             names,
             r_min,
-            softening_max,
-            perturbations: Vec::new(),
+            close_encounter_threshold: None,
+            last_encounter_flag: crate::physics::encounter::EncounterFlag::Far,
+            hamiltonian_perturbations: Vec::new(),
+            non_conservative_perturbations: Vec::new(),
+            observers: Vec::new(),
+            regime_warnings_emitted: std::collections::HashSet::new(),
             seed: 0,
             hooks: HookRegistry::new(),
             stop_requested: false,
             pending_com_shift: (0.0, 0.0),
             last_dense_snapshot: None,
             template_source: None,
+            finished: false,
         }
     }
 
@@ -413,7 +440,7 @@ impl System {
         self
     }
 
-    /// Maximum Barnes-Hut quadtree depth.
+    /// Maximum Barnes-Hut octree depth.
     ///
     /// Most scenes do not need to touch this; the default (32) covers a
     /// spatial extent of ~10⁹ before degrading to forced leaf splits.
@@ -422,14 +449,6 @@ impl System {
     pub fn with_max_depth(mut self, max_depth: usize) -> Self {
         let theta = self.force_model.theta();
         self.set_force_model(Box::new(GravityForceModel::new(theta, max_depth)));
-        self
-    }
-
-    /// Global softening scale (multiplies each body's ε at pairwise evaluation).
-    #[inline]
-    #[must_use]
-    pub fn with_softening_scale(mut self, scale: f64) -> Self {
-        self.set_softening_scale(scale);
         self
     }
 
@@ -462,8 +481,9 @@ impl System {
         self.total_mass = 0.0;
         self.initial_energy = None;
         self.initial_angular_momentum = None;
-        self.rel_energy_error = 0.0;
-        self.rel_angular_momentum_error = 0.0;
+        self.rel_energy_error = None;
+        self.abs_energy_error = 0.0;
+        self.rel_angular_momentum_error = None;
         self.abs_angular_momentum_error = 0.0;
         let template = kind.build(seed);
         let named = instantiate(&template);

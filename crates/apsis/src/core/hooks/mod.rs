@@ -1,33 +1,12 @@
-//! Hook system — observer + command pattern for simulation extensions.
-//!
-//! # Design
-//!
-//! Hooks are user-supplied trait objects that observe the simulation and
-//! request mutations through a restricted command channel. The three rules:
-//!
-//! 1. **Observation is immutable.** Hooks receive [`HookContext`], a read-only
-//!    view. They cannot touch [`System`](crate::core::system::System) directly.
-//! 2. **Mutation is deferred.** Hooks return [`Command`]s which the orchestrator
-//!    applies after all hooks for the current phase have fired. This keeps
-//!    dispatch order independent of side-effects.
-//! 3. **Events are detected inside `step`, emitted afterwards.** Collision and
-//!    escape detection run on the integrated state; hooks see the events only
-//!    once the physics advance is complete. This preserves symplecticity —
-//!    hooks cannot interfere with the integrator.
-//!
-//! # Ordering
-//!
-//! Hooks are stored in a [`HookRegistry`] as [`HookEntry`]s sorted by
-//! `priority` (ascending — lower fires first). Ordering is stable across
-//! insertions at equal priority.
-//!
-//! # Example
+//! Hook extension point — observers register against the `System` and
+//! receive read-only [`HookContext`] views per phase. Mutations are
+//! deferred through [`Command`] and applied after dispatch.
 //!
 //! ```ignore
 //! struct EnergyLogger;
 //! impl SimHook for EnergyLogger {
 //!     fn post_step(&mut self, ctx: &HookContext<'_>) -> Vec<Command> {
-//!         eprintln!("t={:.3} ΔE/E={:.2e}", ctx.t, ctx.rel_energy_error);
+//!         eprintln!("t={:.3} ΔE/E={:?}", ctx.t, ctx.rel_energy_error);
 //!         Vec::new()
 //!     }
 //! }
@@ -35,22 +14,54 @@
 //! system.hooks_mut().register(0, Box::new(EnergyLogger));
 //! ```
 
-pub mod commands;
-pub mod context;
-pub mod events;
+use crate::domain::body::Body;
 
-pub use commands::Command;
-pub use context::{HookContext, HookPhase, HookPhaseKind};
-pub use events::{CollisionEvent, EscapeEvent};
+// ── Command ──────────────────────────────────────────────────────────────────
 
-/// A simulation hook. All methods default to no-ops so implementors only
-/// override the phases they care about.
-///
-/// # Contract
-///
-/// - Hooks **must not** panic — a panicking hook aborts the simulation.
-/// - Hooks **must not** retain references to `HookContext` beyond the call.
-/// - Mutations are expressed solely via returned [`Command`]s.
+/// Action a hook may request of the orchestrator. Applied in insertion
+/// order once all hooks for the current phase have fired.
+#[derive(Debug, Clone)]
+pub enum Command {
+    /// Stop the main loop after the current step completes.
+    Stop,
+}
+
+// ── Context ──────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Copy)]
+pub struct HookPhase(pub HookPhaseKind);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HookPhaseKind {
+    /// Before the integrator runs. Bodies still reflect the previous step.
+    PreStep,
+    /// After integration completes.
+    PostStep,
+    /// Lifecycle ending — hooks flush close-on-drop resources here.
+    Finish,
+}
+
+/// Read-only simulation view passed to a hook for the current phase.
+#[derive(Clone)]
+pub struct HookContext<'a> {
+    pub bodies: &'a [Body],
+    pub names: &'a [String],
+    pub t: f64,
+    pub dt: f64,
+    pub steps: u64,
+    pub rel_energy_error: Option<f64>,
+    pub rel_angular_momentum_error: Option<f64>,
+    pub phase: HookPhase,
+    /// Serialised integrator scratch, populated by the orchestrator
+    /// when at least one registered hook returns
+    /// [`SimHook::wants_resume_state`]`= true`. `None` otherwise.
+    pub resume_state: Option<Vec<u8>>,
+}
+
+// ── Trait ────────────────────────────────────────────────────────────────────
+
+/// A simulation hook. Methods default to no-ops; implementors override
+/// only the phases they care about.
 pub trait SimHook: Send {
     /// Human-readable identifier used in logs and diagnostics.
     fn name(&self) -> &'static str {
@@ -62,43 +73,39 @@ pub trait SimHook: Send {
         Vec::new()
     }
 
-    /// Fired once after integration and event detection complete.
+    /// Fired once after integration completes.
     fn post_step(&mut self, _ctx: &HookContext<'_>) -> Vec<Command> {
         Vec::new()
     }
 
-    /// Fired for each [`CollisionEvent`] detected after the step.
-    fn on_collision(&mut self, _event: &CollisionEvent, _ctx: &HookContext<'_>) -> Vec<Command> {
+    /// Fired once when the simulation lifecycle ends. Hooks holding open
+    /// resources flush them here. Returned commands are ignored.
+    fn on_finish(&mut self, _ctx: &HookContext<'_>) -> Vec<Command> {
         Vec::new()
     }
 
-    /// Fired for each [`EscapeEvent`] detected after the step.
-    fn on_escape(&mut self, _event: &EscapeEvent, _ctx: &HookContext<'_>) -> Vec<Command> {
-        Vec::new()
-    }
-
-    /// Periodic tick independent of step cadence. See
-    /// [`HookRegistry::heartbeat_interval`].
-    fn heartbeat(&mut self, _ctx: &HookContext<'_>) -> Vec<Command> {
-        Vec::new()
+    /// Whether this hook reads [`HookContext::resume_state`]. When any
+    /// registered hook returns `true`, the orchestrator calls
+    /// [`Integrator::resume_state`](crate::physics::integrator::traits::Integrator::resume_state)
+    /// before dispatch so the bytes are available.
+    fn wants_resume_state(&self) -> bool {
+        false
     }
 }
 
-/// A hook with its dispatch priority. Lower priorities fire first.
+// ── Registry ─────────────────────────────────────────────────────────────────
+
+/// A hook with its dispatch priority.
 pub struct HookEntry {
     pub priority: i32,
     pub hook: Box<dyn SimHook>,
 }
 
-/// Container for all registered hooks.
-///
-/// Dispatch order within a phase is strictly by ascending `priority`. Insertion
-/// order breaks ties (stable).
+/// Container for registered hooks. Dispatch order is ascending priority
+/// with stable ties (insertion order).
 #[derive(Default)]
 pub struct HookRegistry {
     entries: Vec<HookEntry>,
-    /// Step interval for heartbeat ticks. `0` disables heartbeats.
-    pub heartbeat_interval: u64,
 }
 
 impl HookRegistry {
@@ -112,7 +119,6 @@ impl HookRegistry {
         self.entries.insert(pos, HookEntry { priority, hook });
     }
 
-    /// Remove all registered hooks.
     pub fn clear(&mut self) {
         self.entries.clear();
     }
@@ -125,7 +131,12 @@ impl HookRegistry {
         self.entries.len()
     }
 
-    /// Dispatch `pre_step` to every hook and collect commands in order.
+    /// `true` when at least one registered hook reports
+    /// [`SimHook::wants_resume_state`].
+    pub fn any_wants_resume_state(&self) -> bool {
+        self.entries.iter().any(|e| e.hook.wants_resume_state())
+    }
+
     pub fn dispatch_pre_step(&mut self, ctx: &HookContext<'_>) -> Vec<Command> {
         let mut out = Vec::new();
         for entry in &mut self.entries {
@@ -134,7 +145,6 @@ impl HookRegistry {
         out
     }
 
-    /// Dispatch `post_step` to every hook and collect commands in order.
     pub fn dispatch_post_step(&mut self, ctx: &HookContext<'_>) -> Vec<Command> {
         let mut out = Vec::new();
         for entry in &mut self.entries {
@@ -143,32 +153,10 @@ impl HookRegistry {
         out
     }
 
-    pub fn dispatch_collision(
-        &mut self,
-        event: &CollisionEvent,
-        ctx: &HookContext<'_>,
-    ) -> Vec<Command> {
-        let mut out = Vec::new();
+    pub fn dispatch_finish(&mut self, ctx: &HookContext<'_>) {
         for entry in &mut self.entries {
-            out.extend(entry.hook.on_collision(event, ctx));
+            let _ = entry.hook.on_finish(ctx);
         }
-        out
-    }
-
-    pub fn dispatch_escape(&mut self, event: &EscapeEvent, ctx: &HookContext<'_>) -> Vec<Command> {
-        let mut out = Vec::new();
-        for entry in &mut self.entries {
-            out.extend(entry.hook.on_escape(event, ctx));
-        }
-        out
-    }
-
-    pub fn dispatch_heartbeat(&mut self, ctx: &HookContext<'_>) -> Vec<Command> {
-        let mut out = Vec::new();
-        for entry in &mut self.entries {
-            out.extend(entry.hook.heartbeat(ctx));
-        }
-        out
     }
 }
 
@@ -192,6 +180,20 @@ mod tests {
         }
     }
 
+    fn empty_ctx<'a>(phase: HookPhaseKind) -> HookContext<'a> {
+        HookContext {
+            bodies: &[],
+            names: &[],
+            t: 0.0,
+            dt: 0.0,
+            steps: 0,
+            rel_energy_error: None,
+            rel_angular_momentum_error: None,
+            phase: HookPhase(phase),
+            resume_state: None,
+        }
+    }
+
     #[test]
     fn priority_order_is_ascending_with_stable_ties() {
         let log = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -202,17 +204,7 @@ mod tests {
         reg.register(5, Box::new(Recorder { label: "mid_a", log: log.clone() }));
         reg.register(5, Box::new(Recorder { label: "mid_b", log: log.clone() }));
 
-        let ctx = HookContext {
-            bodies: &[],
-            names: &[],
-            t: 0.0,
-            dt: 0.0,
-            steps: 0,
-            rel_energy_error: 0.0,
-            rel_angular_momentum_error: 0.0,
-            phase: HookPhase(HookPhaseKind::PreStep),
-        };
-        reg.dispatch_pre_step(&ctx);
+        reg.dispatch_pre_step(&empty_ctx(HookPhaseKind::PreStep));
 
         assert_eq!(*log.lock().unwrap(), vec!["first", "mid_a", "mid_b", "late"]);
     }
@@ -225,16 +217,6 @@ mod tests {
         let mut reg = HookRegistry::new();
         reg.register(0, Box::new(Empty));
 
-        let ctx = HookContext {
-            bodies: &[],
-            names: &[],
-            t: 0.0,
-            dt: 0.0,
-            steps: 0,
-            rel_energy_error: 0.0,
-            rel_angular_momentum_error: 0.0,
-            phase: HookPhase(HookPhaseKind::PostStep),
-        };
-        assert!(reg.dispatch_post_step(&ctx).is_empty());
+        assert!(reg.dispatch_post_step(&empty_ctx(HookPhaseKind::PostStep)).is_empty());
     }
 }

@@ -1,6 +1,9 @@
 use crate::{
-    domain::materials::Material,
-    templates::{Template, TemplateBody, UnitSystem, builders::circular_orbit},
+    domain::body_preset,
+    templates::{
+        Template, TemplateBody, UnitSystem,
+        builders::{KG_M3_TO_SOLAR_AU3, circular_orbit},
+    },
 };
 
 pub fn jupiter_trojans(seed: u64) -> Template {
@@ -26,9 +29,12 @@ pub fn jupiter_trojans(seed: u64) -> Template {
         TemplateBody {
             name: Some("Sun"),
             mass: m_sun,
-            position: Some([0.0, 0.0]),
-            velocity: [0.0, 0.0],
-            material: Material::Star,
+            position: Some([0.0, 0.0, 0.0]),
+            velocity: [0.0, 0.0, 0.0],
+            class_override: None,
+            preset: &body_preset::STAR,
+            density: Some(1408.0 * KG_M3_TO_SOLAR_AU3),
+            albedo: None,
         },
         // Jupiter
         TemplateBody {
@@ -36,7 +42,10 @@ pub fn jupiter_trojans(seed: u64) -> Template {
             mass: m_jupiter,
             position: Some(j_pos),
             velocity: j_vel,
-            material: Material::Gas,
+            class_override: None,
+            preset: &body_preset::GAS,
+            density: Some(1326.0 * KG_M3_TO_SOLAR_AU3),
+            albedo: None,
         },
     ];
 
@@ -61,7 +70,10 @@ pub fn jupiter_trojans(seed: u64) -> Template {
                 mass: 1e-12,
                 position: Some(pos),
                 velocity: vel,
-                material: Material::Asteroid,
+                class_override: None,
+                preset: &body_preset::ASTEROID,
+                density: None,
+                albedo: None,
             });
         }
     }
@@ -71,7 +83,10 @@ pub fn jupiter_trojans(seed: u64) -> Template {
         description: "Sun–Jupiter system with Trojan asteroid clouds at L4 and L5.",
         bodies,
         display_scale: 1.0,
+        orbital_up: None,
+        default_view_distance: None,
         suggested_dt: Some(0.002),
+        suggested_integrator: None,
         units: UnitSystem::solar_au(),
     }
 }

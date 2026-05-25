@@ -1,22 +1,34 @@
 //! System-level radiation perturbation.
 //!
-//! Bridges [`force`](super::force) and the integrator's
-//! [`PerturbationForce`] trait. This is the only file in the radiation
-//! module that depends on [`Body`] or the integrator interface.
+//! Bridges [`force`](super::force) and the integrator's operator surface.
+//! This is the only file in the radiation module that depends on
+//! [`Body`] or the integrator interface.
 //!
 //! # Responsibility boundary
 //!
-//! - [`Material`] owns `q_pr()` — a scalar property of surface composition.
-//! - This module owns the translation from `(Body, Material)` → [`RadiationParams`],
-//!   because that requires knowing both the geometry (`physical_radius`) and
-//!   the composition (`q_pr`). Neither `Body` nor `Material` alone has enough
-//!   information.
+//! - [`Body`] carries `q_pr` directly as a physical property (set by the
+//!   construction preset for receiver classes — asteroids, comets, icy
+//!   bodies — and zero on emitters and large planets).
+//! - This module reads `(Body::q_pr, Body::physical_radius, Body::mass)`
+//!   and packs them into [`RadiationParams`] for the force kernels.
+//!
+//! # Operator classification
+//!
+//! `RadiationField` registers as
+//! [`NonConservativeOperator`](crate::physics::integrator::NonConservativeOperator)
+//! to accommodate the Poynting–Robertson drag branch
+//! (`include_pr_drag = true`). The pure radiation-pressure branch is
+//! Hamiltonian (`V_rad = −F_rad · x`); a future split into
+//! `RadiationPressure` + `PoyntingRobertsonDrag` would let symplectic
+//! integrators preserve invariants in the pressure-only configuration.
+//! Tracking issue: split deferred until a downstream consumer asks for
+//! the conservation guarantee.
 
 use std::f64::consts::PI;
 
 use crate::domain::body::Body;
 use crate::math::Vec3;
-use crate::physics::integrator::PerturbationForce;
+use crate::physics::integrator::{NonConservativeOperator, Operator};
 use crate::physics::radiation::force::{pr_drag_acceleration, radiation_acceleration};
 use crate::physics::radiation::params::RadiationParams;
 use crate::physics::radiation::source::RadiationSource;
@@ -92,12 +104,12 @@ impl RadiationField {
             }
 
             let source = RadiationSource {
-                x: src_body.x,
-                y: src_body.y,
-                z: src_body.z,
-                vx: src_body.vx,
-                vy: src_body.vy,
-                vz: src_body.vz,
+                x: src_body.pos_x,
+                y: src_body.pos_y,
+                z: src_body.pos_z,
+                vx: src_body.vel_x,
+                vy: src_body.vel_y,
+                vz: src_body.vel_z,
                 luminosity,
                 c,
             };
@@ -115,29 +127,19 @@ impl RadiationField {
     }
 }
 
-// ── PerturbationForce impl ────────────────────────────────────────────────────
+// ── Operator impls ────────────────────────────────────────────────────────────
 
-impl PerturbationForce for RadiationField {
-    /// Accumulates radiation accelerations for the full body slice (`offset = 0`).
-    fn accumulate(&self, bodies: &[Body], scratch_acc: &mut [Vec3]) {
-        self.accumulate_offset(bodies, scratch_acc, 0);
-    }
+impl Operator for RadiationField {}
 
-    /// Accumulates radiation accelerations for a sub-slice of bodies.
-    ///
-    /// `offset` is the global index of `bodies[0]` within `System::bodies`.
-    /// Used by [`System::apply_perturbations_planets`] during the
-    /// Wisdom–Holman sub-step, where `scratch_acc` covers only `bodies[1..]`
-    /// and the global index of each planet is `local_index + 1`.
-    fn accumulate_offset(&self, bodies: &[Body], scratch_acc: &mut [Vec3], offset: usize) {
-        for (local_i, (body, acc)) in bodies.iter().zip(scratch_acc.iter_mut()).enumerate() {
-            let global_i = local_i + offset;
-            let Some(params) = self.body_params.get(global_i).and_then(|p| p.as_ref()) else {
+impl NonConservativeOperator for RadiationField {
+    fn accumulate_force(&self, bodies: &[Body], acc: &mut [Vec3]) {
+        for (i, (body, a_slot)) in bodies.iter().zip(acc.iter_mut()).enumerate() {
+            let Some(params) = self.body_params.get(i).and_then(|p| p.as_ref()) else {
                 continue;
             };
 
-            let pos = Vec3::new(body.x, body.y, body.z);
-            let vel = Vec3::new(body.vx, body.vy, body.vz);
+            let pos = Vec3::new(body.pos_x, body.pos_y, body.pos_z);
+            let vel = Vec3::new(body.vel_x, body.vel_y, body.vel_z);
 
             let a = if self.include_pr_drag {
                 pr_drag_acceleration(pos, vel, params, &self.source)
@@ -145,27 +147,26 @@ impl PerturbationForce for RadiationField {
                 radiation_acceleration(pos, params, &self.source)
             };
 
-            *acc += a;
+            *a_slot += a;
         }
     }
 }
 
 // ── Private helper ────────────────────────────────────────────────────────────
 
-/// Derives [`RadiationParams`] for a body from its geometry and material.
+/// Derives [`RadiationParams`] for a body from its geometry and the
+/// `q_pr` it carries.
 ///
-/// Returns `None` if the material is not a radiation receiver (`q_pr == 0`),
-/// which covers stars, planets, and all massive bodies. This is the single
-/// site where [`Material::q_pr`] and [`Body::physical_radius`] are combined —
-/// neither type needs to know about the other.
+/// Returns `None` for non-receiver bodies (`q_pr == 0`), which covers
+/// stars, planets, and any user body that opted out via
+/// [`Body::with_q_pr(0.0)`].
 fn body_radiation_params(body: &Body) -> Option<RadiationParams> {
-    let q_pr = body.material.q_pr();
-    if q_pr <= 0.0 {
+    if body.q_pr <= 0.0 {
         return None;
     }
     Some(RadiationParams {
         area: PI * body.physical_radius * body.physical_radius,
         mass: body.mass,
-        q_pr,
+        q_pr: body.q_pr,
     })
 }

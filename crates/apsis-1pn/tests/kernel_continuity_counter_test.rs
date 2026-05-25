@@ -1,6 +1,6 @@
 //! Counter-test — `Continuity::C0` precondition violation.
 //!
-//! Pairs the existing Mercury / softening counter-test (which exercises the
+//! Pairs the Mercury / softened-kernel counter-test (which exercises the
 //! `Exactness::Exact` invariant) with a distinct physical signature for the
 //! `Continuity::Smooth` invariant declared by the 1PN correction.
 //!
@@ -9,11 +9,11 @@
 //! Configure an equal-mass two-body orbit in the e = 0.5, a = 1
 //! configuration — periapse r = 0.5, apoapse in a truncated Plummer
 //! potential close to 1.44 — and register
-//! [`PostNewtonian1PN::solar_units`] against a
+//! [`PostNewtonian1PN::for_units(UnitSystem::solar_canonical())`] against a
 //! [`TruncatedPlummerKernel`] with cutoff `R_c = 1`. The truncated kernel
 //! provides `Exactness::Modified + Continuity::C0`; 1PN requires
 //! `Exact + Smooth`. Two invariant violations are therefore expected on
-//! the single `add_perturbation` call.
+//! the single `add_hamiltonian_perturbation` call.
 //!
 //! With the orbit bound (outside scale α = 0.5 is the maximum-range
 //! case that keeps the orbit finite for these parameters) the trajectory
@@ -48,9 +48,7 @@ use apsis_1pn::PostNewtonian1PN;
 /// Equal-mass two-body configuration at e = 0.5, a = 1 (COM at origin).
 ///
 /// Body 1 is at `(−a(1−e)/2, 0)` with tangential velocity `+v_peri/2`.
-/// Body 2 is the mirror, giving zero COM position and momentum. Both
-/// bodies are explicitly unsoftened so that the only precondition
-/// violations come from the kernel itself.
+/// Body 2 is the mirror, giving zero COM position and momentum.
 fn two_body_eccentric() -> Vec<Body> {
     const A: f64 = 1.0;
     const E: f64 = 0.5;
@@ -62,15 +60,15 @@ fn two_body_eccentric() -> Vec<Body> {
     let v_peri_rel = (M_TOTAL * (1.0 + E) / (A * (1.0 - E))).sqrt();
     let v_each = v_peri_rel / 2.0;
 
-    let body1 = Body::rocky(M_EACH).at(-r_peri / 2.0, 0.0).with_velocity(0.0, -v_each).unsoftened();
-    let body2 = Body::rocky(M_EACH).at(r_peri / 2.0, 0.0).with_velocity(0.0, v_each).unsoftened();
+    let body1 = Body::rocky(M_EACH).at(-r_peri / 2.0, 0.0).with_velocity(0.0, -v_each);
+    let body2 = Body::rocky(M_EACH).at(r_peri / 2.0, 0.0).with_velocity(0.0, v_each);
     vec![body1, body2]
 }
 
 /// Current pair separation between the two bodies.
 fn pair_separation(bodies: &[Body]) -> f64 {
-    let dx = bodies[1].x - bodies[0].x;
-    let dy = bodies[1].y - bodies[0].y;
+    let dx = bodies[1].pos_x - bodies[0].pos_x;
+    let dy = bodies[1].pos_y - bodies[0].pos_y;
     (dx * dx + dy * dy).sqrt()
 }
 
@@ -139,18 +137,27 @@ fn truncated_kernel_plus_1pn_fires_both_exactness_and_continuity_warnings() {
     let captured: Arc<Mutex<Vec<Event>>> = Arc::new(Mutex::new(Vec::new()));
     let sink = captured.clone();
     let id = subscribe(move |event: &Event| {
-        // Collect every warn-level System event so we can inspect the
-        // `violated_invariant` field of each.
-        if event.level == Level::Warn {
+        // Collect only kernel-precondition warnings (carry the
+        // `violated_invariant` field). The equal-mass two-body setup
+        // also triggers a regime-of-validity warning from 1PN's
+        // mass-ratio bound (Hard severity), but that is a separate
+        // contract and tested elsewhere.
+        if event.level != Level::Warn {
+            return;
+        }
+        if event.fields.iter().any(|(k, _)| *k == "violated_invariant") {
             sink.lock().unwrap().push(event.clone());
         }
     });
 
     let kernel = Arc::new(TruncatedPlummerKernel::new(1.0));
-    let mut sys = System::new(two_body_eccentric(), UnitSystem::canonical())
+    let mut sys = System::new(two_body_eccentric(), UnitSystem::solar_canonical())
         .with_kernel(kernel)
         .with_integrator(IntegratorKind::Yoshida4);
-    sys.add_perturbation(Box::new(PostNewtonian1PN::solar_units()));
+    sys.add_hamiltonian_perturbation(Box::new(PostNewtonian1PN::for_units(
+        UnitSystem::solar_canonical(),
+    )))
+    .expect("kernel-continuity test: matched UnitSystem");
 
     let events = captured.lock().unwrap().clone();
     unsubscribe(id);
@@ -175,7 +182,7 @@ fn truncated_kernel_plus_1pn_fires_both_exactness_and_continuity_warnings() {
     assert_eq!(
         events.len(),
         2,
-        "expected exactly two invariant-violation diagnostics, got {}: {:?}",
+        "expected exactly two kernel-invariant violations (Exactness + Continuity), got {}: {:?}",
         events.len(),
         invariants
     );
@@ -194,9 +201,9 @@ fn truncated_kernel_plus_1pn_fires_both_exactness_and_continuity_warnings() {
 /// the spike magnitudes are several orders of magnitude above the
 /// smooth-kernel baseline drift.
 ///
-/// Running this with the smooth [`PlummerKernel`] on the same bodies
-/// would produce no spikes — the pair of `(baseline, violated)` assertions
-/// guards against false positives on the detection logic itself.
+/// Running this with the smooth default [`NewtonKernel::exact()`] on the
+/// same bodies would produce no spikes — the pair of `(baseline, violated)`
+/// assertions guards against false positives on the detection logic itself.
 #[test]
 #[ignore = "release-mode integration test; run with `cargo test --release -- --ignored`"]
 fn truncated_kernel_energy_spikes_are_in_bijection_with_r_cut_crossings() {
@@ -209,7 +216,7 @@ fn truncated_kernel_energy_spikes_are_in_bijection_with_r_cut_crossings() {
     const N_STEPS: usize = 60_000;
     const SPIKE_THRESHOLD: f64 = 1e-6;
 
-    // ── Reference run: smooth PlummerKernel at the same bodies ───────────
+    // ── Reference run: default smooth NewtonKernel at the same bodies ───
     //
     // Establishes the baseline drift amplitude the spike threshold must
     // clearly separate. The smooth kernel produces no impulsive events,
@@ -219,7 +226,7 @@ fn truncated_kernel_energy_spikes_are_in_bijection_with_r_cut_crossings() {
     // (the cached kinetic/potential fields are still at their default),
     // and pairing that against the first post-step value would look like
     // a spurious spike.
-    let mut sys_smooth = System::new(two_body_eccentric(), UnitSystem::canonical())
+    let mut sys_smooth = System::new(two_body_eccentric(), UnitSystem::solar_canonical())
         .with_integrator(IntegratorKind::Yoshida4)
         .with_dt(DT);
     sys_smooth.step();
@@ -249,11 +256,15 @@ fn truncated_kernel_energy_spikes_are_in_bijection_with_r_cut_crossings() {
 
     // ── Truncated run: same bodies, TruncatedPlummerKernel ───────────────
     let kernel = Arc::new(TruncatedPlummerKernel::new(R_CUT));
-    let mut sys_trunc = System::new(two_body_eccentric(), UnitSystem::canonical())
+    let mut sys_trunc = System::new(two_body_eccentric(), UnitSystem::solar_canonical())
         .with_kernel(kernel)
         .with_integrator(IntegratorKind::Yoshida4)
         .with_dt(DT);
-    sys_trunc.add_perturbation(Box::new(PostNewtonian1PN::solar_units()));
+    sys_trunc
+        .add_hamiltonian_perturbation(Box::new(PostNewtonian1PN::for_units(
+            UnitSystem::solar_canonical(),
+        )))
+        .expect("kernel-continuity test: matched UnitSystem");
     sys_trunc.step();
 
     let mut samples: Vec<Sample> = Vec::with_capacity(N_STEPS);

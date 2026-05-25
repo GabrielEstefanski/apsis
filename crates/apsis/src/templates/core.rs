@@ -8,8 +8,8 @@
 //!
 //! `TemplateBody` is intentionally a *descriptor*, not a `Body`. It holds only
 //! the quantities that the scenario author specifies explicitly; all derived
-//! physical properties (density, physical radius, softening)
-//! are computed by `Body::of` at instantiation time using the material model.
+//! physical properties (density, physical radius) are computed by `Body::of`
+//! at instantiation time using the material model.
 //!
 //! This separation means templates are:
 //! - **Compact** — no redundant derived fields.
@@ -29,63 +29,120 @@
 //! (planet + moon) must add the parent velocity explicitly — see the solar
 //! system template for the canonical pattern.
 
-use crate::domain::materials::Material;
+use crate::domain::body_preset::BodyPreset;
 
 // ── TemplateBody ──────────────────────────────────────────────────────────────
 
 /// Descriptor for one body in a simulation template.
 ///
-/// All fields that can be derived from [`Material`] and mass are omitted here
-/// and computed at instantiation time by [`Body::of`].  Only the quantities
-/// that cannot be derived — or that the scenario author wants to override —
-/// are present.
+/// Templates pair a mass with a [`BodyPreset`] reference; everything
+/// else (density, colour, q_pr, luminosity) is derived at
+/// instantiation time from the preset. Only the quantities the
+/// scenario author wants to override (position, velocity, optional
+/// name) are stored here directly.
 ///
 /// ## What is *not* stored here
 ///
-/// | Derived quantity    | Computed by          |
-/// |---------------------|----------------------|
-/// | Bulk density        | `density(material, mass)` |
-/// | Physical radius     | `radius_from_mass_density(...)` |
-/// | Softening length    | `default_softening(mass)` |
-/// | Display colour      | `material.props().base_color` |
+/// | Derived quantity    | Computed by                            |
+/// |---------------------|----------------------------------------|
+/// | Bulk density        | `preset.density.density_at(mass)`      |
+/// | Physical radius     | `radius_from_density_mass(ρ, m)`       |
+/// | Display colour      | `preset.default_color`                 |
+/// | Radiation `q_pr`    | `preset.default_q_pr`                  |
+/// | Luminosity          | `preset.luminosity.compute(...)`       |
 #[derive(Debug, Clone, Copy)]
 pub struct TemplateBody {
-    /// Optional authored display name preserved at instantiation time.
+    /// Optional authored display name preserved at instantiation
+    /// time. When `None`, the instantiator falls back to the preset's
+    /// `display_name` (e.g. `"Asteroid"`, `"Star"`).
     pub name: Option<&'static str>,
 
     /// Mass [simulation mass units, e.g. M_☉].
     pub mass: f64,
 
-    /// Material class — determines density, colour, and collision behaviour.
-    pub material: Material,
+    /// Construction preset — determines colour, q_pr, and (optionally)
+    /// luminosity at instantiation. The preset's density model is also
+    /// consulted unless `density` overrides it. Reference is held by
+    /// `&'static` so the built-in catalogue is zero-cost; user-defined
+    /// presets can be `Box::leak`'d into the same shape.
+    pub preset: &'static BodyPreset,
 
-    /// Initial position [simulation length units].
+    /// Initial position `[x, y, z]` [simulation length units].
     ///
-    /// `None` defers placement to the instantiation logic (e.g. the engine
-    /// applies a centre-of-mass correction or places bodies on a grid).
-    pub position: Option<[f64; 2]>,
+    /// `None` defers placement to the instantiation logic (e.g. the
+    /// engine applies a centre-of-mass correction or places bodies
+    /// on a grid). 2D scenarios set `z = 0`.
+    pub position: Option<[f64; 3]>,
 
-    /// Initial velocity in the inertial simulation frame [length / time].
-    pub velocity: [f64; 2],
+    /// Initial velocity `[vx, vy, vz]` in the inertial simulation
+    /// frame [length / time]. 2D scenarios set `vz = 0`.
+    pub velocity: [f64; 3],
+
+    /// Override the preset's [`default_class`](BodyPreset::default_class).
+    ///
+    /// `None` keeps the preset's natural class (a `ROCKY` body lands
+    /// as [`BodyClass::Planet`], an `ICY` body as
+    /// [`BodyClass::Moon`]). Use `Some(...)` to tag a body whose role
+    /// in the scene differs from the preset's default — e.g. Earth's
+    /// Moon is a `ROCKY` body that should render as
+    /// [`BodyClass::Moon`].
+    pub class_override: Option<crate::domain::body_preset::BodyClass>,
+
+    /// Optional explicit density [simulation units].
+    ///
+    /// When `Some(ρ)`, the instantiator overrides whatever the
+    /// preset's density model would have produced for this `mass`.
+    /// The point: templates that quote real bodies (Earth, Jupiter,
+    /// Sun, …) supply published densities directly so the rendered
+    /// `physical_radius` tracks the NASA fact sheet to within a few
+    /// percent rather than being clamped to the preset's
+    /// power-law-EOS bounds. Templates whose bodies are heuristic
+    /// (asteroid swarms, ad-hoc test particles) leave this `None` and
+    /// inherit the preset model.
+    pub density: Option<f64>,
+
+    /// Optional Bond-albedo override. Templates that quote real
+    /// bodies pass the published Bond value (Earth `0.306`, Moon
+    /// `0.110`, Vesta `0.42`, etc.); bulk-anonymous bodies leave
+    /// `None` and inherit the preset's class-typical placeholder.
+    pub albedo: Option<f64>,
 }
 
 impl TemplateBody {
     /// Construct a body at rest with no spin.
     ///
-    /// Convenience constructor for the common case where position and velocity
-    /// will be filled in by the scenario builder.
-    pub fn at_rest(mass: f64, material: Material) -> Self {
-        Self { name: None, mass, material, position: None, velocity: [0.0, 0.0] }
+    /// Convenience constructor for the common case where position and
+    /// velocity will be filled in by the scenario builder.
+    pub fn at_rest(mass: f64, preset: &'static BodyPreset) -> Self {
+        Self {
+            name: None,
+            mass,
+            preset,
+            position: None,
+            velocity: [0.0, 0.0, 0.0],
+            class_override: None,
+            density: None,
+            albedo: None,
+        }
     }
 
     /// Construct a body with explicit position and velocity, no spin.
     pub fn with_state(
         mass: f64,
-        material: Material,
-        position: [f64; 2],
-        velocity: [f64; 2],
+        preset: &'static BodyPreset,
+        position: [f64; 3],
+        velocity: [f64; 3],
     ) -> Self {
-        Self { name: None, mass, material, position: Some(position), velocity }
+        Self {
+            name: None,
+            mass,
+            preset,
+            position: Some(position),
+            velocity,
+            class_override: None,
+            density: None,
+            albedo: None,
+        }
     }
 }
 
@@ -243,12 +300,43 @@ pub struct Template {
     /// first loaded.  Users can zoom freely after that.
     pub display_scale: f64,
 
+    /// Orbital plane normal in world coordinates, normalised. The
+    /// canvas uses this to orient the default camera so the scenario
+    /// loads with the orbital plane visible. `None` falls back to
+    /// `[0.0, 0.0, 1.0]` — the convention `state_from_elements` writes
+    /// heliocentric ecliptic templates into.
+    pub orbital_up: Option<[f64; 3]>,
+
+    /// Suggested camera-to-pivot distance for the initial view, in
+    /// world units. Set to frame the bodies the author considers
+    /// "primary" (e.g. inner planets for solar_system) instead of the
+    /// bounding sphere of all bodies, which collapses the interesting
+    /// part to a dot when scales span orders of magnitude. `None`
+    /// falls back to bounding-sphere fit.
+    pub default_view_distance: Option<f64>,
+
     /// Suggested simulation time-step [simulation time units].
     ///
     /// `None` lets the integrator choose an adaptive step.  Set this for
     /// scenarios that require a specific cadence (e.g. close binary stars that
     /// need a small fixed step for accuracy).
     pub suggested_dt: Option<f64>,
+
+    /// Suggested integrator for this scenario.
+    ///
+    /// `None` means the template has no preference — the user's existing
+    /// integrator choice (or the app default, Yoshida 4) wins. `Some(kind)`
+    /// is a recommendation; the app-side consumer is expected to enforce
+    /// the hierarchy
+    ///
+    /// ```text
+    /// explicit user choice  >  template suggestion  >  app default
+    /// ```
+    ///
+    /// In-tree templates currently use this for stiff close-encounter
+    /// problems (Pythagorean → Mercurius) and chaotic regimes that
+    /// benefit from adaptive Gauss–Radau (Chaotic Ejection → IAS15).
+    pub suggested_integrator: Option<crate::physics::integrator::IntegratorKind>,
 
     /// Physical unit system used by this template.
     ///
@@ -280,20 +368,21 @@ impl Template {
     /// to ensure the system has zero net linear momentum in the simulation
     /// frame.  Bodies with `position = None` are included in the momentum sum
     /// using `velocity` as-is.
-    pub fn centre_of_momentum_velocity(&self) -> [f64; 2] {
+    pub fn centre_of_momentum_velocity(&self) -> [f64; 3] {
         let total = self.total_mass();
         if total <= 0.0 {
-            return [0.0, 0.0];
+            return [0.0, 0.0, 0.0];
         }
         let vx = self.bodies.iter().map(|b| b.mass * b.velocity[0]).sum::<f64>() / total;
         let vy = self.bodies.iter().map(|b| b.mass * b.velocity[1]).sum::<f64>() / total;
-        [vx, vy]
+        let vz = self.bodies.iter().map(|b| b.mass * b.velocity[2]).sum::<f64>() / total;
+        [vx, vy, vz]
     }
 
     /// Centre of mass position, computed only over bodies with known positions.
     ///
     /// Returns `None` if no body has a known position.
-    pub fn centre_of_mass(&self) -> Option<[f64; 2]> {
+    pub fn centre_of_mass(&self) -> Option<[f64; 3]> {
         let known: Vec<_> = self.bodies.iter().filter(|b| b.position.is_some()).collect();
         if known.is_empty() {
             return None;
@@ -304,6 +393,7 @@ impl Template {
         }
         let cx = known.iter().map(|b| b.mass * b.position.unwrap()[0]).sum::<f64>() / total;
         let cy = known.iter().map(|b| b.mass * b.position.unwrap()[1]).sum::<f64>() / total;
-        Some([cx, cy])
+        let cz = known.iter().map(|b| b.mass * b.position.unwrap()[2]).sum::<f64>() / total;
+        Some([cx, cy, cz])
     }
 }

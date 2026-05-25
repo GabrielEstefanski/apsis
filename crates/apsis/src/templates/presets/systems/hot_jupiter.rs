@@ -8,7 +8,7 @@
 //! cadence rather than a study of migration itself.
 
 use crate::{
-    domain::materials::Material,
+    domain::body_preset,
     templates::{Template, TemplateBody, UnitSystem, builders::circular_orbit},
 };
 
@@ -27,20 +27,29 @@ pub fn hot_jupiter(_seed: u64) -> Template {
             TemplateBody {
                 name: Some("Star"),
                 mass: m_star,
-                position: Some([0.0, 0.0]),
-                velocity: [0.0, 0.0],
-                material: Material::Star,
+                position: Some([0.0, 0.0, 0.0]),
+                velocity: [0.0, 0.0, 0.0],
+                class_override: None,
+                preset: &body_preset::STAR,
+                density: None,
+                albedo: None,
             },
             TemplateBody {
                 name: Some("Hot Jupiter"),
                 mass: m_jupiter,
                 position: Some(jupiter_pos),
                 velocity: jupiter_vel,
-                material: Material::Gas,
+                class_override: None,
+                preset: &body_preset::GAS,
+                density: None,
+                albedo: None,
             },
         ],
         display_scale: 50.0,
+        orbital_up: None,
+        default_view_distance: None,
         suggested_dt: Some(0.0001),
+        suggested_integrator: None,
         units: UnitSystem::solar_au(),
     }
 }

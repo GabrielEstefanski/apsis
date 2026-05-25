@@ -1,8 +1,18 @@
 /target
-/target-3d
-/target-tests
 .venv
-/memory
-/saves
-/records
-/out
+
+# Maturin-built extension modules (output of `maturin develop`).
+apsis/*.pyd
+apsis/*.so
+apsis/*.dylib
+
+# Python bytecode caches.
+__pycache__/
+*.pyc
+*.pyo
+
+# Editor / IDE config.
+.vscode/
+
+# Runtime record files (apsis-record binary format).
+*.apsis

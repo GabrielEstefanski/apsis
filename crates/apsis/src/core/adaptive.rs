@@ -25,16 +25,16 @@
 ///    constant while the physical step size adapts; still symplectic. Not
 ///    implemented here.
 ///
-/// `Adaptive` mode is provided as an **interactive convenience only**:
-/// exploring a new scenario, finding a stable dt, or running qualitative
-/// demonstrations. It must not be used for any run whose results are cited.
+/// `Adaptive` mode is provided as a **convenience for exploration and
+/// dt tuning only** — finding a stable dt, qualitative demonstrations.
+/// It must not be used for any run whose results are cited.
 ///
 /// # Selection guide
 ///
 /// | Mode | Energy error | Suitable for |
 /// |------|-------------|--------------|
 /// | [`Fixed`] | Bounded, oscillatory — O(dtᵖ) amplitude | Long-term integration, publication |
-/// | [`Adaptive`] | Potentially secular drift | Interactive exploration, dt tuning |
+/// | [`Adaptive`] | Potentially secular drift | Scenario exploration, dt tuning |
 ///
 /// # References
 ///
@@ -69,9 +69,21 @@ pub enum DtMode {
     /// The severity depends on the rate and magnitude of dt changes, but even
     /// small variations accumulate over long integrations.
     ///
-    /// **Use only for interactive exploration and initial condition setup.**
+    /// **Use only for scenario exploration and initial condition setup.**
     /// Switch to [`Fixed`] before any run whose output will be analysed or cited.
     Adaptive,
+}
+
+impl DtMode {
+    /// Stable short label for serialisation / display. Used by
+    /// `apsis::records` to write `integrator.dt_mode` in the record
+    /// header without coupling to `Debug` formatting.
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Fixed => "Fixed",
+            Self::Adaptive => "Adaptive",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -195,10 +207,23 @@ impl ThetaController {
     }
 }
 
+/// Whether the dt controller has a well-conditioned relative-error
+/// signal to feed back on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FeedbackMode {
+    /// Relative error is defined; controller adjusts dt against
+    /// `target_rel_energy_error`.
+    Active,
+    /// `|E_initial|` is below the conditioning threshold; controller
+    /// disables feedback and returns `user_dt` unchanged.
+    DisabledPrecisionLimited,
+}
+
 #[derive(Debug, Clone)]
 pub struct DtController {
     pub config: DtAdaptationConfig,
     last_dt: f64,
+    feedback_mode: FeedbackMode,
 }
 
 impl DtController {
@@ -215,17 +240,23 @@ impl DtController {
                 dt_slew_fraction: config.dt_slew_fraction.clamp(0.02, 1.0),
             },
             last_dt: 0.0,
+            feedback_mode: FeedbackMode::Active,
         }
     }
 
     pub fn reset(&mut self) {
         self.last_dt = 0.0;
+        self.feedback_mode = FeedbackMode::Active;
+    }
+
+    pub fn feedback_mode(&self) -> FeedbackMode {
+        self.feedback_mode
     }
 
     pub fn update(
         &mut self,
         proposed_dt: f64,
-        rel_energy_error: f64,
+        rel_energy_error: Option<f64>,
         stats: AccelerationStats,
     ) -> f64 {
         let cfg = &self.config;
@@ -233,16 +264,26 @@ impl DtController {
         let clamp = |dt: f64| dt.clamp(cfg.min_dt, cfg.max_dt);
 
         if !cfg.enabled {
+            self.feedback_mode = FeedbackMode::Active;
             let dt = clamp(proposed_dt);
             self.last_dt = dt;
             return dt;
         }
 
+        let Some(rel) = rel_energy_error else {
+            self.feedback_mode = FeedbackMode::DisabledPrecisionLimited;
+            let dt = clamp(proposed_dt);
+            self.last_dt = dt;
+            return dt;
+        };
+
+        self.feedback_mode = FeedbackMode::Active;
+
         let prev = if self.last_dt > 0.0 { self.last_dt } else { clamp(proposed_dt) };
 
         let mut dt = clamp(proposed_dt).min(prev);
 
-        let ratio = (rel_energy_error.abs() / cfg.target_rel_energy_error).max(1e-12);
+        let ratio = (rel.abs() / cfg.target_rel_energy_error).max(1e-12);
 
         let energy_scale =
             if ratio > 1.0 { 1.0 / (1.0 + 0.5 * (ratio - 1.0)) } else { 1.0 + 0.2 * (1.0 - ratio) };
@@ -271,5 +312,51 @@ impl DtController {
 
     pub fn last_dt(&self) -> f64 {
         self.last_dt
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn config() -> DtAdaptationConfig {
+        DtAdaptationConfig {
+            enabled: true,
+            min_dt: 1e-9,
+            max_dt: 1e6,
+            target_rel_energy_error: 1e-6,
+            accel_epsilon: 0.1,
+            grow_limit: 1.2,
+            shrink_limit: 0.5,
+            dt_slew_fraction: 0.1,
+        }
+    }
+
+    fn stats() -> AccelerationStats {
+        AccelerationStats { max_acc: 1.0, jerk: 0.0 }
+    }
+
+    #[test]
+    fn feedback_mode_active_when_rel_error_is_some() {
+        let mut ctrl = DtController::new(config());
+        ctrl.update(1e-3, Some(1e-9), stats());
+        assert_eq!(ctrl.feedback_mode(), FeedbackMode::Active);
+    }
+
+    #[test]
+    fn feedback_mode_disabled_when_rel_error_is_none() {
+        let mut ctrl = DtController::new(config());
+        let out = ctrl.update(1e-3, None, stats());
+        assert_eq!(ctrl.feedback_mode(), FeedbackMode::DisabledPrecisionLimited);
+        assert_eq!(out, 1e-3, "proposed_dt returned unchanged in precision-limited regime");
+    }
+
+    #[test]
+    fn feedback_mode_transitions_when_signal_recovers() {
+        let mut ctrl = DtController::new(config());
+        ctrl.update(1e-3, None, stats());
+        assert_eq!(ctrl.feedback_mode(), FeedbackMode::DisabledPrecisionLimited);
+        ctrl.update(1e-3, Some(1e-9), stats());
+        assert_eq!(ctrl.feedback_mode(), FeedbackMode::Active);
     }
 }

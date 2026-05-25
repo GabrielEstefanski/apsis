@@ -1,0 +1,24 @@
+[package]
+name = "apsis-radiation"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+rust-version.workspace = true
+readme = "README.md"
+description = "Out-of-tree perturbation crate for apsis. Radiation pressure (Hamiltonian) + Poynting–Robertson drag (non-conservative) per Burns, Lamy & Soter (1979). First federation-grade publisher of NonConservativeOperator."
+
+[lib]
+path = "src/lib.rs"
+
+# ── Intentional minimal dependency set ────────────────────────────────────────
+#
+# Mirrors apsis-1pn's "no dependencies beyond apsis itself" policy. If this
+# crate needs something the public API doesn't expose, that's a gap in the
+# API and should be surfaced upstream, not papered over here.
+[dependencies]
+apsis = { path = "../apsis" }

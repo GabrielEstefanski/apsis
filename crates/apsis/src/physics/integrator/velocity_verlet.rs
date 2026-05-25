@@ -11,7 +11,8 @@
 
 use crate::domain::body::Body;
 use crate::math::Vec3;
-use crate::physics::integrator::helpers::{apply_perturbations, evaluate, scale_acc_and_pe};
+use crate::physics::integrator::helpers::{evaluate, scale_acc_and_pe};
+use crate::physics::integrator::operator_dispatch::accumulate_perturbation_forces;
 use crate::physics::integrator::primitives::{drift, kick};
 use crate::physics::integrator::traits::{
     Integrator, IntegratorContext, IntegratorKind, StepResult,
@@ -28,18 +29,26 @@ impl Integrator for VelocityVerlet {
         dt: f64,
         acc: &mut Vec<Vec3>,
     ) -> StepResult {
-        // F(t) → scale → perturbations → kick(½dt)
         let raw_pe = evaluate(bodies, ctx.force, acc);
         scale_acc_and_pe(acc, ctx.g_factor, raw_pe);
-        apply_perturbations(bodies, acc, ctx.perturbations);
+        accumulate_perturbation_forces(
+            bodies,
+            acc,
+            ctx.hamiltonian_perturbations,
+            ctx.non_conservative_perturbations,
+        );
 
         kick(bodies, acc, 0.5 * dt);
         drift(bodies, dt);
 
-        // F(t+dt) → scale → perturbations → kick(½dt)
         let raw_pe = evaluate(bodies, ctx.force, acc);
         let pe = scale_acc_and_pe(acc, ctx.g_factor, raw_pe);
-        apply_perturbations(bodies, acc, ctx.perturbations);
+        accumulate_perturbation_forces(
+            bodies,
+            acc,
+            ctx.hamiltonian_perturbations,
+            ctx.non_conservative_perturbations,
+        );
 
         kick(bodies, acc, 0.5 * dt);
 

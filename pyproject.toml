@@ -1,0 +1,117 @@
+# ── Build system ──────────────────────────────────────────────────────────────
+
+[build-system]
+requires = ["maturin>=1.7,<2.0"]
+build-backend = "maturin"
+
+# ── Project metadata (PEP 621) ────────────────────────────────────────────────
+
+[project]
+name = "apsis"
+description = "N-body simulation library — federated operator model with single Python distribution."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "Apache-2.0" }
+authors = [
+    { name = "Gabriel Braga Estefanski", email = "gabrielbragaestefanski@gmail.com" },
+]
+keywords = [
+    "n-body",
+    "astrophysics",
+    "simulation",
+    "ias15",
+    "post-newtonian",
+    "gravity",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Rust",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: Astronomy",
+    "Topic :: Scientific/Engineering :: Physics",
+    "Typing :: Typed",
+]
+
+dependencies = [
+    "numpy >= 1.20",
+]
+
+dynamic = ["version"]
+
+[project.optional-dependencies]
+dev = [
+    "pytest >= 7.0",
+    "pytest-cov >= 4.0",
+    "mypy >= 1.0",
+    "ruff >= 0.5",
+]
+
+docs = [
+    "sphinx >= 7.0",
+    "sphinx-rtd-theme >= 2.0",
+    "matplotlib >= 3.5",
+]
+
+[project.urls]
+Homepage = "https://github.com/GabrielEstefanski/apsis"
+Source = "https://github.com/GabrielEstefanski/apsis"
+Documentation = "https://github.com/GabrielEstefanski/apsis#readme"
+Issues = "https://github.com/GabrielEstefanski/apsis/issues"
+
+# ── Maturin configuration ─────────────────────────────────────────────────────
+#
+# `manifest-path` reaches into the Cargo workspace for the cdylib crate
+# (`crates/apsis-python`). The Python package source lives at the repo
+# root in `apsis/`, so `python-source = "."` and maturin finds it as a
+# sibling of pyproject.toml named after `[project] name`.
+#
+# This decouples the Rust workspace layout (`crates/*`) from the Python
+# distribution layout (`apsis/` at root): contributors see the Python
+# package as the first thing in the repo, the cdylib lives in the
+# Cargo workspace alongside other crates, and maturin bridges the two.
+
+[tool.maturin]
+features = ["pyo3/extension-module"]
+manifest-path = "crates/apsis-python/Cargo.toml"
+python-source = "."
+module-name = "apsis._native"
+strip = true
+
+# ── Tooling configuration ─────────────────────────────────────────────────────
+
+[tool.mypy]
+python_version = "3.9"
+strict = true
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+files = ["apsis", "tests"]
+
+[tool.ruff]
+target-version = "py39"
+line-length = 100
+extend-exclude = ["apsis/_native.pyi"]
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "B", "UP", "SIM", "RUF"]
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+testpaths = ["python-tests"]
+addopts = "-ra --strict-markers"
+
+[tool.pyright]
+include = ["apsis", "tests"]
+exclude = ["**/__pycache__", "**/.venv"]
+extraPaths = ["."]
+typeCheckingMode = "strict"
+reportMissingImports = "warning"
+reportMissingTypeStubs = "warning"

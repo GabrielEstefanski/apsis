@@ -99,14 +99,11 @@ pub fn kepler_e099() -> ScenarioSpec {
 /// (t∈[0,10]) covers the strongest encounter phase without letting
 /// chaos amplify bit-level noise into macroscopic trajectory divergence.
 pub fn pythagorean() -> ScenarioSpec {
-    let mut bodies = vec![
+    let bodies = vec![
         Body::rocky(3.0).at(1.0, 3.0).with_velocity(0.0, 0.0),
         Body::rocky(4.0).at(-2.0, -1.0).with_velocity(0.0, 0.0),
         Body::rocky(5.0).at(1.0, -1.0).with_velocity(0.0, 0.0),
     ];
-    for b in &mut bodies {
-        b.softening = 0.0;
-    }
     ScenarioSpec {
         name: "pythagorean",
         bodies,
@@ -118,14 +115,14 @@ pub fn pythagorean() -> ScenarioSpec {
 }
 
 /// Uniform disk cluster of 50 equal-mass bodies with circular velocities
-/// around the centre of mass. Seeded random layout, softening applied
-/// to keep pairwise forces bounded when bodies pass close to each other.
+/// around the centre of mass. Seeded random layout under the default
+/// exact `NewtonKernel`.
 ///
 /// This is the first scenario in the harness with non-trivial N. Its
 /// purpose is to expose how the IAS15 phases scale with body count —
-/// specifically, the transition where `evaluate` (O(N²) pairwise sum
-/// below `EXACT_THRESHOLD = 64`) overtakes the other phases, and to
-/// give `update_g_and_b` (linear in N) a large enough body axis to
+/// specifically, the transition where `evaluate` (O(N²) pairwise sum)
+/// overtakes the other phases, and to give `update_g_and_b` (linear
+/// in N) a large enough body axis to
 /// make SIMD / SoA layout arguments testable rather than speculative.
 ///
 /// The seed is pinned (`0xc1a55e1` — "cluster seed") so the scenario
@@ -137,12 +134,9 @@ pub fn pythagorean() -> ScenarioSpec {
 pub fn cluster_n50() -> ScenarioSpec {
     const N: usize = 50;
     const R_DISK: f64 = 1.0;
-    const SOFTENING: f64 = 0.02;
     const SEED: u64 = 0xc1a55e1;
 
-    // Total mass 1 → each body mass 1/N. Keeps pairwise force at
-    // softened close approach bounded by m_i·m_j / ε² = (1/N²) / ε²
-    // which is well within f64 dynamic range for N=50, ε=0.02.
+    // Total mass 1 → each body mass 1/N.
     let mass_per_body = 1.0 / N as f64;
 
     let mut rng = SmallRng::seed_from_u64(SEED);
@@ -173,8 +167,7 @@ pub fn cluster_n50() -> ScenarioSpec {
         let vx = -v_mag * theta.sin();
         let vy = v_mag * theta.cos();
 
-        let mut b = Body::rocky(mass_per_body).at(x, y).with_velocity(vx, vy);
-        b.softening = SOFTENING;
+        let b = Body::rocky(mass_per_body).at(x, y).with_velocity(vx, vy);
         bodies.push(b);
     }
 
@@ -233,9 +226,9 @@ pub fn solar_n641() -> ScenarioSpec {
     //
     // ## On the regime and its limits
     //
-    // Even at this reduced spread and with softening = 0.05,
+    // Under the default exact `NewtonKernel` (ε = 0),
     // N=640 random-uniform test particles in a thin annulus concentrate
-    // some pairs below the softening length. The adaptive dt therefore
+    // enough close pairs that the adaptive dt
     // shrinks toward DT_MIN around close-encounter events, yielding a
     // baseline `peak_energy_err` of order 10â»â´ — NOT representative of
     // IAS15's machine-precision regime.
@@ -257,7 +250,6 @@ pub fn solar_n641() -> ScenarioSpec {
     // advisories, not treated as regressions.
     const R_INNER: f64 = 1.5;
     const R_OUTER: f64 = 3.5;
-    const SOFTENING: f64 = 0.05;
     const SEED: u64 = 0x501a5; // "solaš"
 
     let mut rng = SmallRng::seed_from_u64(SEED);
@@ -279,8 +271,7 @@ pub fn solar_n641() -> ScenarioSpec {
         let vx = -v_circ * theta.sin();
         let vy = v_circ * theta.cos();
 
-        let mut b = Body::asteroid(M_TEST).at(x, y).with_velocity(vx, vy);
-        b.softening = SOFTENING;
+        let b = Body::asteroid(M_TEST).at(x, y).with_velocity(vx, vy);
         bodies.push(b);
     }
 
@@ -326,9 +317,8 @@ pub fn solar_n641() -> ScenarioSpec {
 ///     geometry, bounded pair separations, no birthday-problem close
 ///     encounters. Useful for future work that wants to isolate
 ///     integrator behaviour at high N from scenario stiffness.
-///   * Running it through the new pairing (IAS15 auto-switches to
-///     direct O(N²)) gives a clean reading of IAS15's in-regime
-///     quality at N=641 — paper-grade material.
+///   * Running it under IAS15 with the auto-switch to direct O(N²)
+///     gives a clean reading of IAS15's in-regime quality at N=641.
 ///   * Comparing its metrics between force models (direct vs a
 ///     hypothetical smooth multipole method in the future) is
 ///     exactly the experiment the scenario was designed for.
@@ -365,7 +355,6 @@ pub fn structured_rings_n641() -> ScenarioSpec {
     const M_TEST: f64 = 1e-10;
     const R_INNER: f64 = 1.5;
     const R_OUTER: f64 = 3.5;
-    const SOFTENING: f64 = 0.03;
     const SEED: u64 = 0x1166_5EED; // "rings seed"
 
     let mut rng = SmallRng::seed_from_u64(SEED);
@@ -390,8 +379,7 @@ pub fn structured_rings_n641() -> ScenarioSpec {
             let vx = -v_circ * theta.sin();
             let vy = v_circ * theta.cos();
 
-            let mut b = Body::asteroid(M_TEST).at(x, y).with_velocity(vx, vy);
-            b.softening = SOFTENING;
+            let b = Body::asteroid(M_TEST).at(x, y).with_velocity(vx, vy);
             bodies.push(b);
         }
     }
@@ -434,10 +422,8 @@ fn kepler_two_body(name: &'static str, a: f64, e: f64, mu: f64, n_orbits: u64) -
     let v_peri = (mu * (1.0 + e) / (a * (1.0 - e))).sqrt();
     let period = 2.0 * std::f64::consts::PI * (a.powi(3) / mu).sqrt();
 
-    let mut b1 = Body::rocky(1.0).at(-r_peri / 2.0, 0.0).with_velocity(0.0, -v_peri / 2.0);
-    b1.softening = 0.0;
-    let mut b2 = Body::rocky(1.0).at(r_peri / 2.0, 0.0).with_velocity(0.0, v_peri / 2.0);
-    b2.softening = 0.0;
+    let b1 = Body::rocky(1.0).at(-r_peri / 2.0, 0.0).with_velocity(0.0, -v_peri / 2.0);
+    let b2 = Body::rocky(1.0).at(r_peri / 2.0, 0.0).with_velocity(0.0, v_peri / 2.0);
 
     ScenarioSpec {
         name,

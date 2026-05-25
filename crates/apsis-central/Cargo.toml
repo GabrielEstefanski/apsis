@@ -1,0 +1,20 @@
+[package]
+name = "apsis-central"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+rust-version.workspace = true
+readme = "README.md"
+description = "Out-of-tree perturbation crate for apsis. Generalized central force a = A·rᵞ per Tamayo, Rein, Shi & Hernandez (2019). Observable-inversion exemplar: `from_apsidal_rate(...)` inverts a measured apsidal precession into the operator's coupling."
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+apsis = { path = "../apsis" }
+libm = { workspace = true }

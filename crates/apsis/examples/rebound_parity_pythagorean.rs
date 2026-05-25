@@ -22,7 +22,7 @@
 //! The full protocol — initial conditions, integrator settings, metrics,
 //! tolerances declared *a priori*, and the metric tier hierarchy — is
 //! specified in
-//! [`docs/experiments/2026-04-30-rebound-parity-pythagorean.md`](../../../../docs/experiments/2026-04-30-rebound-parity-pythagorean.md).
+//! [`paper/notebooks/2026-04-30-rebound-parity-pythagorean.md`](../../../../paper/notebooks/2026-04-30-rebound-parity-pythagorean.md).
 //!
 //! Constants in this file mirror the protocol's IC and run-parameter
 //! values. Changes here are protocol changes — update the notebook in
@@ -86,9 +86,9 @@ fn main() {
     // additional recentering: the ICs are integer-valued f64, and any
     // explicit shift would introduce an implementation-divergent
     // perturbation to a state already bit-identical between sides.
-    let body1 = Body::rocky(MASSES[0]).at(R1.0, R1.1).with_velocity(V1.0, V1.1).unsoftened();
-    let body2 = Body::rocky(MASSES[1]).at(R2.0, R2.1).with_velocity(V2.0, V2.1).unsoftened();
-    let body3 = Body::rocky(MASSES[2]).at(R3.0, R3.1).with_velocity(V3.0, V3.1).unsoftened();
+    let body1 = Body::rocky(MASSES[0]).at(R1.0, R1.1).with_velocity(V1.0, V1.1);
+    let body2 = Body::rocky(MASSES[1]).at(R2.0, R2.1).with_velocity(V2.0, V2.1);
+    let body3 = Body::rocky(MASSES[2]).at(R3.0, R3.1).with_velocity(V3.0, V3.1);
 
     // ── Integrator setup ────────────────────────────────────────────────── //
     let mut sys = System::new(vec![body1, body2, body3], UnitSystem::canonical())
@@ -111,7 +111,7 @@ fn main() {
 
     writeln!(w, "# REBOUND parity — Pythagorean three-body (Burrau 1913) — apsis IAS15 side")
         .unwrap();
-    writeln!(w, "# protocol: docs/experiments/2026-04-30-rebound-parity-pythagorean.md").unwrap();
+    writeln!(w, "# protocol: paper/notebooks/2026-04-30-rebound-parity-pythagorean.md").unwrap();
     writeln!(w, "# integrator: IAS15 (apsis)").unwrap();
     writeln!(w, "# units: canonical (G = 1)").unwrap();
     writeln!(
@@ -169,9 +169,9 @@ fn write_sample(w: &mut BufWriter<File>, sample: u64, sys: &System) {
         w,
         "{sample},{t:.18e},{x0:.18e},{y0:.18e},{vx0:.18e},{vy0:.18e},{x1:.18e},{y1:.18e},{vx1:.18e},{vy1:.18e},{x2:.18e},{y2:.18e},{vx2:.18e},{vy2:.18e},{e:.18e}",
         t = sys.t(),
-        x0 = b0.x, y0 = b0.y, vx0 = b0.vx, vy0 = b0.vy,
-        x1 = b1.x, y1 = b1.y, vx1 = b1.vx, vy1 = b1.vy,
-        x2 = b2.x, y2 = b2.y, vx2 = b2.vx, vy2 = b2.vy,
+        x0 = b0.pos_x, y0 = b0.pos_y, vx0 = b0.vel_x, vy0 = b0.vel_y,
+        x1 = b1.pos_x, y1 = b1.pos_y, vx1 = b1.vel_x, vy1 = b1.vel_y,
+        x2 = b2.pos_x, y2 = b2.pos_y, vx2 = b2.vel_x, vy2 = b2.vel_y,
         e = e_total,
     )
     .unwrap();
@@ -180,17 +180,18 @@ fn write_sample(w: &mut BufWriter<File>, sample: u64, sys: &System) {
 /// Total mechanical energy, computed inline so the formula is visible at
 /// the comparison site and matches REBOUND's `sim.energy()` convention
 /// exactly: KE = ½ Σ mᵢ vᵢ², PE = −Σᵢ<ⱼ G mᵢ mⱼ / rᵢⱼ, with G = 1 and no
-/// softening (verified by `Body::unsoftened()` on every body). The
+/// softening (default exact NewtonKernel, ε = 0). The
 /// expression is mass-distribution-independent — `b.mass` is per-body —
 /// so the same code works for the Pythagorean (3, 4, 5) and the figure-8
 /// (1, 1, 1) configurations without modification.
 fn total_energy(bodies: &[Body]) -> f64 {
-    let ke: f64 = bodies.iter().map(|b| 0.5 * b.mass * (b.vx * b.vx + b.vy * b.vy)).sum();
+    let ke: f64 =
+        bodies.iter().map(|b| 0.5 * b.mass * (b.vel_x * b.vel_x + b.vel_y * b.vel_y)).sum();
     let mut pe = 0.0;
     for i in 0..bodies.len() {
         for j in (i + 1)..bodies.len() {
-            let dx = bodies[i].x - bodies[j].x;
-            let dy = bodies[i].y - bodies[j].y;
+            let dx = bodies[i].pos_x - bodies[j].pos_x;
+            let dy = bodies[i].pos_y - bodies[j].pos_y;
             let r = (dx * dx + dy * dy).sqrt();
             pe -= bodies[i].mass * bodies[j].mass / r;
         }

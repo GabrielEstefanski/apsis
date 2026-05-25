@@ -12,11 +12,13 @@ use crate::physics::integrator::{AdaptiveStats, IntegratorKind};
 /// - No heuristic scaling
 /// - All values are directly interpretable physically
 ///
-/// # Notes
+/// # Conservation diagnostics
 ///
-/// - Energy and angular momentum errors are measured relative to
-///   their initial values
-/// - These errors should remain bounded in a correct symplectic simulation
+/// Absolute drifts (`abs_energy_error`, `abs_angular_momentum_error`)
+/// are always defined. Relative drifts (`rel_energy_error`,
+/// `rel_angular_momentum_error`) are `None` when the baseline is
+/// below [`crate::core::system::MIN_RELATIVE_DENOMINATOR`]
+/// (precision-limited regime where round-off dominates the metric).
 #[derive(Debug, Clone, Copy)]
 pub struct Metrics {
     // ── Energetics ────────────────────────────────────────────────────────── //
@@ -24,23 +26,30 @@ pub struct Metrics {
     pub potential: f64,
     pub total_energy: f64,
 
-    /// Relative energy drift:
-    ///   δE = (E_now − E_initial) / |E_initial|
-    pub rel_energy_error: f64,
+    /// Initial total energy (set after the first force evaluation).
+    pub initial_energy: f64,
+
+    /// Absolute energy drift `E_now − E_initial`.
+    pub abs_energy_error: f64,
+
+    /// Relative energy drift `(E_now − E_initial) / |E_initial|`,
+    /// or `None` when `|E_initial|` is below
+    /// [`crate::core::system::MIN_RELATIVE_DENOMINATOR`].
+    pub rel_energy_error: Option<f64>,
 
     // ── Angular momentum & COM ─────────────────────────────────────────────── //
     /// Total angular momentum (z-component).
     pub angular_momentum_z: f64,
 
-    /// Relative angular momentum drift:
-    ///   δLz = (Lz_now − Lz_initial) / |Lz_initial|
-    pub rel_angular_momentum_error: f64,
+    /// Initial Lz (set after the first state evaluation).
+    pub initial_angular_momentum_z: f64,
 
-    /// Absolute angular momentum drift:
-    ///   |Lz_now − Lz_initial|
-    ///
-    /// This is always meaningful, even when Lz ≈ 0.
+    /// Absolute angular momentum drift `|Lz_now − Lz_initial|`.
     pub abs_angular_momentum_error: f64,
+
+    /// Relative angular momentum drift, or `None` when `|Lz_initial|`
+    /// is below [`crate::core::system::MIN_RELATIVE_DENOMINATOR`].
+    pub rel_angular_momentum_error: Option<f64>,
 
     pub com_x: f64,
     pub com_y: f64,
@@ -105,18 +114,17 @@ pub struct Metrics {
     /// fixed-step integrators this is always `false`.
     pub last_step_degraded: bool,
 
-    // ── Softening diagnostics ─────────────────────────────────────────────── //
+    // ── Geometry diagnostics ─────────────────────────────────────────────── //
     /// Minimum pairwise separation observed at the last step (simulation units).
     ///
     /// Set to `f64::MAX` when fewer than 2 bodies are present or when N is too
     /// large for O(N²) computation (> [`N_CLOSENESS_THRESHOLD`]).
     pub r_min: f64,
 
-    /// Maximum effective pairwise softening length at the last step:
-    ///   `ε_ij = √((ε²_i + ε²_j) / 2)`,  maximised over all pairs.
-    ///
-    /// Zero when no pairs exist.
-    pub softening_max: f64,
+    /// Squared softening of the active gravity kernel. Zero for the
+    /// default Newton kernel; positive when a Plummer (or other softened)
+    /// kernel is selected.
+    pub kernel_epsilon_squared: f64,
 
     // ── Timestep guidance ─────────────────────────────────────────────────── //
     /// Recommended timestep derived from the current system state.

@@ -1,4 +1,4 @@
-use crate::domain::materials::Material;
+use crate::domain::body_preset;
 use crate::templates::{Template, TemplateBody, UnitSystem};
 
 pub fn star(_seed: u64) -> Template {
@@ -8,12 +8,18 @@ pub fn star(_seed: u64) -> Template {
         bodies: vec![TemplateBody {
             name: Some("Star"),
             mass: 1.0,
-            position: Some([0.0, 0.0]),
-            velocity: [0.0, 0.0],
-            material: Material::Star,
+            position: Some([0.0, 0.0, 0.0]),
+            velocity: [0.0, 0.0, 0.0],
+            class_override: None,
+            preset: &body_preset::STAR,
+            density: None,
+            albedo: None,
         }],
         display_scale: 1.0,
+        orbital_up: None,
+        default_view_distance: None,
         suggested_dt: None,
+        suggested_integrator: None,
         units: UnitSystem::solar_au(),
     }
 }
@@ -25,12 +31,18 @@ pub fn brown_dwarf(_seed: u64) -> Template {
         bodies: vec![TemplateBody {
             name: Some("Brown Dwarf"),
             mass: 0.04,
-            position: Some([0.0, 0.0]),
-            velocity: [0.0, 0.0],
-            material: Material::BrownDwarf,
+            position: Some([0.0, 0.0, 0.0]),
+            velocity: [0.0, 0.0, 0.0],
+            class_override: None,
+            preset: &body_preset::BROWN_DWARF,
+            density: None,
+            albedo: None,
         }],
         display_scale: 1.0,
+        orbital_up: None,
+        default_view_distance: None,
         suggested_dt: None,
+        suggested_integrator: None,
         units: UnitSystem::solar_au(),
     }
 }
@@ -42,12 +54,18 @@ pub fn gas_giant(_seed: u64) -> Template {
         bodies: vec![TemplateBody {
             name: Some("Gas Giant"),
             mass: 9.5e-4, // ≈ Jupiter mass in solar units
-            position: Some([0.0, 0.0]),
-            velocity: [0.0, 0.0],
-            material: Material::Gas,
+            position: Some([0.0, 0.0, 0.0]),
+            velocity: [0.0, 0.0, 0.0],
+            class_override: None,
+            preset: &body_preset::GAS,
+            density: None,
+            albedo: None,
         }],
         display_scale: 1.0,
+        orbital_up: None,
+        default_view_distance: None,
         suggested_dt: None,
+        suggested_integrator: None,
         units: UnitSystem::solar_au(),
     }
 }
@@ -59,12 +77,18 @@ pub fn rocky_planet(_seed: u64) -> Template {
         bodies: vec![TemplateBody {
             name: Some("Rocky Planet"),
             mass: 3.0e-6, // ≈ Earth mass in solar units
-            position: Some([0.0, 0.0]),
-            velocity: [0.0, 0.0],
-            material: Material::Rocky,
+            position: Some([0.0, 0.0, 0.0]),
+            velocity: [0.0, 0.0, 0.0],
+            class_override: None,
+            preset: &body_preset::ROCKY,
+            density: None,
+            albedo: None,
         }],
         display_scale: 1.0,
+        orbital_up: None,
+        default_view_distance: None,
         suggested_dt: None,
+        suggested_integrator: None,
         units: UnitSystem::solar_au(),
     }
 }

@@ -10,7 +10,7 @@ keywords.workspace = true
 categories.workspace = true
 rust-version.workspace = true
 readme = "README.md"
-description = "Out-of-tree perturbation crate for apsis. Proves the perturbation extension contract is buildable, not just documented. Test-particle 1PN; reproduces Mercury's perihelion precession to 4.4 ppm of GR (CI-gated)."
+description = "Out-of-tree perturbation crate for apsis. Proves the perturbation extension contract is buildable, not just documented. Test-particle 1PN; reproduces Mercury's perihelion precession to 28 ppm of GR cross-platform (CI gate at 100 ppm)."
 
 [lib]
 path = "src/lib.rs"

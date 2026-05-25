@@ -17,9 +17,9 @@
 //!   versions of these quantities; the mapping happens at the field
 //!   layer, not here.
 //!
-//! A `use crate::core::...` or `use crate::io::...` line in this file
-//! is a review red flag: it inverts the layering and contaminates the
-//! domain with output concerns. Reverse imports of this module by the
+//! A `use crate::core::...` line in this file is a review red flag:
+//! it inverts the layering and contaminates the domain with
+//! orchestrator concerns. Reverse imports of this module by the
 //! layers above are correct and expected.
 //!
 //! ## Read-only contract
@@ -37,7 +37,7 @@
 
 use crate::domain::body::Body;
 use crate::math::Vec3;
-use crate::physics::gravity::{G, pair_eps2};
+use crate::physics::gravity::G;
 
 // ── Structural contract: Body is Copy ────────────────────────────────────────
 //
@@ -64,7 +64,10 @@ const _: () = {
 /// observable on the energy-conservation gates pinned in
 /// `docs/experiments/2026-04-29-3d-port-baseline.md`.
 pub fn kinetic_energy(bodies: &[Body]) -> f64 {
-    bodies.iter().map(|b| 0.5 * b.mass * (b.vx * b.vx + b.vy * b.vy + b.vz * b.vz)).sum()
+    bodies
+        .iter()
+        .map(|b| 0.5 * b.mass * (b.vel_x * b.vel_x + b.vel_y * b.vel_y + b.vel_z * b.vel_z))
+        .sum()
 }
 
 /// Total mechanical energy: `E = KE + PE`.
@@ -92,7 +95,11 @@ pub fn total_energy(kinetic: f64, potential: f64) -> f64 {
 pub fn angular_momentum(bodies: &[Body]) -> Vec3 {
     bodies.iter().fold(Vec3::ZERO, |acc, b| {
         acc + b.mass
-            * Vec3::new(b.y * b.vz - b.z * b.vy, b.z * b.vx - b.x * b.vz, b.x * b.vy - b.y * b.vx)
+            * Vec3::new(
+                b.pos_y * b.vel_z - b.pos_z * b.vel_y,
+                b.pos_z * b.vel_x - b.pos_x * b.vel_z,
+                b.pos_x * b.vel_y - b.pos_y * b.vel_x,
+            )
     })
 }
 
@@ -104,7 +111,7 @@ pub fn angular_momentum(bodies: &[Body]) -> Vec3 {
 /// matching the form used by the energy-conservation gates and the
 /// CSV recorder column.
 pub fn angular_momentum_z(bodies: &[Body]) -> f64 {
-    bodies.iter().map(|b| b.mass * (b.x * b.vy - b.y * b.vx)).sum()
+    bodies.iter().map(|b| b.mass * (b.pos_x * b.vel_y - b.pos_y * b.vel_x)).sum()
 }
 
 // ── Centre of mass ───────────────────────────────────────────────────────────
@@ -122,12 +129,12 @@ pub fn center_of_mass_state(bodies: &[Body]) -> (Vec3, Vec3) {
 
     for b in bodies {
         m += b.mass;
-        pos.x += b.mass * b.x;
-        pos.y += b.mass * b.y;
-        pos.z += b.mass * b.z;
-        vel.x += b.mass * b.vx;
-        vel.y += b.mass * b.vy;
-        vel.z += b.mass * b.vz;
+        pos.x += b.mass * b.pos_x;
+        pos.y += b.mass * b.pos_y;
+        pos.z += b.mass * b.pos_z;
+        vel.x += b.mass * b.vel_x;
+        vel.y += b.mass * b.vel_y;
+        vel.z += b.mass * b.vel_z;
     }
 
     if m == 0.0 {
@@ -155,17 +162,16 @@ pub fn center_of_mass_state(bodies: &[Body]) -> (Vec3, Vec3) {
 /// recorder at the per-record interval, parameter scans). NOT intended
 /// for per-frame UI sampling — wiring this into a render path will
 /// silently quadratic-cost the frame budget.
-pub fn per_body_potential_energy(bodies: &[Body], g_factor: f64) -> Vec<f64> {
+pub fn per_body_potential_energy(bodies: &[Body], g_factor: f64, eps_sq: f64) -> Vec<f64> {
     let n = bodies.len();
     let mut pe = vec![0.0_f64; n];
 
     for i in 0..n {
         for j in (i + 1)..n {
-            let dx = bodies[j].x - bodies[i].x;
-            let dy = bodies[j].y - bodies[i].y;
-            let dz = bodies[j].z - bodies[i].z;
-            let eps2 = pair_eps2(bodies[i].softening, bodies[j].softening);
-            let d2 = dx * dx + dy * dy + dz * dz + eps2;
+            let dx = bodies[j].pos_x - bodies[i].pos_x;
+            let dy = bodies[j].pos_y - bodies[i].pos_y;
+            let dz = bodies[j].pos_z - bodies[i].pos_z;
+            let d2 = dx * dx + dy * dy + dz * dz + eps_sq;
             let phi = -G * g_factor * bodies[i].mass * bodies[j].mass / d2.sqrt();
             pe[i] += phi * 0.5;
             pe[j] += phi * 0.5;

@@ -139,9 +139,10 @@ combined softening radius. Typical causes:
    Risk: the integrator may require a smaller $\Delta t$ to stay stable.
 2. **Reduce $\Delta t$** — allows the integrator to resolve close encounters
    that were previously being jumped over.
-3. **Switch to Yoshida 4th-order** — its superior energy conservation allows a
-   larger $\Delta t$ margin before instability, giving more headroom near
-   encounters.
+3. **Switch to a higher-order symplectic** (e.g. Yoshida 4) — better energy
+   conservation allows a larger $\Delta t$ margin before instability, giving
+   more headroom near encounters. Trades the default IAS15's adaptive
+   accuracy for bounded per-step cost.
 4. **Accept the error** — for cosmological or statistical runs where close
    encounters are intentionally suppressed, a large $\epsilon$ is physically
    justified.

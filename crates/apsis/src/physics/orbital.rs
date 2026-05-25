@@ -62,10 +62,9 @@
 //! bit-equivalent across the 3D port.
 //!
 //! Apsis-specific surface (kernel `Exactness`/`Continuity` invariants,
-//! per-perturbation `KernelRequirements`, federated extension crates)
+//! per-operator `KernelRequirements`, federated extension crates)
 //! lives in `physics::gravity::kernel` and
-//! `physics::integrator::PerturbationForce`. This module is
-//! intentionally vanilla.
+//! `physics::integrator::operator`. This module is intentionally vanilla.
 //!
 //! ## Singularity contracts
 //!
@@ -82,10 +81,9 @@
 //!
 //! Angular continuity across step boundaries — the `π → −π` wrap that
 //! visualisations need to unwrap for smooth animation — is the
-//! responsibility of the presentation layer (e.g. `apsis-app`'s
-//! `orbit_smoother`), not this module. The element values returned here
-//! are always principal-value angles in `[-π, π]` enforced by
-//! [`crate::math::wrap_pi`].
+//! responsibility of the presentation layer, not this module. The
+//! element values returned here are always principal-value angles in
+//! `[-π, π]` enforced by [`crate::math::wrap_pi`].
 //!
 //! ## References
 //! - Murray & Dermott (1999). *Solar System Dynamics*. Cambridge.
@@ -530,8 +528,12 @@ pub fn dominant_primary(bodies: &[Body], idx: usize) -> Option<usize> {
         .enumerate()
         .filter(|(j, _)| *j != idx)
         .max_by(|(_, bj), (_, bk)| {
-            let rj2 = (bj.x - bi.x).powi(2) + (bj.y - bi.y).powi(2) + (bj.z - bi.z).powi(2);
-            let rk2 = (bk.x - bi.x).powi(2) + (bk.y - bi.y).powi(2) + (bk.z - bi.z).powi(2);
+            let rj2 = (bj.pos_x - bi.pos_x).powi(2)
+                + (bj.pos_y - bi.pos_y).powi(2)
+                + (bj.pos_z - bi.pos_z).powi(2);
+            let rk2 = (bk.pos_x - bi.pos_x).powi(2)
+                + (bk.pos_y - bi.pos_y).powi(2)
+                + (bk.pos_z - bi.pos_z).powi(2);
             // Compare m_j/r_j² vs m_k/r_k²  (G cancels)
             let score_j = if rj2 > 0.0 { bj.mass / rj2 } else { f64::INFINITY };
             let score_k = if rk2 > 0.0 { bk.mass / rk2 } else { f64::INFINITY };
@@ -628,15 +630,20 @@ pub fn hierarchical_primary(bodies: &[Body], idx: usize) -> Option<(usize, Hiera
                 None => continue,
             };
             let bp = &bodies[parent_idx];
-            let a_cp =
-                ((bc.x - bp.x).powi(2) + (bc.y - bp.y).powi(2) + (bc.z - bp.z).powi(2)).sqrt();
+            let a_cp = ((bc.pos_x - bp.pos_x).powi(2)
+                + (bc.pos_y - bp.pos_y).powi(2)
+                + (bc.pos_z - bp.pos_z).powi(2))
+            .sqrt();
             if a_cp < 1e-15 || bp.mass < 1e-30 {
                 continue;
             }
             a_cp * (bc.mass / (3.0 * bp.mass)).cbrt()
         };
 
-        let r_self = ((bi.x - bc.x).powi(2) + (bi.y - bc.y).powi(2) + (bi.z - bc.z).powi(2)).sqrt();
+        let r_self = ((bi.pos_x - bc.pos_x).powi(2)
+            + (bi.pos_y - bc.pos_y).powi(2)
+            + (bi.pos_z - bc.pos_z).powi(2))
+        .sqrt();
         if r_self < r_hill {
             return Some((cand, HierarchicalRelation::HillSphere));
         }
@@ -645,16 +652,16 @@ pub fn hierarchical_primary(bodies: &[Body], idx: usize) -> Option<(usize, Hiera
     // Energy fallback — pick the smallest bound candidate.
     for &cand in &candidates {
         let bc = &bodies[cand];
-        let dx = bi.x - bc.x;
-        let dy = bi.y - bc.y;
-        let dz = bi.z - bc.z;
+        let dx = bi.pos_x - bc.pos_x;
+        let dy = bi.pos_y - bc.pos_y;
+        let dz = bi.pos_z - bc.pos_z;
         let r = (dx * dx + dy * dy + dz * dz).sqrt();
         if r < 1e-15 {
             continue;
         }
-        let dvx = bi.vx - bc.vx;
-        let dvy = bi.vy - bc.vy;
-        let dvz = bi.vz - bc.vz;
+        let dvx = bi.vel_x - bc.vel_x;
+        let dvy = bi.vel_y - bc.vel_y;
+        let dvz = bi.vel_z - bc.vel_z;
         let v2 = dvx * dvx + dvy * dvy + dvz * dvz;
         // Sign of the orbital energy proxy `½v² − m_cand/r`. The constant
         // `G` would scale both terms identically and is irrelevant to the
@@ -674,13 +681,13 @@ pub fn hierarchical_primary(bodies: &[Body], idx: usize) -> Option<(usize, Hiera
 /// Returns `None` if the bodies are co-located (r < 1e-15) or have zero combined mass.
 /// Linear-in-state primitives from which all Keplerian elements derive.
 ///
-/// Exposing these lets external code (e.g. the render-side osculating-element
-/// smoother in `apsis-app`) apply transformations *before* the non-linear
-/// reconstruction into (a, e, ω). EMA on (a, e, sin ω, cos ω) is dimensionally
-/// noisier than EMA on these four scalars: ε is linear in (v², 1/r), the
-/// Laplace–Runge–Lenz components (ex, ey) are linear in (r, v), and h is
-/// bilinear in (r, v). They have no angular wraparound and no singularity at
-/// the parabolic limit.
+/// Exposing these lets external code (e.g. presentation-layer osculating-
+/// element smoothers) apply transformations *before* the non-linear
+/// reconstruction into (a, e, ω). EMA on (a, e, sin ω, cos ω) is
+/// dimensionally noisier than EMA on these four scalars: ε is linear in
+/// (v², 1/r), the Laplace–Runge–Lenz components (ex, ey) are linear in
+/// (r, v), and h is bilinear in (r, v). They have no angular wraparound
+/// and no singularity at the parabolic limit.
 #[derive(Debug, Clone, Copy)]
 pub struct OrbitInvariants {
     /// Specific orbital energy ε = ½v² − GM/r.
@@ -729,8 +736,8 @@ pub fn compute_invariants(
     let b = &bodies[idx];
     let p = &bodies[primary_idx];
 
-    let r_vec = Vec3::new(b.x - p.x, b.y - p.y, b.z - p.z);
-    let v_vec = Vec3::new(b.vx - p.vx, b.vy - p.vy, b.vz - p.vz);
+    let r_vec = Vec3::new(b.pos_x - p.pos_x, b.pos_y - p.pos_y, b.pos_z - p.pos_z);
+    let v_vec = Vec3::new(b.vel_x - p.vel_x, b.vel_y - p.vel_y, b.vel_z - p.vel_z);
 
     let r = r_vec.length();
     let gm = g_factor * (b.mass + p.mass);
@@ -1042,47 +1049,83 @@ pub fn elements_anchored_to_body(
     let a = -gm / (2.0 * inv.energy);
     let period = TAU * (a * a * a / gm).sqrt();
 
-    // Anchor algebra is planar: it operates in the orbital plane and
-    // returns `inclination = 0`, `Ω = 0`. The perifocal → world
-    // rotation in [`OrbitalElements::sample_orbit`] handles the lift
-    // back to 3D for the rendered ellipse.
-    let rx = body.x - primary.x;
-    let ry = body.y - primary.y;
-    let r = (rx * rx + ry * ry).sqrt();
-    if r < 1e-15 {
+    // 3D state vectors in the primary's frame.
+    let r_vec = Vec3::new(
+        body.pos_x - primary.pos_x,
+        body.pos_y - primary.pos_y,
+        body.pos_z - primary.pos_z,
+    );
+    let v_vec = Vec3::new(
+        body.vel_x - primary.vel_x,
+        body.vel_y - primary.vel_y,
+        body.vel_z - primary.vel_z,
+    );
+
+    let h_mag = inv.h_vec.length();
+
+    // Out-of-plane projection breaks down without a defined orbital
+    // normal; fall back to the unanchored elements.
+    if h_mag < 1e-15 {
         return elements_from_invariants(inv, primary_idx, gm);
     }
-    let vrx = body.vx - primary.vx;
-    let vry = body.vy - primary.vy;
+    let h_hat = inv.h_vec / h_mag;
+
+    // Project the body's position onto the smoothed orbital plane to
+    // get an in-plane radius `r_eff`. Any out-of-plane component is
+    // discarded — the displayed ellipse always lives in that plane,
+    // so the body's projection is the closest point that can possibly
+    // sit on it. For a body whose true plane matches the smoothed
+    // plane, `r_eff ≈ |r_vec|` and the anchor reduces to the planar
+    // case below.
+    let r_in_plane = r_vec - h_hat * r_vec.dot(h_hat);
+    let r_eff = r_in_plane.length();
+    if r_eff < 1e-15 {
+        return elements_from_invariants(inv, primary_idx, gm);
+    }
+
+    // Reference frame inside the orbital plane. `node_hat` is the
+    // standard ascending-node direction (ẑ × ĥ). When the orbit is
+    // planar (h_hat ≈ ±ẑ) this collapses; pick the world x-axis as a
+    // stable fallback so atan2 keeps a meaningful zero.
+    let node_raw = Vec3::new(-h_hat.y, h_hat.x, 0.0);
+    let node_mag = node_raw.length();
+    let node_hat = if node_mag > 1e-9 {
+        node_raw / node_mag
+    } else {
+        let proj = Vec3::new(1.0, 0.0, 0.0);
+        let proj = proj - h_hat * proj.dot(h_hat);
+        let pl = proj.length();
+        if pl > 1e-15 {
+            proj / pl
+        } else {
+            return elements_from_invariants(inv, primary_idx, gm);
+        }
+    };
+    let perp_node_hat = h_hat.cross(node_hat);
 
     // Solve focus-conic for cos ν, clamping to absorb body distances
     // slightly outside the smoothed ellipse's apsidal range.
     let p = a * (1.0 - e * e);
-    let cos_nu = ((p / r - 1.0) / e).clamp(-1.0, 1.0);
+    let cos_nu = ((p / r_eff - 1.0) / e).clamp(-1.0, 1.0);
 
-    // sign(sin ν) = sign(h_inst · (r⃗·v⃗)). Both factors are needed:
-    // h_inst alone gives orbit chirality (prograde/retrograde);
-    // (r⃗·v⃗) alone is wrong for retrograde. The product encodes both
-    // the leg (outbound/inbound) and the chirality.
-    //
-    // Near peri/apo the (r⃗·v⃗) term passes through zero and its sign
-    // is FP-fragile, but sin ν ≈ 0 there too — both ν = +ε and ν = −ε
-    // map to nearly identical positions, so a flicker is sub-pixel.
-    let h_inst = rx * vry - ry * vrx;
-    let r_dot_v = rx * vrx + ry * vry;
-    let s = (h_inst * r_dot_v).signum();
-    // signum() returns 0 only when h·(r·v) = 0 exactly; pick +1 then.
+    // sign(sin ν) = sign((r⃗ × v⃗)·ĥ · (r⃗·v⃗)). The triple product gives
+    // the orbit chirality relative to the smoothed plane; (r⃗·v⃗) gives
+    // outbound/inbound. Their product disambiguates the ±ν branch.
+    let h_inst_signed = r_vec.cross(v_vec).dot(h_hat);
+    let r_dot_v = r_vec.dot(v_vec);
+    let s = (h_inst_signed * r_dot_v).signum();
     let sin_nu_sign = if s == 0.0 { 1.0 } else { s };
-
     let nu = sin_nu_sign * cos_nu.acos();
-    let theta_body = ry.atan2(rx);
+
+    // Body's azimuthal angle inside the smoothed orbital plane,
+    // measured from the line of nodes. ω anchors the perifocal
+    // x-axis so the body lands at parametric angle ν on the ellipse.
+    let theta_body = r_in_plane.dot(perp_node_hat).atan2(r_in_plane.dot(node_hat));
     let omega = wrap_pi(theta_body - nu);
 
-    // Eccentric and mean anomalies follow the same elliptical identities
-    // used in [`anomalies`]; the planar anchor reuses `nu` from above.
-    // `mean_anomaly` is not wrapped — see the doc on
-    // `OrbitalElements::mean_anomaly` for why snapshot M is not collapsed
-    // to `[−π, π]`.
+    let inclination = h_hat.z.clamp(-1.0, 1.0).acos();
+    let lon_ascending_node = if node_mag > 1e-9 { node_hat.y.atan2(node_hat.x) } else { 0.0 };
+
     let half_nu = 0.5 * nu;
     let (s_half, c_half) = half_nu.sin_cos();
     let big_e = 2.0 * ((1.0 - e).sqrt() * s_half).atan2((1.0 + e).sqrt() * c_half);
@@ -1096,8 +1139,8 @@ pub fn elements_anchored_to_body(
         h_vec: inv.h_vec,
         energy: inv.energy,
         omega,
-        inclination: 0.0,
-        lon_ascending_node: 0.0,
+        inclination,
+        lon_ascending_node,
         true_anomaly: nu,
         eccentric_anomaly: big_e,
         mean_anomaly,
@@ -1239,8 +1282,8 @@ mod tests {
         let gm = G * (bodies[1].mass + bodies[0].mass);
         let el = elements_anchored_to_body(&inv, 0, gm, &bodies[1], &bodies[0]);
 
-        let rx = bodies[1].x - bodies[0].x;
-        let ry = bodies[1].y - bodies[0].y;
+        let rx = bodies[1].pos_x - bodies[0].pos_x;
+        let ry = bodies[1].pos_y - bodies[0].pos_y;
         let r = (rx * rx + ry * ry).sqrt();
         let nu = ry.atan2(rx) - el.omega;
         let r_orbit = el.a * (1.0 - el.e * el.e) / (1.0 + el.e * nu.cos());
@@ -1261,8 +1304,8 @@ mod tests {
         let gm = G * (bodies[1].mass + bodies[0].mass);
         let el = elements_anchored_to_body(&inv, 0, gm, &bodies[1], &bodies[0]);
 
-        let rx = bodies[1].x - bodies[0].x;
-        let ry = bodies[1].y - bodies[0].y;
+        let rx = bodies[1].pos_x - bodies[0].pos_x;
+        let ry = bodies[1].pos_y - bodies[0].pos_y;
         let r = (rx * rx + ry * ry).sqrt();
         let nu = ry.atan2(rx) - el.omega;
         let r_orbit = el.a * (1.0 - el.e * el.e) / (1.0 + el.e * nu.cos());
@@ -1296,8 +1339,8 @@ mod tests {
         let gm = G * (bodies[1].mass + bodies[0].mass);
         let el = elements_anchored_to_body(&inv_smooth, 0, gm, &bodies[1], &bodies[0]);
 
-        let rx = bodies[1].x - bodies[0].x;
-        let ry = bodies[1].y - bodies[0].y;
+        let rx = bodies[1].pos_x - bodies[0].pos_x;
+        let ry = bodies[1].pos_y - bodies[0].pos_y;
         let r = (rx * rx + ry * ry).sqrt();
         let nu = ry.atan2(rx) - el.omega;
         let r_orbit = el.a * (1.0 - el.e * el.e) / (1.0 + el.e * nu.cos());
@@ -1453,7 +1496,7 @@ mod tests {
     #[test]
     fn cw_orbit_has_negative_angular_momentum() {
         let (p, mut s) = circular_orbit(10.0, 1e6);
-        s.vy = -s.vy; // inverte para CW
+        s.vel_y = -s.vel_y; // inverte para CW
         let el = elements(p, s);
         assert!(el.h_vec.z < 0.0, "h_z = {}, deve ser negativo (CW)", el.h_vec.z);
     }
@@ -2336,10 +2379,8 @@ mod tests {
 
         let m = 1.0;
         let z0 = 1.0;
-        let mut a = Body::rocky(m).at_3d(0.0, 0.0, z0).with_velocity_3d(0.0, 0.0, -0.05);
-        let mut b = Body::rocky(m).at_3d(0.0, 0.0, -z0).with_velocity_3d(0.0, 0.0, 0.05);
-        a.softening = 0.0;
-        b.softening = 0.0;
+        let a = Body::rocky(m).at_3d(0.0, 0.0, z0).with_velocity_3d(0.0, 0.0, -0.05);
+        let b = Body::rocky(m).at_3d(0.0, 0.0, -z0).with_velocity_3d(0.0, 0.0, 0.05);
 
         let mut sys = System::new(vec![a, b], UnitSystem::canonical())
             .with_integrator(IntegratorKind::Ias15)
@@ -2354,24 +2395,24 @@ mod tests {
             // bound here is the f64 round-off floor — anything above 1e-14
             // indicates a structural coupling, not a tolerance failure.
             assert!(
-                body.x.abs() < 1e-14,
+                body.pos_x.abs() < 1e-14,
                 "body {k}: x drifted to {} from a pure-z initial condition",
-                body.x,
+                body.pos_x,
             );
             assert!(
-                body.y.abs() < 1e-14,
+                body.pos_y.abs() < 1e-14,
                 "body {k}: y drifted to {} from a pure-z initial condition",
-                body.y,
+                body.pos_y,
             );
             assert!(
-                body.vx.abs() < 1e-14,
+                body.vel_x.abs() < 1e-14,
                 "body {k}: vx drifted to {} from a pure-z initial condition",
-                body.vx,
+                body.vel_x,
             );
             assert!(
-                body.vy.abs() < 1e-14,
+                body.vel_y.abs() < 1e-14,
                 "body {k}: vy drifted to {} from a pure-z initial condition",
-                body.vy,
+                body.vel_y,
             );
         }
     }
@@ -2413,19 +2454,19 @@ mod tests {
         // localises a swizzle bug to the offending axis.
         assert!(
             (unit.x - expected.x).abs() < 1e-12,
-            "h.x direction off: {} vs {}",
+            "h.pos_x direction off: {} vs {}",
             unit.x,
             expected.x
         );
         assert!(
             (unit.y - expected.y).abs() < 1e-12,
-            "h.y direction off: {} vs {}",
+            "h.pos_y direction off: {} vs {}",
             unit.y,
             expected.y
         );
         assert!(
             (unit.z - expected.z).abs() < 1e-12,
-            "h.z direction off: {} vs {}",
+            "h.pos_z direction off: {} vs {}",
             unit.z,
             expected.z
         );
@@ -2725,9 +2766,10 @@ mod tests {
         let (p_planar, s_planar) = ellipse_at_true_anomaly(a, e, nu, m);
         // Rotate (r, v) around x̂: y' = y cos i, z' = y sin i; same for v.
         let (s_i, c_i) = i.sin_cos();
-        let mut s = body(s_planar.x, s_planar.y * c_i, s_planar.vx, s_planar.vy * c_i, 1e-10);
-        s.z = s_planar.y * s_i;
-        s.vz = s_planar.vy * s_i;
+        let mut s =
+            body(s_planar.pos_x, s_planar.pos_y * c_i, s_planar.vel_x, s_planar.vel_y * c_i, 1e-10);
+        s.pos_z = s_planar.pos_y * s_i;
+        s.vel_z = s_planar.vel_y * s_i;
         s.sync_physical_properties();
 
         let bodies = vec![p_planar, s];
@@ -2820,8 +2862,8 @@ mod tests {
 
         let primary = body(0.0, 0.0, 0.0, 0.0, primary_mass);
         let mut sat = body(r0.x, r0.y, v0.x, v0.y, 1e-10);
-        sat.z = r0.z;
-        sat.vz = v0.z;
+        sat.pos_z = r0.z;
+        sat.vel_z = v0.z;
         sat.sync_physical_properties();
 
         let bodies = vec![primary, sat];
@@ -2886,8 +2928,8 @@ mod tests {
         let (r0, v0) = reconstruct_state(a, e, 0.0, 0.0, 0.0, nu, mu);
         let primary = body(0.0, 0.0, 0.0, 0.0, primary_mass);
         let mut sat = body(r0.x, r0.y, v0.x, v0.y, 1e-10);
-        sat.z = r0.z;
-        sat.vz = v0.z;
+        sat.pos_z = r0.z;
+        sat.vel_z = v0.z;
         sat.sync_physical_properties();
         let bodies = vec![primary, sat];
         let el = compute_elements(&bodies, 1, 0, G).expect("circular regime is computable");
@@ -2916,7 +2958,7 @@ mod tests {
     /// the energy fallback, which is exercised separately.
     fn body3(x: f64, y: f64, z: f64, mass: f64) -> Body {
         let mut b = Body::rocky(mass).at(x, y);
-        b.z = z;
+        b.pos_z = z;
         b.sync_physical_properties();
         b
     }

@@ -17,8 +17,10 @@
 //! ```
 //!
 //! Different physical models of K correspond to different [`Kernel`]
-//! implementations. The default is [`PlummerKernel`], which softens the
-//! 1/r singularity with a spherically-symmetric Plummer sphere.
+//! implementations. The default is [`NewtonKernel`], parameterised by a
+//! single softening length `ε`: `ε = 0` is exact `1/r²` Newton; `ε > 0`
+//! is the Plummer-softened regularisation. The `ε → 0` limit is
+//! continuous, so Newton and Plummer share one impl.
 //!
 //! ## Extension contract
 //!
@@ -34,22 +36,23 @@
 //! | Sub-module | Responsibility |
 //! |---|---|
 //! | `trait_def` (private)   | The [`Kernel`] trait definition |
-//! | `plummer` (private)     | [`PlummerKernel`] — the default impl |
+//! | `newton` (private)      | [`NewtonKernel`] — `ε`-parameterised Newton/Plummer |
+//! | `truncated` (private)   | [`TruncatedPlummerKernel`] — counter-test fixture |
 //! | `properties` (private)  | Invariant types and matching logic |
 
-mod plummer;
+mod newton;
 mod properties;
 mod trait_def;
 mod truncated;
 
-pub use plummer::PlummerKernel;
+pub use newton::NewtonKernel;
 pub use properties::{
     Continuity, Exactness, KernelProperties, KernelRequirements, RequirementViolation,
 };
 pub use trait_def::Kernel;
 pub use truncated::{DEFAULT_TRUNCATED_OUTSIDE_SCALE, TruncatedPlummerKernel};
 
-// ── Constants and helpers ─────────────────────────────────────────────────── //
+// ── Constants ─────────────────────────────────────────────────────────────── //
 
 /// Gravitational constant in simulation units.
 ///
@@ -57,13 +60,3 @@ pub use truncated::{DEFAULT_TRUNCATED_OUTSIDE_SCALE, TruncatedPlummerKernel};
 /// unit system where G = 1. Physical results scale trivially: multiply
 /// forces by `G_phys / 1` if real units are needed.
 pub const G: f64 = 1.0;
-
-/// Pairwise softening squared: ε²_ij = (ε²_i + ε²_j) / 2.
-///
-/// Specific to Plummer-style per-body softening. By averaging ε² rather
-/// than ε, the kernel produces identical forces in both directions of the
-/// pair, preserving Newton's 3rd law exactly.
-#[inline]
-pub fn pair_eps2(eps_i: f64, eps_j: f64) -> f64 {
-    0.5 * (eps_i * eps_i + eps_j * eps_j)
-}

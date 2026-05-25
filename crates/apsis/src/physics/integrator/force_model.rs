@@ -11,14 +11,15 @@
 use std::sync::Arc;
 
 use crate::domain::body::Body;
+use crate::domain::body_arrays::BodyArrays;
 use crate::math::Vec3;
-use crate::physics::gravity::{BarnesHutEngine, Kernel, PlummerKernel};
+use crate::physics::gravity::{BarnesHutEngine, Kernel, NewtonKernel};
 
 // ── Trait ─────────────────────────────────────────────────────────────────────
 
 /// A force model that can compute accelerations for a set of bodies.
 ///
-/// Implementations own whatever internal state they need (quadtrees, GPU
+/// Implementations own whatever internal state they need (octrees, GPU
 /// buffers, neighbour lists, …).  The only contract is:
 ///
 /// 1. After `compute()` returns, `acc[i]` holds the acceleration of body `i`.
@@ -59,6 +60,14 @@ pub trait ForceModel: Send {
     /// No-op for force models that do not use a BH tree.
     fn set_exact_threshold(&mut self, _n: usize) {}
 
+    /// Mass-ratio cutoff for back-reaction suppression. `0.0` if not supported.
+    fn test_particle_threshold(&self) -> f64 {
+        0.0
+    }
+
+    /// No-op for force models without a direct pairwise loop.
+    fn set_test_particle_threshold(&mut self, _threshold: f64) {}
+
     /// Access the underlying Barnes-Hut engine for spatial queries.
     ///
     /// Returns `None` for force models that do not use a Barnes-Hut tree
@@ -71,12 +80,10 @@ pub trait ForceModel: Send {
 
     /// Handle to the gravitational kernel this force model dispatches through.
     ///
-    /// The default returns [`PlummerKernel`] for force models that do not
-    /// have an explicit kernel concept — preserving the simulator's
-    /// canonical Plummer-softened semantics for consumers that query
-    /// kernel properties via [`Kernel::properties`].
+    /// The default returns [`NewtonKernel`] (exact 1/r²) for force models
+    /// that do not have an explicit kernel concept.
     fn kernel(&self) -> Arc<dyn Kernel> {
-        Arc::new(PlummerKernel::new())
+        Arc::new(NewtonKernel::exact())
     }
 
     /// Swap the active kernel.
@@ -116,21 +123,34 @@ pub trait ForceModel: Send {
 
 // ── GravityForceModel ─────────────────────────────────────────────────────────
 
-/// Default force model: Barnes-Hut / exact O(N²) gravity with Plummer
-/// softening, parameterised by the opening angle θ.
+/// Default force model: Barnes-Hut / exact O(N²) gravity, parameterised
+/// by the opening angle θ. The kernel (Newton with `ε ≥ 0`, or any
+/// other [`Kernel`] impl) is held separately and selected via
+/// [`System::with_kernel`](crate::core::system::System::with_kernel).
+///
+/// Owns the per-`compute()` SoA snapshot buffer
+/// ([`BodyArrays`](crate::domain::body_arrays::BodyArrays)). Each call to
+/// [`compute`](Self::compute) re-packs the buffer from the integrator's
+/// `Vec<Body>` and passes it to the engine. See
+/// `docs/experiments/2026-05-10-soa-layout.md` §Design constraint for the
+/// lifecycle contract.
 pub struct GravityForceModel {
     engine: BarnesHutEngine,
     theta: f64,
+    /// Per-`compute()` SoA snapshot. Reused across calls (allocator
+    /// hits zero after warmup); written by `pack_from`, read by the
+    /// engine, conceptually discarded when `compute` returns.
+    body_arrays: BodyArrays,
 }
 
 impl GravityForceModel {
     /// Create a new gravity force model.
     ///
     /// - `theta`:     Barnes-Hut opening angle (controls accuracy vs speed).
-    /// - `max_depth`: Maximum quadtree depth (16 is sufficient for all
+    /// - `max_depth`: Maximum octree depth (16 is sufficient for all
     ///   practical particle counts).
     pub fn new(theta: f64, max_depth: usize) -> Self {
-        Self { engine: BarnesHutEngine::new(max_depth), theta }
+        Self { engine: BarnesHutEngine::new(max_depth), theta, body_arrays: BodyArrays::new() }
     }
 }
 
@@ -144,6 +164,14 @@ impl ForceModel for GravityForceModel {
     }
 
     fn compute(&mut self, bodies: &[Body], acc: &mut [Vec3]) -> f64 {
+        // Pack the SoA snapshot for this compute() call. Body positions
+        // mutate between integrator substeps (IAS15's Picard iterations,
+        // VV's drift), so the snapshot is rebuilt each call from the
+        // authoritative AoS state. `pack_from` reuses buffer capacity;
+        // allocations occur only when N grows past a previous high-water
+        // mark.
+        self.body_arrays.pack_from(bodies);
+
         // Phase-split instrumentation for the IAS15 diagnostic harness:
         // separate the tree-build half from the traversal half of the
         // evaluate work so an optimisation that caches the tree across
@@ -152,13 +180,13 @@ impl ForceModel for GravityForceModel {
         // off; accesses thread-local storage owned by `ias15::profile`.
         #[cfg(feature = "ias15-profile")]
         let build_start = std::time::Instant::now();
-        self.engine.build(bodies);
+        self.engine.maintain(&self.body_arrays);
         #[cfg(feature = "ias15-profile")]
         crate::physics::integrator::ias15::profile::record_tree_build(build_start.elapsed());
 
         #[cfg(feature = "ias15-profile")]
         let traverse_start = std::time::Instant::now();
-        let pe = self.engine.evaluate(bodies, self.theta, acc);
+        let pe = self.engine.evaluate(&self.body_arrays, self.theta, acc);
         #[cfg(feature = "ias15-profile")]
         crate::physics::integrator::ias15::profile::record_tree_traverse(traverse_start.elapsed());
 
@@ -179,6 +207,14 @@ impl ForceModel for GravityForceModel {
 
     fn set_exact_threshold(&mut self, n: usize) {
         self.engine.set_exact_threshold(n);
+    }
+
+    fn test_particle_threshold(&self) -> f64 {
+        self.engine.test_particle_threshold()
+    }
+
+    fn set_test_particle_threshold(&mut self, threshold: f64) {
+        self.engine.set_test_particle_threshold(threshold);
     }
 
     fn bh_engine(&self) -> Option<&BarnesHutEngine> {

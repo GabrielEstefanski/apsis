@@ -24,39 +24,6 @@
 //! the quantitative gates for those two; the tests below carry the
 //! generic gates that any federated extension can rely on.
 //!
-//! ## What this contract is, and why it exists
-//!
-//! N-body simulators routinely accept user-defined non-gravitational
-//! forces (radiation pressure, J2 oblateness, atmospheric drag, custom
-//! research perturbations). The accepted way of integrating them — pass
-//! a callback, hope for the best — is informal. There is no statement of
-//! what the simulator promises about the environment in which the
-//! callback runs, no statement of what the callback may rely on across
-//! multiple registrations, no machine-checkable record of what counts as
-//! a valid configuration. The thesis APSIS advances is that this can be
-//! made formal: perturbations are first-class scientific artifacts under
-//! a written, versioned, executable contract.
-//!
-//! Concretely, against the comparable surface in REBOUND/REBOUNDx:
-//!
-//! ```text
-//! | Aspect            | REBOUND   | APSIS         |
-//! |-------------------|-----------|---------------|
-//! | formal contract   | implicit  | explicit      |
-//! | validation        | partial   | systematic    |
-//! | composition       | ad hoc    | specified     |
-//! | verifiability     | limited   | executable    |
-//! ```
-//!
-//! "Systematic" here is **not** a claim of broader test coverage — REBOUND
-//! has a wider validation portfolio measured by problem count. It is a
-//! claim of **shape**: every guarantee in this module has a named test
-//! gated in CI, every locked baseline lives in `docs/experiments/`, every
-//! warning the simulator can emit is asserted to fire under exactly one
-//! known configuration. The property that distinguishes APSIS is that a
-//! reviewer can **mechanically check** the claims, not that the claims
-//! are quantitatively stronger.
-//!
 //! ## Scope and counter-scope
 //!
 //! Two layers of guarantee live below — read both before writing a
@@ -81,18 +48,20 @@
 //!    to Newton, never substituted for it.
 //!    - test: `tests::invariant_newtonian_consistency_under_null_perturbation_attach`
 //!
-//! 3. **Read-only access to base dynamics.** Perturbations cannot
-//!    mutate body state, force-model state, or any other system field.
+//! 3. **Read-only access to base dynamics.** Operators cannot mutate
+//!    body state, force-model state, or any other system field.
 //!    Enforced by the `&self` receiver on
-//!    [`PerturbationForce::accumulate`](crate::physics::integrator::PerturbationForce::accumulate)
+//!    [`HamiltonianOperator::accumulate_force`](crate::physics::integrator::HamiltonianOperator::accumulate_force)
+//!    and
+//!    [`NonConservativeOperator::accumulate_force`](crate::physics::integrator::NonConservativeOperator::accumulate_force),
 //!    and by Rust's borrow checker — there is no runtime gate to
 //!    bypass. The escape hatch (`Cell`/`RefCell`/atomic via interior
 //!    mutability) is a contract violation rather than a structural one,
 //!    and is gated by:
 //!    - test: `tests::invariant_perturbation_is_pure_function_of_state`
-//!      (`accumulate` invoked twice on the same instance with identical
-//!      input produces identical output — proves no observable internal
-//!      state evolution between calls).
+//!      (`accumulate_force` invoked twice on the same instance with
+//!      identical input produces identical output — proves no observable
+//!      internal state evolution between calls).
 //!
 //! ### `CompositionRules` — what the system promises about multi-perturbation registration
 //!
@@ -171,6 +140,205 @@
 //!     on a subscriber being present at any specific moment.
 //!     - test: `tests::failure_silent_acceptance_is_impossible`
 //!
+//! ## Observable constructor convention
+//!
+//! Perturbations parametrise physical processes. Parameters come from
+//! physics — fundamental constants, observations, regime choices — not
+//! from raw numerical input pasted from another simulator without
+//! checking. The convention below makes that load-bearing at the API
+//! surface so a contributor cannot ship a perturbation that silently
+//! invites unit-mismatch errors.
+//!
+//! ### Mandatory unit-system binding
+//!
+//! Every dimensional perturbation **must** carry the
+//! [`crate::units::UnitSystem`] it was constructed for and surface it
+//! through [`crate::physics::integrator::Operator::declared_units`].
+//! [`crate::core::system::System::add_hamiltonian_perturbation`]
+//! (and the non-conservative / observer counterparts) compare the
+//! operator's declared units against the `System`'s own units and
+//! return [`Err(UnitSystemMismatch)`](crate::physics::integrator::UnitSystemMismatch)
+//! on mismatch. Silent unit-system confusion is structurally
+//! impossible — the operator is **not** registered when the units
+//! disagree, and the caller chooses the policy (propagate with `?`,
+//! log and skip, swap the operator, fall back, or `.expect(...)` for
+//! end-of-line scripts). Operators that are genuinely unit-agnostic
+//! (a constant push expressed as a dimensionless multiplier, e.g.)
+//! leave `declared_units` at its default `None` and the registration
+//! returns `Ok(())` regardless of the System's unit system.
+//!
+//! Two-tier registration semantics:
+//!
+//! - **Hard** — `UnitSystemMismatch` is `Err`. Integration would
+//!   silently produce wrong physics with the wrong dimensional
+//!   constant; the operator is refused and the caller decides.
+//! - **Soft** — kernel-precondition violations and regime-of-validity
+//!   bounds emit `warn_diag` events on the structured log bus.
+//!   Integration continues with the user's choice; the bus carries
+//!   the audit trail.
+//!
+//! The Python binding maps the `Err` variant to the typed
+//! [`apsis.UnitSystemMismatchError`](crate::physics::integrator::UnitSystemMismatch)
+//! exception, with the same `operator` / `operator_units` /
+//! `system_units` fields available as Python attributes for
+//! programmatic recovery.
+//!
+//! The constructor shapes below all carry `UnitSystem` (explicitly or
+//! through a named regime) for any operator whose physics is
+//! dimensional. There is no constructor path that produces a
+//! dimensional operator without a `UnitSystem` attached.
+//!
+//! ### Regime-based constructor (`for_units`, `for_<regime>`)
+//!
+//! Encodes a unit system or physical regime in the constructor name.
+//! `for_units` derives parameters from a supplied `UnitSystem`;
+//! regime-named factories (`for_earth`, `for_iss_altitude_km`) embed
+//! the unit choice in the name itself.
+//!
+//! ```text
+//! PostNewtonian1PN::for_units(UnitSystem::solar_canonical())
+//! PostNewtonian1PN::for_units(UnitSystem::solar())
+//! J2::for_earth()                         // future
+//! Drag::for_iss_altitude_km(400.0)        // future
+//! ```
+//!
+//! ### Observable-inversion constructor (`from_<observable>`)
+//!
+//! Inverts a desired observable to compute the operator's coefficient.
+//! The user names what they measure; the constructor solves for the
+//! parameter. Always takes a `UnitSystem` so the produced operator
+//! survives the registration check.
+//!
+//! ```text
+//! CentralForce::from_precession_rate(rate, gamma, &primary, units)   // future
+//! Drag::from_orbital_decay_rate(rate, &body, units)                  // future
+//! ```
+//!
+//! Eliminates a class of silent error: the user works in the space
+//! they measure (precession rate, decay rate) instead of the space the
+//! model uses (`Acentral` coefficient, drag constant).
+//!
+//! ### Raw escape (`from_raw_xxx`)
+//!
+//! The `from_raw_` prefix marks the constructor as accepting the
+//! parameter without inversion or unit-derived computation. The
+//! `UnitSystem` argument is still mandatory so the registration check
+//! at `System` level remains load-bearing.
+//!
+//! ```text
+//! PostNewtonian1PN::from_raw_c(c, units)
+//! ```
+//!
+//! Use when the value is known-correct from neighbouring code (so
+//! cross-checking against `units` would be redundant) or for
+//! hypothetical experiments where the parameter is intentionally
+//! non-physical. The regime-based constructor remains the default
+//! path in user-facing examples and downstream bindings.
+//!
+//! ### Implementor checklist
+//!
+//! When adding a new perturbation crate:
+//!
+//! 1. Carry `UnitSystem` on every dimensional operator and override
+//!    `declared_units` to return `Some(units)` so the registration
+//!    panic catches mismatches.
+//! 2. Provide at least one regime-based or observable-inversion
+//!    constructor — the default path for users should not require
+//!    raw numeric input.
+//! 3. If a raw constructor is exposed, name it with the `from_raw_`
+//!    prefix and require a `UnitSystem` argument.
+//! 4. Default downstream binding examples use the regime-based or
+//!    observable-inversion constructor.
+//! 5. If the operator's derivation assumes a physical regime (mass
+//!    ratio, eccentricity, v/c, …), declare the bound via
+//!    [`crate::physics::integrator::Operator::check_regime`] — see the
+//!    "Regime-of-validity contract" section below.
+//!
+//! ## Regime-of-validity contract
+//!
+//! `KernelRequirements` is the **numerical contract** every operator
+//! places on the gravitational kernel (Exactness, Continuity).
+//! Regime-of-validity is the **physical contract** every operator
+//! places on the body state itself: a test-particle approximation
+//! assumes `m_secondary ≪ m_primary`, a 1PN expansion assumes
+//! `v ≪ c`, an averaging theory assumes small eccentricity, and so
+//! on. Crossing the bound does not break the integrator; it breaks
+//! the operator's claim to represent the physics it was derived from.
+//!
+//! Operators expose their bounds through
+//! [`crate::physics::integrator::Operator::check_regime`], which
+//! returns one [`crate::physics::integrator::RegimeViolation`] per
+//! crossed bound at the current body state. `System` invokes this:
+//!
+//! - **At registration** — once, against the initial body state.
+//!   Captures bad initial conditions before the integrator starts.
+//! - **During integration** — every
+//!   [`regime_check_cadence`](crate::physics::integrator::Operator::regime_check_cadence)
+//!   outer steps, against the current body state. Captures regime
+//!   crossings that develop dynamically (eccentricity growth,
+//!   periapse passage, mass change). Cadence is per-operator and the
+//!   system uses the minimum across registered operators.
+//!
+//! Each `(operator, bound)` pair fires exactly one `warn_diag` per
+//! `System` lifetime — a violation persisting across many checks does
+//! not respam the bus. The dedup state is reset by
+//! [`crate::core::system::System::reset_regime_warnings`] when the
+//! caller deliberately changes scenario.
+//!
+//! [`Severity`](crate::physics::integrator::Severity) carries three
+//! tiers — `Approaching` (near the bound), `Exceeded` (past it,
+//! integration continues), `Hard` (far outside the derivation
+//! envelope). Encode them at the call site so a reader can match
+//! intent to value without consulting the threshold constants.
+//!
+//! - test: `tests::regime_check_fires_at_registration_when_initial_state_violates`
+//! - test: `tests::regime_check_silent_when_initial_state_within_regime`
+//! - test: `tests::regime_check_dedups_persistent_violation_across_steps`
+//!
+//! Together with `KernelRequirements`, the regime contract closes the
+//! precondition surface: numerical (kernel) checked at registration,
+//! physical (regime) checked statically AND dynamically. An operator
+//! that survives both is on its derivation's footing for the run.
+//!
+//! ## Citation provenance
+//!
+//! Each registered operator publishes a
+//! [`Citation`](crate::physics::integrator::Citation) carrying the BibTeX
+//! entry of the paper it implements, the DOI when available, and the
+//! implementing crate's `crate_name` / `crate_version` /
+//! `commit_hash` captured at the operator's crate compile site (not
+//! apsis core's). The `commit_hash` field is populated by the operator
+//! crate's `build.rs` via `cargo:rustc-env=`; consumer code never
+//! constructs a citation by hand.
+//!
+//! [`crate::core::system::System::citations`] aggregates them across
+//! Hamiltonian + non-conservative + observer stacks in registration
+//! order; [`crate::core::system::System::provenance`] renders a
+//! human-readable block suitable for paper supplementary material or
+//! for embedding into a snapshot file. Both are deterministic given the
+//! same operator stack — diff two outputs to confirm the dependency
+//! graph stayed bit-equal.
+//!
+//! Operators with no canonical reference (test fakes, internal tooling)
+//! inherit the default `None` and are silently skipped by the
+//! aggregator. The citation surface is opt-in for operators but
+//! opt-out for the federation: every published perturbation crate
+//! should override
+//! [`Operator::citation`](crate::physics::integrator::Operator::citation)
+//! so the run's full reference list reads off the operator stack
+//! automatically.
+//!
+//! - test: [`crate::physics::integrator::citation`] module tests
+//! - test: `tests::citations_skip_operators_without_citation`
+//! - test: `tests::citations_preserve_registration_order`
+//! - test: `tests::provenance_renders_every_registered_citation`
+//!
+//! `crate_version` + `commit_hash` together pin the implementation to a
+//! specific source state and are sufficient (modulo platform-level f64
+//! variance) to reproduce the operator's behaviour bit-for-bit on a
+//! single platform. The reproducibility envelope is the same one the
+//! "What this contract does NOT guarantee" section names below.
+//!
 //! ## What this contract does NOT guarantee
 //!
 //! Reviewers who hold the federation thesis to a stronger standard need
@@ -191,7 +359,7 @@
 //!   the integrate loop. The Barnes–Hut tree traversal uses Rayon, and
 //!   parallel reduction order is not guaranteed across runs — but this
 //!   is not exercised by any release-mode physics gate (every gate sits
-//!   under `EXACT_THRESHOLD` and uses direct O(N²) summation). A
+//!   under the engine's exact-summation default and uses direct O(N²)). A
 //!   perturbation author who introduces multi-threaded internal state
 //!   is outside the contract; the integrator does not protect against
 //!   this.
@@ -211,23 +379,28 @@
 //!
 //! ## Iteration-order invariant (load-bearing)
 //!
-//! The determinism property above silently relies on a property of the
-//! perturbation storage:
+//! The determinism property above silently relies on two properties of
+//! the operator storage:
 //!
-//! > Perturbations registered through
-//! > [`System::add_perturbation`](crate::core::system::System::add_perturbation)
-//! > are stored in a `Vec<Box<dyn PerturbationForce>>` and iterated via
-//! > `slice::iter()`. **Iteration order equals registration order.**
+//! > Operators registered through
+//! > [`System::add_hamiltonian_perturbation`](crate::core::system::System::add_hamiltonian_perturbation)
+//! > and
+//! > [`System::add_non_conservative_perturbation`](crate::core::system::System::add_non_conservative_perturbation)
+//! > are stored in two `Vec<Box<dyn …>>` containers and iterated via
+//! > `slice::iter()`. **Within each container, iteration order equals
+//! > registration order.** **Across containers, the dispatch helper
+//! > applies all Hamiltonian operators before any non-conservative
+//! > operator** (see [`crate::physics::integrator::operator_dispatch::accumulate_perturbation_forces`]).
 //!
-//! Any future change that swaps the storage for a `HashSet`, `HashMap`,
-//! `BTreeSet`-by-pointer-address, or any other container with non-stable
-//! iteration order silently breaks determinism. The test
-//! `tests::invariant_determinism_bit_exact` is the load-bearing guard:
-//! such a regression would surface as a bit-difference between two
-//! identical runs, not as a compile error. The
-//! `tests::composition_commutative_two_perturbations` test (next
-//! commit) does NOT cover this — commutativity is symmetry under
-//! reordering, while determinism is sameness under no reordering.
+//! Any future change that swaps either storage for a `HashSet`,
+//! `HashMap`, `BTreeSet`-by-pointer-address, or any other container
+//! with non-stable iteration order silently breaks determinism. The
+//! test `tests::invariant_determinism_bit_exact` is the load-bearing
+//! guard: such a regression would surface as a bit-difference between
+//! two identical runs, not as a compile error. The
+//! `tests::composition_commutative_two_perturbations` test does NOT
+//! cover this — commutativity is symmetry under reordering, while
+//! determinism is sameness under no reordering.
 
 #[cfg(test)]
 mod tests {
@@ -241,73 +414,103 @@ mod tests {
     use crate::physics::gravity::kernel::{
         Continuity, Exactness, KernelRequirements, TruncatedPlummerKernel,
     };
-    use crate::physics::integrator::{IntegratorKind, PerturbationForce};
+    use crate::physics::integrator::{
+        HamiltonianOperator, IntegratorKind, NonConservativeOperator, Operator, Potential,
+    };
     use crate::units::UnitSystem;
 
     // ── Test perturbations ────────────────────────────────────────────────────
     //
     // Test-local fakes deliberately disjoint from `apsis-1pn` and
     // anything in the production crate graph. The contract is generic
-    // over `PerturbationForce` impls, so the tests must not couple to
-    // any particular real perturbation. `apsis-1pn` carries its own
-    // contract evidence in `crates/apsis-1pn/tests/` — proving a real
-    // perturbation also satisfies the contract — but does not appear
-    // here.
+    // over operator impls, so the tests must not couple to any
+    // particular real perturbation. `apsis-1pn` carries its own contract
+    // evidence in `crates/apsis-1pn/tests/` — proving a real perturbation
+    // also satisfies the contract — but does not appear here.
 
-    /// Stateless perturbation that adds a fixed Vec3 to every body's
-    /// acceleration. Trivial enough to reason about by hand; useful for
-    /// composition tests where each perturbation's contribution is known
+    /// Stateless Hamiltonian operator that adds a fixed `Vec3` to every
+    /// body's acceleration — i.e. a uniform external field with potential
+    /// `V = −F · Σ x_i`. Trivial enough to reason about by hand; useful
+    /// for composition tests where each operator's contribution is known
     /// in closed form.
     struct ConstantPush(Vec3);
 
-    impl PerturbationForce for ConstantPush {
-        fn accumulate(&self, _bodies: &[Body], acc: &mut [Vec3]) {
+    impl Operator for ConstantPush {}
+
+    impl HamiltonianOperator for ConstantPush {
+        fn accumulate_force(&self, _bodies: &[Body], acc: &mut [Vec3]) {
             for a in acc.iter_mut() {
                 *a += self.0;
             }
         }
+
+        fn potential(&self, bodies: &[Body]) -> Potential {
+            let mut s = 0.0;
+            for b in bodies {
+                s -= self.0.x * b.pos_x + self.0.y * b.pos_y + self.0.z * b.pos_z;
+            }
+            Potential::Value(s)
+        }
     }
 
-    /// Stateless perturbation that adds a linear-drag term `-k · v` to
-    /// each body. Reads body velocity, so it exercises the
-    /// `(bodies, scratch_acc) → contribution` data flow that pure
-    /// constant pushes cannot. Used by determinism / state-purity tests
-    /// that need a non-trivial dependence on body state.
+    /// Non-conservative operator: linear drag `−k · v`. Reads body
+    /// velocity, so it exercises the `(bodies, acc) → contribution`
+    /// data flow that pure constant pushes cannot. Used by determinism /
+    /// state-purity tests that need a non-trivial dependence on body
+    /// state.
     struct LinearDrag(f64);
 
-    impl PerturbationForce for LinearDrag {
-        fn accumulate(&self, bodies: &[Body], acc: &mut [Vec3]) {
+    impl Operator for LinearDrag {}
+
+    impl NonConservativeOperator for LinearDrag {
+        fn accumulate_force(&self, bodies: &[Body], acc: &mut [Vec3]) {
             for (b, a) in bodies.iter().zip(acc.iter_mut()) {
-                a.x -= self.0 * b.vx;
-                a.y -= self.0 * b.vy;
-                a.z -= self.0 * b.vz;
+                a.x -= self.0 * b.vel_x;
+                a.y -= self.0 * b.vel_y;
+                a.z -= self.0 * b.vel_z;
             }
         }
     }
 
-    /// Perturbation that contributes nothing. Used by the Newtonian
-    /// consistency test: attaching a no-op perturbation must leave the
-    /// trajectory bit-equal to the bare-Newton run.
+    /// Hamiltonian operator that contributes nothing. Used by the
+    /// Newtonian consistency test: attaching a no-op operator must
+    /// leave the trajectory bit-equal to the bare-Newton run.
     struct NullPerturbation;
 
-    impl PerturbationForce for NullPerturbation {
-        fn accumulate(&self, _bodies: &[Body], _acc: &mut [Vec3]) {}
+    impl Operator for NullPerturbation {}
+
+    impl HamiltonianOperator for NullPerturbation {
+        fn accumulate_force(&self, _bodies: &[Body], _acc: &mut [Vec3]) {}
+        fn potential(&self, _bodies: &[Body]) -> Potential {
+            Potential::Value(0.0)
+        }
     }
 
-    /// Stateless perturbation with a third dynamical signature: a
-    /// position-dependent radial pull. Combined with `LinearDrag`
+    /// Hamiltonian operator with a third dynamical signature: a
+    /// position-dependent radial pull `F = −k · x` (harmonic well with
+    /// potential `V = (k/2) Σ |x_i|²`). Combined with `LinearDrag`
     /// (velocity-dependent) and `ConstantPush` (constant) it gives the
     /// associativity test three terms that are dynamically distinct, so
     /// no two of them collapse into a single effective contribution.
     struct RadialPull(f64);
 
-    impl PerturbationForce for RadialPull {
-        fn accumulate(&self, bodies: &[Body], acc: &mut [Vec3]) {
+    impl Operator for RadialPull {}
+
+    impl HamiltonianOperator for RadialPull {
+        fn accumulate_force(&self, bodies: &[Body], acc: &mut [Vec3]) {
             for (b, a) in bodies.iter().zip(acc.iter_mut()) {
-                a.x -= self.0 * b.x;
-                a.y -= self.0 * b.y;
-                a.z -= self.0 * b.z;
+                a.x -= self.0 * b.pos_x;
+                a.y -= self.0 * b.pos_y;
+                a.z -= self.0 * b.pos_z;
             }
+        }
+
+        fn potential(&self, bodies: &[Body]) -> Potential {
+            let mut s = 0.0;
+            for b in bodies {
+                s += b.pos_x * b.pos_x + b.pos_y * b.pos_y + b.pos_z * b.pos_z;
+            }
+            Potential::Value(0.5 * self.0 * s)
         }
     }
 
@@ -317,10 +520,16 @@ mod tests {
     /// registration-time precondition check is exercised.
     struct DeclaresExactnessRequirement;
 
-    impl PerturbationForce for DeclaresExactnessRequirement {
-        fn accumulate(&self, _bodies: &[Body], _acc: &mut [Vec3]) {}
+    impl Operator for DeclaresExactnessRequirement {
         fn kernel_requirements(&self) -> KernelRequirements {
             KernelRequirements { required_exactness: Some(Exactness::Exact), min_continuity: None }
+        }
+    }
+
+    impl HamiltonianOperator for DeclaresExactnessRequirement {
+        fn accumulate_force(&self, _bodies: &[Body], _acc: &mut [Vec3]) {}
+        fn potential(&self, _bodies: &[Body]) -> Potential {
+            Potential::Value(0.0)
         }
     }
 
@@ -330,13 +539,19 @@ mod tests {
     /// effective requirements are the union of the individuals'.
     struct DeclaresContinuityRequirement;
 
-    impl PerturbationForce for DeclaresContinuityRequirement {
-        fn accumulate(&self, _bodies: &[Body], _acc: &mut [Vec3]) {}
+    impl Operator for DeclaresContinuityRequirement {
         fn kernel_requirements(&self) -> KernelRequirements {
             KernelRequirements {
                 required_exactness: None,
                 min_continuity: Some(Continuity::Smooth),
             }
+        }
+    }
+
+    impl HamiltonianOperator for DeclaresContinuityRequirement {
+        fn accumulate_force(&self, _bodies: &[Body], _acc: &mut [Vec3]) {}
+        fn potential(&self, _bodies: &[Body]) -> Potential {
+            Potential::Value(0.0)
         }
     }
 
@@ -347,8 +562,8 @@ mod tests {
     /// numbers don't matter — the same fixture across tests means the
     /// invariants are tested against the same dynamical regime.
     fn fixture_system() -> System {
-        let primary = Body::star(1.0).at(0.0, 0.0).with_velocity(0.0, 0.0).unsoftened();
-        let satellite = Body::rocky(1e-6).at(1.0, 0.0).with_velocity(0.0, 1.0).unsoftened();
+        let primary = Body::star(1.0).at(0.0, 0.0).with_velocity(0.0, 0.0);
+        let satellite = Body::rocky(1e-6).at(1.0, 0.0).with_velocity(0.0, 1.0);
         System::new(vec![primary, satellite], UnitSystem::canonical())
             .with_integrator(IntegratorKind::Ias15)
             .with_dt(1e-3)
@@ -359,18 +574,25 @@ mod tests {
     /// of every f64 field.
     #[derive(Clone, PartialEq, Debug)]
     struct BodyState {
-        x: f64,
-        y: f64,
-        z: f64,
-        vx: f64,
-        vy: f64,
-        vz: f64,
+        pos_x: f64,
+        pos_y: f64,
+        pos_z: f64,
+        vel_x: f64,
+        vel_y: f64,
+        vel_z: f64,
     }
 
     fn snapshot(sys: &System) -> Vec<BodyState> {
         sys.bodies()
             .iter()
-            .map(|b| BodyState { x: b.x, y: b.y, z: b.z, vx: b.vx, vy: b.vy, vz: b.vz })
+            .map(|b| BodyState {
+                pos_x: b.pos_x,
+                pos_y: b.pos_y,
+                pos_z: b.pos_z,
+                vel_x: b.vel_x,
+                vel_y: b.vel_y,
+                vel_z: b.vel_z,
+            })
             .collect()
     }
 
@@ -388,8 +610,10 @@ mod tests {
 
         let run = || {
             let mut sys = fixture_system();
-            sys.add_perturbation(Box::new(LinearDrag(1e-4)));
-            sys.add_perturbation(Box::new(ConstantPush(Vec3::new(0.0, 0.0, 1e-6))));
+            sys.add_non_conservative_perturbation(Box::new(LinearDrag(1e-4)))
+                .expect("contract test fixture: matched UnitSystem");
+            sys.add_hamiltonian_perturbation(Box::new(ConstantPush(Vec3::new(0.0, 0.0, 1e-6))))
+                .expect("contract test fixture: matched UnitSystem");
             for _ in 0..N_STEPS {
                 sys.step();
             }
@@ -421,13 +645,13 @@ mod tests {
         const N_STEPS: u64 = 200;
 
         let run = |x_offset: f64| {
-            let primary = Body::star(1.0).at(0.0, 0.0).with_velocity(0.0, 0.0).unsoftened();
-            let satellite =
-                Body::rocky(1e-6).at(1.0 + x_offset, 0.0).with_velocity(0.0, 1.0).unsoftened();
+            let primary = Body::star(1.0).at(0.0, 0.0).with_velocity(0.0, 0.0);
+            let satellite = Body::rocky(1e-6).at(1.0 + x_offset, 0.0).with_velocity(0.0, 1.0);
             let mut sys = System::new(vec![primary, satellite], UnitSystem::canonical())
                 .with_integrator(IntegratorKind::Ias15)
                 .with_dt(1e-3);
-            sys.add_perturbation(Box::new(LinearDrag(1e-4)));
+            sys.add_non_conservative_perturbation(Box::new(LinearDrag(1e-4)))
+                .expect("contract test fixture: matched UnitSystem");
             for _ in 0..N_STEPS {
                 sys.step();
             }
@@ -465,7 +689,9 @@ mod tests {
 
         // Same setup, with a no-op perturbation registered.
         let mut with_null = fixture_system();
-        with_null.add_perturbation(Box::new(NullPerturbation));
+        with_null
+            .add_hamiltonian_perturbation(Box::new(NullPerturbation))
+            .expect("contract test fixture: matched UnitSystem");
         for _ in 0..N_STEPS {
             with_null.step();
         }
@@ -479,15 +705,15 @@ mod tests {
         );
     }
 
-    /// **Invariant 3.** A perturbation instance is a pure function of
-    /// `(bodies, scratch_acc)`: invoking `accumulate` twice on the same
+    /// **Invariant 3.** An operator instance is a pure function of
+    /// `(bodies, acc)`: invoking `accumulate_force` twice on the same
     /// instance with identical inputs produces identical outputs. The
     /// test catches accidental interior mutability (a `Cell`-typed
     /// counter, a memoisation cache, an atomic that drifts between
     /// calls), which the trait's `&self` receiver does not structurally
     /// prevent.
     ///
-    /// The trait-level guarantee that `accumulate` cannot mutate
+    /// The trait-level guarantee that `accumulate_force` cannot mutate
     /// `&mut self` is enforced by the borrow checker and needs no
     /// runtime test. This test is specifically for the looser property
     /// — no observable side effect on internal state across calls —
@@ -501,17 +727,17 @@ mod tests {
         let bodies = [primary, satellite];
 
         let mut acc1 = vec![Vec3::ZERO; bodies.len()];
-        p.accumulate(&bodies, &mut acc1);
+        p.accumulate_force(&bodies, &mut acc1);
 
         let mut acc2 = vec![Vec3::ZERO; bodies.len()];
-        p.accumulate(&bodies, &mut acc2);
+        p.accumulate_force(&bodies, &mut acc2);
 
         assert_eq!(
             acc1, acc2,
-            "the same perturbation instance produced different accumulator state \
+            "the same operator instance produced different accumulator state \
              on two calls with identical input — observable internal state is \
-             evolving between calls, which violates the contract that perturbation \
-             evaluation is a pure function of (bodies, scratch_acc)"
+             evolving between calls, which violates the contract that operator \
+             evaluation is a pure function of (bodies, acc)"
         );
     }
 
@@ -532,11 +758,15 @@ mod tests {
         let run = |order_swapped: bool| {
             let mut sys = fixture_system();
             if order_swapped {
-                sys.add_perturbation(Box::new(ConstantPush(Vec3::new(0.0, 0.0, 1e-6))));
-                sys.add_perturbation(Box::new(LinearDrag(1e-4)));
+                sys.add_hamiltonian_perturbation(Box::new(ConstantPush(Vec3::new(0.0, 0.0, 1e-6))))
+                    .expect("contract test fixture: matched UnitSystem");
+                sys.add_non_conservative_perturbation(Box::new(LinearDrag(1e-4)))
+                    .expect("contract test fixture: matched UnitSystem");
             } else {
-                sys.add_perturbation(Box::new(LinearDrag(1e-4)));
-                sys.add_perturbation(Box::new(ConstantPush(Vec3::new(0.0, 0.0, 1e-6))));
+                sys.add_non_conservative_perturbation(Box::new(LinearDrag(1e-4)))
+                    .expect("contract test fixture: matched UnitSystem");
+                sys.add_hamiltonian_perturbation(Box::new(ConstantPush(Vec3::new(0.0, 0.0, 1e-6))))
+                    .expect("contract test fixture: matched UnitSystem");
             }
             for _ in 0..N_STEPS {
                 sys.step();
@@ -587,14 +817,14 @@ mod tests {
         let sentinel = Vec3::new(0.5, -0.25, 1e-3);
 
         let mut acc_forward = vec![sentinel; bodies.len()];
-        drag.accumulate(&bodies, &mut acc_forward);
-        push.accumulate(&bodies, &mut acc_forward);
-        pull.accumulate(&bodies, &mut acc_forward);
+        drag.accumulate_force(&bodies, &mut acc_forward);
+        push.accumulate_force(&bodies, &mut acc_forward);
+        pull.accumulate_force(&bodies, &mut acc_forward);
 
         let mut acc_reversed = vec![sentinel; bodies.len()];
-        pull.accumulate(&bodies, &mut acc_reversed);
-        push.accumulate(&bodies, &mut acc_reversed);
-        drag.accumulate(&bodies, &mut acc_reversed);
+        pull.accumulate_force(&bodies, &mut acc_reversed);
+        push.accumulate_force(&bodies, &mut acc_reversed);
+        drag.accumulate_force(&bodies, &mut acc_reversed);
 
         // Eight ULPs of the largest accumulator entry. With sentinel
         // ~0.5 the floor is ~9e-16: large enough to absorb any
@@ -639,7 +869,7 @@ mod tests {
         let p = ConstantPush(push_value);
 
         let mut acc = vec![sentinel; bodies.len()];
-        p.accumulate(&bodies, &mut acc);
+        p.accumulate_force(&bodies, &mut acc);
 
         let expected = sentinel + push_value;
         for (i, a) in acc.iter().enumerate() {
@@ -668,8 +898,10 @@ mod tests {
         let invariants = capture_violation_invariants(|| {
             let kernel = Arc::new(TruncatedPlummerKernel::new(1.0));
             let mut sys = fixture_system().with_kernel(kernel);
-            sys.add_perturbation(Box::new(DeclaresExactnessRequirement));
-            sys.add_perturbation(Box::new(DeclaresContinuityRequirement));
+            sys.add_hamiltonian_perturbation(Box::new(DeclaresExactnessRequirement))
+                .expect("contract test fixture: matched UnitSystem");
+            sys.add_hamiltonian_perturbation(Box::new(DeclaresContinuityRequirement))
+                .expect("contract test fixture: matched UnitSystem");
         });
 
         let exactness_count = invariants.iter().filter(|s| *s == "Exactness").count();
@@ -759,26 +991,22 @@ mod tests {
     }
 
     /// **Invariant 8 (Exactness).** A perturbation declaring a single
-    /// `required_exactness = Exact` requirement, registered against the
-    /// default Plummer kernel (which reports `Softened` whenever any
-    /// body has nonzero softening), produces exactly one warning whose
+    /// `required_exactness = Exact` requirement, registered against an
+    /// opt-in Plummer kernel, produces exactly one warning whose
     /// `violated_invariant` tag identifies the offending invariant.
-    /// No silent acceptance, no spurious second warning for an
-    /// invariant the perturbation did not constrain.
-    ///
-    /// The bodies use their default material softening — i.e. the
-    /// configuration that any new user gets without thinking about
-    /// kernel preconditions, which is exactly the case the contract
-    /// must catch.
     #[test]
     fn failure_exactness_violation_emits_exactly_one_warning() {
+        use crate::physics::gravity::NewtonKernel;
+        use std::sync::Arc;
         let invariants = capture_violation_invariants(|| {
             let primary = Body::star(1.0).at(0.0, 0.0).with_velocity(0.0, 0.0);
             let satellite = Body::rocky(1e-6).at(1.0, 0.0).with_velocity(0.0, 1.0);
             let mut sys = System::new(vec![primary, satellite], UnitSystem::canonical())
+                .with_kernel(Arc::new(NewtonKernel::new(0.01)))
                 .with_integrator(IntegratorKind::Ias15)
                 .with_dt(1e-3);
-            sys.add_perturbation(Box::new(DeclaresExactnessRequirement));
+            sys.add_hamiltonian_perturbation(Box::new(DeclaresExactnessRequirement))
+                .expect("contract test fixture: matched UnitSystem");
         });
 
         assert_eq!(
@@ -800,7 +1028,8 @@ mod tests {
         let invariants = capture_violation_invariants(|| {
             let kernel = Arc::new(TruncatedPlummerKernel::new(1.0));
             let mut sys = fixture_system().with_kernel(kernel);
-            sys.add_perturbation(Box::new(DeclaresContinuityRequirement));
+            sys.add_hamiltonian_perturbation(Box::new(DeclaresContinuityRequirement))
+                .expect("contract test fixture: matched UnitSystem");
         });
 
         assert_eq!(
@@ -831,7 +1060,8 @@ mod tests {
             let kernel = Arc::new(TruncatedPlummerKernel::new(1.0));
             let mut sys = fixture_system().with_kernel(kernel);
             for _ in 0..N_REGISTRATIONS {
-                sys.add_perturbation(Box::new(DeclaresContinuityRequirement));
+                sys.add_hamiltonian_perturbation(Box::new(DeclaresContinuityRequirement))
+                    .expect("contract test fixture: matched UnitSystem");
             }
         });
 
@@ -883,7 +1113,8 @@ mod tests {
         // (1) and (2): registration with no subscriber attached must
         // not panic and must actually register.
         let pre_count = sys.perturbation_count();
-        sys.add_perturbation(Box::new(DeclaresContinuityRequirement));
+        sys.add_hamiltonian_perturbation(Box::new(DeclaresContinuityRequirement))
+            .expect("contract test fixture: matched UnitSystem");
         assert_eq!(
             sys.perturbation_count(),
             pre_count + 1,
@@ -909,7 +1140,8 @@ mod tests {
             }
         });
 
-        sys.add_perturbation(Box::new(DeclaresContinuityRequirement));
+        sys.add_hamiltonian_perturbation(Box::new(DeclaresContinuityRequirement))
+            .expect("contract test fixture: matched UnitSystem");
 
         let events = captured.lock().unwrap().clone();
         unsubscribe(id);

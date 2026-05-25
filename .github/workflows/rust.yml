@@ -2,9 +2,12 @@ name: Rust CI
 
 on:
   push:
-    branches: ["master", "develop"]
   pull_request:
     branches: ["master", "develop"]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
@@ -16,12 +19,13 @@ jobs:
   # wrong.
   fmt-and-clippy:
     name: rustfmt + clippy
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+      - uses: rui314/setup-mold@v1
       - uses: actions/cache@v4
         with:
           path: |
@@ -34,14 +38,16 @@ jobs:
       - name: cargo clippy -D warnings
         run: cargo clippy --workspace --all-targets -- -D warnings
 
-  # ── Build + unit tests (debug) ───────────────────────────────────────────
+  # ── Build + unit tests ───────────────────────────────────────────────────
   build-and-test:
     name: build + unit tests
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
     needs: fmt-and-clippy
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - uses: rui314/setup-mold@v1
+      - uses: taiki-e/install-action@nextest
       - uses: actions/cache@v4
         with:
           path: |
@@ -49,21 +55,22 @@ jobs:
             ~/.cargo/git
             target
           key: ${{ runner.os }}-cargo-test-${{ hashFiles('**/Cargo.lock') }}
-      - name: cargo build (workspace)
-        run: cargo build --workspace --all-targets
-      - name: cargo test --workspace
-        run: cargo test --workspace
+      - name: cargo nextest run (workspace)
+        run: cargo nextest run --workspace
+      - name: cargo test --doc (nextest does not run doctests)
+        run: cargo test --workspace --doc
 
   # ── Examples compile ─────────────────────────────────────────────────────
   # Guards the Tier-1 public API: if any example stops compiling, something
   # the public API offered was withdrawn without being ported.
   examples-build:
     name: examples build
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
     needs: fmt-and-clippy
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - uses: rui314/setup-mold@v1
       - uses: actions/cache@v4
         with:
           path: |
@@ -79,7 +86,7 @@ jobs:
   # into apsis fails this step.
   core-isolation:
     name: core isolation (no UI deps)
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
     needs: fmt-and-clippy
     steps:
       - uses: actions/checkout@v4
@@ -94,6 +101,53 @@ jobs:
           fi
           echo "OK: core resolves no UI dependency"
 
+  # ── Python distribution build + import smoke ─────────────────────────────
+  # Catches FFI link errors, module-name mismatches, and the PyO3
+  # `add_submodule` / `sys.modules` registration regression that breaks
+  # `from apsis.<operator> import X` even when attribute access works.
+  python-build:
+    name: maturin build + import smoke
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    needs: fmt-and-clippy
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: rui314/setup-mold@v1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-pybuild-${{ hashFiles('**/Cargo.lock') }}
+      - name: create venv + maturin develop
+        run: |
+          python -m venv .venv
+          . .venv/bin/activate
+          pip install maturin
+          maturin develop --release
+      - name: from apsis import + per-operator import
+        run: |
+          . .venv/bin/activate
+          python -c "import apsis; print('apsis', apsis.__version__)"
+          python -c "from apsis.gr import PostNewtonian1PN, C_SOLAR_UNITS; assert C_SOLAR_UNITS > 1e4"
+          python -c "from apsis.radiation import RadiationPressure"
+          python -c "from apsis.central import CentralForce"
+          python -c "import apsis; from apsis.gr import PostNewtonian1PN; \
+            p = PostNewtonian1PN.for_units(units=apsis.units.SOLAR_CANONICAL); \
+            assert isinstance(p, apsis.Perturbation)"
+      - name: examples run
+        run: |
+          . .venv/bin/activate
+          python python-examples/mercury_perihelion.py
+          python python-examples/radiation_dust.py
+          python python-examples/central_precession.py
+          python python-examples/federation_composition.py
+          python python-examples/implicit_midpoint.py
+
   # ── Release-mode validation: Mercury 1PN vs GR ───────────────────────────
   # Headline physics gate. Mercury 1PN reproduces the GR perihelion
   # precession; this job runs the assertion in release mode at the
@@ -101,11 +155,13 @@ jobs:
   # J2, …) attach to this job so the workflow surface stays compact.
   mercury-gate:
     name: release validation (mercury 1PN vs GR)
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
     needs: fmt-and-clippy
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - uses: rui314/setup-mold@v1
+      - uses: taiki-e/install-action@nextest
       - uses: actions/cache@v4
         with:
           path: |
@@ -113,7 +169,7 @@ jobs:
             ~/.cargo/git
             target
           key: ${{ runner.os }}-cargo-gate-${{ hashFiles('**/Cargo.lock') }}
-      - name: cargo test --release -p apsis-1pn -- --ignored
+      - name: cargo nextest run --release -p apsis-1pn --run-ignored only
         env:
           RUSTFLAGS: ""
-        run: cargo test --release -p apsis-1pn --tests -- --ignored
+        run: cargo nextest run --release -p apsis-1pn --tests --run-ignored only

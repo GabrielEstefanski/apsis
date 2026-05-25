@@ -20,7 +20,7 @@
 //!
 //! The full protocol — initial conditions, integrator settings, metrics, and
 //! tolerances declared *a priori* — is specified in
-//! [`docs/experiments/2026-04-25-rebound-parity-kepler.md`](../../../../docs/experiments/2026-04-25-rebound-parity-kepler.md).
+//! [`paper/notebooks/2026-04-25-rebound-parity-kepler.md`](../../../../paper/notebooks/2026-04-25-rebound-parity-kepler.md).
 //!
 //! Constants in this file (`A`, `E`, `M_PRIMARY`, `M_SECONDARY`, `N_ORBITS`)
 //! are the protocol's IC values. Changes here are protocol changes — update
@@ -81,10 +81,8 @@ fn main() {
     let secondary_x = (M_PRIMARY / m_total) * r_peri;
     let secondary_vy = (M_PRIMARY / m_total) * v_peri;
 
-    let primary =
-        Body::star(M_PRIMARY).at(primary_x, 0.0).with_velocity(0.0, primary_vy).unsoftened();
-    let secondary =
-        Body::rocky(M_SECONDARY).at(secondary_x, 0.0).with_velocity(0.0, secondary_vy).unsoftened();
+    let primary = Body::star(M_PRIMARY).at(primary_x, 0.0).with_velocity(0.0, primary_vy);
+    let secondary = Body::rocky(M_SECONDARY).at(secondary_x, 0.0).with_velocity(0.0, secondary_vy);
 
     // ── Integrator setup ────────────────────────────────────────────────── //
     //
@@ -108,7 +106,7 @@ fn main() {
     let mut w = BufWriter::new(file);
 
     writeln!(w, "# REBOUND parity — Kepler e=0.5 — apsis IAS15 side").unwrap();
-    writeln!(w, "# protocol: docs/experiments/2026-04-25-rebound-parity-kepler.md").unwrap();
+    writeln!(w, "# protocol: paper/notebooks/2026-04-25-rebound-parity-kepler.md").unwrap();
     writeln!(w, "# integrator: IAS15 (apsis)").unwrap();
     writeln!(w, "# units: canonical (G = 1)").unwrap();
     writeln!(w, "# a={A}, e={E}, m_primary={M_PRIMARY}, m_secondary={M_SECONDARY:e}").unwrap();
@@ -137,33 +135,33 @@ fn write_sample(w: &mut BufWriter<File>, orbit: u64, sys: &System) {
         w,
         "{orbit},{t:.18e},{x0:.18e},{y0:.18e},{vx0:.18e},{vy0:.18e},{x1:.18e},{y1:.18e},{vx1:.18e},{vy1:.18e},{e:.18e}",
         t = sys.t(),
-        x0 = b0.x,
-        y0 = b0.y,
-        vx0 = b0.vx,
-        vy0 = b0.vy,
-        x1 = b1.x,
-        y1 = b1.y,
-        vx1 = b1.vx,
-        vy1 = b1.vy,
+        x0 = b0.pos_x,
+        y0 = b0.pos_y,
+        vx0 = b0.vel_x,
+        vy0 = b0.vel_y,
+        x1 = b1.pos_x,
+        y1 = b1.pos_y,
+        vx1 = b1.vel_x,
+        vy1 = b1.vel_y,
         e = e_total,
     )
     .unwrap();
 }
 
-/// Total mechanical energy for the two-body unsoftened system.
+/// Total mechanical energy for the two-body system (default exact NewtonKernel).
 ///
 /// Computed inline rather than through `apsis::physics::energy` so the
 /// formula is visible at the comparison site and matches REBOUND's
 /// `sim.calculate_energy()` convention exactly: KE = ½ Σ mᵢ vᵢ², PE =
-/// −Σᵢ<ⱼ G mᵢ mⱼ / rᵢⱼ, with G = 1 and no softening (verified by
-/// `Body::unsoftened()` on every body in this configuration).
+/// −Σᵢ<ⱼ G mᵢ mⱼ / rᵢⱼ, with G = 1 under the default exact NewtonKernel (ε = 0).
 fn total_energy(bodies: &[Body]) -> f64 {
-    let ke: f64 = bodies.iter().map(|b| 0.5 * b.mass * (b.vx * b.vx + b.vy * b.vy)).sum();
+    let ke: f64 =
+        bodies.iter().map(|b| 0.5 * b.mass * (b.vel_x * b.vel_x + b.vel_y * b.vel_y)).sum();
     let mut pe = 0.0;
     for i in 0..bodies.len() {
         for j in (i + 1)..bodies.len() {
-            let dx = bodies[i].x - bodies[j].x;
-            let dy = bodies[i].y - bodies[j].y;
+            let dx = bodies[i].pos_x - bodies[j].pos_x;
+            let dy = bodies[i].pos_y - bodies[j].pos_y;
             let r = (dx * dx + dy * dy).sqrt();
             pe -= bodies[i].mass * bodies[j].mass / r;
         }

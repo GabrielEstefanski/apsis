@@ -1,10 +1,10 @@
 # Integrators
 
-The simulator supports four integration schemes, chosen at runtime via
-`System::set_integrator` or the UI combo box. All share the same
-[`ForceModel`](../crates/apsis/src/physics/integrator/force_model.rs) interface
-and the same `IntegratorContext` plumbing — changing integrator
-never touches the force, perturbation, or diagnostic code.
+The simulator ships seven integration schemes, chosen at runtime via
+`System::set_integrator`. All share the same
+[`ForceModel`](../crates/apsis/src/physics/integrator/force_model.rs)
+interface and the same `IntegratorContext` plumbing — changing
+integrator never touches the force, perturbation, or diagnostic code.
 
 This document captures the contract (what each integrator is for,
 what it requires) rather than the numerical derivation (which lives
@@ -12,38 +12,42 @@ in the source-level doc-comments).
 
 ## Selection rubric
 
-| If you want...                               | Pick                         |
-| -------------------------------------------- | ---------------------------- |
-| Interactive playback at any N                | **Yoshida 4** (default)      |
-| Cheaper playback (lower accuracy OK)         | Velocity Verlet              |
-| Paper-grade Keplerian hierarchy              | Wisdom–Holman                |
-| Paper-grade trajectory with close encounters | **IAS15** (precision mode)   |
+| If you want...                                              | Pick                       |
+| ----------------------------------------------------------- | -------------------------- |
+| Paper-grade trajectory (incl. close encounters, high $e$)   | **IAS15** (default)        |
+| Paper-grade Keplerian hierarchy with close encounters       | Mercurius                  |
+| Long-horizon planetary integration with $\sqrt{N}$ round-off | WHFast                     |
+| Long-horizon Keplerian hierarchy (analytical Kepler drift)   | Wisdom–Holman              |
+| BH binaries / equal-mass / particle clouds (A-stable)        | Implicit Midpoint          |
+| 4th-order symplectic with bounded per-step cost              | Yoshida 4                  |
+| 2nd-order symplectic, cheapest per step                      | Velocity Verlet            |
 
-`Yoshida 4` is the default in both `System::new` and
-`PhysicsConfig::default`. It is 4th-order symplectic, has bounded
-per-step wall time at any realistic N, and conserves orbital energy
-at publication quality for bound orbits.
+`IAS15` is the default in `System::new`. The default force model is
+also direct O(N²) (always-direct), so defaults are coherent by
+construction: IAS15's deterministic-force contract is satisfied
+without any runtime correction. See [ADR-013](adr/013-default-integrator-ias15.md).
+Callers who want Barnes-Hut throughput opt in via
+`set_exact_threshold(N)`.
 
-## Execution profile — real-time vs precision
+## Per-step cost: bounded vs adaptive
 
-Every integrator declares an
-[`ExecutionProfile`](../crates/apsis/src/physics/integrator/traits.rs) that
-downstream code (physics thread, UI) reads to decide how to drive
-it.
+`IntegratorKind::is_adaptive()` distinguishes the cost classes the
+zoo exposes:
 
-| Integrator      | Profile     | Why                                                                 |
-| --------------- | ----------- | ------------------------------------------------------------------- |
-| Velocity Verlet | `Realtime`  | Fixed per-step cost, O(N²) or O(N log N) per step.                  |
-| Yoshida 4       | `Realtime`  | Same — 4 evals per step but still bounded.                          |
-| Wisdom–Holman   | `Realtime`  | Analytic Kepler + perturbation; no adaptation.                      |
-| IAS15           | `Precision` | Adaptive Gauss-Radau; `dt` can shrink unboundedly in stiff regimes. |
+| Integrator       | `is_adaptive` | Per-step cost                                              |
+| ---------------- | ------------- | ---------------------------------------------------------- |
+| Velocity Verlet  | `false`       | Bounded by force evaluation.                               |
+| Yoshida 4        | `false`       | Same — 4 evals per step, bounded.                          |
+| Wisdom-Holman    | `false`       | Analytic Kepler + perturbation; no adaptation.             |
+| WHFast           | `false`       | Same, with compensated summation.                          |
+| Mercurius        | `false`       | Outer step is bounded; IAS15 only fires on close encounter.|
+| Implicit Midpoint| `false`       | Fixed-step with bounded inner-iteration cap.               |
+| IAS15            | **`true`**    | Adaptive controller can shrink `dt` arbitrarily.           |
 
-`Precision` means the caller must expect unbounded per-step wall
-time. In practice this means running the integrator off-thread to
-completion with a progress indicator, not inside a 60 Hz render
-loop. REBOUND pairs IAS15 with a scripted `reb_integrate(sim, tmax)`
-entry point for the same reason: IAS15 is an offline precision tool,
-not a real-time one.
+Adaptive integrators (IAS15) advertise unbounded per-step wall time:
+a stiff regime can spend seconds on one logical step while the
+controller cascades toward `DT_MIN`. REBOUND pairs IAS15 with a
+scripted `reb_integrate(sim, tmax)` entry point for the same reason.
 
 ## Force-model determinism contract
 
@@ -80,18 +84,17 @@ constraint.
 the pairing rule. When the new integrator requires deterministic
 forces and the current force model is not deterministic, the force
 model is auto-reconfigured (exact threshold raised so BH is
-bypassed) and a `warn_diag!` event is emitted with structured
-fields (`integrator`, `exact_threshold_before`, `exact_threshold_after`).
+bypassed). The correction is silent — inspect
+`sys.force_model().exact_threshold()` to audit the post-state.
 
-Downstream code (physics thread, UI, benchmark runner) does not
-re-check the pairing. The invariant holds by construction after
-each `set_integrator` call.
+Downstream code does not re-check the pairing. The invariant holds
+by construction after each `set_integrator` call.
 
 A second advisory fires at the same call site if the new integrator
-is `Precision` and the current body count is above
-`PRECISION_BODY_SOFT_WARN` (200). This is a hint, not a block: the
-user may proceed with IAS15 at large N, but the soft warn surfaces
-the stutter expectation early rather than when the first frame drop
+is adaptive and the current body count is above
+`ADAPTIVE_BODY_SOFT_WARN` (200). Hint, not a block: the user may
+proceed with IAS15 at large N, but the soft warn surfaces the
+per-step-cost expectation early rather than when the first stall
 arrives.
 
 ## Scenario stiffness signal (IAS15 only)
@@ -108,11 +111,6 @@ occurrences verbatim, then every power of two ($4, 8, 16, \ldots$).
 This keeps the signal visible at low frequency without drowning stderr
 on pathological scenes.
 
-Degraded accepts triggered by the cooperative deadline (physics-thread
-budget exhausted) do not emit a log — they are expected in interactive
-precision runs and not a scenario indictment. Both causes still
-accumulate into the unified `degraded` counter.
-
 ### Diagnostic counters in `AdaptiveStats`
 
 `AdaptiveStats` (returned by `Integrator::adaptive_stats()`) carries
@@ -126,7 +124,7 @@ unconditionally (no feature flag, single `saturating_add` per accept):
 | `picard_iters` / `attempts` | $\sim 2$–$3$ | Predictor–corrector is starting too far from the converged $b$ |
 | `picard_stagnations` | $\ll$ `substeps` | Picard residual saturating above `PICARD_TOL` — typically a sign of warmstart bias against the true $b$ |
 | `shrink_grow_cycles` | $\ll$ `substeps` | Controller chatter; the dt proposal alternates between shrinking and growing on consecutive accepts |
-| `degraded` | $0$ | Floor or deadline escape clauses fired |
+| `degraded` | $0$ | `DT_MIN` floor escape clause fired |
 
 A run that disagrees on any of these by orders of magnitude from the
 healthy regime is a controller-health regression, even when the gated

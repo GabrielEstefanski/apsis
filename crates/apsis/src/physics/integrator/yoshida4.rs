@@ -14,7 +14,8 @@
 use crate::domain::body::Body;
 use crate::math::Vec3;
 use crate::physics::integrator::coefficients::{Y4_C, Y4_D};
-use crate::physics::integrator::helpers::{apply_perturbations, evaluate, scale_acc_and_pe};
+use crate::physics::integrator::helpers::{evaluate, scale_acc_and_pe};
+use crate::physics::integrator::operator_dispatch::accumulate_perturbation_forces;
 use crate::physics::integrator::primitives::{drift, kick};
 use crate::physics::integrator::traits::{
     Integrator, IntegratorContext, IntegratorKind, StepResult,
@@ -37,7 +38,12 @@ impl Integrator for Yoshida4 {
 
             let raw_pe = evaluate(bodies, ctx.force, acc);
             scale_acc_and_pe(acc, ctx.g_factor, raw_pe);
-            apply_perturbations(bodies, acc, ctx.perturbations);
+            accumulate_perturbation_forces(
+                bodies,
+                acc,
+                ctx.hamiltonian_perturbations,
+                ctx.non_conservative_perturbations,
+            );
 
             kick(bodies, acc, Y4_D[i] * dt);
         }

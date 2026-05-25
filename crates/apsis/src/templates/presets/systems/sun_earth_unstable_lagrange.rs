@@ -1,6 +1,9 @@
 use crate::{
-    domain::materials::Material,
-    templates::{Template, TemplateBody, UnitSystem, builders::circular_orbit},
+    domain::body_preset,
+    templates::{
+        Template, TemplateBody, UnitSystem,
+        builders::{KG_M3_TO_SOLAR_AU3, circular_orbit},
+    },
 };
 
 pub fn sun_earth_unstable_lagrange(_seed: u64) -> Template {
@@ -17,11 +20,11 @@ pub fn sun_earth_unstable_lagrange(_seed: u64) -> Template {
     let r_l = a * (mu / 3.0).cbrt(); // ≈ 0.01 AU
 
     // L1 (between Sun and Earth)
-    let l1_pos = [earth_pos[0] - r_l, earth_pos[1]];
+    let l1_pos = [earth_pos[0] - r_l, earth_pos[1], earth_pos[2]];
     let l1_vel = earth_vel;
 
     // L2 (beyond Earth)
-    let l2_pos = [earth_pos[0] + r_l, earth_pos[1]];
+    let l2_pos = [earth_pos[0] + r_l, earth_pos[1], earth_pos[2]];
     let l2_vel = earth_vel;
 
     // L3 (opposite side of the Sun)
@@ -35,9 +38,12 @@ pub fn sun_earth_unstable_lagrange(_seed: u64) -> Template {
             TemplateBody {
                 name: Some("Sun"),
                 mass: m_sun,
-                position: Some([0.0, 0.0]),
-                velocity: [0.0, 0.0],
-                material: Material::Star,
+                position: Some([0.0, 0.0, 0.0]),
+                velocity: [0.0, 0.0, 0.0],
+                class_override: None,
+                preset: &body_preset::STAR,
+                density: Some(1408.0 * KG_M3_TO_SOLAR_AU3),
+                albedo: None,
             },
             // Earth
             TemplateBody {
@@ -45,7 +51,10 @@ pub fn sun_earth_unstable_lagrange(_seed: u64) -> Template {
                 mass: m_earth,
                 position: Some(earth_pos),
                 velocity: earth_vel,
-                material: Material::Rocky,
+                class_override: None,
+                preset: &body_preset::ROCKY,
+                density: Some(5514.0 * KG_M3_TO_SOLAR_AU3),
+                albedo: None,
             },
             // L1 (unstable)
             TemplateBody {
@@ -53,7 +62,10 @@ pub fn sun_earth_unstable_lagrange(_seed: u64) -> Template {
                 mass: 1e-12,
                 position: Some(l1_pos),
                 velocity: l1_vel,
-                material: Material::Asteroid,
+                class_override: None,
+                preset: &body_preset::ASTEROID,
+                density: None,
+                albedo: None,
             },
             // L2 (unstable)
             TemplateBody {
@@ -61,7 +73,10 @@ pub fn sun_earth_unstable_lagrange(_seed: u64) -> Template {
                 mass: 1e-12,
                 position: Some(l2_pos),
                 velocity: l2_vel,
-                material: Material::Asteroid,
+                class_override: None,
+                preset: &body_preset::ASTEROID,
+                density: None,
+                albedo: None,
             },
             // L3 (unstable)
             TemplateBody {
@@ -69,11 +84,17 @@ pub fn sun_earth_unstable_lagrange(_seed: u64) -> Template {
                 mass: 1e-12,
                 position: Some(l3_pos),
                 velocity: l3_vel,
-                material: Material::Asteroid,
+                class_override: None,
+                preset: &body_preset::ASTEROID,
+                density: None,
+                albedo: None,
             },
         ],
         display_scale: 1.0,
+        orbital_up: None,
+        default_view_distance: None,
         suggested_dt: Some(0.002),
+        suggested_integrator: None,
         units: UnitSystem::solar_au(),
     }
 }

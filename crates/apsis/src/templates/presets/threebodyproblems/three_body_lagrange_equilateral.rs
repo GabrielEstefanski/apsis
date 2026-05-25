@@ -1,10 +1,11 @@
 //! Lagrange's equilateral three-body solution (equal-mass case).
 //!
 //! Three equal masses at the vertices of an equilateral triangle,
-//! rotating rigidly about the common centre of mass. For three equal
-//! masses at distance `r` from the COM, the angular velocity that
-//! balances gravity is `ω = √(3·G·m / r³)` and each body's velocity
-//! is tangential with magnitude `ω·r`.
+//! rotating rigidly about the common centre of mass. With `r` denoting
+//! the distance from each vertex to the COM (side length `L = r·√3`),
+//! the gravitational force on each body sums to `G·m²·√3 / L²` toward
+//! the COM. Balancing centripetal `m·ω²·r` against this gives
+//! `ω² = G·m / (r³·√3)` and tangential speed `v = ω·r`.
 //!
 //! Lagrange's equilateral solution is *only* linearly stable when one
 //! mass strongly dominates the other two — Routh's criterion requires
@@ -20,19 +21,19 @@
 //! (where `m_test ≪ m_sun` satisfies Routh).
 
 use crate::{
-    domain::materials::Material,
+    domain::body_preset,
     templates::{Template, TemplateBody, UnitSystem},
 };
 
 pub fn three_body_lagrange_equilateral(_seed: u64) -> Template {
     let m = 1.0_f64;
     let r = 1.0_f64;
-    let omega = (3.0 * m / (r * r * r)).sqrt();
+    let omega = (m / (r * r * r * 3.0_f64.sqrt())).sqrt();
     let v = omega * r;
 
-    let p1 = [r, 0.0];
-    let p2 = [-0.5 * r, (3.0_f64).sqrt() / 2.0 * r];
-    let p3 = [-0.5 * r, -(3.0_f64).sqrt() / 2.0 * r];
+    let p1 = [r, 0.0, 0.0];
+    let p2 = [-0.5 * r, (3.0_f64).sqrt() / 2.0 * r, 0.0];
+    let p3 = [-0.5 * r, -(3.0_f64).sqrt() / 2.0 * r, 0.0];
 
     Template {
         name: "Lagrange Equilateral (unstable)",
@@ -46,30 +47,42 @@ pub fn three_body_lagrange_equilateral(_seed: u64) -> Template {
                 mass: m,
                 position: Some(p1),
                 velocity: tangential(p1, v),
-                material: Material::Rocky,
+                class_override: None,
+                preset: &body_preset::ROCKY,
+                density: None,
+                albedo: None,
             },
             TemplateBody {
                 name: Some("Body 2"),
                 mass: m,
                 position: Some(p2),
                 velocity: tangential(p2, v),
-                material: Material::Rocky,
+                class_override: None,
+                preset: &body_preset::ROCKY,
+                density: None,
+                albedo: None,
             },
             TemplateBody {
                 name: Some("Body 3"),
                 mass: m,
                 position: Some(p3),
                 velocity: tangential(p3, v),
-                material: Material::Rocky,
+                class_override: None,
+                preset: &body_preset::ROCKY,
+                density: None,
+                albedo: None,
             },
         ],
         display_scale: 1.0,
+        orbital_up: None,
+        default_view_distance: None,
         suggested_dt: Some(0.001),
+        suggested_integrator: None,
         units: UnitSystem::dimensionless(),
     }
 }
 
-fn tangential(position: [f64; 2], speed: f64) -> [f64; 2] {
+fn tangential(position: [f64; 3], speed: f64) -> [f64; 3] {
     let r = (position[0] * position[0] + position[1] * position[1]).sqrt();
-    [-position[1] * speed / r, position[0] * speed / r]
+    [-position[1] * speed / r, position[0] * speed / r, 0.0]
 }

@@ -1,4 +1,4 @@
-use crate::domain::materials::Material;
+use crate::domain::body_preset;
 use crate::templates::{Template, TemplateBody, UnitSystem};
 
 pub fn binary_star(_seed: u64) -> Template {
@@ -20,20 +20,29 @@ pub fn binary_star(_seed: u64) -> Template {
             TemplateBody {
                 name: Some("Star A"),
                 mass: m,
-                position: Some([-r, 0.0]),
-                velocity: [0.0, -v_body],
-                material: Material::Star,
+                position: Some([-r, 0.0, 0.0]),
+                velocity: [0.0, -v_body, 0.0],
+                class_override: None,
+                preset: &body_preset::STAR,
+                density: None,
+                albedo: None,
             },
             TemplateBody {
                 name: Some("Star B"),
                 mass: m,
-                position: Some([r, 0.0]),
-                velocity: [0.0, v_body],
-                material: Material::Star,
+                position: Some([r, 0.0, 0.0]),
+                velocity: [0.0, v_body, 0.0],
+                class_override: None,
+                preset: &body_preset::STAR,
+                density: None,
+                albedo: None,
             },
         ],
         display_scale: 1.0,
+        orbital_up: None,
+        default_view_distance: None,
         suggested_dt: Some(0.001),
+        suggested_integrator: None,
         units: UnitSystem::solar_au(),
     }
 }
@@ -70,20 +79,29 @@ pub fn star_companion(_seed: u64) -> Template {
             TemplateBody {
                 name: Some("Primary Star"),
                 mass: m1,
-                position: Some([-r1, 0.0]),
-                velocity: [0.0, -v1],
-                material: Material::Star,
+                position: Some([-r1, 0.0, 0.0]),
+                velocity: [0.0, -v1, 0.0],
+                class_override: None,
+                preset: &body_preset::STAR,
+                density: None,
+                albedo: None,
             },
             TemplateBody {
                 name: Some("Companion"),
                 mass: m2,
-                position: Some([r2, 0.0]),
-                velocity: [0.0, v2],
-                material: Material::BrownDwarf,
+                position: Some([r2, 0.0, 0.0]),
+                velocity: [0.0, v2, 0.0],
+                class_override: None,
+                preset: &body_preset::BROWN_DWARF,
+                density: None,
+                albedo: None,
             },
         ],
         display_scale: 1.0,
+        orbital_up: None,
+        default_view_distance: None,
         suggested_dt: Some(0.001),
+        suggested_integrator: None,
         units: UnitSystem::solar_au(),
     }
 }

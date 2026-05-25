@@ -15,8 +15,11 @@ use rand::{RngExt, SeedableRng};
 use std::f64::consts::TAU;
 
 use crate::{
-    domain::materials::Material,
-    templates::{Template, TemplateBody, UnitSystem, builders::circular_orbit},
+    domain::body_preset,
+    templates::{
+        Template, TemplateBody, UnitSystem,
+        builders::{KG_M3_TO_SOLAR_AU3, circular_orbit},
+    },
 };
 
 pub fn sun_earth_moon(seed: u64) -> Template {
@@ -34,8 +37,16 @@ pub fn sun_earth_moon(seed: u64) -> Template {
 
     let moon_phase = rng.random::<f64>() * TAU;
     let (moon_rel_pos, moon_rel_vel) = circular_orbit(M_EARTH, A_MOON, moon_phase);
-    let moon_pos = [earth_pos[0] + moon_rel_pos[0], earth_pos[1] + moon_rel_pos[1]];
-    let moon_vel = [earth_vel[0] + moon_rel_vel[0], earth_vel[1] + moon_rel_vel[1]];
+    let moon_pos = [
+        earth_pos[0] + moon_rel_pos[0],
+        earth_pos[1] + moon_rel_pos[1],
+        earth_pos[2] + moon_rel_pos[2],
+    ];
+    let moon_vel = [
+        earth_vel[0] + moon_rel_vel[0],
+        earth_vel[1] + moon_rel_vel[1],
+        earth_vel[2] + moon_rel_vel[2],
+    ];
 
     Template {
         name: "Sun–Earth–Moon",
@@ -46,27 +57,39 @@ pub fn sun_earth_moon(seed: u64) -> Template {
             TemplateBody {
                 name: Some("Sun"),
                 mass: M_SUN,
-                position: Some([0.0, 0.0]),
-                velocity: [0.0, 0.0],
-                material: Material::Star,
+                position: Some([0.0, 0.0, 0.0]),
+                velocity: [0.0, 0.0, 0.0],
+                class_override: None,
+                preset: &body_preset::STAR,
+                density: Some(1408.0 * KG_M3_TO_SOLAR_AU3),
+                albedo: None,
             },
             TemplateBody {
                 name: Some("Earth"),
                 mass: M_EARTH,
                 position: Some(earth_pos),
                 velocity: earth_vel,
-                material: Material::Rocky,
+                class_override: None,
+                preset: &body_preset::ROCKY,
+                density: Some(5514.0 * KG_M3_TO_SOLAR_AU3),
+                albedo: None,
             },
             TemplateBody {
                 name: Some("Moon"),
                 mass: M_MOON,
                 position: Some(moon_pos),
                 velocity: moon_vel,
-                material: Material::Icy,
+                class_override: None,
+                preset: &body_preset::ICY,
+                density: Some(3344.0 * KG_M3_TO_SOLAR_AU3),
+                albedo: None,
             },
         ],
         display_scale: 1.0,
+        orbital_up: None,
+        default_view_distance: None,
         suggested_dt: Some(0.0005),
+        suggested_integrator: None,
         units: UnitSystem::solar_au(),
     }
 }

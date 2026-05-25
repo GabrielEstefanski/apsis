@@ -8,6 +8,7 @@
 //! | [`Yoshida4`]        | 4th  | 4               | Forest–Ruth / Yoshida (1990) |
 //! | [`WisdomHolman`]    | 2nd  | 1               | Keplerian + perturbation split |
 //! | [`Ias15`]           | 15th | ~14 (adaptive)  | Gauss-Radau, Rein & Spiegel (2015) — **default** |
+//! | [`ImplicitMidpoint`]| 2nd  | ~10 (iterated)  | Single-stage Gauss-Legendre, A-stable, no hierarchy gate |
 //!
 //! # Architecture
 //!
@@ -21,13 +22,14 @@
 //!
 //! # Module layout
 //!
-//! - [`coefficients`]  — Yoshida-4 composition constants.
-//! - [`primitives`]    — `kick`, `drift` kernels.
-//! - [`perturbation`]  — public [`PerturbationForce`] extension trait.
-//! - [`kepler`]        — universal-variable two-body propagator (WH core).
-//! - [`force_model`]   — [`ForceModel`] trait + [`GravityForceModel`] wrapper.
-//! - [`helpers`]       — shared `evaluate`, `scale_acc_and_pe`, perturbation helpers.
-//! - [`traits`]        — [`Integrator`] trait, [`IntegratorContext`], [`StepResult`], [`IntegratorKind`].
+//! - [`coefficients`]       — Yoshida-4 composition constants.
+//! - [`primitives`]         — `kick`, `drift` kernels.
+//! - [`operator`]           — public [`Operator`] / [`HamiltonianOperator`] / [`NonConservativeOperator`] extension traits.
+//! - [`operator_dispatch`]  — helpers integrators call to apply operators at canonical positions.
+//! - [`kepler`]             — universal-variable two-body propagator (WH core).
+//! - [`force_model`]        — [`ForceModel`] trait + [`GravityForceModel`] wrapper.
+//! - [`helpers`]            — shared `evaluate`, `scale_acc_and_pe` helpers.
+//! - [`traits`]             — [`Integrator`] trait, [`IntegratorContext`], [`StepResult`], [`IntegratorKind`].
 //! - [`velocity_verlet`], [`yoshida4`], [`wisdom_holman`], [`ias15`] — integrator implementations.
 //!
 //! # References
@@ -38,31 +40,53 @@
 //! - Everhart (1985). *Dyn. Comets* 115, 185–202 (original RADAU15).
 //! - Rein & Spiegel (2015). *MNRAS* 446, 1424–1437 (IAS15).
 
+pub mod citation;
 pub mod coefficients;
+pub mod conservation;
 pub mod dense;
 pub mod force_model;
 pub mod helpers;
 pub mod ias15;
+pub mod implicit_midpoint;
 pub mod kepler;
-pub mod perturbation;
+pub mod mercurius;
+pub mod operator;
+pub mod operator_dispatch;
 pub mod primitives;
+pub mod regime;
 pub mod traits;
 pub mod velocity_verlet;
+pub mod whfast;
 pub mod wisdom_holman;
 pub mod yoshida4;
 
+#[cfg(test)]
+mod tests_resume;
+
 // ── Re-exports ────────────────────────────────────────────────────────────────
 
+pub use citation::{Citation, render_provenance};
 pub use coefficients::{Y4_C, Y4_D, Y4_W0, Y4_W1};
+pub use conservation::{
+    ConservationClass, ConservationContribution, ConservationReport, EnergyImpact, OperatorRole,
+    PotentialStatus,
+};
 pub use dense::{DenseCoeffs, DenseSnapshot};
 pub use force_model::{ForceModel, GravityForceModel};
-pub use helpers::{apply_perturbations, evaluate, scale_acc_and_pe};
+pub use helpers::{evaluate, scale_acc_and_pe};
 pub use ias15::Ias15;
+pub use implicit_midpoint::{ImplicitMidpoint, IterationOutcome, Solver};
 pub use kepler::kepler_step;
-pub use perturbation::{PerturbationDescriptor, PerturbationForce};
+pub use mercurius::Mercurius;
+pub use operator::{
+    HamiltonianOperator, HamiltonianOperatorDescriptor, NonConservativeOperator, Operator,
+    Potential, UnitSystemMismatch,
+};
 pub use primitives::{drift, kick};
+pub use regime::{RegimeViolation, Severity};
 pub use traits::{AdaptiveStats, Integrator, IntegratorContext, IntegratorKind, StepResult};
 pub use velocity_verlet::VelocityVerlet;
+pub use whfast::WHFast;
 pub use wisdom_holman::WisdomHolman;
 pub use yoshida4::Yoshida4;
 
@@ -74,6 +98,9 @@ pub fn make_integrator(kind: IntegratorKind) -> Box<dyn Integrator> {
         IntegratorKind::VelocityVerlet => Box::new(VelocityVerlet),
         IntegratorKind::Yoshida4 => Box::new(Yoshida4),
         IntegratorKind::WisdomHolman => Box::new(WisdomHolman::new()),
+        IntegratorKind::WHFast => Box::new(WHFast::new()),
         IntegratorKind::Ias15 => Box::new(Ias15::new()),
+        IntegratorKind::Mercurius => Box::new(Mercurius::new()),
+        IntegratorKind::ImplicitMidpoint => Box::new(ImplicitMidpoint::new()),
     }
 }

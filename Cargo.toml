@@ -2,25 +2,23 @@
 resolver = "2"
 members = [
     "crates/apsis",
-    "crates/apsis-app",
     "crates/apsis-1pn",
-    "crates/apsis-1pn-py",
-    "crates/apsis-py",
     "crates/apsis-py-core",
+    "crates/apsis-python",
+    "crates/apsis-radiation",
+    "crates/apsis-central",
 ]
 
-# `apsis-py` is a Python extension module (`cdylib` + PyO3). Building
-# it requires Python development headers on the host machine; a
-# normal Rust contributor working only on the core or app should not
-# be forced to install Python just to run `cargo build` at the
-# workspace root. Listing it as a workspace member but not as a
-# default member keeps `cargo {build,test,check}` (no `-p`) on a pure
-# Rust toolchain, while `cargo {build,test,check} -p apsis-py` (and
-# `maturin develop`) build it explicitly when the contributor opts in.
+# `apsis-python` is a Python extension module (cdylib). Building it
+# requires Python development headers on the host. Excluding it from
+# default-members keeps `cargo {build,test,check}` (no `-p`) on a
+# pure Rust toolchain; `maturin develop` from the repo root builds
+# it explicitly.
 default-members = [
     "crates/apsis",
-    "crates/apsis-app",
     "crates/apsis-1pn",
+    "crates/apsis-radiation",
+    "crates/apsis-central",
 ]
 
 [workspace.package]
@@ -28,7 +26,7 @@ version = "0.1.0"
 edition = "2024"
 license = "Apache-2.0"
 authors = ["Gabriel Braga Estefanski <gabrielbragaestefanski@gmail.com>"]
-rust-version = "1.85"
+rust-version = "1.89"
 readme = "README.md"
 repository = "https://github.com/gabrielbragaestefanski/apsis"
 homepage = "https://github.com/gabrielbragaestefanski/apsis"
@@ -41,13 +39,9 @@ serde_json = "1.0"
 toml = { version = "1.1.2", default-features = false, features = ["parse", "display", "serde"] }
 rand = "0.10.1"
 rayon = "1.12.0"
+blake3 = "1"
 bytemuck = { version = "1.14", features = ["derive"] }
-eframe = "0.34.1"
-egui = "0.34.1"
-egui-phosphor = { version = "0.12", default-features = false, features = ["regular", "fill"] }
-wgpu = "29.0.1"
-winit = "0.30.13"
-pollster = "0.4.0"
+glam = { version = "0.30", features = ["bytemuck"] }
 proptest = "1.5"
 approx = "0.5"
 pretty_assertions = "1.4"
@@ -56,4 +50,16 @@ criterion = "0.8.2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 tracing-tracy = "0.11"
-egui_kittest = "0.34.1"
+libm = "0.2"
+
+# ── Profiles ─────────────────────────────────────────────────────────────────
+
+# opt-level=2 for own crates (incremental compile cost) + 3 for deps (cached).
+# Default opt-level=0 dominates wall time on IAS15 / parity tests.
+[profile.test]
+opt-level = 2
+debug = true
+incremental = true
+
+[profile.test.package."*"]
+opt-level = 3

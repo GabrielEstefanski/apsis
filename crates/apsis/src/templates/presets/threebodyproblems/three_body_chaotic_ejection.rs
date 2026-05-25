@@ -1,5 +1,6 @@
 use crate::{
-    domain::materials::Material,
+    domain::body_preset,
+    physics::integrator::IntegratorKind,
     templates::{Template, TemplateBody, UnitSystem},
 };
 
@@ -13,27 +14,42 @@ pub fn three_body_chaotic_ejection(_seed: u64) -> Template {
             TemplateBody {
                 name: Some("Body 1"),
                 mass: 1.0,
-                position: Some([-1.0, 0.0]),
-                velocity: [0.3, 0.4],
-                material: Material::Rocky,
+                position: Some([-1.0, 0.0, 0.0]),
+                velocity: [0.3, 0.4, 0.0],
+                class_override: None,
+                preset: &body_preset::ROCKY,
+                density: None,
+                albedo: None,
             },
             TemplateBody {
                 name: Some("Body 2"),
                 mass: 1.0,
-                position: Some([1.0, 0.0]),
-                velocity: [0.3, 0.4 + eps],
-                material: Material::Rocky,
+                position: Some([1.0, 0.0, 0.0]),
+                velocity: [0.3, 0.4 + eps, 0.0],
+                class_override: None,
+                preset: &body_preset::ROCKY,
+                density: None,
+                albedo: None,
             },
             TemplateBody {
                 name: Some("Body 3"),
                 mass: 1.0,
-                position: Some([0.0, 0.1]),
-                velocity: [-0.6, -0.8],
-                material: Material::Rocky,
+                position: Some([0.0, 0.1, 0.0]),
+                velocity: [-0.6, -0.8, 0.0],
+                class_override: None,
+                preset: &body_preset::ROCKY,
+                density: None,
+                albedo: None,
             },
         ],
         display_scale: 1.0,
+        orbital_up: None,
+        default_view_distance: None,
         suggested_dt: Some(0.001),
+        // Chaotic close encounters require adaptive substeps; IAS15 is
+        // the precision-controlled path that survives the encounter
+        // cascade without dt floor exhaustion.
+        suggested_integrator: Some(IntegratorKind::Ias15),
         units: UnitSystem::dimensionless(),
     }
 }

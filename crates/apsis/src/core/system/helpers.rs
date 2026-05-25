@@ -2,74 +2,60 @@
 
 use crate::domain::body::Body;
 
-const MASS_TO_SOLAR: f64 = 1.0;
-const RADIUS_TO_SOLAR: f64 = 1.0 / 0.00465;
-const L_SUN: f64 = 1.0;
+/// Default prefix when a body is added without an explicit name and
+/// no preset hint is available (e.g. via [`System::add_body`]). Callers
+/// that know which preset produced the body should pass that preset's
+/// `display_name` through [`System::add_named_body`] instead.
+pub(crate) const DEFAULT_NAME_PREFIX: &str = "Body";
 
-pub(crate) fn mass_to_solar() -> f64 {
-    MASS_TO_SOLAR
-}
-pub(crate) fn radius_to_solar() -> f64 {
-    RADIUS_TO_SOLAR
-}
-pub(crate) fn l_sun() -> f64 {
-    L_SUN
-}
-
-/// Generate an auto-name for a new body given existing names.
-/// Counts existing names that start with the material prefix and appends N+1.
-pub(crate) fn auto_name(
-    material: crate::domain::materials::Material,
-    existing: &[String],
-) -> String {
-    let prefix = material.display_name();
+/// Generate an auto-name `"<prefix> N"` for a new body given the
+/// names already in use. Counts existing names that start with the
+/// requested prefix and appends `N + 1`.
+pub(crate) fn auto_name(prefix: &str, existing: &[String]) -> String {
     let count = existing.iter().filter(|n| n.starts_with(prefix)).count() + 1;
     format!("{prefix} {count}")
 }
 
+/// Resolve a final body name from an optional explicit value and a
+/// fallback prefix used when the explicit value is missing or blank.
 pub(crate) fn resolved_name(
     explicit: Option<String>,
-    material: crate::domain::materials::Material,
+    fallback_prefix: &str,
     existing: &[String],
 ) -> String {
     explicit
         .map(|name| name.trim().to_owned())
         .filter(|name| !name.is_empty())
-        .unwrap_or_else(|| auto_name(material, existing))
+        .unwrap_or_else(|| auto_name(fallback_prefix, existing))
 }
 
-/// Compute the minimum pairwise separation and maximum effective softening
-/// length over all body pairs.
+/// Minimum pairwise separation across all body pairs.
 ///
-/// Skipped (returns sentinels) when N < 2 or N > `N_CLOSENESS_THRESHOLD`,
+/// Skipped (returns `f64::MAX`) when N < 2 or N > `N_CLOSENESS_THRESHOLD`,
 /// to keep overhead bounded for large asteroid-belt simulations.
-pub(crate) fn compute_closeness(bodies: &[Body]) -> (f64, f64) {
+///
+/// Distances are 3D (`dx² + dy² + dz²`); a previous 2D-only implementation
+/// silently understated `r_min` for any inclined or out-of-plane pair.
+pub(crate) fn compute_closeness(bodies: &[Body]) -> f64 {
     const N_CLOSENESS_THRESHOLD: usize = 512;
 
     if bodies.len() < 2 || bodies.len() > N_CLOSENESS_THRESHOLD {
-        return (f64::MAX, 0.0);
+        return f64::MAX;
     }
 
     let mut r_min = f64::MAX;
-    let mut soft_max = 0.0_f64;
 
     for i in 0..bodies.len() {
         for j in (i + 1)..bodies.len() {
-            let dx = bodies[i].x - bodies[j].x;
-            let dy = bodies[i].y - bodies[j].y;
-            let r = (dx * dx + dy * dy).sqrt();
+            let dx = bodies[i].pos_x - bodies[j].pos_x;
+            let dy = bodies[i].pos_y - bodies[j].pos_y;
+            let dz = bodies[i].pos_z - bodies[j].pos_z;
+            let r = (dx * dx + dy * dy + dz * dz).sqrt();
             if r < r_min {
                 r_min = r;
-            }
-            let eps2_ij = (bodies[i].softening * bodies[i].softening
-                + bodies[j].softening * bodies[j].softening)
-                * 0.5;
-            let eps_ij = eps2_ij.sqrt();
-            if eps_ij > soft_max {
-                soft_max = eps_ij;
             }
         }
     }
 
-    (r_min, soft_max)
+    r_min
 }

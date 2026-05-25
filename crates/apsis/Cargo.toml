@@ -16,12 +16,14 @@ description = "A Rust N-body gravitational simulation library with an adaptive I
 path = "src/lib.rs"
 
 [dependencies]
+blake3 = { workspace = true }
+bytemuck = { workspace = true }
+libm = { workspace = true }
+rand = { workspace = true }
+rayon = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 toml = { workspace = true }
-rand = { workspace = true }
-rayon = { workspace = true }
-bytemuck = { workspace = true }
 
 [dev-dependencies]
 proptest = { workspace = true }
@@ -29,6 +31,9 @@ approx = { workspace = true }
 pretty_assertions = { workspace = true }
 insta = { workspace = true }
 criterion = { workspace = true }
+num-rational = { version = "0.4", default-features = false, features = ["num-bigint", "std"] }
+num-traits = { version = "0.2", default-features = false, features = ["std"] }
+num-bigint = { version = "0.4", default-features = false, features = ["std"] }
 
 # ── Features ──────────────────────────────────────────────────────────────────
 #

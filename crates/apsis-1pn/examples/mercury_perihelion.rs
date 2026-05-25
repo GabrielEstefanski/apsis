@@ -16,33 +16,15 @@
 //!
 //! which integrates to 43 arcseconds per century for the real Mercury.
 //!
-//! # Formal note on Plummer softening
+//! # Kernel exactness
 //!
-//! The simulator's default body carries a material-scaled Plummer softening
-//! length `ε = EPS_BASE · mass^(1/3)`. For a solar-mass body this evaluates
-//! to ε ≈ 0.02 AU — about 5 % of Mercury's perihelion distance. The
-//! resulting deviation from a pure `1/r` potential introduces a *numerical*
-//! apsidal precession that, at Mercury's orbit, is roughly **2 × 10³ larger
-//! than the 43 arcsec/century GR effect the example is trying to measure**.
-//!
-//! This was caught on the first end-to-end run: with default softening the
-//! measured precession was −83 000 arcsec/century (wrong sign, wrong
-//! magnitude); zeroing softening recovered +43 arcsec/century within 4.4
-//! ppm of GR. Any future test of a fine gravitational effect — post-
-//! Newtonian, J2 oblateness, tidal dissipation — faces the same trap.
-//!
-//! The trap is *silent* at the simulator level: energy is still conserved to
-//! machine precision, angular momentum is still exact, nothing looks wrong.
-//! Only cross-referencing against an analytic prediction reveals it.
-//!
-//! As of this release, registering a [`PerturbationForce`] whose
-//! [`kernel_requirements()`](apsis::physics::integrator::PerturbationForce::kernel_requirements)
-//! declare Exactness or Continuity constraints that the active kernel
-//! fails to satisfy (for example, a 1PN correction on top of a
-//! Plummer-softened system) emits a [`warn_diag!`](apsis::warn_diag)
-//! diagnostic naming the violated invariant. Dismiss the warning by
-//! calling [`Body::unsoftened`] or [`System::with_exact_gravity`] at
-//! construction — both shown below.
+//! `PostNewtonian1PN::kernel_requirements()` declares `Exactness::Exact`
+//! plus `Continuity::Smooth`. Default systems use `NewtonKernel::exact()`
+//! (ε = 0) and the registration is silent. Any caller that opts into a
+//! softened kernel (`NewtonKernel::new(ε > 0)`) on top of 1PN gets a
+//! [`warn_diag!`](apsis::warn_diag) naming the violated invariant: at
+//! Mercury's perihelion, an ε ≈ 0.02 AU softening produces a numerical
+//! apsidal drift ~2 × 10³ larger than the 43 arcsec/century GR effect.
 
 use apsis::core::system::System;
 use apsis::domain::body::Body;
@@ -66,31 +48,24 @@ const N_ORBITS: u64 = 500;
 
 fn main() {
     // ── Initial conditions ──────────────────────────────────────────────────
-    //
-    // `.unsoftened()` expresses intent (this body participates in a fine-
-    // physics measurement) rather than acting on a field directly — see the
-    // module-level note above for why it matters.
-    let sun = Body::star(M_SUN).unsoftened();
+    let sun = Body::star(M_SUN);
 
     let r_peri = A_MERCURY * (1.0 - E_MERCURY);
     let v_peri = (M_SUN * (2.0 / r_peri - 1.0 / A_MERCURY)).sqrt();
-    let mercury = Body::rocky(M_MERCURY).at(r_peri, 0.0).with_velocity(0.0, v_peri).unsoftened();
+    let mercury = Body::rocky(M_MERCURY).at(r_peri, 0.0).with_velocity(0.0, v_peri);
 
     // ── Build the simulation ────────────────────────────────────────────────
-    let mut sys = System::new(vec![sun, mercury], UnitSystem::canonical())
+    let mut sys = System::new(vec![sun, mercury], UnitSystem::solar_canonical())
         .with_integrator(IntegratorKind::Ias15)
         .with_dt(1e-4);
 
     // Attach the out-of-tree 1PN perturbation. Everything below this line
-    // uses only the public API of `apsis`; `apsis-1pn` has
-    // no other dependency on the workspace. This is the Phase 3 gate.
-    //
-    // `PostNewtonian1PN::kernel_requirements()` declares Exactness::Exact
-    // plus Continuity::Smooth; registering this perturbation into a
-    // softened system would fire an Exactness-violation warning. Since
-    // both bodies above are `.unsoftened()`, the active PlummerKernel
-    // reports Exactness::Exact dynamically and the check stays silent.
-    sys.add_perturbation(Box::new(PostNewtonian1PN::solar_units()));
+    // uses only the public API of `apsis`; `apsis-1pn` has no other
+    // dependency on the workspace.
+    sys.add_hamiltonian_perturbation(Box::new(PostNewtonian1PN::for_units(
+        UnitSystem::solar_canonical(),
+    )))
+    .expect("System and operator must share UnitSystem::solar_canonical()");
 
     // ── Reference state at t = 0 ────────────────────────────────────────────
     let el0 = compute_elements(sys.bodies(), 1, 0, 1.0)
@@ -119,7 +94,7 @@ fn main() {
                 k,
                 d_omega,
                 arcsec,
-                sys.energy_delta().abs(),
+                sys.energy_delta().unwrap_or(f64::NAN).abs(),
             );
         }
     }
@@ -128,7 +103,7 @@ fn main() {
     //
     // Schwarzschild perihelion advance per orbit:
     //     Δω = 6π G M / (c² a (1 − e²))
-    let c = PostNewtonian1PN::solar_units().c();
+    let c = PostNewtonian1PN::for_units(UnitSystem::solar_canonical()).c();
     let predicted_per_orbit =
         6.0 * PI * M_SUN / (c * c * A_MERCURY * (1.0 - E_MERCURY * E_MERCURY));
     let predicted_total = predicted_per_orbit * (N_ORBITS as f64);

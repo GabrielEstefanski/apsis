@@ -268,11 +268,10 @@ mod tests {
         let sys1 = System::from_template(TemplateKind::JupiterTrojans).with_seed(42);
 
         assert_eq!(sys0.bodies().len(), sys1.bodies().len());
-        let any_differ = sys0
-            .bodies()
-            .iter()
-            .zip(sys1.bodies().iter())
-            .any(|(a, b)| (a.x - b.x).abs() > 1e-12 || (a.y - b.y).abs() > 1e-12);
+        let any_differ =
+            sys0.bodies().iter().zip(sys1.bodies().iter()).any(|(a, b)| {
+                (a.pos_x - b.pos_x).abs() > 1e-12 || (a.pos_y - b.pos_y).abs() > 1e-12
+            });
         assert!(any_differ, "with_seed must rebuild randomised preset");
     }
 

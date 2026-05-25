@@ -5,24 +5,16 @@ use crate::core::hooks::HookRegistry;
 use crate::core::system::System;
 use crate::domain::body::Body;
 use crate::physics::gravity::BarnesHutEngine;
-use crate::physics::integrator::traits::ExecutionProfile;
 use crate::physics::integrator::{ForceModel, IntegratorKind, make_integrator};
 
-/// Threshold above which selecting a [`ExecutionProfile::Precision`]
-/// integrator on the current system emits a scale advisory through
-/// `warn_diag!`.
+/// Body count above which selecting an adaptive integrator (per
+/// [`IntegratorKind::is_adaptive`]) emits a scale advisory through
+/// `warn_diag!`. Soft hint — the call still proceeds.
 ///
-/// The value is a soft hint — the call still proceeds. It exists
-/// because IAS15's per-step wall time grows quickly with body count,
-/// and by the time the user notices the interactive stutter, the
-/// cascade may already be hundreds of substeps deep. The advisory
-/// gives a cheaper signal.
-///
-/// 200 is at the low end of the regime where IAS15+direct becomes
-/// uncomfortably slow for a 60 Hz render loop (direct O(N²) at N=200
-/// is ~40 000 pair-evaluations per force call, ~50 µs typical, and
-/// IAS15 does ~14 force calls per accepted substep).
-pub(crate) const PRECISION_BODY_SOFT_WARN: usize = 200;
+/// IAS15 at N ≈ 200 with direct O(N²) is ~40 000 pair-evaluations
+/// per force call (~50 µs) times ~14 force calls per accepted
+/// substep; the cascade-to-DT_MIN failure mode grows from there.
+pub(crate) const ADAPTIVE_BODY_SOFT_WARN: usize = 200;
 
 impl System {
     /// Immutable slice of all bodies in the simulation.
@@ -81,7 +73,7 @@ impl System {
 
     // ── Gravitational scaling ──────────────────────────────────────────────────
 
-    /// Override the runtime `G` multiplier (GUI slider). The unit system stays
+    /// Override the runtime `G` multiplier. The unit system stays
     /// frozen; this scales `g_factor` on top of `units().g()`.
     pub fn set_g_factor(&mut self, g: f64) {
         self.g_factor = g.max(0.0);
@@ -129,65 +121,58 @@ impl System {
         self.integrator.kind()
     }
 
+    /// Active gravitational kernel (used by `apsis::records` to capture
+    /// the kernel variant in the record header).
+    pub fn kernel(&self) -> std::sync::Arc<dyn crate::physics::gravity::kernel::Kernel> {
+        self.force_model.kernel()
+    }
+
+    /// Read-only access to the registered Hamiltonian perturbations.
+    /// Used by `apsis::records` provenance to enumerate operators.
+    pub fn hamiltonian_perturbations(
+        &self,
+    ) -> &[Box<dyn crate::physics::integrator::HamiltonianOperator>] {
+        &self.hamiltonian_perturbations
+    }
+
+    /// Read-only access to the registered non-conservative perturbations.
+    pub fn non_conservative_perturbations(
+        &self,
+    ) -> &[Box<dyn crate::physics::integrator::NonConservativeOperator>] {
+        &self.non_conservative_perturbations
+    }
+
     /// Switch the integration algorithm. Takes effect on the next `step()`.
     ///
-    /// ## Integrator–force compatibility
+    /// Auto-corrects the force model when the new integrator requires a
+    /// deterministic force (raises the BH exact threshold; correction is
+    /// silent — audit via `force_model().exact_threshold()`).
     ///
-    /// Some integrators (IAS15) require the force model to be a
-    /// deterministic function of state — bit-reproducible across
-    /// Picard iterations. Barnes-Hut's position-dependent tree
-    /// rebuild violates that invariant and, at large N, cascades into
-    /// controller rejections and `dt` collapse.
+    /// A scale advisory (`warn_diag!`) fires for adaptive integrators at
+    /// `N > ADAPTIVE_BODY_SOFT_WARN`. See `docs/integrator.md`
+    /// §Enforcement and [ADR-003] for the rationale.
     ///
-    /// This method is the **single enforcement point** for that rule.
-    /// Two diagnostic hooks fire here:
-    ///
-    /// * **Compatibility auto-correction** — if the new integrator
-    ///   requires a deterministic force and the current force model
-    ///   is not configured deterministically, the force model is
-    ///   auto-reconfigured (exact threshold raised so BH is bypassed)
-    ///   and a `warn_diag!` event is emitted. Downstream code
-    ///   (physics thread, UI) never needs to re-check the pairing.
-    ///
-    /// * **Scale advisory for Precision-profile integrators** — if
-    ///   the new integrator's execution profile is `Precision` and
-    ///   the current body count is above
-    ///   [`PRECISION_BODY_SOFT_WARN`], a second event is emitted
-    ///   warning that interactive playback will not be real-time.
-    ///   This is a hint, not a block — the caller may proceed.
+    /// [ADR-003]: ../../docs/adr/003-integrator-execution-profile.md
     pub fn set_integrator(&mut self, kind: IntegratorKind) {
         let integrator = make_integrator(kind);
 
         if integrator.requires_deterministic_force() && !self.force_model.is_deterministic() {
-            let prev_threshold = self.force_model.exact_threshold();
             // `usize::MAX` saturates to the engine's clamp ceiling,
             // which is the canonical "direct mode" threshold. See
             // `BarnesHutEngine::is_direct_mode`.
             self.force_model.set_exact_threshold(usize::MAX);
-            let new_threshold = self.force_model.exact_threshold();
-            let kind_label = kind.slug();
-            crate::warn_diag!(
-                crate::core::log::Source::System,
-                "integrator requires deterministic force; switching force model to direct O(N²)",
-                integrator = kind_label,
-                exact_threshold_before = prev_threshold,
-                exact_threshold_after = new_threshold,
-                hint = "select velocity_verlet or yoshida4 for real-time playback",
-            );
         }
 
-        if integrator.execution_profile() == ExecutionProfile::Precision
-            && self.bodies.len() > PRECISION_BODY_SOFT_WARN
-        {
+        if integrator.is_adaptive() && self.bodies.len() > ADAPTIVE_BODY_SOFT_WARN {
             let kind_label = kind.slug();
             let n = self.bodies.len();
             crate::warn_diag!(
                 crate::core::log::Source::System,
-                "Precision-profile integrator selected with many bodies; per-step wall time may spike",
+                "adaptive integrator selected with many bodies; per-step wall time may spike",
                 integrator = kind_label,
                 n_bodies = n,
-                soft_warn_threshold = PRECISION_BODY_SOFT_WARN,
-                hint = "consider yoshida4 for interactive playback; IAS15 is designed for offline precision runs",
+                soft_warn_threshold = ADAPTIVE_BODY_SOFT_WARN,
+                hint = "IAS15 is designed for offline reference runs; consider yoshida4 if bounded per-step cost is required",
             );
         }
 
@@ -248,13 +233,16 @@ impl System {
         self.integrator.epsilon()
     }
 
-    /// Set a cooperative wall-clock deadline for subsequent [`System::step`]
-    /// calls. Adaptive integrators (IAS15) use this to short-circuit retry
-    /// spins when the surrounding batch loop has already exhausted its
-    /// budget. Passing `None` clears the deadline. Fixed-step integrators
-    /// ignore it.
-    pub fn set_step_deadline(&mut self, deadline: Option<std::time::Instant>) {
-        self.step_deadline = deadline;
+    /// Set the Mercurius Hill-radius multiplier (`α`). No-op for other
+    /// integrators.
+    pub fn set_mercurius_alpha(&mut self, alpha: f64) {
+        self.integrator.set_hill_factor(alpha);
+    }
+
+    /// Returns the active Mercurius `α`, or `None` for other
+    /// integrators.
+    pub fn mercurius_alpha(&self) -> Option<f64> {
+        self.integrator.hill_factor()
     }
 
     /// `true` if the system satisfies the Wisdom-Holman dominance criterion.
@@ -339,20 +327,46 @@ impl System {
         self.force_model.set_exact_threshold(n);
     }
 
-    // ── Softening ─────────────────────────────────────────────────────────────
-
-    pub fn softening_scale(&self) -> f64 {
-        self.softening_scale
+    pub fn test_particle_threshold(&self) -> f64 {
+        self.force_model.test_particle_threshold()
     }
 
-    /// Set the global Plummer softening scale (`ε = ε_default · scale`) and
-    /// rescale all existing body softenings immediately.
-    pub fn set_softening_scale(&mut self, scale: f64) {
-        use crate::domain::body::default_softening;
-        self.softening_scale = scale.max(0.0);
-        for b in &mut self.bodies {
-            b.softening = default_softening(b.mass) * self.softening_scale;
-        }
+    /// Clamped to `[0.0, 1.0]`. `0.0` disables suppression.
+    pub fn set_test_particle_threshold(&mut self, threshold: f64) {
+        self.force_model.set_test_particle_threshold(threshold);
+    }
+
+    #[must_use]
+    pub fn with_test_particle_threshold(mut self, threshold: f64) -> Self {
+        self.set_test_particle_threshold(threshold);
+        self
+    }
+
+    // ── Close-encounter advisory ─────────────────────────────────────────────
+
+    /// Set the close-encounter advisory threshold.
+    ///
+    /// `Some(t)` enables the [`EncounterFlag`](crate::physics::encounter::EncounterFlag)
+    /// classification of the system-wide minimum pairwise separation;
+    /// `None` (the default) disables the diagnostic. Setting a new
+    /// threshold also resets the per-step transition tracker so the
+    /// next descent into the `Close` band emits a warning event.
+    pub fn set_close_encounter_threshold(&mut self, threshold: Option<f64>) {
+        self.close_encounter_threshold = threshold;
+        self.last_encounter_flag = crate::physics::encounter::EncounterFlag::Far;
+    }
+
+    /// Current close-encounter advisory threshold.
+    pub fn close_encounter_threshold(&self) -> Option<f64> {
+        self.close_encounter_threshold
+    }
+
+    /// Most recent [`EncounterFlag`](crate::physics::encounter::EncounterFlag)
+    /// classification of the system-wide minimum separation. Always
+    /// [`Far`](crate::physics::encounter::EncounterFlag::Far) when the
+    /// threshold is unset.
+    pub fn last_encounter_flag(&self) -> crate::physics::encounter::EncounterFlag {
+        self.last_encounter_flag
     }
 
     // ── COM shift for TrailRecorder ───────────────────────────────────────────

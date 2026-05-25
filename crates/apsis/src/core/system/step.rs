@@ -2,14 +2,15 @@
 
 use crate::core::adaptive::{AccelerationStats, DtMode};
 use crate::core::calibration;
-use crate::core::hooks::{
-    CollisionEvent, Command, EscapeEvent, HookContext, HookPhase, HookPhaseKind, HookRegistry,
-};
+use crate::core::hooks::{Command, HookContext, HookPhase, HookPhaseKind, HookRegistry};
 use crate::core::system::System;
 use crate::core::system::helpers::compute_closeness;
+use crate::domain::body_arrays::BodyArrays;
 use crate::math::Vec3;
+use crate::physics::encounter::EncounterFlag;
 use crate::physics::energy::{angular_momentum_z, kinetic_energy, total_energy};
 use crate::physics::integrator::IntegratorContext;
+use crate::physics::integrator::operator_dispatch::dispatch_observers;
 use crate::physics::integrator::{DenseSnapshot, IntegratorKind};
 
 impl System {
@@ -19,15 +20,25 @@ impl System {
     /// 1. `pre_step` — observe pre-integration state, queue commands.
     /// 2. Apply pre-step commands.
     /// 3. Integrator advances bodies.
-    /// 4. Detect events (collisions, escapes) on the integrated state.
-    /// 5. Dispatch event hooks and `post_step`, collect commands.
-    /// 6. Optional `heartbeat` tick when `steps % heartbeat_interval == 0`.
-    /// 7. Apply post-step / event commands in insertion order.
+    /// 4. `post_step` — observe integrated state, queue commands.
+    /// 5. Apply post-step commands in insertion order.
     pub fn step(&mut self) {
+        // Prime the conservation baseline so the first hook fires with
+        // `rel_*_error = Some(0.0)`, not the uninitialised `None`.
+        if self.initial_energy.is_none() {
+            self.refresh_energy_diagnostics();
+        }
+
         // ── 1. pre_step hooks (observe pre-integration state) ────────────────
         let pre_cmds = if !self.hooks.is_empty() {
             let mut hooks = take_hooks(self);
-            let ctx = build_hook_context(self, HookPhaseKind::PreStep);
+            let resume_state = if hooks.any_wants_resume_state() {
+                Some(self.integrator.resume_state())
+            } else {
+                None
+            };
+            let mut ctx = build_hook_context(self, HookPhaseKind::PreStep);
+            ctx.resume_state = resume_state;
             let cmds = hooks.dispatch_pre_step(&ctx);
             drop(ctx);
             restore_hooks(self, hooks);
@@ -53,8 +64,8 @@ impl System {
             && self.integrator.kind() != IntegratorKind::Ias15
             && self.scratch_acc.len() == self.bodies.len();
         if need_order2 {
-            pre_x0 = self.bodies.iter().map(|b| Vec3::new(b.x, b.y, b.z)).collect();
-            pre_v0 = self.bodies.iter().map(|b| Vec3::new(b.vx, b.vy, b.vz)).collect();
+            pre_x0 = self.bodies.iter().map(|b| Vec3::new(b.pos_x, b.pos_y, b.pos_z)).collect();
+            pre_v0 = self.bodies.iter().map(|b| Vec3::new(b.vel_x, b.vel_y, b.vel_z)).collect();
             pre_a0 = self.scratch_acc.clone();
         } else {
             pre_x0 = Vec::new();
@@ -65,8 +76,9 @@ impl System {
         let mut ctx = IntegratorContext {
             force: &mut *self.force_model,
             g_factor,
-            perturbations: &self.perturbations,
-            deadline: self.step_deadline,
+            hamiltonian_perturbations: &self.hamiltonian_perturbations,
+            non_conservative_perturbations: &self.non_conservative_perturbations,
+            observers: &mut self.observers,
         };
         let result = self.integrator.step(&mut self.bodies, &mut ctx, dt, &mut self.scratch_acc);
         self.last_potential = result.potential_energy;
@@ -82,6 +94,27 @@ impl System {
         let consumed_dt = result.consumed_dt;
         self.steps += 1;
         self.t += consumed_dt;
+
+        // Operator boundary observation. Bodies are at synchronised
+        // post-step state and `t` is post-advance; observers see the
+        // canonical step boundary.
+        dispatch_observers(
+            &self.bodies,
+            self.t,
+            consumed_dt,
+            &mut self.hamiltonian_perturbations,
+            &mut self.non_conservative_perturbations,
+            &mut self.observers,
+        );
+
+        // Dynamic regime-of-validity check, gated by the smallest
+        // cadence across registered operators. Each `(operator, bound)`
+        // pair fires at most once per session via the warn-once dedup
+        // in `emit_regime_violation_once`.
+        let cadence = self.regime_check_cadence_min();
+        if cadence != usize::MAX && cadence > 0 && self.steps.is_multiple_of(cadence as u64) {
+            self.run_regime_checks_all();
+        }
 
         // Produce the dense-output snapshot.  t0 = system.t() - snapshot.dt
         // works for both cases: IAS15 sub-steps use their own dt, Order-2 uses
@@ -99,6 +132,7 @@ impl System {
                 a0: pre_a0,
                 b: Vec::new(),
                 kind: self.integrator.kind(),
+                wh_data: None,
             })
         } else {
             None
@@ -109,26 +143,16 @@ impl System {
         self.update_energy_tracking();
         self.update_angular_momentum_tracking();
 
-        // `current_dt` is the value passed to the integrator on the *next*
-        // call as its `dt_hint`, and is also surfaced to the UI / headless
-        // CSV as the simulation's "current step size". Three regimes:
+        // `current_dt` is the value passed to the integrator on the
+        // *next* call as its `dt_hint`, and is surfaced to downstream
+        // observers as the simulation's current step size. Three regimes:
         //
-        //   * Self-adaptive integrator (IAS15) — the integrator's own
-        //     controller has already chosen the next step. Reading it via
-        //     [`Integrator::proposed_next_dt`] keeps `current_dt` honest
-        //     about the cadence the simulation is actually running at,
-        //     rather than reporting `user_dt` perpetually. The hint we
-        //     pass on the next call is the same value we reported, but
-        //     by trait contract the integrator is free to refine it
-        //     against the controller's internal state.
-        //
-        //   * `DtMode::Adaptive` — the *external* `DtController` (used by
-        //     fixed-step schemes that want adaptive cadence) computes the
+        //   * Self-adaptive integrator (IAS15) — adopt the controller's
+        //     proposed next step via [`Integrator::proposed_next_dt`].
+        //   * `DtMode::Adaptive` — external `DtController` computes the
         //     next step from energy error and acceleration statistics.
-        //
         //   * `DtMode::Fixed` with a non-self-adaptive integrator — pin
-        //     `current_dt = user_dt` so the next step uses exactly the
-        //     user's chosen cadence (the symplectic schemes need this for
+        //     `current_dt = user_dt` (symplectic schemes need this for
         //     measure preservation).
         self.current_dt = if self.integrator.controls_own_step_size() {
             self.integrator.proposed_next_dt().unwrap_or(self.user_dt)
@@ -142,61 +166,76 @@ impl System {
             }
         };
 
-        if self.adaptive_theta && !self.bodies.is_empty() {
-            if let Some(engine) = self.force_model.bh_engine() {
-                let theta = self.force_model.theta();
-                let e_theta = engine.theta_error_proxy(0, &self.bodies, theta);
-                let new_theta = self.theta_ctrl.update(e_theta, self.current_dt);
-                self.force_model.set_theta(new_theta);
-            }
+        if self.adaptive_theta
+            && !self.bodies.is_empty()
+            && let Some(engine) = self.force_model.bh_engine()
+        {
+            // theta_error_proxy reads body 0's position from the SoA
+            // snapshot. Pack a transient buffer for this one call
+            // (~40 µs at N = 10⁴; called once per step) — the
+            // ForceModel's own snapshot was packed at the previous
+            // compute() and may be stale relative to current bodies.
+            let theta = self.force_model.theta();
+            let mut probe_arrays = BodyArrays::with_capacity(self.bodies.len());
+            probe_arrays.pack_from(&self.bodies);
+            let e_theta = engine.theta_error_proxy(0, &probe_arrays, theta);
+            let new_theta = self.theta_ctrl.update(e_theta, self.current_dt);
+            self.force_model.set_theta(new_theta);
         }
 
-        if self.steps % 97 == 0 {
-            if let Some((dx, dy)) = calibration::com_offset(&self.bodies, self.total_mass) {
-                // Route through the integrator's `recenter_bodies` rather
-                // than the bare `apply_body_shift`: this preserves the
-                // per-body compensation accumulators that IAS15 uses to
-                // bound round-off error to `O(ε)` over long horizons.
-                // Fixed-step integrators inherit the trait default (bare
-                // subtraction), so behaviour is unchanged for them.
-                self.integrator.recenter_bodies(&mut self.bodies, dx, dy);
-                self.pending_com_shift.0 += -dx as f32;
-                self.pending_com_shift.1 += -dy as f32;
-            }
+        if self.steps.is_multiple_of(97)
+            && let Some((dx, dy)) = calibration::com_offset(&self.bodies, self.total_mass)
+        {
+            // Route through the integrator's `recenter_bodies` rather
+            // than the bare `apply_body_shift`: this preserves the
+            // per-body compensation accumulators that IAS15 uses to
+            // bound round-off error to `O(ε)` over long horizons.
+            // Fixed-step integrators inherit the trait default (bare
+            // subtraction), so behaviour is unchanged for them.
+            self.integrator.recenter_bodies(&mut self.bodies, dx, dy);
+            self.pending_com_shift.0 += -dx as f32;
+            self.pending_com_shift.1 += -dy as f32;
         }
 
-        let (r_min, soft_max) = compute_closeness(&self.bodies);
-        self.r_min = r_min;
-        self.softening_max = soft_max;
+        self.r_min = compute_closeness(&self.bodies);
 
-        // ── 3. Detect events and dispatch post-step hooks ────────────────────
+        // Close-encounter advisory. When `close_encounter_threshold` is
+        // unset the flag is always `Far` and this branch is a single
+        // comparison; when set it grades `r_min` against the threshold
+        // and emits a structured event the first step a Close descent
+        // becomes visible. Edge-triggered on the previous flag — once
+        // the system is Close the warning does not repeat until it has
+        // climbed back out of the band.
+        let new_flag = EncounterFlag::classify(self.r_min, self.close_encounter_threshold);
+        if new_flag == EncounterFlag::Close
+            && self.last_encounter_flag != EncounterFlag::Close
+            && let Some(threshold) = self.close_encounter_threshold
+        {
+            crate::warn_diag!(
+                crate::core::log::Source::System,
+                "close encounter detected",
+                r_min = self.r_min,
+                threshold = threshold,
+                step = self.steps,
+                t = self.t,
+                hint = "consider Mercurius integrator for hybrid close-encounter handling",
+            );
+        }
+        self.last_encounter_flag = new_flag;
+
+        // ── 3. Dispatch post-step hooks ──────────────────────────────────────
         if !self.hooks.is_empty() {
-            let collisions = self.detect_collisions();
-            let escapes = self.detect_escapes();
-
             let mut hooks = take_hooks(self);
-            let heartbeat_interval = hooks.heartbeat_interval;
-            let fire_heartbeat = heartbeat_interval > 0 && self.steps % heartbeat_interval == 0;
-
-            let ctx = build_hook_context(self, HookPhaseKind::PostStep);
-            let mut cmds = Vec::new();
-
-            let event_ctx = HookContext { phase: HookPhase(HookPhaseKind::Event), ..ctx.clone() };
-            for ev in &collisions {
-                cmds.extend(hooks.dispatch_collision(ev, &event_ctx));
-            }
-            for ev in &escapes {
-                cmds.extend(hooks.dispatch_escape(ev, &event_ctx));
-            }
-            cmds.extend(hooks.dispatch_post_step(&ctx));
-
-            if fire_heartbeat {
-                let hb_ctx = HookContext { phase: HookPhase(HookPhaseKind::Heartbeat), ..ctx };
-                cmds.extend(hooks.dispatch_heartbeat(&hb_ctx));
+            let resume_state = if hooks.any_wants_resume_state() {
+                Some(self.integrator.resume_state())
             } else {
-                drop(ctx);
-            }
-            drop(event_ctx);
+                None
+            };
+
+            let mut ctx = build_hook_context(self, HookPhaseKind::PostStep);
+            ctx.resume_state = resume_state;
+            let cmds = hooks.dispatch_post_step(&ctx);
+            drop(ctx);
 
             restore_hooks(self, hooks);
             self.apply_commands(cmds);
@@ -236,8 +275,9 @@ impl System {
             },
         };
 
-        let denom = baseline.abs().max(1e-12);
-        self.rel_energy_error = (total - baseline) / denom;
+        let delta = total - baseline;
+        self.abs_energy_error = delta;
+        self.rel_energy_error = crate::core::system::regime::regime_aware_rel(delta, baseline);
     }
 
     pub(crate) fn update_angular_momentum_tracking(&mut self) {
@@ -251,69 +291,18 @@ impl System {
             },
         };
 
-        self.abs_angular_momentum_error = (lz - baseline).abs();
-
-        let denom = baseline.abs().max(1e-12);
-        self.rel_angular_momentum_error = (lz - baseline) / denom;
+        let delta = lz - baseline;
+        self.abs_angular_momentum_error = delta.abs();
+        self.rel_angular_momentum_error =
+            crate::core::system::regime::regime_aware_rel(delta, baseline);
     }
 
-    /// Event detection stub — collision detection will arrive with the basic
-    /// merge model. Returns empty until a [`CollisionHandler`]-style component
-    /// is wired in.
-    fn detect_collisions(&self) -> Vec<CollisionEvent> {
-        Vec::new()
-    }
-
-    /// Event detection stub — escape detection will arrive with the boundary
-    /// condition component.
-    fn detect_escapes(&self) -> Vec<EscapeEvent> {
-        Vec::new()
-    }
-
-    /// Apply a batch of hook-produced commands in order.
-    ///
-    /// Removals and merges are re-sorted by index (descending) so `swap_remove`
-    /// on earlier indices cannot corrupt later ones. Other command kinds run
-    /// in insertion order.
+    /// Apply hook-produced commands in insertion order.
     pub(crate) fn apply_commands(&mut self, cmds: Vec<Command>) {
-        if cmds.is_empty() {
-            return;
-        }
-
-        // Split into removal-style and additive commands, preserving order
-        // within each class. Removals are applied last, sorted descending, so
-        // hook-side indices stay valid until we touch them.
-        let mut removals: Vec<usize> = Vec::new();
-        let mut additions: Vec<crate::domain::body::NamedBody> = Vec::new();
-        let mut merges: Vec<(usize, usize, crate::domain::body::Body, Option<String>)> = Vec::new();
-
         for cmd in cmds {
             match cmd {
-                Command::RemoveBody { index } => removals.push(index),
-                Command::AddBody(nb) => additions.push(nb),
-                Command::Merge { remove_a, remove_b, merged, merged_name } => {
-                    merges.push((remove_a, remove_b, merged, merged_name));
-                },
                 Command::Stop => self.stop_requested = true,
             }
-        }
-
-        // Merges: queue both indices for removal and add the merged body.
-        for (a, b, merged, name) in merges {
-            removals.push(a);
-            removals.push(b);
-            additions.push(crate::domain::body::NamedBody { body: merged, name });
-        }
-
-        // Remove in descending, deduplicated order.
-        removals.sort_unstable_by(|a, b| b.cmp(a));
-        removals.dedup();
-        for idx in removals {
-            self.remove_body(idx);
-        }
-
-        if !additions.is_empty() {
-            self.add_named_bodies(additions);
         }
     }
 
@@ -351,6 +340,31 @@ impl System {
         }
         self.steps - start_steps
     }
+
+    /// Fire `on_finish` on every registered hook. Idempotent. Invoked
+    /// automatically by `Drop` as a safety net.
+    pub fn finish(&mut self) {
+        if self.finished || self.hooks.is_empty() {
+            self.finished = true;
+            return;
+        }
+        let mut hooks = take_hooks(self);
+        let ctx = build_hook_context(self, HookPhaseKind::Finish);
+        hooks.dispatch_finish(&ctx);
+        drop(ctx);
+        restore_hooks(self, hooks);
+        self.finished = true;
+    }
+}
+
+impl Drop for System {
+    fn drop(&mut self) {
+        // Safety net for callers that forget the explicit close. Hooks
+        // holding open resources see this as their last chance to flush.
+        if !self.finished {
+            self.finish();
+        }
+    }
 }
 
 // ── Hook borrow helpers ───────────────────────────────────────────────────────
@@ -369,6 +383,7 @@ fn build_hook_context(system: &System, phase: HookPhaseKind) -> HookContext<'_> 
         rel_energy_error: system.rel_energy_error,
         rel_angular_momentum_error: system.rel_angular_momentum_error,
         phase: HookPhase(phase),
+        resume_state: None,
     }
 }
 
