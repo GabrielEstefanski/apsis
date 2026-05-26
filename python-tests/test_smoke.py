@@ -24,7 +24,6 @@ import pytest
 
 import apsis
 
-
 # ── Module surface ────────────────────────────────────────────────────────────
 
 
@@ -139,7 +138,9 @@ def test_system_constructor_accepts_string_or_enum_integrator() -> None:
     sun = apsis.Body.star(mass=1.0)
     earth = apsis.Body.rocky(mass=3e-6, position=(1.0, 0.0), velocity=(0.0, 1.0))
 
-    sys_str = apsis.System(bodies=[sun, earth], units=apsis.units.CANONICAL, integrator="ias15", dt=1e-3)
+    sys_str = apsis.System(
+        bodies=[sun, earth], units=apsis.units.CANONICAL, integrator="ias15", dt=1e-3,
+    )
     sys_enum = apsis.System(
         bodies=[sun, earth],
         units=apsis.units.CANONICAL,
@@ -168,7 +169,9 @@ def test_system_run_loop_advances_time() -> None:
     """``integrate_for`` moves ``t`` forward and bumps the step counter."""
     sun = apsis.Body.star(mass=1.0)
     earth = apsis.Body.rocky(mass=3e-6, position=(1.0, 0.0), velocity=(0.0, 1.0))
-    sys = apsis.System(bodies=[sun, earth], units=apsis.units.CANONICAL, integrator="ias15", dt=1e-3)
+    sys = apsis.System(
+        bodies=[sun, earth], units=apsis.units.CANONICAL, integrator="ias15", dt=1e-3,
+    )
 
     assert sys.t == 0.0
     assert sys.steps == 0
@@ -192,7 +195,9 @@ def test_system_energy_delta_is_machine_precision_on_kepler() -> None:
     earth = (apsis.Body.rocky(mass=3e-6)
              .at((1.0, 0.0))
              .with_velocity((0.0, 1.0)))
-    sys = apsis.System(bodies=[sun, earth], units=apsis.units.CANONICAL, integrator="ias15", dt=1e-3)
+    sys = apsis.System(
+        bodies=[sun, earth], units=apsis.units.CANONICAL, integrator="ias15", dt=1e-3,
+    )
 
     sys.integrate_for(2 * 3.14159)
 
@@ -209,7 +214,9 @@ def _two_body_kepler_system() -> apsis.System:
     earth = (apsis.Body.rocky(mass=3e-6)
              .at((1.0, 0.0))
              .with_velocity((0.0, 1.0)))
-    return apsis.System(bodies=[sun, earth], units=apsis.units.CANONICAL, integrator="ias15", dt=1e-3)
+    return apsis.System(
+        bodies=[sun, earth], units=apsis.units.CANONICAL, integrator="ias15", dt=1e-3,
+    )
 
 
 def test_sample_returns_trajectory_with_expected_shape() -> None:
@@ -452,7 +459,7 @@ def test_sample_rejects_partial_duration_mode() -> None:
 def test_sample_rejects_no_arguments() -> None:
     """Calling ``sample()`` with neither form raises the same clear error."""
     sys = _two_body_kepler_system()
-    with pytest.raises(ValueError, match="times|duration"):
+    with pytest.raises(ValueError, match=r"times|duration"):
         sys.sample()
 
 
@@ -471,7 +478,9 @@ def test_sample_evenly_and_explicit_match_for_matched_inputs() -> None:
 
 
 def test_sample_single_point_records_only_initial_state() -> None:
-    """``n_samples=1`` is the degenerate zero-integration case: state is captured but not advanced."""
+    """``n_samples=1`` is the degenerate zero-integration case.
+
+    State is captured but not advanced."""
     sys = _two_body_kepler_system()
     start_t = sys.t
 
