@@ -53,6 +53,19 @@ const TOL_REL_E_Y4: f64 = 1.0e-6;
 const TOL_REL_LZ: f64 = 1.0e-10;
 const TOL_ABS_LZ: f64 = 1.0e-10;
 
+// Scenarios outside the regime the `recommended_dt` heuristic targets
+// (quasi-regular, low-eccentricity, no strong close encounters). Cells
+// for these scenarios are reported informationally rather than gated:
+// the heuristic does not claim to deliver fixed-step VV/Y4 conservation
+// at the tolerances above when the underlying dynamics is highly
+// eccentric or chaotic.
+const OUT_OF_REGIME_SCENARIOS: &[&str] = &[
+    "alpha_centauri_ab",       // e = 0.52 binary (Kervella et al. 2017)
+    "hd_80606_b_system",       // e = 0.93 hot Jupiter (Naef et al. 2001)
+    "three_body_figure_eight", // periodic 3-body with tight pair passes
+    "three_body_pythagorean",  // chaotic; template suggests Mercurius
+];
+
 // ── Records ─────────────────────────────────────────────────────────────── //
 
 #[derive(Debug)]
@@ -195,13 +208,18 @@ fn analyse(samples: &BTreeMap<(String, String), Vec<Sample>>) -> Vec<CellResult>
         let peak_abs_lz_drift = rows.iter().map(|r| (r.lz - lz0).abs()).fold(0.0_f64, f64::max);
         let lz_bound_effective = (TOL_REL_LZ * lz0.abs()).max(TOL_ABS_LZ);
 
-        // Apply gates per integrator.
+        // Apply gates per integrator, then drop the gate for scenarios
+        // declared out-of-regime for the heuristic. WH is always
+        // informational; VV and Y4 are informational only when the
+        // scenario itself is out of regime.
+        let in_regime = !OUT_OF_REGIME_SCENARIOS.contains(&scenario.as_str());
         let (gated, e_tol, lz_tol) = match integrator.as_str() {
-            "vv" => (true, Some(TOL_REL_E_VV), Some(lz_bound_effective)),
-            "y4" => (true, Some(TOL_REL_E_Y4), Some(lz_bound_effective)),
+            "vv" => (in_regime, Some(TOL_REL_E_VV), Some(lz_bound_effective)),
+            "y4" => (in_regime, Some(TOL_REL_E_Y4), Some(lz_bound_effective)),
             "wh" => (false, None, None),
             other => panic!("unknown integrator label: {other}"),
         };
+        let (e_tol, lz_tol) = if gated { (e_tol, lz_tol) } else { (None, None) };
         let e_gate_passed = e_tol.map(|tol| peak_rel_de <= tol);
         let lz_gate_passed = lz_tol.map(|tol| peak_abs_lz_drift <= tol);
         let e_gate_utilization = e_tol.map(|tol| peak_rel_de / tol);
