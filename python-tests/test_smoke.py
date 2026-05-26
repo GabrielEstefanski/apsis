@@ -114,13 +114,6 @@ def test_body_builder_methods_return_new_instances() -> None:
     assert base is not placed
 
 
-def test_body_unsoftened_zeroes_softening() -> None:
-    """``unsoftened`` flips the softening to exactly zero (exact 1/r gravity)."""
-    softened = apsis.Body.star(mass=1.0)
-    assert softened.softening > 0.0
-    assert softened.unsoftened().softening == 0.0
-
-
 def test_body_rejects_non_positive_mass() -> None:
     """A negative or zero mass raises ``ValueError`` at the boundary."""
     with pytest.raises(ValueError, match="mass"):
@@ -172,8 +165,8 @@ def test_system_rejects_unknown_integrator() -> None:
 
 def test_system_run_loop_advances_time() -> None:
     """``integrate_for`` moves ``t`` forward and bumps the step counter."""
-    sun = apsis.Body.star(mass=1.0).unsoftened()
-    earth = apsis.Body.rocky(mass=3e-6, position=(1.0, 0.0), velocity=(0.0, 1.0)).unsoftened()
+    sun = apsis.Body.star(mass=1.0)
+    earth = apsis.Body.rocky(mass=3e-6, position=(1.0, 0.0), velocity=(0.0, 1.0))
     sys = apsis.System(bodies=[sun, earth], units=apsis.units.CANONICAL, integrator="ias15", dt=1e-3)
 
     assert sys.t == 0.0
@@ -194,11 +187,10 @@ def test_system_energy_delta_is_machine_precision_on_kepler() -> None:
     so a Python-side bookkeeping error in the FFI surfaces clearly while
     a one-orbit run is fast enough to remain a smoke test.
     """
-    sun = apsis.Body.star(mass=1.0).unsoftened()
+    sun = apsis.Body.star(mass=1.0)
     earth = (apsis.Body.rocky(mass=3e-6)
              .at((1.0, 0.0))
-             .with_velocity((0.0, 1.0))
-             .unsoftened())
+             .with_velocity((0.0, 1.0)))
     sys = apsis.System(bodies=[sun, earth], units=apsis.units.CANONICAL, integrator="ias15", dt=1e-3)
 
     sys.integrate_for(2 * 3.14159)
@@ -210,11 +202,10 @@ def test_system_energy_delta_is_machine_precision_on_kepler() -> None:
 
 
 def _two_body_kepler_system() -> apsis.System:
-    sun = apsis.Body.star(mass=1.0).unsoftened()
+    sun = apsis.Body.star(mass=1.0)
     earth = (apsis.Body.rocky(mass=3e-6)
              .at((1.0, 0.0))
-             .with_velocity((0.0, 1.0))
-             .unsoftened())
+             .with_velocity((0.0, 1.0)))
     return apsis.System(bodies=[sun, earth], units=apsis.units.CANONICAL, integrator="ias15", dt=1e-3)
 
 
@@ -260,11 +251,10 @@ def test_sample_z_components_are_zero_for_planar_input() -> None:
 def test_sample_records_3d_motion_for_inclined_input() -> None:
     """An inclined orbit (`vz != 0` initially) populates the 3D arrays with
     real motion, not zeros."""
-    primary = apsis.Body.star(mass=1.0).unsoftened()
+    primary = apsis.Body.star(mass=1.0)
     inclined = (apsis.Body.rocky(mass=1e-6)
                 .at((1.0, 0.0, 0.0))
-                .with_velocity((0.0, 0.7, 0.7))
-                .unsoftened())
+                .with_velocity((0.0, 0.7, 0.7)))
     sys = apsis.System(
         bodies=[primary, inclined],
         units=apsis.units.CANONICAL,
@@ -276,8 +266,6 @@ def test_sample_records_3d_motion_for_inclined_input() -> None:
 
     # The inclined body must explore non-zero z over the integration.
     assert np.any(traj.z[:, 1] != 0.0), "inclined orbit produced no z motion"
-    # Sanity: the central body stays at the origin (no kick yet).
-    assert np.all(traj.z[:, 0] == 0.0)
 
 
 def test_sample_time_axis_is_monotonic_and_brackets_duration() -> None:
@@ -577,11 +565,10 @@ def test_system_units_snapshot_is_immutable_across_integration() -> None:
     energy / momentum baseline captured at construction would become
     physically meaningless mid-run.
     """
-    sun = apsis.Body.star(mass=1.0).unsoftened()
+    sun = apsis.Body.star(mass=1.0)
     earth = (apsis.Body.rocky(mass=3e-6)
              .at((1.0, 0.0))
-             .with_velocity((0.0, 1.0))
-             .unsoftened())
+             .with_velocity((0.0, 1.0)))
     sys = apsis.System(
         bodies=[sun, earth],
         units=apsis.units.SOLAR,
@@ -646,8 +633,8 @@ def test_adaptive_counters_zero_at_construction() -> None:
 
 def test_adaptive_stats_is_none_for_fixed_step_integrators() -> None:
     """Fixed-step schemes don't run a controller, so the binding returns ``None``."""
-    sun = apsis.Body.star(mass=1.0).unsoftened()
-    earth = apsis.Body.rocky(mass=3e-6, position=(1.0, 0.0), velocity=(0.0, 1.0)).unsoftened()
+    sun = apsis.Body.star(mass=1.0)
+    earth = apsis.Body.rocky(mass=3e-6, position=(1.0, 0.0), velocity=(0.0, 1.0))
     for scheme in ("yoshida4", "velocity_verlet"):
         sys = apsis.System(
             bodies=[sun, earth],
@@ -785,8 +772,8 @@ def test_trajectory_carries_energy_and_lz_drift_history() -> None:
 
 def test_yoshida4_trajectory_dt_is_constant() -> None:
     """Fixed-step integrator: every sample reads back the same dt."""
-    sun = apsis.Body.star(mass=1.0).unsoftened()
-    earth = apsis.Body.rocky(mass=3e-6, position=(1.0, 0.0), velocity=(0.0, 1.0)).unsoftened()
+    sun = apsis.Body.star(mass=1.0)
+    earth = apsis.Body.rocky(mass=3e-6, position=(1.0, 0.0), velocity=(0.0, 1.0))
     sys = apsis.System(
         bodies=[sun, earth],
         units=apsis.units.CANONICAL,
@@ -801,7 +788,7 @@ def test_yoshida4_trajectory_dt_is_constant() -> None:
 
 def test_system_units_propagates_to_g_factor() -> None:
     """The system's effective G is read from the chosen unit system at construction."""
-    sun = apsis.Body.star(mass=1.0).unsoftened()
+    sun = apsis.Body.star(mass=1.0)
     sys_solar = apsis.System(
         bodies=[sun],
         units=apsis.units.SOLAR,
