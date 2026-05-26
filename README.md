@@ -338,12 +338,13 @@ What is verified in CI:
     ($\sim 8\times$ across $100\times$ horizon, slightly below
     $\sqrt{N}$, consistent with IAS15's near-symplectic structure).
     Notebook: [`paper/notebooks/2026-05-01-rebound-parity-retrograde.md`](paper/notebooks/2026-05-01-rebound-parity-retrograde.md).
-- **Heuristic validation portfolio**: 13 scenarios × 3 fixed-step
-  integrators × 100 substeps; 26 / 26 gated cells pass under the
-  isclose-style two-sided Tier 2 bound. Per-cell utilization
-  ($u = \text{peak}/\text{bound}$) emitted for regression-canary
-  detection.
-  Notebook: [`paper/notebooks/2026-05-01-recommended-dt-validation.md`](paper/notebooks/2026-05-01-recommended-dt-validation.md).
+- **`recommended_dt` heuristic** (utility for fixed-step integrators):
+  13 scenarios × 3 integrators × 100 substeps; 18 / 18 gated cells
+  pass, 21 informational cells (WH + four out-of-regime scenarios:
+  high-eccentricity Kepler, periodic and chaotic 3-body). Per-cell
+  utilization ($u = \text{peak}/\text{bound}$) emitted as a
+  regression canary.
+  Note: [`docs/experiments/2026-05-01-recommended-dt-heuristic.md`](docs/experiments/2026-05-01-recommended-dt-heuristic.md).
 ## Further reading
 
 The repository carries the full methodological record a software paper

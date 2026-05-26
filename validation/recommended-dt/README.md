@@ -1,6 +1,6 @@
 # Recommended-dt heuristic
 
-Validation of the `recommended_dt` step-size heuristic for fixed-step integrators (Velocity Verlet, Yoshida 4, Wisdom–Holman) across 13 template scenarios. Protocol declared in [`paper/notebooks/2026-05-01-recommended-dt-validation.md`](../../paper/notebooks/2026-05-01-recommended-dt-validation.md); constants in the Cargo examples below mirror the notebook in lockstep.
+Validation of the `recommended_dt` step-size heuristic for fixed-step integrators (Velocity Verlet, Yoshida 4, Wisdom–Holman) across 13 template scenarios. Heuristic shape, gates, and current verdict are recorded in [`docs/experiments/2026-05-01-recommended-dt-heuristic.md`](../../docs/experiments/2026-05-01-recommended-dt-heuristic.md); constants in the Cargo examples below mirror that note in lockstep.
 
 ## Layout
 
