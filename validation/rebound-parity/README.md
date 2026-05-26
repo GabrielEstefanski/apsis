@@ -12,21 +12,37 @@ The framing is **validation** — establishing that `apsis`'s numerical foundati
 | `figure8/` | validated | [2026-04-26-rebound-parity-figure8.md](../../docs/experiments/2026-04-26-rebound-parity-figure8.md) |
 | `pythagorean/` | validated | [2026-04-30-rebound-parity-pythagorean.md](../../docs/experiments/2026-04-30-rebound-parity-pythagorean.md) |
 | `retrograde/` | validated | [2026-05-01-rebound-parity-retrograde.md](../../docs/experiments/2026-05-01-rebound-parity-retrograde.md) |
+| `mercurius/` | validated (Tier 1 structural; Tier 2 chaotic noted as documented gap) | [2026-05-13-rebound-parity-mercurius.md](../../paper/notebooks/2026-05-13-rebound-parity-mercurius.md) |
 
 ## Running a scenario
 
-Each scenario has a Python orchestrator (`run.py`) that runs the `apsis` side (via `cargo run --release --example`), the REBOUND side (via Python), and the comparator. Run from the scenario directory:
+Each scenario has a Python orchestrator (`run.py`) that runs the `apsis` side (via `cargo run --release --example`), the REBOUND side (via Python), and the comparator. From the scenario directory, create a virtualenv, install dependencies, then run the orchestrator.
 
-```text
+<details>
+<summary>POSIX (Linux / macOS)</summary>
+
+```bash
 cd validation/rebound-parity/<scenario>
 python -m venv .venv
-# Windows:
-.venv\Scripts\activate
-# Linux/macOS:
 source .venv/bin/activate
 pip install -r requirements.txt
 python run.py
 ```
+
+</details>
+
+<details>
+<summary>Windows (PowerShell)</summary>
+
+```powershell
+cd validation/rebound-parity/<scenario>
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+python run.py
+```
+
+</details>
 
 The orchestrator exits non-zero if any metric falls outside the tolerance declared *a priori* in the protocol notebook.
 

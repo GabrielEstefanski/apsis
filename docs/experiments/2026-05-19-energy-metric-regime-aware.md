@@ -169,7 +169,7 @@ Run the following on `develop` tip and record current outputs:
    (`apsis-1pn::mercury_precession_matches_gr_within_100ppm`) —
    PASS reading.
 
-Capture as `validation/energy-metric/baseline-pre-fix.{csv,txt}`.
+Capture as `2026-05-19-energy-metric-regime-aware/baseline-pre-fix.{csv,txt}` (sibling directory).
 
 ### Implementation gate
 
@@ -284,7 +284,7 @@ Captured against `develop` tip (commit `4ddef70` post-#147 merge):
 Kepler value matches IAS15 noise floor expectation; Mercury gate
 green. Diagnosis is stable; ready for implementation.
 
-Raw stdout under `validation/energy-metric/`.
+Raw stdout under [`2026-05-19-energy-metric-regime-aware/`](./2026-05-19-energy-metric-regime-aware/) (sibling directory).
 
 ### Post-fix
 
