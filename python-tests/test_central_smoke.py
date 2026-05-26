@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any, cast
+
 import pytest
 
 import apsis
@@ -52,7 +54,7 @@ def test_from_apsidal_rate_returns_apsis_perturbation() -> None:
 
 def test_factories_require_keyword_only_arguments() -> None:
     with pytest.raises(TypeError):
-        central.CentralForce.from_raw(  # type: ignore[misc]
+        cast(Any, central.CentralForce.from_raw)(
             0, 5e-9, -3.0, apsis.units.SOLAR_CANONICAL,
         )
 

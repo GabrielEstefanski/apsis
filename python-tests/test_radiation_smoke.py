@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any, cast
+
 import pytest
 
 import apsis
@@ -41,7 +43,7 @@ def test_from_raw_betas_returns_apsis_perturbation() -> None:
 
 def test_from_raw_betas_requires_keyword_only_arguments() -> None:
     with pytest.raises(TypeError):
-        radiation.RadiationPressure.from_raw_betas(  # type: ignore[misc]
+        cast(Any, radiation.RadiationPressure.from_raw_betas)(
             0, [0.0, 0.05], apsis.units.SOLAR_CANONICAL,
         )
 
