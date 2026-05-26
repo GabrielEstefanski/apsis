@@ -17,6 +17,7 @@ façade is wired up.
 from __future__ import annotations
 
 import re
+from typing import Any, cast
 
 import numpy as np
 import pytest
@@ -125,9 +126,9 @@ def test_body_rejects_non_positive_mass() -> None:
 def test_body_rejects_malformed_position() -> None:
     """Position that is not a 2- or 3-element sequence raises ``ValueError``."""
     with pytest.raises(ValueError, match="position"):
-        apsis.Body.star(mass=1.0, position=(1.0,))  # type: ignore[arg-type]
+        apsis.Body.star(mass=1.0, position=cast(Any, (1.0,)))
     with pytest.raises(ValueError, match="position"):
-        apsis.Body.star(mass=1.0, position=(1.0, 2.0, 3.0, 4.0))  # type: ignore[arg-type]
+        apsis.Body.star(mass=1.0, position=cast(Any, (1.0, 2.0, 3.0, 4.0)))
 
 
 # ── System ────────────────────────────────────────────────────────────────────
@@ -195,7 +196,9 @@ def test_system_energy_delta_is_machine_precision_on_kepler() -> None:
 
     sys.integrate_for(2 * 3.14159)
 
-    assert abs(sys.energy_delta) < 1e-12, f"energy drift too large: {sys.energy_delta}"
+    delta = sys.energy_delta
+    assert delta is not None, "energy_delta returned None — kepler 2-body is well-conditioned"
+    assert abs(delta) < 1e-12, f"energy drift too large: {delta}"
 
 
 # ── Trajectory ────────────────────────────────────────────────────────────────
@@ -554,7 +557,7 @@ def test_system_requires_units_kwarg() -> None:
     """Constructing a System without ``units=`` is a ``TypeError``."""
     sun = apsis.Body.star(mass=1.0)
     with pytest.raises(TypeError):
-        apsis.System(bodies=[sun], integrator="ias15", dt=1e-3)  # type: ignore[call-arg]
+        cast(Any, apsis.System)(bodies=[sun], integrator="ias15", dt=1e-3)
 
 
 def test_system_units_snapshot_is_immutable_across_integration() -> None:
@@ -598,9 +601,9 @@ def test_add_hamiltonian_perturbation_rejects_non_perturbation_objects() -> None
     """Anything without a ``_capsule`` attribute is rejected at the boundary."""
     sys = _two_body_kepler_system()
     with pytest.raises(ValueError, match="perturbation"):
-        sys.add_hamiltonian_perturbation("not a perturbation")  # type: ignore[arg-type]
+        cast(Any, sys.add_hamiltonian_perturbation)("not a perturbation")
     with pytest.raises(ValueError, match="perturbation"):
-        sys.add_hamiltonian_perturbation(42)  # type: ignore[arg-type]
+        cast(Any, sys.add_hamiltonian_perturbation)(42)
 
 
 def test_add_hamiltonian_perturbation_rejects_perturbation_with_non_capsule_attribute() -> None:

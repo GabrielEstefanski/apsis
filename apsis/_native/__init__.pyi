@@ -8,7 +8,7 @@ package re-exports from here. Submodule stubs (``gr``, future
 
 from __future__ import annotations
 
-from typing import Sequence
+from typing import Any, Sequence
 
 import numpy as np
 import numpy.typing as npt
@@ -56,12 +56,13 @@ class IntegratorKind:
 # ── Body ──────────────────────────────────────────────────────────────────────
 
 class Body:
-    """Point-mass body with kinematics, mass, softening, and a binding-
-    layer material slug.
+    """Point-mass body with kinematics, mass, and a binding-layer
+    material slug.
 
     Bodies are constructed through one of the nine preset factories
     (``Body.star``, ``Body.rocky``, ...). All factories share a
-    kwargs-only signature; position and velocity default to zero.
+    kwargs-only signature; position and velocity default to zero and
+    accept either a 2-tuple ``(x, y)`` or a 3-tuple ``(x, y, z)``.
 
     The underlying core body holds no material taxonomy field —
     physical defaults from the preset are applied once at construction
@@ -80,9 +81,8 @@ class Body:
     def star(
         *,
         mass: float,
-        position: tuple[float, float] | None = None,
-        velocity: tuple[float, float] | None = None,
-        softening: float | None = None,
+        position: tuple[float, float] | tuple[float, float, float] | None = None,
+        velocity: tuple[float, float] | tuple[float, float, float] | None = None,
     ) -> Body:
         """Main-sequence luminous body."""
 
@@ -90,9 +90,8 @@ class Body:
     def brown_dwarf(
         *,
         mass: float,
-        position: tuple[float, float] | None = None,
-        velocity: tuple[float, float] | None = None,
-        softening: float | None = None,
+        position: tuple[float, float] | tuple[float, float, float] | None = None,
+        velocity: tuple[float, float] | tuple[float, float, float] | None = None,
     ) -> Body:
         """Brown dwarf — sub-stellar, deuterium-burning regime."""
 
@@ -100,9 +99,8 @@ class Body:
     def white_dwarf(
         *,
         mass: float,
-        position: tuple[float, float] | None = None,
-        velocity: tuple[float, float] | None = None,
-        softening: float | None = None,
+        position: tuple[float, float] | tuple[float, float, float] | None = None,
+        velocity: tuple[float, float] | tuple[float, float, float] | None = None,
     ) -> Body:
         """White dwarf — compact stellar remnant."""
 
@@ -110,9 +108,8 @@ class Body:
     def gas_giant(
         *,
         mass: float,
-        position: tuple[float, float] | None = None,
-        velocity: tuple[float, float] | None = None,
-        softening: float | None = None,
+        position: tuple[float, float] | tuple[float, float, float] | None = None,
+        velocity: tuple[float, float] | tuple[float, float, float] | None = None,
     ) -> Body:
         """Gas giant — Jupiter-class hydrogen/helium envelope."""
 
@@ -120,9 +117,8 @@ class Body:
     def ice_giant(
         *,
         mass: float,
-        position: tuple[float, float] | None = None,
-        velocity: tuple[float, float] | None = None,
-        softening: float | None = None,
+        position: tuple[float, float] | tuple[float, float, float] | None = None,
+        velocity: tuple[float, float] | tuple[float, float, float] | None = None,
     ) -> Body:
         """Ice giant — Neptune-class water/methane envelope."""
 
@@ -130,9 +126,8 @@ class Body:
     def rocky(
         *,
         mass: float,
-        position: tuple[float, float] | None = None,
-        velocity: tuple[float, float] | None = None,
-        softening: float | None = None,
+        position: tuple[float, float] | tuple[float, float, float] | None = None,
+        velocity: tuple[float, float] | tuple[float, float, float] | None = None,
     ) -> Body:
         """Rocky body — terrestrial planet or large rocky satellite."""
 
@@ -140,9 +135,8 @@ class Body:
     def icy(
         *,
         mass: float,
-        position: tuple[float, float] | None = None,
-        velocity: tuple[float, float] | None = None,
-        softening: float | None = None,
+        position: tuple[float, float] | tuple[float, float, float] | None = None,
+        velocity: tuple[float, float] | tuple[float, float, float] | None = None,
     ) -> Body:
         """Icy body — water-dominated composition (outer satellites, KBOs)."""
 
@@ -150,9 +144,8 @@ class Body:
     def asteroid(
         *,
         mass: float,
-        position: tuple[float, float] | None = None,
-        velocity: tuple[float, float] | None = None,
-        softening: float | None = None,
+        position: tuple[float, float] | tuple[float, float, float] | None = None,
+        velocity: tuple[float, float] | tuple[float, float, float] | None = None,
     ) -> Body:
         """Asteroid — rocky minor body."""
 
@@ -160,18 +153,21 @@ class Body:
     def comet(
         *,
         mass: float,
-        position: tuple[float, float] | None = None,
-        velocity: tuple[float, float] | None = None,
-        softening: float | None = None,
+        position: tuple[float, float] | tuple[float, float, float] | None = None,
+        velocity: tuple[float, float] | tuple[float, float, float] | None = None,
     ) -> Body:
         """Comet — volatile-rich minor body."""
 
     # ── Builder ──
-    def at(self, position: tuple[float, float]) -> Body:
-        """Place the body at ``position = (x, y)``. Returns a new ``Body``."""
+    def at(
+        self, position: tuple[float, float] | tuple[float, float, float]
+    ) -> Body:
+        """Place the body at ``position = (x, y)`` or ``(x, y, z)``. Returns a new ``Body``."""
 
-    def with_velocity(self, velocity: tuple[float, float]) -> Body:
-        """Set the body's velocity to ``(vx, vy)``. Returns a new ``Body``."""
+    def with_velocity(
+        self, velocity: tuple[float, float] | tuple[float, float, float]
+    ) -> Body:
+        """Set the body's velocity to ``(vx, vy)`` or ``(vx, vy, vz)``. Returns a new ``Body``."""
 
     def with_density(self, density: float) -> Body:
         """Override the material-default density. Recomputes physical radius."""
@@ -180,19 +176,21 @@ class Body:
     @property
     def mass(self) -> float: ...
     @property
-    def position(self) -> tuple[float, float]: ...
+    def position(self) -> tuple[float, float, float]: ...
     @property
-    def velocity(self) -> tuple[float, float]: ...
+    def velocity(self) -> tuple[float, float, float]: ...
     @property
     def x(self) -> float: ...
     @property
     def y(self) -> float: ...
     @property
+    def z(self) -> float: ...
+    @property
     def vx(self) -> float: ...
     @property
     def vy(self) -> float: ...
     @property
-    def softening(self) -> float: ...
+    def vz(self) -> float: ...
     @property
     def density(self) -> float: ...
     @property
@@ -311,7 +309,7 @@ class System:
     def sample(
         self,
         *,
-        times: Sequence[float] | _F64Array1D | None = None,
+        times: Sequence[float] | npt.NDArray[np.floating[Any]] | None = None,
         duration: float | None = None,
         n_samples: int | None = None,
     ) -> Trajectory:
@@ -462,12 +460,20 @@ class Trajectory:
         """Body y-coordinates, shape ``(n_samples, n_bodies)``."""
 
     @property
+    def z(self) -> _F64Array2D:
+        """Body z-coordinates, shape ``(n_samples, n_bodies)``."""
+
+    @property
     def vx(self) -> _F64Array2D:
         """Body x-velocities, shape ``(n_samples, n_bodies)``."""
 
     @property
     def vy(self) -> _F64Array2D:
         """Body y-velocities, shape ``(n_samples, n_bodies)``."""
+
+    @property
+    def vz(self) -> _F64Array2D:
+        """Body z-velocities, shape ``(n_samples, n_bodies)``."""
 
     @property
     def energy(self) -> _F64Array1D:
