@@ -18,15 +18,29 @@ The `apsis` side lives at [`crates/apsis/examples/rebound_parity_retrograde.rs`]
 
 ## Quick start
 
-```text
+<details>
+<summary>POSIX (Linux / macOS)</summary>
+
+```bash
 python -m venv .venv
-# Windows:
-.venv\Scripts\activate
-# Linux/macOS:
 source .venv/bin/activate
 pip install -r requirements.txt
 python run.py
 ```
+
+</details>
+
+<details>
+<summary>Windows (PowerShell)</summary>
+
+```powershell
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+python run.py
+```
+
+</details>
 
 Wall-time estimate: $\sim 10$–$30$ seconds total for the apsis side (10000 orbits at IAS15) plus a similar duration for the REBOUND side, dominated by IAS15's adaptive substep selection. CSV output is $\sim 1$ MB per side.
 

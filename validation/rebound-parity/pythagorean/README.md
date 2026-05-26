@@ -16,15 +16,29 @@ The `apsis` side lives at [`crates/apsis/examples/rebound_parity_pythagorean.rs`
 
 ## Quick start
 
-```text
+<details>
+<summary>POSIX (Linux / macOS)</summary>
+
+```bash
 python -m venv .venv
-# Windows:
-.venv\Scripts\activate
-# Linux/macOS:
 source .venv/bin/activate
 pip install -r requirements.txt
 python run.py
 ```
+
+</details>
+
+<details>
+<summary>Windows (PowerShell)</summary>
+
+```powershell
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+python run.py
+```
+
+</details>
 
 For an informational longer-horizon stress run (not part of the gated parity claim — see protocol notebook §Out of scope):
 

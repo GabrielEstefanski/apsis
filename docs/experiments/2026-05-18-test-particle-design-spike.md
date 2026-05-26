@@ -96,7 +96,7 @@ This contract is documented in:
 
 Run `examples/radiation_dust.py` on `develop` tip (commit
 `4ddef70`). Record `|dE/E|`, `|ΔP/P_initial|`, `|Δa/a|` at 50
-orbits. Capture as `validation/test-particle/baseline-pre-fix.csv`.
+orbits. Capture as `2026-05-18-test-particle-design-spike/baseline-pre-fix.csv` (sibling directory).
 
 ### Implementation (three commits)
 
@@ -149,7 +149,7 @@ Captured against `develop` tip (commit `4ddef70`):
 
 **Gate 1 — PASS.** Diagnosis has not shifted; proceed to
 implementation. Raw stdout and CSV under
-`validation/test-particle/`.
+[`2026-05-18-test-particle-design-spike/`](./2026-05-18-test-particle-design-spike/) (sibling directory).
 
 ### Post-fix
 
@@ -164,7 +164,7 @@ Endpoint `|dE/E|` is unchanged. Trajectory diverges by
 O(mass_ratio) as expected for the test-particle approximation,
 confirming the skip is active.
 
-Raw stdout: `validation/test-particle/post-fix.txt`.
+Raw stdout: `2026-05-18-test-particle-design-spike/post-fix.txt` (sibling directory).
 
 ### Gate 2 reanalysis — the gate was malformed
 
