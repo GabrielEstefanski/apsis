@@ -37,8 +37,8 @@ from apsis._native import (
     UnitSystem,
     UnitSystemMismatchError,
     __version__,
+    units,
 )
-from apsis._native import units
 
 
 class Perturbation:
@@ -77,6 +77,6 @@ __all__ = [
     "Trajectory",
     "UnitSystem",
     "UnitSystemMismatchError",
-    "units",
     "__version__",
+    "units",
 ]
