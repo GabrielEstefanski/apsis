@@ -303,7 +303,8 @@ that emits a BibTeX block keyed by every operator crate's name,
 version, source-repository URL, build commit when available, and
 the `Cargo.lock` hash that pins the dependency closure. For a
 simulation registering `apsis-1pn` and `apsis-radiation`, the
-emitted block has the form:
+emitted block carries one `@software` entry per crate. The
+Hamiltonian operator from `apsis-1pn` produces:
 
 ```bibtex
 @software{apsis-1pn_0.1.0,
@@ -315,7 +316,13 @@ emitted block has the form:
              Cargo.lock blake3: 7f2a...e3c1;
              kernel_requirements: exact_and_smooth},
 }
+```
 
+followed by `apsis-radiation`, whose entry carries the same
+shape but a different `kernel_requirements` tag because Burns 1979
+imposes no constraint on the gravitational kernel it composes with:
+
+```bibtex
 @software{apsis-radiation_0.1.0,
   title   = {apsis-radiation},
   version = {0.1.0},
