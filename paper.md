@@ -735,8 +735,15 @@ crate_hash = "workspace:fb7218a5538a6a4448a8c954e75ef45192799e88-dirty"
 (Body metadata follows under `[bodies]` with one `[[bodies.list]]`
 entry per registered body — mass, density, physical radius, render
 colour, radiation-coupling coefficients, and dynamical class.)
-Material physical events (collisions, escapes) are recorded inline
-in the binary frame stream that follows.
+Numeric fields are in the canonical units declared above
+(`length = AU`, `mass = Msun`, `time = T_G`); the explicit
+`unit_system` block lets a replay convert to SI or to a different
+canonical system without ambiguity. The `g` field is computed from
+the canonical SI scales rather than hardcoded, which records the
+1-ULP residual that `time_s = sqrt(AU³/(G_SI·MSUN))` produces under
+f64 — the integrator runs with this `G_code` and the replay must
+see the same value. Material physical events (collisions, escapes)
+are recorded inline in the binary frame stream that follows.
 
 The federation thesis — that a simulation's physical model is
 captured in `Cargo.lock` — is here extended to the run itself:
