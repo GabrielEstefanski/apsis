@@ -96,6 +96,14 @@ warn_redundant_casts = true
 warn_unused_ignores = true
 files = ["apsis", "python-tests", "paper/figures/scripts"]
 
+# Paper-figure scripts import matplotlib for plotting; matplotlib's
+# type-stub coverage is partial and the package is not installed on
+# the CI runner. Mirrors the pyright `executionEnvironment` opt-out
+# at `paper/figures/scripts`.
+[[tool.mypy.overrides]]
+module = "matplotlib.*"
+ignore_missing_imports = true
+
 [tool.ruff]
 target-version = "py39"
 line-length = 100
