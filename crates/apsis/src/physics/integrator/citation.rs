@@ -216,13 +216,16 @@ pub fn render_cite_block(
             out.push_str(&format!("  url     = {{{}}},\n", url));
         }
         let req_slug = kernel_requirements_slug(req);
+        // Wrap on natural separators so the field fits the paper's
+        // text width when rendered.
         match c.description {
             Some(desc) => out.push_str(&format!(
-                "  note    = {{{desc}. Cargo.lock blake3: {lock_short}; \
+                "  note    = {{{desc}.\n             \
+                 Cargo.lock blake3: {lock_short};\n             \
                  kernel_requirements: {req_slug}}},\n"
             )),
             None => out.push_str(&format!(
-                "  note    = {{Cargo.lock blake3: {lock_short}; \
+                "  note    = {{Cargo.lock blake3: {lock_short};\n             \
                  kernel_requirements: {req_slug}}},\n"
             )),
         }
@@ -343,6 +346,16 @@ mod tests {
     fn cite_block_empty_when_no_entries() {
         let block = render_cite_block(&[], "deadbeef".repeat(8).as_str());
         assert!(block.is_empty());
+    }
+
+    /// Locks the note-field wrap so a future collapse to single line
+    /// surfaces here, not as a PDF overflow on re-render.
+    #[test]
+    fn cite_block_wraps_note_field_with_thirteen_space_indent() {
+        let block =
+            render_cite_block(&[(full_citation(), req_exact_and_smooth())], &"a".repeat(64));
+        assert!(block.contains("\n             Cargo.lock blake3: "));
+        assert!(block.contains("\n             kernel_requirements: "));
     }
 
     #[test]

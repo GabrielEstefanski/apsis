@@ -311,7 +311,9 @@ emitted block has the form:
   version = {0.1.0},
   commit  = {f2d8e91},
   url     = {https://github.com/GabrielEstefanski/apsis},
-  note    = {First-post-Newtonian Schwarzschild correction. Cargo.lock blake3: 7f2a...e3c1; kernel_requirements: exact_and_smooth},
+  note    = {First-post-Newtonian Schwarzschild correction.
+             Cargo.lock blake3: 7f2a...e3c1;
+             kernel_requirements: exact_and_smooth},
 }
 
 @software{apsis-radiation_0.1.0,
@@ -319,7 +321,9 @@ emitted block has the form:
   version = {0.1.0},
   commit  = {f2d8e91},
   url     = {https://github.com/GabrielEstefanski/apsis},
-  note    = {Radiation pressure and Poynting--Robertson drag after Burns 1979. Cargo.lock blake3: 7f2a...e3c1; kernel_requirements: any},
+  note    = {Radiation pressure and Poynting--Robertson drag after Burns 1979.
+             Cargo.lock blake3: 7f2a...e3c1;
+             kernel_requirements: any},
 }
 ```
 
