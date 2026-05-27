@@ -182,6 +182,7 @@ impl Operator for PostNewtonian1PN {
             commit_hash: option_env!("APSIS_1PN_GIT_COMMIT").filter(|s| !s.is_empty()),
             description: Some("First-post-Newtonian Schwarzschild correction"),
             url: Some("https://github.com/GabrielEstefanski/apsis"),
+            author: Some("Estefanski, G. B."),
         })
     }
 }

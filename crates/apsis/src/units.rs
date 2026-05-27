@@ -224,7 +224,9 @@ impl UnitSystem {
     /// `G_code = G_SI · mass_scale · time_scale² / length_scale³`.
     /// Never read from a hardcoded literature value — `solar().g()`
     /// returns `≈ 39.478` (the IAU approximation to `4π²`) by
-    /// derivation, not by definition.
+    /// derivation, not by definition. `solar_canonical().g()`
+    /// returns `1.0 ± 1 ULP` rather than literal `1.0` because
+    /// `time_s = sqrt(AU³/(G·M))` is itself a derivation.
     #[inline]
     pub fn g(&self) -> f64 {
         G_SI * self.mass_kg * self.time_s * self.time_s

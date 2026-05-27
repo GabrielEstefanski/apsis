@@ -308,12 +308,13 @@ Hamiltonian operator from `apsis-1pn` produces:
 
 ```bibtex
 @software{apsis-1pn_0.1.0,
+  author  = {Estefanski, G. B.},
   title   = {apsis-1pn},
   version = {0.1.0},
-  commit  = {f2d8e91},
+  commit  = {fb7218a},
   url     = {https://github.com/GabrielEstefanski/apsis},
   note    = {First-post-Newtonian Schwarzschild correction.
-             Cargo.lock blake3: 7f2a...e3c1;
+             Cargo.lock blake3: e3f3...e94e;
              kernel_requirements: exact_and_smooth},
 }
 ```
@@ -324,13 +325,14 @@ imposes no constraint on the gravitational kernel it composes with:
 
 ```bibtex
 @software{apsis-radiation_0.1.0,
+  author  = {Estefanski, G. B.},
   title   = {apsis-radiation},
   version = {0.1.0},
-  commit  = {f2d8e91},
+  commit  = {fb7218a},
   url     = {https://github.com/GabrielEstefanski/apsis},
   note    = {Radiation pressure and Poynting--Robertson drag after Burns 1979.
-             Cargo.lock blake3: 7f2a...e3c1;
-             kernel_requirements: any},
+             Cargo.lock blake3: e3f3...e94e;
+             kernel_requirements: unconstrained},
 }
 ```
 
@@ -678,15 +680,70 @@ mathematical derivations, or scientific decision-making.
 
 Each apsis simulation emits an *Apsis Record* — a binary
 certificate documenting the run's full provenance and physical
-state. The record contains the apsis-core git commit, a BLAKE3 hash
-of the project's `Cargo.lock`, the unit system, integrator
-configuration, kernel variant (and softening parameter when
-applicable), seed, every registered operator with its crate name +
-version + lockfile hash + declared `KernelRequirements`, and
-bookend snapshots of body state. Material physical events
-(collisions, escapes) are recorded inline. The certificate is a
-single binary file with a human-readable TOML header and a binary
-frame stream.
+state. The certificate is a single binary file consisting of a
+human-readable TOML header followed by a binary frame stream and a
+BLAKE3 trailer. The header is emitted at `attach_record` time; the
+following block is the verbatim header of a run with `apsis-1pn`
+and `apsis-radiation` registered on Sun + Mercury under
+`SOLAR_CANONICAL`:
+
+```toml
+[apsis]
+version = "0.1.0"
+git_sha = "fb7218a5538a6a4448a8c954e75ef45192799e88-dirty"
+created_utc = "2026-05-27T19:00:30Z"
+rustc_version = "rustc 1.94.1 (e408947bf 2026-03-25)"
+generated_by = "apsis 0.1.0"
+
+[reproducibility]
+cargo_lock_blake3 = "e3f3742765d9ade1ff9fddfa26bcb050a6f162043c4fc0b37dc560282856e94e"
+seed = 42
+
+[unit_system]
+g = 1.0000000000000002
+length = "AU"
+mass = "Msun"
+time = "T_G"
+
+[integrator]
+kind = "IAS15 (15th, adaptive)"
+dt_mode = "Fixed"
+initial_dt = 0.001
+
+[kernel]
+variant = "Newton"
+exactness = "exact"
+continuity = "smooth"
+
+[[operators]]
+name = "apsis-1pn"
+version = "0.1.0"
+crate_hash = "workspace:fb7218a5538a6a4448a8c954e75ef45192799e88-dirty"
+
+[operators.requirements]
+kernel_exactness = "exact"
+kernel_continuity = "smooth"
+
+[[operators]]
+name = "apsis-radiation"
+version = "0.1.0"
+crate_hash = "workspace:fb7218a5538a6a4448a8c954e75ef45192799e88-dirty"
+
+[operators.requirements]
+```
+
+(Body metadata follows under `[bodies]` with one `[[bodies.list]]`
+entry per registered body — mass, density, physical radius, render
+colour, radiation-coupling coefficients, and dynamical class.)
+Numeric fields are in the canonical units declared above
+(`length = AU`, `mass = Msun`, `time = T_G`); the explicit
+`unit_system` block lets a replay convert to SI or to a different
+canonical system without ambiguity. The `g` field is computed from
+the canonical SI scales rather than hardcoded, which records the
+1-ULP residual that `time_s = sqrt(AU³/(G_SI·MSUN))` produces under
+f64 — the integrator runs with this `G_code` and the replay must
+see the same value. Material physical events (collisions, escapes)
+are recorded inline in the binary frame stream that follows.
 
 The federation thesis — that a simulation's physical model is
 captured in `Cargo.lock` — is here extended to the run itself:
