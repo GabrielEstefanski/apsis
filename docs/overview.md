@@ -91,8 +91,9 @@ crate.
 
 Inside `apsis`, the code is organised by responsibility:
 
-- [`domain/`](../crates/apsis/src/domain/) — `Body`,
-  `NamedBody`, and the body-array layout used by the force kernels.
+- [`domain/`](../crates/apsis/src/domain/) — `Body` (with optional
+  display name carried through to provenance output) and the
+  body-array layout used by the force kernels.
 - [`physics/`](../crates/apsis/src/physics/) — force
   models (direct $O(N^2)$ + Barnes-Hut with a Newton kernel that
   optionally carries Plummer softening), the integrator stack

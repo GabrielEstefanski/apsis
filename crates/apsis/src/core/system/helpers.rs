@@ -2,10 +2,10 @@
 
 use crate::domain::body::Body;
 
-/// Default prefix when a body is added without an explicit name and
-/// no preset hint is available (e.g. via [`System::add_body`]). Callers
+/// Default prefix when a body is added without an explicit name
+/// (e.g. via [`System::add_body`] with `body.name = None`). Callers
 /// that know which preset produced the body should pass that preset's
-/// `display_name` through [`System::add_named_body`] instead.
+/// `display_name` through [`Body::with_name`] before registration.
 pub(crate) const DEFAULT_NAME_PREFIX: &str = "Body";
 
 /// Generate an auto-name `"<prefix> N"` for a new body given the
