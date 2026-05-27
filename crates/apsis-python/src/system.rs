@@ -684,12 +684,12 @@ impl PySystem {
     /// the workspace ``Cargo.lock`` blake3 hash and reports its
     /// declared ``kernel_requirements``.
     ///
-    /// Raises ``OSError`` when the workspace ``Cargo.lock`` cannot
-    /// be located or read — same lookup contract as ``attach_record``.
-    fn cite(&self) -> PyResult<String> {
-        self.inner
-            .cite()
-            .map_err(|e| pyo3::exceptions::PyIOError::new_err(format!("apsis cite: {e}")))
+    /// The workspace ``Cargo.lock`` is best-effort: when it cannot
+    /// be located (typical of pip-installed wheels run outside a
+    /// Cargo workspace) the ``blake3`` slot in each entry's ``note``
+    /// field reads ``unknown``; the rest of the entry is unaffected.
+    fn cite(&self) -> String {
+        self.inner.cite()
     }
 
     fn __repr__(&self) -> String {

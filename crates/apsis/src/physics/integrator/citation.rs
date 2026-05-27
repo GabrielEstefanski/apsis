@@ -207,31 +207,44 @@ pub fn render_cite_block(
             name = c.crate_name,
             ver = c.crate_version
         ));
-        out.push_str(&format!("  title   = {{{}}},\n", c.crate_name));
-        out.push_str(&format!("  version = {{{}}},\n", c.crate_version));
+        out.push_str(&format!("  title   = {{{}}},\n", bibtex_escape(c.crate_name)));
+        out.push_str(&format!("  version = {{{}}},\n", bibtex_escape(c.crate_version)));
         if let Some(hash) = c.commit_hash {
             out.push_str(&format!("  commit  = {{{}}},\n", short_commit(hash)));
         }
         if let Some(url) = c.url {
-            out.push_str(&format!("  url     = {{{}}},\n", url));
+            out.push_str(&format!("  url     = {{{}}},\n", bibtex_escape(url)));
         }
         let req_slug = kernel_requirements_slug(req);
-        // Wrap on natural separators so the field fits the paper's
-        // text width when rendered.
-        match c.description {
-            Some(desc) => out.push_str(&format!(
-                "  note    = {{{desc}.\n             \
-                 Cargo.lock blake3: {lock_short};\n             \
-                 kernel_requirements: {req_slug}}},\n"
-            )),
-            None => out.push_str(&format!(
-                "  note    = {{Cargo.lock blake3: {lock_short};\n             \
-                 kernel_requirements: {req_slug}}},\n"
-            )),
-        }
+        let desc_prefix = c
+            .description
+            .map(|d| format!("{}.\n             ", bibtex_escape(d)))
+            .unwrap_or_default();
+        out.push_str(&format!(
+            "  note    = {{{desc_prefix}Cargo.lock blake3: {lock_short};\n             \
+             kernel_requirements: {req_slug}}},\n"
+        ));
         out.push_str("}\n");
     }
     out
+}
+
+/// Escape `{` and `}` so a value containing braces does not close the
+/// surrounding BibTeX field early. Returns the input unchanged when
+/// no escape is needed — common case for crate names, versions, URLs.
+fn bibtex_escape(s: &str) -> std::borrow::Cow<'_, str> {
+    if !s.contains(['{', '}']) {
+        return std::borrow::Cow::Borrowed(s);
+    }
+    let mut out = String::with_capacity(s.len() + 4);
+    for ch in s.chars() {
+        match ch {
+            '{' => out.push_str("\\{"),
+            '}' => out.push_str("\\}"),
+            c => out.push(c),
+        }
+    }
+    std::borrow::Cow::Owned(out)
 }
 
 fn kernel_requirements_slug(req: &crate::physics::gravity::kernel::KernelRequirements) -> String {
@@ -455,5 +468,37 @@ mod tests {
     fn short_lock_hash_keeps_short_input_verbatim() {
         assert_eq!(short_lock_hash("abc"), "abc");
         assert_eq!(short_lock_hash("1234567890a"), "1234567890a");
+    }
+
+    /// `}` and `{` in description/url do not close the surrounding
+    /// BibTeX field early. Guards against a third-party operator
+    /// shipping a Citation with brace-bearing prose.
+    #[test]
+    fn cite_block_escapes_braces_in_description_and_url() {
+        let c = Citation {
+            bibtex: "@misc{x}",
+            doi: None,
+            crate_name: "apsis-fake",
+            crate_version: "0.1.0",
+            commit_hash: None,
+            description: Some("contains } and { chars"),
+            url: Some("https://x.example/{owner}/repo"),
+        };
+        let block = render_cite_block(&[(c, req_none())], &"a".repeat(64));
+        assert!(block.contains("contains \\} and \\{ chars"));
+        assert!(block.contains("https://x.example/\\{owner\\}/repo"));
+    }
+
+    #[test]
+    fn bibtex_escape_passes_clean_input_through_without_alloc() {
+        let clean = "no special chars";
+        let escaped = bibtex_escape(clean);
+        assert!(matches!(escaped, std::borrow::Cow::Borrowed(_)));
+        assert_eq!(escaped, clean);
+    }
+
+    #[test]
+    fn bibtex_escape_handles_braces() {
+        assert_eq!(bibtex_escape("a{b}c"), "a\\{b\\}c");
     }
 }

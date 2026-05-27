@@ -201,6 +201,19 @@ impl System {
         self.regime_warnings_emitted.clear();
     }
 
+    /// Iterate every registered operator as `&dyn Operator`, in
+    /// dispatch order: Hamiltonian, then non-conservative, then
+    /// observers. Within each category, registration order is
+    /// preserved. Shared backbone for the citation / provenance /
+    /// cite aggregation methods that all walk the same three vecs.
+    pub(crate) fn iter_all_operators(&self) -> impl Iterator<Item = &(dyn Operator + '_)> + '_ {
+        self.hamiltonian_perturbations
+            .iter()
+            .map(|b| b.as_ref() as &dyn Operator)
+            .chain(self.non_conservative_perturbations.iter().map(|b| b.as_ref() as &dyn Operator))
+            .chain(self.observers.iter().map(|b| b.as_ref()))
+    }
+
     /// Aggregate [`Citation`](crate::physics::integrator::Citation)
     /// entries from every registered operator (Hamiltonian +
     /// non-conservative + observers). Operators without a citation
@@ -217,23 +230,7 @@ impl System {
     /// expansion will fold them in so the full reference list comes
     /// from one call.
     pub fn citations(&self) -> Vec<crate::physics::integrator::Citation> {
-        let mut out = Vec::new();
-        for op in &self.hamiltonian_perturbations {
-            if let Some(c) = op.citation() {
-                out.push(c);
-            }
-        }
-        for op in &self.non_conservative_perturbations {
-            if let Some(c) = op.citation() {
-                out.push(c);
-            }
-        }
-        for op in &self.observers {
-            if let Some(c) = op.citation() {
-                out.push(c);
-            }
-        }
-        out
+        self.iter_all_operators().filter_map(|op| op.citation()).collect()
     }
 
     /// Render the registered operator stack's citations as a
@@ -265,34 +262,24 @@ impl System {
     /// references (Anderson 1975, Burns 1979, Tamayo 2019, ...) stay
     /// reachable through [`Self::citations`] `[i].bibtex`.
     ///
-    /// # Errors
-    ///
-    /// Returns [`crate::records::provenance::ProvenanceError`] when
-    /// the workspace `Cargo.lock` cannot be located or read — same
-    /// lookup contract as `attach_record`.
-    pub fn cite(&self) -> Result<String, crate::records::provenance::ProvenanceError> {
-        let lock_hash = crate::records::provenance::lock_blake3(None)?;
+    /// The workspace `Cargo.lock` is best-effort: when it cannot be
+    /// located (typical of pip-installed wheels run outside a Cargo
+    /// workspace) the `blake3` slot in each entry's `note` field
+    /// reads `unknown`, the rest of the entry is unaffected, and no
+    /// error is raised. Use [`crate::records::provenance::lock_blake3`]
+    /// directly if you need to detect a missing lockfile.
+    pub fn cite(&self) -> String {
+        let lock_hash =
+            crate::records::provenance::lock_blake3(None).unwrap_or_else(|_| "unknown".to_string());
         let mut entries = Vec::new();
         let mut seen: std::collections::HashSet<&'static str> = std::collections::HashSet::new();
-        for op in &self.hamiltonian_perturbations {
+        for op in self.iter_all_operators() {
             let Some(c) = op.citation() else { continue };
             if seen.insert(c.crate_name) {
                 entries.push((c, op.kernel_requirements()));
             }
         }
-        for op in &self.non_conservative_perturbations {
-            let Some(c) = op.citation() else { continue };
-            if seen.insert(c.crate_name) {
-                entries.push((c, op.kernel_requirements()));
-            }
-        }
-        for op in &self.observers {
-            let Some(c) = op.citation() else { continue };
-            if seen.insert(c.crate_name) {
-                entries.push((c, op.kernel_requirements()));
-            }
-        }
-        Ok(crate::physics::integrator::render_cite_block(&entries, &lock_hash))
+        crate::physics::integrator::render_cite_block(&entries, &lock_hash)
     }
 
     /// Check that the operator's
@@ -763,14 +750,11 @@ mod tests {
         assert_eq!(cites[1].crate_name, "apsis-b");
     }
 
-    /// `cite()` on an empty stack returns an empty BibTeX string —
-    /// the lockfile is still read (so `ProvenanceError` propagation
-    /// stays exercised in CI), but no entries are emitted.
+    /// `cite()` on an empty stack returns an empty BibTeX string.
     #[test]
     fn cite_empty_when_no_operators_registered() {
         let sys = System::new(vec![Body::star(1.0)], UnitSystem::solar_canonical());
-        let block = sys.cite().expect("Cargo.lock must be readable from the workspace");
-        assert!(block.is_empty(), "no operators → no @software entries; got {block:?}");
+        assert!(sys.cite().is_empty());
     }
 
     /// Two operators from different crates produce two `@software`
@@ -784,7 +768,7 @@ mod tests {
             .expect("CitedOp is unit-agnostic");
         sys.add_hamiltonian_perturbation(Box::new(CitedOp(fake_citation("apsis-b"))))
             .expect("CitedOp is unit-agnostic");
-        let block = sys.cite().expect("Cargo.lock must be readable from the workspace");
+        let block = sys.cite();
         let a_at = block.find("@software{apsis-a_0.1.0,").expect("apsis-a entry");
         let b_at = block.find("@software{apsis-b_0.1.0,").expect("apsis-b entry");
         assert!(a_at < b_at, "registration order: apsis-a must come before apsis-b");
@@ -802,7 +786,7 @@ mod tests {
             .expect("CitedOp is unit-agnostic");
         sys.add_hamiltonian_perturbation(Box::new(CitedOp(fake_citation("apsis-radiation"))))
             .expect("CitedOp is unit-agnostic");
-        let block = sys.cite().expect("Cargo.lock must be readable from the workspace");
+        let block = sys.cite();
         assert_eq!(
             block.matches("@software{apsis-radiation_").count(),
             1,

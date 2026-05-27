@@ -436,8 +436,9 @@ class System:
         """BibTeX ``@software`` block citing every registered operator
         crate, suitable for direct inclusion in a paper's ``.bib``. One
         entry per unique crate, deduped by name, in registration order.
-        Raises ``OSError`` when the workspace ``Cargo.lock`` cannot be
-        located or read."""
+        Best-effort on the workspace ``Cargo.lock``: when not found
+        (e.g. pip-installed wheel outside a workspace) the ``blake3``
+        slot reads ``unknown`` instead of raising."""
 
     def __repr__(self) -> str: ...
 
