@@ -76,7 +76,7 @@ use crate::convert::{value_error, xyz_triple};
 /// )
 /// ```
 #[pyclass(module = "apsis", name = "Body", frozen)]
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(crate) struct PyBody {
     pub(crate) inner: CoreBody,
     /// Construction-time tag exposed via [`material`](Self::material).
@@ -239,7 +239,7 @@ impl PyBody {
     /// `z = 0`.
     fn at(&self, position: &Bound<'_, PyAny>) -> PyResult<Self> {
         let (x, y, z) = xyz_triple("position", position)?;
-        let mut inner = self.inner;
+        let mut inner = self.inner.clone();
         inner.pos_x = x;
         inner.pos_y = y;
         inner.pos_z = z;
@@ -251,7 +251,7 @@ impl PyBody {
     /// with `vz = 0`.
     fn with_velocity(&self, velocity: &Bound<'_, PyAny>) -> PyResult<Self> {
         let (vx, vy, vz) = xyz_triple("velocity", velocity)?;
-        let mut inner = self.inner;
+        let mut inner = self.inner.clone();
         inner.vel_x = vx;
         inner.vel_y = vy;
         inner.vel_z = vz;
@@ -268,7 +268,14 @@ impl PyBody {
                 format!("expected a strictly positive finite float, got {density}"),
             ));
         }
-        Ok(Self { inner: self.inner.with_density(density), slug: self.slug })
+        Ok(Self { inner: self.inner.clone().with_density(density), slug: self.slug })
+    }
+
+    /// Attach an explicit display name. The name rides with the body
+    /// into `System` and surfaces in `System.bodies()[i].name`,
+    /// `cite()` provenance, and the Apsis Record header.
+    fn with_name(&self, name: String) -> Self {
+        Self { inner: self.inner.clone().with_name(name), slug: self.slug }
     }
 
     // ── Read-only properties ─────────────────────────────────────────────

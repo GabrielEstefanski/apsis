@@ -94,9 +94,8 @@ pub fn header_from_system(
     let body_meta: Vec<BodyMeta> = sys
         .bodies()
         .iter()
-        .zip(sys.names().iter())
-        .map(|(b, name)| BodyMeta {
-            name: name.clone(),
+        .map(|b| BodyMeta {
+            name: b.name.clone().unwrap_or_default(),
             mass: b.mass,
             density: b.density,
             physical_radius: b.physical_radius,

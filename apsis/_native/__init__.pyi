@@ -173,6 +173,11 @@ class Body:
     def with_density(self, density: float) -> Body:
         """Override the material-default density. Recomputes physical radius."""
 
+    def with_name(self, name: str) -> Body:
+        """Attach an explicit display name. The name rides into ``System``
+        and surfaces in provenance output, ``System.bodies()[i].name``,
+        and the Apsis Record header (``[[bodies.list]]`` entries)."""
+
     # ── Properties ──
     @property
     def mass(self) -> float: ...

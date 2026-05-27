@@ -156,10 +156,6 @@ pub struct System {
     /// Absolute Lz drift `|Lz - Lz_initial|`.
     pub(crate) abs_angular_momentum_error: f64,
 
-    /// Human-readable label for each body, parallel to `bodies`.
-    /// Separate because `Body` is `Copy` and cannot own a `String`.
-    pub(crate) names: Vec<String>,
-
     /// Minimum pairwise separation from the most recent step.
     pub(crate) r_min: f64,
 
@@ -332,9 +328,9 @@ impl System {
         let named = instantiate(&template);
         // Presets are calibrated for G = 1 (Hénon).
         let mut sys = Self::new(Vec::new(), UnitSystem::canonical());
-        sys.add_named_bodies(named);
-        // Restore the template handle that add_named_bodies cleared, so
-        // a follow-up .with_seed(...) can rebuild from the same preset.
+        sys.add_bodies(named);
+        // Restore the template handle that add_bodies cleared, so a
+        // follow-up .with_seed(...) can rebuild from the same preset.
         sys.template_source = Some(kind);
         sys
     }
@@ -346,13 +342,20 @@ impl System {
         units: UnitSystem,
     ) -> Self {
         let total_mass = bodies.iter().map(|b| b.mass).sum();
-        let names = {
-            let mut acc: Vec<String> = Vec::with_capacity(bodies.len());
-            for _ in &bodies {
-                acc.push(helpers::auto_name(helpers::DEFAULT_NAME_PREFIX, &acc));
-            }
-            acc
-        };
+        // Resolve each body's name against the running set so explicit
+        // names (e.g. "Sun", "Mercury") ride through and `None` slots
+        // receive monotonic `"Body N"` placeholders.
+        let mut acc_names: Vec<String> = Vec::with_capacity(bodies.len());
+        let bodies: Vec<Body> = bodies
+            .into_iter()
+            .map(|mut b| {
+                let resolved =
+                    helpers::resolved_name(b.name.take(), helpers::DEFAULT_NAME_PREFIX, &acc_names);
+                acc_names.push(resolved.clone());
+                b.name = Some(resolved);
+                b
+            })
+            .collect();
 
         let theta = force_model.theta();
         let r_min = helpers::compute_closeness(&bodies);
@@ -394,7 +397,6 @@ impl System {
             initial_angular_momentum: None,
             rel_angular_momentum_error: None,
             abs_angular_momentum_error: 0.0,
-            names,
             r_min,
             close_encounter_threshold: None,
             last_encounter_flag: crate::physics::encounter::EncounterFlag::Far,
@@ -477,7 +479,6 @@ impl System {
 
     fn rebuild_from_template(&mut self, kind: TemplateKind, seed: u64) {
         self.bodies.clear();
-        self.names.clear();
         self.total_mass = 0.0;
         self.initial_energy = None;
         self.initial_angular_momentum = None;
@@ -487,8 +488,8 @@ impl System {
         self.abs_angular_momentum_error = 0.0;
         let template = kind.build(seed);
         let named = instantiate(&template);
-        self.add_named_bodies(named);
-        // add_named_bodies cleared template_source; this is an internal
+        self.add_bodies(named);
+        // add_bodies cleared template_source; this is an internal
         // rebuild path, so restore the invariant.
         self.template_source = Some(kind);
     }

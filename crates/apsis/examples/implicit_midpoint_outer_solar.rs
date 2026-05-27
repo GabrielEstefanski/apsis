@@ -53,7 +53,7 @@ fn run_one(kind: IntegratorKind, n_steps: u64, dt: f64, sample_every: u64) -> Ru
     let mut sum_signed_rel_de = 0.0_f64;
     let mut samples = 0_u64;
 
-    let mut sample_q1 = sys.bodies()[1];
+    let mut sample_q1 = sys.bodies()[1].clone();
     let mut last_sampled = 0_u64;
 
     for k in 1..=n_steps {
@@ -64,7 +64,7 @@ fn run_one(kind: IntegratorKind, n_steps: u64, dt: f64, sample_every: u64) -> Ru
             peak_rel_de = peak_rel_de.max(signed_rel.abs());
             sum_signed_rel_de += signed_rel;
             samples += 1;
-            sample_q1 = sys.bodies()[1];
+            sample_q1 = sys.bodies()[1].clone();
             last_sampled = k;
         }
     }
@@ -79,7 +79,7 @@ fn run_one(kind: IntegratorKind, n_steps: u64, dt: f64, sample_every: u64) -> Ru
         cum_iterations: stats.map(|s| s.picard_iters).unwrap_or(0),
         cum_max_iter_hits: stats.map(|s| s.degraded).unwrap_or(0),
         cum_steps: stats.map(|s| s.substeps).unwrap_or(n_steps),
-        final_q_planet1: sys.bodies()[1],
+        final_q_planet1: sys.bodies()[1].clone(),
     }
 }
 

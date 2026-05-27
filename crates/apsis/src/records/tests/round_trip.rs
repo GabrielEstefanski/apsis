@@ -46,10 +46,9 @@ fn minimal_header() -> Header {
     }
 }
 
-fn make_ctx<'a>(bodies: &'a [Body], names: &'a [String], t: f64, steps: u64) -> HookContext<'a> {
+fn make_ctx<'a>(bodies: &'a [Body], t: f64, steps: u64) -> HookContext<'a> {
     HookContext {
         bodies,
-        names,
         t,
         dt: 1e-3,
         steps,
@@ -68,8 +67,7 @@ fn write_then_open_round_trip() {
             RecordHook::with_header(&path, minimal_header(), RecordPolicy::BookendsAndEvents)
                 .unwrap();
         let bodies = vec![Body::star(1.0).at(0.0, 0.0).with_velocity(0.0, 0.0)];
-        let names = vec!["sun".to_string()];
-        let ctx = make_ctx(&bodies, &names, 0.0, 0);
+        let ctx = make_ctx(&bodies, 0.0, 0);
         hook.pre_step(&ctx);
         hook.on_finish(&ctx);
     }
@@ -87,12 +85,11 @@ fn round_trip_with_post_step_advances() {
             RecordHook::with_header(&path, minimal_header(), RecordPolicy::BookendsAndEvents)
                 .unwrap();
         let bodies = vec![Body::star(1.0).at(0.0, 0.0).with_velocity(0.0, 0.0)];
-        let names = vec!["sun".to_string()];
-        hook.pre_step(&make_ctx(&bodies, &names, 0.0, 0));
+        hook.pre_step(&make_ctx(&bodies, 0.0, 0));
         for s in 1..=10 {
-            hook.post_step(&make_ctx(&bodies, &names, s as f64 * 1e-3, s));
+            hook.post_step(&make_ctx(&bodies, s as f64 * 1e-3, s));
         }
-        hook.on_finish(&make_ctx(&bodies, &names, 10e-3, 10));
+        hook.on_finish(&make_ctx(&bodies, 10e-3, 10));
     }
     let rec = Record::open(&path).unwrap();
     let (init, fin) = rec.bookends().unwrap();

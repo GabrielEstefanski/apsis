@@ -655,12 +655,15 @@ mod tests {
         let mut h = OrbitHierarchy::new();
         h.cadence = Duration::from_secs(3600); // prevent normal ticks
 
-        assert!(h.tick(&[star, planet], g), "first tick always recomputes");
-        assert!(!h.tick(&[star, planet], g), "cadence should gate unchanged topology",);
+        assert!(h.tick(&[star.clone(), planet.clone()], g), "first tick always recomputes");
+        assert!(
+            !h.tick(&[star.clone(), planet.clone()], g),
+            "cadence should gate unchanged topology",
+        );
 
         let moon = body(101.0, 0.0, 0.0, circular(100.0, 1.0e6) + 1.0, 1.0);
         assert!(
-            h.tick(&[star, planet, moon], g),
+            h.tick(&[star.clone(), planet.clone(), moon], g),
             "a body-count change must force an immediate recompute",
         );
         assert_eq!(h.class(2), Some(OrbitClass::Bound { level: 2 }));

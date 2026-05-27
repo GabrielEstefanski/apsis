@@ -39,20 +39,14 @@ use crate::domain::body::Body;
 use crate::math::Vec3;
 use crate::physics::gravity::G;
 
-// ── Structural contract: Body is Copy ────────────────────────────────────────
+// ── Structural contract: Body carries no interior mutability ────────────────
 //
 // The read-only contract above relies on `Body` carrying no interior
-// mutability (no `Cell`, `RefCell`, `Mutex`, etc.). `Copy` is
-// incompatible with all of those — `&[Body]` cannot then be used to
-// mutate body state through any back-channel. Removing `Copy` from
-// `Body` would break this guarantee, so we wedge it as a compile-time
-// assertion: a future change that makes `Body` non-Copy fails the
-// build here, surfacing the contract violation before the layering it
-// protects can be undermined.
-const _: () = {
-    const fn assert_copy<T: Copy>() {}
-    assert_copy::<Body>();
-};
+// mutability (no `Cell`, `RefCell`, `Mutex`, etc.) so `&[Body]` cannot
+// be used to mutate body state through any back-channel. `Body` is
+// not `Copy` (the `name` field owns a `String`), so we cannot wedge
+// the invariant as a `T: Copy` assertion; it is defended by code
+// review on the `Body` struct definition.
 
 // ── Energy ───────────────────────────────────────────────────────────────────
 
