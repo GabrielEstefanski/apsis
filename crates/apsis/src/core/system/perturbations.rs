@@ -701,6 +701,7 @@ mod tests {
             commit_hash: None,
             description: Some("fake operator for tests"),
             url: Some("https://example.invalid/fake"),
+            author: Some("Fake, A."),
         }
     }
 

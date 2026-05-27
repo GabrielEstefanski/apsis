@@ -371,6 +371,7 @@ impl Operator for CentralForce {
             commit_hash: option_env!("APSIS_CENTRAL_GIT_COMMIT").filter(|s| !s.is_empty()),
             description: Some("General central force after Tamayo et al. 2019"),
             url: Some("https://github.com/GabrielEstefanski/apsis"),
+            author: Some("Estefanski, G. B."),
         })
     }
 }

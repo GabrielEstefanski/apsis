@@ -75,6 +75,12 @@ pub struct Citation {
     /// workspace constant so a future spinoff crate stays honest
     /// without touching core.
     pub url: Option<&'static str>,
+
+    /// Author / maintainer name used as the `author` field of the
+    /// `@software` entry emitted by
+    /// [`crate::core::system::System::cite`]. BibTeX convention
+    /// `"Surname, G. B."`; multiple authors join with ` and `.
+    pub author: Option<&'static str>,
 }
 
 impl Citation {
@@ -96,6 +102,7 @@ impl Citation {
     ///         commit_hash: option_env!("MY_CRATE_GIT_COMMIT"),
     ///         description: Some("short one-sentence summary of the physics"),
     ///         url: Some("https://github.com/your-org/your-crate"),
+    ///         author: Some("Lastname, F. M."),
     ///     }
     /// }
     /// ```
@@ -207,6 +214,9 @@ pub fn render_cite_block(
             name = c.crate_name,
             ver = c.crate_version
         ));
+        if let Some(author) = c.author {
+            out.push_str(&format!("  author  = {{{}}},\n", bibtex_escape(author)));
+        }
         out.push_str(&format!("  title   = {{{}}},\n", bibtex_escape(c.crate_name)));
         out.push_str(&format!("  version = {{{}}},\n", bibtex_escape(c.crate_version)));
         if let Some(hash) = c.commit_hash {
@@ -261,7 +271,7 @@ fn kernel_requirements_slug(req: &crate::physics::gravity::kernel::KernelRequire
         Continuity::Smooth => "smooth",
     });
     match (e, c) {
-        (None, None) => "any".to_string(),
+        (None, None) => "unconstrained".to_string(),
         (Some(e), None) => e.to_string(),
         (None, Some(c)) => c.to_string(),
         (Some(e), Some(c)) => format!("{e}_and_{c}"),
@@ -281,6 +291,7 @@ mod tests {
             commit_hash: commit,
             description: Some("sample operator for tests"),
             url: Some("https://example.invalid/sample"),
+            author: Some("Test, A."),
         }
     }
 
@@ -352,6 +363,7 @@ mod tests {
             commit_hash: Some("f2d8e91abcdef1234567890"),
             description: Some("First-post-Newtonian Schwarzschild correction"),
             url: Some("https://github.com/GabrielEstefanski/apsis"),
+            author: Some("Estefanski, G. B."),
         }
     }
 
@@ -378,6 +390,7 @@ mod tests {
             "7f2a000000000000000000000000000000000000000000000000000000003c1",
         );
         assert!(block.starts_with("@software{apsis-1pn_0.1.0,\n"));
+        assert!(block.contains("  author  = {Estefanski, G. B.},\n"));
         assert!(block.contains("  title   = {apsis-1pn},\n"));
         assert!(block.contains("  version = {0.1.0},\n"));
         assert!(block.contains("  commit  = {f2d8e91},\n"));
@@ -425,7 +438,7 @@ mod tests {
         assert!(block.contains("@software{apsis-1pn_0.1.0,"));
         assert!(block.contains("@software{apsis-radiation_0.1.0,"));
         assert!(block.contains("kernel_requirements: exact_and_smooth"));
-        assert!(block.contains("kernel_requirements: any"));
+        assert!(block.contains("kernel_requirements: unconstrained"));
         // Two entries → two open braces of @software{ }.
         assert_eq!(block.matches("@software{").count(), 2);
     }
@@ -433,7 +446,7 @@ mod tests {
     #[test]
     fn kernel_requirements_slug_covers_every_combo() {
         use crate::physics::gravity::kernel::{Continuity, Exactness, KernelRequirements};
-        assert_eq!(kernel_requirements_slug(&req_none()), "any");
+        assert_eq!(kernel_requirements_slug(&req_none()), "unconstrained");
         assert_eq!(kernel_requirements_slug(&req_exact_and_smooth()), "exact_and_smooth");
         assert_eq!(
             kernel_requirements_slug(&KernelRequirements {
@@ -483,6 +496,7 @@ mod tests {
             commit_hash: None,
             description: Some("contains } and { chars"),
             url: Some("https://x.example/{owner}/repo"),
+            author: None,
         };
         let block = render_cite_block(&[(c, req_none())], &"a".repeat(64));
         assert!(block.contains("contains \\} and \\{ chars"));

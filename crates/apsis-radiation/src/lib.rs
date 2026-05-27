@@ -166,6 +166,7 @@ impl Operator for RadiationPressure {
             commit_hash: option_env!("APSIS_RADIATION_GIT_COMMIT").filter(|s| !s.is_empty()),
             description: Some("Radiation pressure and Poynting--Robertson drag after Burns 1979"),
             url: Some("https://github.com/GabrielEstefanski/apsis"),
+            author: Some("Estefanski, G. B."),
         })
     }
 }
@@ -353,6 +354,7 @@ impl Operator for PoyntingRobertsonDrag {
             commit_hash: option_env!("APSIS_RADIATION_GIT_COMMIT").filter(|s| !s.is_empty()),
             description: Some("Radiation pressure and Poynting--Robertson drag after Burns 1979"),
             url: Some("https://github.com/GabrielEstefanski/apsis"),
+            author: Some("Estefanski, G. B."),
         })
     }
 }

@@ -308,12 +308,13 @@ Hamiltonian operator from `apsis-1pn` produces:
 
 ```bibtex
 @software{apsis-1pn_0.1.0,
+  author  = {Estefanski, G. B.},
   title   = {apsis-1pn},
   version = {0.1.0},
-  commit  = {f2d8e91},
+  commit  = {fb7218a},
   url     = {https://github.com/GabrielEstefanski/apsis},
   note    = {First-post-Newtonian Schwarzschild correction.
-             Cargo.lock blake3: 7f2a...e3c1;
+             Cargo.lock blake3: e3f3...e94e;
              kernel_requirements: exact_and_smooth},
 }
 ```
@@ -324,13 +325,14 @@ imposes no constraint on the gravitational kernel it composes with:
 
 ```bibtex
 @software{apsis-radiation_0.1.0,
+  author  = {Estefanski, G. B.},
   title   = {apsis-radiation},
   version = {0.1.0},
-  commit  = {f2d8e91},
+  commit  = {fb7218a},
   url     = {https://github.com/GabrielEstefanski/apsis},
   note    = {Radiation pressure and Poynting--Robertson drag after Burns 1979.
-             Cargo.lock blake3: 7f2a...e3c1;
-             kernel_requirements: any},
+             Cargo.lock blake3: e3f3...e94e;
+             kernel_requirements: unconstrained},
 }
 ```
 
