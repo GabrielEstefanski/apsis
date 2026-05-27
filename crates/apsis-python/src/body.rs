@@ -280,6 +280,14 @@ impl PyBody {
 
     // ── Read-only properties ─────────────────────────────────────────────
 
+    /// Display name set via [`with_name`](Self::with_name). `None` on
+    /// a fresh body; auto-filled to `"Body N"` once registered with a
+    /// `System`.
+    #[getter]
+    fn name(&self) -> Option<&str> {
+        self.inner.name.as_deref()
+    }
+
     /// Body mass in simulation units.
     #[getter]
     fn mass(&self) -> f64 {

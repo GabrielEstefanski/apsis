@@ -94,8 +94,12 @@ pub fn header_from_system(
     let body_meta: Vec<BodyMeta> = sys
         .bodies()
         .iter()
-        .map(|b| BodyMeta {
-            name: b.name.clone().unwrap_or_default(),
+        .enumerate()
+        .map(|(i, b)| BodyMeta {
+            name: b
+                .name
+                .clone()
+                .unwrap_or_else(|| panic!("body at index {i} has no name; invariant violated")),
             mass: b.mass,
             density: b.density,
             physical_radius: b.physical_radius,
