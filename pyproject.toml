@@ -94,7 +94,7 @@ strict = true
 warn_unused_configs = true
 warn_redundant_casts = true
 warn_unused_ignores = true
-files = ["apsis", "python-tests"]
+files = ["apsis", "python-tests", "paper/figures/scripts"]
 
 [tool.ruff]
 target-version = "py39"
@@ -114,7 +114,7 @@ testpaths = ["python-tests"]
 addopts = "-ra --strict-markers"
 
 [tool.pyright]
-include = ["apsis", "python-tests"]
+include = ["apsis", "python-tests", "paper/figures/scripts"]
 exclude = ["**/__pycache__", "**/.venv"]
 extraPaths = ["."]
 typeCheckingMode = "strict"
@@ -127,6 +127,15 @@ reportMissingTypeStubs = "warning"
 # 3rd-party-untypedness reports that strict mode raises.
 [[tool.pyright.executionEnvironments]]
 root = "python-tests"
+reportUnknownMemberType = "none"
+reportUnknownArgumentType = "none"
+reportUnknownVariableType = "none"
+
+# Paper-figure scripts consume matplotlib's deliberately loose API
+# (e.g. ``pyplot.subplots`` overloads, ``Axes.plot`` accepting Any);
+# same opt-out shape as the tests.
+[[tool.pyright.executionEnvironments]]
+root = "paper/figures/scripts"
 reportUnknownMemberType = "none"
 reportUnknownArgumentType = "none"
 reportUnknownVariableType = "none"
