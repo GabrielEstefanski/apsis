@@ -201,6 +201,19 @@ impl System {
         self.regime_warnings_emitted.clear();
     }
 
+    /// Iterate every registered operator as `&dyn Operator`, in
+    /// dispatch order: Hamiltonian, then non-conservative, then
+    /// observers. Within each category, registration order is
+    /// preserved. Shared backbone for the citation / provenance /
+    /// cite aggregation methods that all walk the same three vecs.
+    pub(crate) fn iter_all_operators(&self) -> impl Iterator<Item = &(dyn Operator + '_)> + '_ {
+        self.hamiltonian_perturbations
+            .iter()
+            .map(|b| b.as_ref() as &dyn Operator)
+            .chain(self.non_conservative_perturbations.iter().map(|b| b.as_ref() as &dyn Operator))
+            .chain(self.observers.iter().map(|b| b.as_ref()))
+    }
+
     /// Aggregate [`Citation`](crate::physics::integrator::Citation)
     /// entries from every registered operator (Hamiltonian +
     /// non-conservative + observers). Operators without a citation
@@ -217,23 +230,7 @@ impl System {
     /// expansion will fold them in so the full reference list comes
     /// from one call.
     pub fn citations(&self) -> Vec<crate::physics::integrator::Citation> {
-        let mut out = Vec::new();
-        for op in &self.hamiltonian_perturbations {
-            if let Some(c) = op.citation() {
-                out.push(c);
-            }
-        }
-        for op in &self.non_conservative_perturbations {
-            if let Some(c) = op.citation() {
-                out.push(c);
-            }
-        }
-        for op in &self.observers {
-            if let Some(c) = op.citation() {
-                out.push(c);
-            }
-        }
-        out
+        self.iter_all_operators().filter_map(|op| op.citation()).collect()
     }
 
     /// Render the registered operator stack's citations as a
@@ -252,6 +249,37 @@ impl System {
     /// ```
     pub fn provenance(&self) -> String {
         crate::physics::integrator::render_provenance(&self.citations())
+    }
+
+    /// Emit a BibTeX `@software` block for the registered operator
+    /// stack — one entry per unique crate, deduped by `crate_name`,
+    /// in registration order (Hamiltonian, then non-conservative,
+    /// then observers). Each entry pins the crate against the
+    /// workspace `Cargo.lock` blake3 hash and reports its declared
+    /// `kernel_requirements`.
+    ///
+    /// Goes directly into a paper `.bib`; the upstream physics
+    /// references (Anderson 1975, Burns 1979, Tamayo 2019, ...) stay
+    /// reachable through [`Self::citations`] `[i].bibtex`.
+    ///
+    /// The workspace `Cargo.lock` is best-effort: when it cannot be
+    /// located (typical of pip-installed wheels run outside a Cargo
+    /// workspace) the `blake3` slot in each entry's `note` field
+    /// reads `unknown`, the rest of the entry is unaffected, and no
+    /// error is raised. Use [`crate::records::provenance::lock_blake3`]
+    /// directly if you need to detect a missing lockfile.
+    pub fn cite(&self) -> String {
+        let lock_hash =
+            crate::records::provenance::lock_blake3(None).unwrap_or_else(|_| "unknown".to_string());
+        let mut entries = Vec::new();
+        let mut seen: std::collections::HashSet<&'static str> = std::collections::HashSet::new();
+        for op in self.iter_all_operators() {
+            let Some(c) = op.citation() else { continue };
+            if seen.insert(c.crate_name) {
+                entries.push((c, op.kernel_requirements()));
+            }
+        }
+        crate::physics::integrator::render_cite_block(&entries, &lock_hash)
     }
 
     /// Check that the operator's
@@ -671,6 +699,8 @@ mod tests {
             crate_name,
             crate_version: "0.1.0",
             commit_hash: None,
+            description: Some("fake operator for tests"),
+            url: Some("https://example.invalid/fake"),
         }
     }
 
@@ -718,6 +748,50 @@ mod tests {
         assert_eq!(cites.len(), 2);
         assert_eq!(cites[0].crate_name, "apsis-a");
         assert_eq!(cites[1].crate_name, "apsis-b");
+    }
+
+    /// `cite()` on an empty stack returns an empty BibTeX string.
+    #[test]
+    fn cite_empty_when_no_operators_registered() {
+        let sys = System::new(vec![Body::star(1.0)], UnitSystem::solar_canonical());
+        assert!(sys.cite().is_empty());
+    }
+
+    /// Two operators from different crates produce two `@software`
+    /// entries in registration order. Locks the dedupe-set ordering
+    /// the consumer relies on for stable paper.bib output.
+    #[test]
+    fn cite_emits_one_entry_per_unique_crate_in_registration_order() {
+        let mut sys = System::new(vec![Body::star(1.0)], UnitSystem::solar_canonical())
+            .with_integrator(IntegratorKind::Ias15);
+        sys.add_hamiltonian_perturbation(Box::new(CitedOp(fake_citation("apsis-a"))))
+            .expect("CitedOp is unit-agnostic");
+        sys.add_hamiltonian_perturbation(Box::new(CitedOp(fake_citation("apsis-b"))))
+            .expect("CitedOp is unit-agnostic");
+        let block = sys.cite();
+        let a_at = block.find("@software{apsis-a_0.1.0,").expect("apsis-a entry");
+        let b_at = block.find("@software{apsis-b_0.1.0,").expect("apsis-b entry");
+        assert!(a_at < b_at, "registration order: apsis-a must come before apsis-b");
+    }
+
+    /// Two operators from the same crate collapse to one `@software`
+    /// entry — apsis-radiation publishes both `RadiationPressure`
+    /// (Hamiltonian) and `PoyntingRobertsonDrag` (non-conservative)
+    /// and the paper.bib should not list it twice.
+    #[test]
+    fn cite_dedups_when_one_crate_publishes_multiple_operators() {
+        let mut sys = System::new(vec![Body::star(1.0)], UnitSystem::solar_canonical())
+            .with_integrator(IntegratorKind::Ias15);
+        sys.add_hamiltonian_perturbation(Box::new(CitedOp(fake_citation("apsis-radiation"))))
+            .expect("CitedOp is unit-agnostic");
+        sys.add_hamiltonian_perturbation(Box::new(CitedOp(fake_citation("apsis-radiation"))))
+            .expect("CitedOp is unit-agnostic");
+        let block = sys.cite();
+        assert_eq!(
+            block.matches("@software{apsis-radiation_").count(),
+            1,
+            "duplicate crate registration must produce exactly one entry; got {block}",
+        );
     }
 
     /// `provenance()` runs the standard renderer over the aggregated

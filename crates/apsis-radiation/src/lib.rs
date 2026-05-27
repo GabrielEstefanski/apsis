@@ -164,6 +164,8 @@ impl Operator for RadiationPressure {
             crate_name: env!("CARGO_PKG_NAME"),
             crate_version: env!("CARGO_PKG_VERSION"),
             commit_hash: option_env!("APSIS_RADIATION_GIT_COMMIT").filter(|s| !s.is_empty()),
+            description: Some("Radiation pressure and Poynting--Robertson drag after Burns 1979"),
+            url: Some("https://github.com/GabrielEstefanski/apsis"),
         })
     }
 }
@@ -349,6 +351,8 @@ impl Operator for PoyntingRobertsonDrag {
             crate_name: env!("CARGO_PKG_NAME"),
             crate_version: env!("CARGO_PKG_VERSION"),
             commit_hash: option_env!("APSIS_RADIATION_GIT_COMMIT").filter(|s| !s.is_empty()),
+            description: Some("Radiation pressure and Poynting--Robertson drag after Burns 1979"),
+            url: Some("https://github.com/GabrielEstefanski/apsis"),
         })
     }
 }

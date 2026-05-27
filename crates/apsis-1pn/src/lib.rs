@@ -180,6 +180,8 @@ impl Operator for PostNewtonian1PN {
             crate_name: env!("CARGO_PKG_NAME"),
             crate_version: env!("CARGO_PKG_VERSION"),
             commit_hash: option_env!("APSIS_1PN_GIT_COMMIT").filter(|s| !s.is_empty()),
+            description: Some("First-post-Newtonian Schwarzschild correction"),
+            url: Some("https://github.com/GabrielEstefanski/apsis"),
         })
     }
 }
