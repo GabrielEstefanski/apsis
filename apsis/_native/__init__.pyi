@@ -421,6 +421,24 @@ class System:
         softened-gravity system) emit structured warnings.
         """
 
+    def citations(self) -> list[dict[str, str | None]]:
+        """One dict per registered operator's citation, in registration order.
+        Keys: ``crate_name``, ``crate_version``, ``commit_hash``, ``doi``,
+        ``bibtex``. Operators without a citation are silently skipped."""
+
+    def provenance(self) -> str:
+        """Human-readable provenance block — one paragraph per registered
+        operator's citation. Layout matches the Rust ``System::provenance()``
+        renderer; diff across runs to confirm the dependency graph stayed
+        bit-equal."""
+
+    def cite(self) -> str:
+        """BibTeX ``@software`` block citing every registered operator
+        crate, suitable for direct inclusion in a paper's ``.bib``. One
+        entry per unique crate, deduped by name, in registration order.
+        Raises ``OSError`` when the workspace ``Cargo.lock`` cannot be
+        located or read."""
+
     def __repr__(self) -> str: ...
 
 # ── Trajectory ────────────────────────────────────────────────────────────────

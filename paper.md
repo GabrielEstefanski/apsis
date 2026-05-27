@@ -298,38 +298,39 @@ perturbation storage that a future refactor must not break.
 ## Citable operator stack
 
 The registered-operator list that drives the contract surface
-above is also the input to `System::cite()`, a Python and CLI
-accessor that emits a BibTeX block keyed by every operator crate's
-name, version, DOI when present, and the `Cargo.lock` hash that
-pins the operator's exact build. For a simulation registering
-`apsis-1pn` and `apsis-radiation`, the emitted block has the form:
+above is also the input to `System::cite()`, a Python accessor
+that emits a BibTeX block keyed by every operator crate's name,
+version, source-repository URL, build commit when available, and
+the `Cargo.lock` hash that pins the dependency closure. For a
+simulation registering `apsis-1pn` and `apsis-radiation`, the
+emitted block has the form:
 
 ```bibtex
 @software{apsis-1pn_0.1.0,
   title   = {apsis-1pn},
   version = {0.1.0},
+  commit  = {f2d8e91},
   url     = {https://github.com/GabrielEstefanski/apsis},
-  note    = {First-post-Newtonian Schwarzschild correction.
-             Cargo.lock blake3: 7f2a...e3c1;
-             kernel_requirements: exact_and_smooth},
+  note    = {First-post-Newtonian Schwarzschild correction. Cargo.lock blake3: 7f2a...e3c1; kernel_requirements: exact_and_smooth},
 }
+
 @software{apsis-radiation_0.1.0,
   title   = {apsis-radiation},
   version = {0.1.0},
+  commit  = {f2d8e91},
   url     = {https://github.com/GabrielEstefanski/apsis},
-  note    = {Radiation pressure and Poynting--Robertson drag
-             after Burns 1979. Cargo.lock blake3: 7f2a...e3c1;
-             kernel_requirements: any},
+  note    = {Radiation pressure and Poynting--Robertson drag after Burns 1979. Cargo.lock blake3: 7f2a...e3c1; kernel_requirements: any},
 }
 ```
 
 The output is a self-describing citation for the simulation's full
 physical model: a follow-up paper using the same operator stack
-reproduces the BibTeX entries by running `apsis cite` against the
-recorded *Apsis Record* (Appendix A) or against a live `System`
-before integration. Forces published as versioned crates are
-citable artifacts at the granularity at which they are published;
-the cite-generator is the operational form of that claim.
+reproduces the BibTeX entries by calling `System::cite()` on a
+live `System` before integration, or by reading them back from the
+*Apsis Record* (Appendix A) that captures the same header. Forces
+published as versioned crates are citable artifacts at the
+granularity at which they are published; the cite-generator is
+the operational form of that claim.
 
 # Results {#sec:results}
 
@@ -692,11 +693,12 @@ reproducibility applies to the data the Record wraps; the binary
 file therefore reproduces across the same heterogeneous hosts
 modulo the `created_utc` metadata field.
 
-The Record is also the persistent counterpart of the live
+The Record is the persistent counterpart of the live
 `System::cite()` accessor described in §Methods: the same
 operator-stack metadata (crate name, version, lockfile hash,
 declared `KernelRequirements`) that drives runtime citation
-generation is serialised into the Record header, so a reviewer
-holding only the Record file can regenerate the BibTeX block
-without access to the originating `System` instance or to its
-`Cargo.lock`.
+generation is serialised into the Record header. A reviewer
+holding a Record can confirm the dependency closure matches a
+candidate build by comparing the lockfile hash, then re-run
+`System::cite()` against an equivalent `System` to regenerate the
+BibTeX block.

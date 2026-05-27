@@ -677,6 +677,21 @@ impl PySystem {
         self.inner.provenance()
     }
 
+    /// Emit a BibTeX ``@software`` block citing every registered
+    /// operator crate, suitable for direct inclusion in a paper's
+    /// ``.bib`` file. One entry per unique crate, deduped by crate
+    /// name, in registration order. Each entry pins the crate against
+    /// the workspace ``Cargo.lock`` blake3 hash and reports its
+    /// declared ``kernel_requirements``.
+    ///
+    /// Raises ``OSError`` when the workspace ``Cargo.lock`` cannot
+    /// be located or read — same lookup contract as ``attach_record``.
+    fn cite(&self) -> PyResult<String> {
+        self.inner
+            .cite()
+            .map_err(|e| pyo3::exceptions::PyIOError::new_err(format!("apsis cite: {e}")))
+    }
+
     fn __repr__(&self) -> String {
         let m = self.inner.metrics();
         format!(
