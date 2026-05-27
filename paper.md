@@ -13,8 +13,17 @@ authors:
 affiliations:
  - name: Independent researcher
    index: 1
+author: "Gabriel Braga Estefanski^[Independent researcher. ORCID: 0009-0009-1041-2715]"
 date: 22 May 2026
 bibliography: paper.bib
+geometry:
+  - margin=1in
+fontsize: 11pt
+header-includes:
+  - \usepackage{microtype}
+  - \usepackage{float}
+  - \floatplacement{figure}{!ht}
+  - \sloppy
 ---
 
 # Summary
@@ -122,11 +131,22 @@ paper.
 
 A simulation's physical model is therefore not embedded in code,
 but in its dependency graph: `Cargo.toml` declares the forces a
-paper uses, `Cargo.lock` pins them bit-precisely. A follow-up paper
-extending the model adds one line. This is reproducibility at the
-force-composition level, distinct from script-level reproducibility
-— the latter captures the configuration but not the physics
-implementation.
+paper uses, `Cargo.lock` pins them bit-precisely. Composition at
+the call site is a single registration per operator:
+
+```rust
+let mut sys = System::new(bodies, UnitSystem::solar_canonical())
+    .with_integrator(IntegratorKind::IAS15);
+
+let gr = PostNewtonian1PN::for_units(UnitSystem::solar_canonical());
+sys.add_hamiltonian_perturbation(gr)?;            // apsis-1pn
+sys.add_non_conservative_perturbation(drag)?;     // apsis-radiation
+```
+
+A follow-up paper extending the model adds one line plus one entry
+in `Cargo.toml`. This is reproducibility at the force-composition
+level, distinct from script-level reproducibility — the latter
+captures the configuration but not the physics implementation.
 
 The contribution is to the *methodology* of extending an N-body
 simulator rather than to the inventory of simulators. A research
@@ -196,16 +216,18 @@ properties are matched field-by-field against
 `operator.kernel_requirements()`; every invariant violation emits a
 `warn_diag!` event naming the specific invariant, the value required,
 and the value provided. The default kernel is `NewtonKernel::exact()`
-(ε = 0), which reports `Exactness::Exact`, so a correctly configured
-run stays silent. Cluster-scale work that opts into a softened kernel
-via `System::with_kernel(Arc::new(NewtonKernel::new(ε > 0)))` triggers
-the diagnostic at registration of any Exactness-requiring operator.
+($\varepsilon = 0$), which reports `Exactness::Exact`, so a correctly
+configured run stays silent. Cluster-scale work that opts into a
+softened kernel via `System::with_kernel(Arc::new(NewtonKernel::new(eps)))`
+with $\varepsilon > 0$ triggers the diagnostic at registration of any
+Exactness-requiring operator.
 
 Two counter-tests exercise the two invariants separately. The **Exactness**
 counter-test is the Sun–Mercury configuration integrated for 500
 orbital periods under the adaptive Gauss–Radau IAS15 scheme
-[@ReinSpiegel2015]. Under the default `NewtonKernel::exact()` (ε = 0) —
-Exactness satisfied — the measured cumulative perihelion advance is
+[@ReinSpiegel2015]. Under the default `NewtonKernel::exact()`
+($\varepsilon = 0$) — Exactness satisfied — the measured cumulative
+perihelion advance is
 51.7705 arcsec, matching the closed-form general-relativistic
 prediction $\Delta\omega_{\text{orbit}} = 6\pi GM / (c^2 a (1 - e^2))$
 summed over 500 orbits (51.7720 arcsec in canonical f64 evaluation)
@@ -215,8 +237,20 @@ matched to four significant figures. The measurement reproduces
 bit-identically across Windows and Linux on x86_64; the
 hardware-specific reproducibility detail is in §Cross-platform
 reproducibility.
-With a Plummer-softened kernel (`NewtonKernel::new(ε ≈ 0.02 AU)`,
-the cluster-scale ε for a solar-mass body) opted in — Exactness
+
+Extending the same scenario to 4153 orbits (figure below) shows
+the cumulative perihelion advance tracking the GR prediction
+linearly across a 1000-year horizon. The per-orbit precession rate
+inherits the f64 round-off floor of the integrator; the residual at
+the end of the run sits at $2.2 \times 10^{-4}$ relative to the
+predicted total, consistent with the per-orbit precision reported in
+§Cross-platform reproducibility scaled to the longer horizon.
+
+![Mercury perihelion precession under `apsis` (IAS15 + apsis-1pn) versus the closed-form Schwarzschild GR prediction over 4153 orbits ($\sim 1000$ years). Top: cumulative $\Delta\omega$ as a function of orbit number; the measured trajectory (solid) is visually indistinguishable from the GR prediction (dashed) on this scale. Bottom: the residual measured $-$ GR, showing a linear secular drift consistent with the per-orbit precision floor reported in §Cross-platform reproducibility.](paper/figures/mercury_1pn_long_horizon.pdf){#fig:mercury-1pn-long-horizon width=85%}
+
+With a Plummer-softened kernel (`NewtonKernel::new(eps)` with
+$\varepsilon \approx 0.02$ AU, the cluster-scale softening for a
+solar-mass body) opted in — Exactness
 violated — the drift is $-83\,128$ arcseconds per century: three
 orders of magnitude larger than the relativistic effect and of the
 wrong sign, while energy and angular momentum remain conserved to
@@ -387,7 +421,7 @@ of inputs respectively, both within IEEE-754 tolerance for
 transcendentals (which permits but does not require correctly-
 rounded results). The 1-ULP differences in the remaining cases
 propagate through the controller's substep-cadence selection to a
-0.002 arcsec/century absolute shift in cumulative Mercury Δω over
+0.002 arcsec/century absolute shift in cumulative Mercury $\Delta\omega$ over
 500 orbits, separating the $4.4 \times 10^{-6}$ relative agreement
 on Windows UCRT (scenario-specific accidental cancellation in
 UCRT's rounding distribution) from the $2.8 \times 10^{-5}$ result

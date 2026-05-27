@@ -16,3 +16,7 @@ __pycache__/
 
 # Runtime record files (apsis-record binary format).
 *.apsis
+
+# Compiled paper (generated via `make paper`). Figures under
+# `paper/figures/` are versioned; the assembled paper.pdf is not.
+/paper.pdf

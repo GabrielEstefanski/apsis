@@ -136,15 +136,15 @@ jobs:
       - name: ruff check
         run: |
           . .venv/bin/activate
-          ruff check apsis/ python-tests/
+          ruff check apsis/ python-tests/ paper/figures/scripts/
       - name: mypy
         run: |
           . .venv/bin/activate
-          mypy apsis/ python-tests/
+          mypy apsis/ python-tests/ paper/figures/scripts/
       - name: pyright
         run: |
           . .venv/bin/activate
-          pyright apsis/ python-tests/
+          pyright apsis/ python-tests/ paper/figures/scripts/
       - name: pytest python-tests/
         run: |
           . .venv/bin/activate
