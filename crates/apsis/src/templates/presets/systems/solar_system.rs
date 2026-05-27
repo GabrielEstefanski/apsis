@@ -834,7 +834,7 @@ mod tests {
         bodies
             .iter()
             .find(|b| b.name.as_deref() == Some(name))
-            .map(|b| b.body.physical_radius)
+            .map(|b| b.physical_radius)
             .unwrap_or_else(|| panic!("{name} not found in solar system template"))
     }
 

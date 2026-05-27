@@ -54,7 +54,7 @@ impl PyCentralForce {
         let rust_units = extract_unit_system(units)?;
         let rust_bodies: Vec<apsis::domain::body::Body> = bodies
             .try_iter()?
-            .map(|item| Ok::<_, PyErr>(item?.extract::<PyRef<'_, PyBody>>()?.inner))
+            .map(|item| Ok::<_, PyErr>(item?.extract::<PyRef<'_, PyBody>>()?.inner.clone()))
             .collect::<PyResult<_>>()?;
         let force = CentralForce::from_apsidal_rate(
             source,

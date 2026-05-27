@@ -690,8 +690,8 @@ and `apsis-radiation` registered on Sun + Mercury under
 ```toml
 [apsis]
 version = "0.1.0"
-git_sha = "fb7218a5538a6a4448a8c954e75ef45192799e88-dirty"
-created_utc = "2026-05-27T19:00:30Z"
+git_sha = "9d6e1f50449d72f5499ee520daa049451d4d24cb-dirty"
+created_utc = "2026-05-27T20:56:31Z"
 rustc_version = "rustc 1.94.1 (e408947bf 2026-03-25)"
 generated_by = "apsis 0.1.0"
 
@@ -718,7 +718,7 @@ continuity = "smooth"
 [[operators]]
 name = "apsis-1pn"
 version = "0.1.0"
-crate_hash = "workspace:fb7218a5538a6a4448a8c954e75ef45192799e88-dirty"
+crate_hash = "workspace:9d6e1f50449d72f5499ee520daa049451d4d24cb-dirty"
 
 [operators.requirements]
 kernel_exactness = "exact"
@@ -727,14 +727,15 @@ kernel_continuity = "smooth"
 [[operators]]
 name = "apsis-radiation"
 version = "0.1.0"
-crate_hash = "workspace:fb7218a5538a6a4448a8c954e75ef45192799e88-dirty"
+crate_hash = "workspace:9d6e1f50449d72f5499ee520daa049451d4d24cb-dirty"
 
 [operators.requirements]
 ```
 
 (Body metadata follows under `[bodies]` with one `[[bodies.list]]`
-entry per registered body — mass, density, physical radius, render
-colour, radiation-coupling coefficients, and dynamical class.)
+entry per registered body — explicit name (`"Sun"`, `"Mercury"` in
+this run), mass, density, physical radius, render colour,
+radiation-coupling coefficients, and dynamical class.)
 Numeric fields are in the canonical units declared above
 (`length = AU`, `mass = Msun`, `time = T_G`); the explicit
 `unit_system` block lets a replay convert to SI or to a different

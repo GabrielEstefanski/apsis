@@ -3,64 +3,41 @@
 use crate::core::calibration;
 use crate::core::diagnostics::{DiagnosticsComputer, SimulationDiagnostics};
 use crate::core::system::System;
-use crate::core::system::helpers::{
-    DEFAULT_NAME_PREFIX, auto_name, compute_closeness, resolved_name,
-};
-use crate::domain::body::{Body, NamedBody};
+use crate::core::system::helpers::{DEFAULT_NAME_PREFIX, compute_closeness, resolved_name};
+use crate::domain::body::Body;
 
 impl System {
     /// Adds a new body to the simulation.
     ///
-    /// The trail buffer is reset to accommodate the new body count; trail
+    /// If `body.name` is `None` the system fills it with a stable
+    /// `"Body N"` placeholder before pushing; an explicit name on the
+    /// incoming `Body` (via [`Body::with_name`]) rides through unchanged.
+    /// Trail buffer is reset to accommodate the new body count; trail
     /// history is lost. Energy baseline is reset because the system
-    /// topology has changed. Also invalidates any template-rebuild source
-    /// remembered by [`from_template`](System::from_template): a later
-    /// [`with_seed`](System::with_seed) will no longer overwrite this
-    /// manual addition.
-    ///
-    /// Auto-naming uses the generic `"Body N"` prefix because [`Body`]
-    /// no longer carries a preset reference. Callers that know which
-    /// preset produced the body should pass the preset's `display_name`
-    /// via [`add_named_body`] for `"Rocky 1"`-style names.
+    /// topology has changed. Also invalidates any template-rebuild
+    /// source remembered by [`from_template`](System::from_template).
     pub fn add_body(&mut self, mut body: Body) {
         body.sync_physical_properties();
         self.total_mass += body.mass;
-        self.names.push(auto_name(DEFAULT_NAME_PREFIX, &self.names));
+        let existing = self.existing_names();
+        body.name = Some(resolved_name(body.name.take(), DEFAULT_NAME_PREFIX, &existing));
         self.bodies.push(body);
         self.initial_energy = None;
         self.template_source = None;
     }
 
-    /// Adds a single body while preserving an explicit display name when given.
-    pub fn add_named_body(&mut self, named_body: NamedBody) {
-        self.add_named_bodies(vec![named_body]);
-    }
-
     /// Add multiple bodies in a single batch.
     ///
-    /// More efficient than calling [`add_body`] in a loop: the trail buffer is
-    /// reset only once and the energy baseline is invalidated once.
+    /// More efficient than calling [`add_body`] in a loop: the energy
+    /// baseline is invalidated once. Each body's name is resolved
+    /// against the running set so auto-numbered placeholders stay
+    /// monotonic and explicit names are preserved.
     pub fn add_bodies(&mut self, new_bodies: Vec<Body>) {
         for mut body in new_bodies {
             body.sync_physical_properties();
             self.total_mass += body.mass;
-            self.names.push(auto_name(DEFAULT_NAME_PREFIX, &self.names));
-            self.bodies.push(body);
-        }
-
-        self.initial_energy = None;
-        self.template_source = None;
-    }
-
-    /// Add multiple bodies in a single batch while preserving explicit names.
-    pub fn add_named_bodies(&mut self, new_bodies: Vec<NamedBody>) {
-        for mut named_body in new_bodies {
-            let body = named_body.body;
-            let mut body = body;
-            body.sync_physical_properties();
-            self.total_mass += body.mass;
-            let name = resolved_name(named_body.name.take(), DEFAULT_NAME_PREFIX, &self.names);
-            self.names.push(name);
+            let existing = self.existing_names();
+            body.name = Some(resolved_name(body.name.take(), DEFAULT_NAME_PREFIX, &existing));
             self.bodies.push(body);
         }
 
@@ -70,15 +47,12 @@ impl System {
 
     /// Removes a body from the simulation.
     ///
-    /// Uses `swap_remove` for O(1) removal.  The trail buffer is reset
+    /// Uses `swap_remove` for O(1) removal. The trail buffer is reset
     /// because body indices change.
     pub fn remove_body(&mut self, index: usize) {
         if index < self.bodies.len() {
             let removed = self.bodies.swap_remove(index);
             self.total_mass -= removed.mass;
-            if index < self.names.len() {
-                self.names.swap_remove(index);
-            }
 
             self.initial_energy = None;
             self.rel_energy_error = None;
@@ -110,35 +84,22 @@ impl System {
 
     /// Replaces the entire set of bodies in the simulation.
     ///
-    /// All previous state is cleared, the trail buffer is reset, and the
-    /// system is normalised to its COM rest frame. Bodies receive
-    /// `"Body N"` auto-names; use [`load_named_bodies`](Self::load_named_bodies)
-    /// to supply explicit names (e.g. preset display names from a template).
+    /// All previous state is cleared, the trail buffer is reset, and
+    /// the system is normalised to its COM rest frame. Each body's
+    /// name is resolved against the running set during the load —
+    /// explicit names (e.g. preset display names from a template via
+    /// [`Body::with_name`]) ride through; `None` slots get
+    /// `"Body N"` placeholders.
     pub fn load_bodies(&mut self, bodies: Vec<Body>) {
-        self.load_named_bodies(
-            bodies.into_iter().map(|body| NamedBody { body, name: None }).collect(),
-        );
-    }
-
-    /// Replaces the entire set of bodies in the simulation, preserving any
-    /// explicit names attached to each body.
-    ///
-    /// Same state-reset semantics as [`load_bodies`](Self::load_bodies):
-    /// previous bodies, scratch buffers, energy baselines, and integrator
-    /// controllers are cleared, and the new system is normalised to its COM
-    /// rest frame.
-    pub fn load_named_bodies(&mut self, named_bodies: Vec<NamedBody>) {
         self.bodies.clear();
         self.scratch_acc.clear();
-        self.names.clear();
         self.total_mass = 0.0;
 
-        for mut named in named_bodies {
-            let mut body = named.body;
+        for mut body in bodies {
             body.sync_physical_properties();
             self.total_mass += body.mass;
-            let name = resolved_name(named.name.take(), DEFAULT_NAME_PREFIX, &self.names);
-            self.names.push(name);
+            let existing = self.existing_names();
+            body.name = Some(resolved_name(body.name.take(), DEFAULT_NAME_PREFIX, &existing));
             self.bodies.push(body);
         }
 
@@ -185,15 +146,25 @@ impl System {
         }
     }
 
-    /// All body names (parallel to `bodies()`).
-    pub fn names(&self) -> &[String] {
-        &self.names
+    /// All body names, in registration order. Always `Some` because
+    /// [`Self::add_body`] auto-fills `body.name` with a `"Body N"`
+    /// placeholder when the caller didn't supply one.
+    pub fn names(&self) -> Vec<&str> {
+        self.bodies.iter().map(|b| b.name.as_deref().unwrap_or("")).collect()
     }
 
     /// Rename body `idx`. Silently ignores out-of-range indices.
     pub fn set_name(&mut self, idx: usize, name: String) {
-        if let Some(slot) = self.names.get_mut(idx) {
-            *slot = name;
+        if let Some(slot) = self.bodies.get_mut(idx) {
+            slot.name = Some(name);
         }
+    }
+
+    /// Helper: snapshot the current set of body names as owned
+    /// `String`s. Used by the auto-name policy at insert time so
+    /// `resolved_name` can compare against the running set without
+    /// borrowing self twice.
+    fn existing_names(&self) -> Vec<String> {
+        self.bodies.iter().filter_map(|b| b.name.clone()).collect()
     }
 }

@@ -376,7 +376,6 @@ impl Drop for System {
 fn build_hook_context(system: &System, phase: HookPhaseKind) -> HookContext<'_> {
     HookContext {
         bodies: &system.bodies,
-        names: &system.names,
         t: system.t,
         dt: system.current_dt,
         steps: system.steps,

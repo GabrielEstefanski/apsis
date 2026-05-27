@@ -24,11 +24,12 @@ from apsis import gr, radiation
 
 
 def build_system_with_both_operators() -> apsis.System:
-    sun = apsis.Body.star(mass=1.0)
+    sun = apsis.Body.star(mass=1.0).with_name("Sun")
     mercury = (
         apsis.Body.rocky(mass=1.66e-7)
         .at((0.387, 0.0))
         .with_velocity((0.0, 1.61))
+        .with_name("Mercury")
     )
     sys = apsis.System(
         bodies=[sun, mercury],

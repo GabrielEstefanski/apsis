@@ -331,7 +331,7 @@ impl PySystem {
     /// they enter a System) when material introspection matters.
     #[getter]
     fn bodies(&self) -> Vec<PyBody> {
-        self.inner.bodies().iter().copied().map(|b| PyBody { inner: b, slug: "body" }).collect()
+        self.inner.bodies().iter().cloned().map(|b| PyBody { inner: b, slug: "body" }).collect()
     }
 
     /// Total mechanical energy at the most recently completed step,

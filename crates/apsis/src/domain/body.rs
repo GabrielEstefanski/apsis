@@ -9,8 +9,14 @@ use std::f64::consts::PI;
 /// (see [`crate::domain::body_preset`]), not runtime fields. Body holds
 /// no force-law parameter (softening, Yukawa range, …) — those live in
 /// the active [`Kernel`](crate::physics::gravity::Kernel) on `System`.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct Body {
+    /// Display name carried with the body. `None` means no explicit
+    /// name was supplied; [`crate::core::system::System`] auto-fills a
+    /// `"Body N"` placeholder at registration so every registered body
+    /// has a non-empty name in provenance output.
+    pub name: Option<String>,
+
     pub pos_x: f64,
     pub pos_y: f64,
     pub pos_z: f64,
@@ -83,18 +89,6 @@ pub struct Body {
     pub albedo: f64,
 }
 
-/// Body payload with an optional explicit display name.
-///
-/// Returned by [`Body::named`] and by the template catalog. Consumed by
-/// [`System::add_named_body`](crate::core::system::System::add_named_body)
-/// to preserve authored names; otherwise the system derives a stable
-/// preset-based fallback.
-#[derive(Clone, Debug)]
-pub struct NamedBody {
-    pub body: Body,
-    pub name: Option<String>,
-}
-
 impl Body {
     // ── Low-level constructor ────────────────────────────────────────────────
     //
@@ -109,6 +103,7 @@ impl Body {
     pub fn new(mass: f64, density: f64) -> Self {
         let physical_radius = radius_from_density_mass(density, mass);
         Self {
+            name: None,
             pos_x: 0.0,
             pos_y: 0.0,
             pos_z: 0.0,
@@ -146,6 +141,7 @@ impl Body {
             .unwrap_or(0.0);
 
         Self {
+            name: None,
             pos_x: 0.0,
             pos_y: 0.0,
             pos_z: 0.0,
@@ -324,12 +320,14 @@ impl Body {
         self
     }
 
-    /// Attach an explicit display name, producing a [`NamedBody`] consumable
-    /// by [`System::add_named_body`](crate::core::system::System::add_named_body).
+    /// Attach an explicit display name. The name rides with the body
+    /// through [`crate::core::system::System::add_body`] into the
+    /// system's provenance output and Record header.
     #[inline]
     #[must_use]
-    pub fn named(self, name: impl Into<String>) -> NamedBody {
-        NamedBody { body: self, name: Some(name.into()) }
+    pub fn with_name(mut self, name: impl Into<String>) -> Self {
+        self.name = Some(name.into());
+        self
     }
 
     // ── Mutators ──────────────────────────────────────────────────────────────

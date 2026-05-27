@@ -1370,7 +1370,7 @@ mod tests {
         // ANCHOR_MIN_E = 0.05). Anchor must NOT engage here.
         let v = 1.005 * v_c;
         let primary = body(0.0, 0.0, 0.0, 0.0, m);
-        let bodies = vec![primary, body(r, 0.0, 0.0, v, 1e-10)];
+        let bodies = vec![primary.clone(), body(r, 0.0, 0.0, v, 1e-10)];
         let inv = compute_invariants(&bodies, 1, 0, G).unwrap();
         assert!(
             inv.e_vec.length() < ANCHOR_MIN_E,
@@ -1405,7 +1405,7 @@ mod tests {
         let v_c = (gm / r).sqrt();
         let v = 1.2 * v_c; // e ≈ 0.44, well above threshold
         let primary = body(0.0, 0.0, 0.0, 0.0, m);
-        let bodies = vec![primary, body(r, 0.0, 0.0, v, 1e-10)];
+        let bodies = vec![primary.clone(), body(r, 0.0, 0.0, v, 1e-10)];
         let inv = compute_invariants(&bodies, 1, 0, G).unwrap();
         let gm_pair = G * (bodies[1].mass + primary.mass);
         let el_a = elements_anchored_to_body(&inv, 0, gm_pair, &bodies[1], &primary);
@@ -2183,7 +2183,7 @@ mod tests {
         let primary = body(0.0, 0.0, 0.0, 0.0, 1e6);
         let satellite = body(7.0, 4.0, -0.6, 0.4, 1e-10);
 
-        let inv = compute_invariants(&[primary, satellite], 1, 0, G).unwrap();
+        let inv = compute_invariants(&[primary.clone(), satellite.clone()], 1, 0, G).unwrap();
         let gm = G * (primary.mass + satellite.mass);
         let el = elements_from_invariants(&inv, 0, gm);
 
@@ -2259,7 +2259,7 @@ mod tests {
             v_hyp * i_target.sin(),
         );
 
-        let el_a = compute_elements(&[primary, satellite], 1, 0, G).unwrap();
+        let el_a = compute_elements(&[primary.clone(), satellite.clone()], 1, 0, G).unwrap();
 
         // 1% perturbation on each velocity component.
         let perturbed = Body::rocky(1e-10).at_3d(r, 0.0, 0.0).with_velocity_3d(
@@ -2267,7 +2267,7 @@ mod tests {
             v_hyp * i_target.cos() * 1.01,
             v_hyp * i_target.sin() * 0.99,
         );
-        let el_b = compute_elements(&[primary, perturbed], 1, 0, G).unwrap();
+        let el_b = compute_elements(&[primary.clone(), perturbed], 1, 0, G).unwrap();
 
         assert!(matches!(el_a.orbit_type, OrbitType::Hyperbolic));
         assert!(matches!(el_b.orbit_type, OrbitType::Hyperbolic));
@@ -2301,7 +2301,7 @@ mod tests {
     #[test]
     fn h_vec_magnitude_equals_h_z_when_planar() {
         let (primary, satellite) = circular_orbit(8.0, 1e6);
-        let inv = compute_invariants(&[primary, satellite], 1, 0, G).unwrap();
+        let inv = compute_invariants(&[primary.clone(), satellite.clone()], 1, 0, G).unwrap();
 
         // Precondition: orbit is in the `xy`-plane, so `h_vec` is along ±ẑ.
         assert_eq!(inv.h_vec.x, 0.0, "test setup: planar input must have h_vec.x == 0");
@@ -2442,7 +2442,7 @@ mod tests {
         let satellite =
             Body::rocky(1e-10).at_3d(r, 0.0, 0.0).with_velocity_3d(0.0, v_c * cos_i, v_c * sin_i);
 
-        let inv = compute_invariants(&[primary, satellite], 1, 0, G).unwrap();
+        let inv = compute_invariants(&[primary.clone(), satellite.clone()], 1, 0, G).unwrap();
         let h_mag = inv.h_vec.length();
 
         // Analytic prediction: r × v with r = (R, 0, 0) and
@@ -2521,7 +2521,7 @@ mod tests {
                 .at_3d(r_inertial.x, r_inertial.y, r_inertial.z)
                 .with_velocity_3d(v_inertial.x, v_inertial.y, v_inertial.z);
 
-            let el = compute_elements(&[primary, satellite], 1, 0, G)
+            let el = compute_elements(&[primary.clone(), satellite.clone()], 1, 0, G)
                 .expect("elements must be computable");
 
             // Tolerance: 1e-9 rad ≈ 0.2 milli-arcsec at 1 AU — captures
