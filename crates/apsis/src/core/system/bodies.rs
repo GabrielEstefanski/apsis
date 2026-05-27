@@ -61,7 +61,9 @@ impl System {
         }
     }
 
-    /// Updates a body in-place, recomputing derived physical properties.
+    /// Updates a body in-place, recomputing derived properties. If
+    /// `body.name` is `None` the existing name is preserved — rename
+    /// via [`Self::set_name`].
     pub fn update_body(&mut self, index: usize, mut body: Body) {
         if let Some(slot) = self.bodies.get_mut(index) {
             let mass_changed = (slot.mass - body.mass).abs() > 1e-15;
@@ -72,6 +74,9 @@ impl System {
                 self.total_mass += body.mass - slot.mass;
             }
 
+            if body.name.is_none() {
+                body.name = slot.name.take();
+            }
             *slot = body;
 
             if mass_changed {
@@ -146,11 +151,19 @@ impl System {
         }
     }
 
-    /// All body names, in registration order. Always `Some` because
-    /// [`Self::add_body`] auto-fills `body.name` with a `"Body N"`
-    /// placeholder when the caller didn't supply one.
+    /// All body names, in registration order. Panics on `None` —
+    /// `add_body` / `update_body` are responsible for ensuring every
+    /// registered body has one.
     pub fn names(&self) -> Vec<&str> {
-        self.bodies.iter().map(|b| b.name.as_deref().unwrap_or("")).collect()
+        self.bodies
+            .iter()
+            .enumerate()
+            .map(|(i, b)| {
+                b.name
+                    .as_deref()
+                    .unwrap_or_else(|| panic!("body at index {i} has no name; invariant violated"))
+            })
+            .collect()
     }
 
     /// Rename body `idx`. Silently ignores out-of-range indices.
@@ -166,5 +179,31 @@ impl System {
     /// borrowing self twice.
     fn existing_names(&self) -> Vec<String> {
         self.bodies.iter().filter_map(|b| b.name.clone()).collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::units::UnitSystem;
+
+    #[test]
+    fn update_body_preserves_name_when_incoming_is_none() {
+        let mut sys = System::new(
+            vec![Body::star(1.0).with_name("Sun"), Body::rocky(1e-6).with_name("Mercury")],
+            UnitSystem::solar_canonical(),
+        );
+        sys.update_body(1, Body::rocky(1e-6));
+        assert_eq!(sys.bodies()[1].name.as_deref(), Some("Mercury"));
+    }
+
+    #[test]
+    fn update_body_overwrites_name_when_incoming_is_some() {
+        let mut sys = System::new(
+            vec![Body::star(1.0).with_name("Sun"), Body::rocky(1e-6).with_name("Mercury")],
+            UnitSystem::solar_canonical(),
+        );
+        sys.update_body(1, Body::rocky(1e-6).with_name("Venus"));
+        assert_eq!(sys.bodies()[1].name.as_deref(), Some("Venus"));
     }
 }

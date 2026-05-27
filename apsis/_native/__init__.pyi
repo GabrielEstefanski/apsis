@@ -180,6 +180,12 @@ class Body:
 
     # ── Properties ──
     @property
+    def name(self) -> str | None:
+        """Display name set via :meth:`with_name`, or ``None`` on a
+        freshly-constructed body. Auto-filled to ``"Body N"`` once the
+        body is registered with a :class:`System`."""
+
+    @property
     def mass(self) -> float: ...
     @property
     def position(self) -> tuple[float, float, float]: ...
