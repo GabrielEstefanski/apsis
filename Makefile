@@ -7,14 +7,17 @@
 # output into `paper/figures/data/`.
 
 .PHONY: help figures paper validation clean
-.PHONY: figures-mercury-1pn
+.PHONY: figures-mercury-1pn figures-rebound-parity-trajectories figures-rebound-parity-brouwer
 .PHONY: validation-mercury-1pn validation-recommended-dt
 
 FIGURES_DIR := paper/figures
 SCRIPTS_DIR := $(FIGURES_DIR)/scripts
 DATA_DIR    := $(FIGURES_DIR)/data
 
-PAPER_FIGURES := $(FIGURES_DIR)/mercury_1pn_long_horizon.pdf
+PAPER_FIGURES := \
+	$(FIGURES_DIR)/mercury_1pn_long_horizon.pdf \
+	$(FIGURES_DIR)/rebound_parity_trajectories.pdf \
+	$(FIGURES_DIR)/rebound_parity_brouwer.pdf
 
 help:
 	@echo "Reviewer targets:"
@@ -25,6 +28,8 @@ help:
 	@echo
 	@echo "Per-figure / per-harness:"
 	@echo "  make figures-mercury-1pn"
+	@echo "  make figures-rebound-parity-trajectories"
+	@echo "  make figures-rebound-parity-brouwer"
 	@echo "  make validation-mercury-1pn"
 	@echo "  make validation-recommended-dt"
 
@@ -38,6 +43,30 @@ $(FIGURES_DIR)/mercury_1pn_long_horizon.pdf: \
 	python $(SCRIPTS_DIR)/mercury_1pn_long_horizon.py
 
 figures-mercury-1pn: $(FIGURES_DIR)/mercury_1pn_long_horizon.pdf
+
+REBOUND_PARITY_DATA := \
+	$(DATA_DIR)/rebound_parity_kepler_apsis.csv \
+	$(DATA_DIR)/rebound_parity_kepler_rebound.csv \
+	$(DATA_DIR)/rebound_parity_figure8_apsis.csv \
+	$(DATA_DIR)/rebound_parity_figure8_rebound.csv \
+	$(DATA_DIR)/rebound_parity_pythagorean_apsis.csv \
+	$(DATA_DIR)/rebound_parity_pythagorean_rebound.csv \
+	$(DATA_DIR)/rebound_parity_retrograde_apsis.csv \
+	$(DATA_DIR)/rebound_parity_retrograde_rebound.csv
+
+$(FIGURES_DIR)/rebound_parity_trajectories.pdf: \
+		$(SCRIPTS_DIR)/rebound_parity_trajectories.py \
+		$(REBOUND_PARITY_DATA)
+	python $(SCRIPTS_DIR)/rebound_parity_trajectories.py
+
+$(FIGURES_DIR)/rebound_parity_brouwer.pdf: \
+		$(SCRIPTS_DIR)/rebound_parity_brouwer.py \
+		$(DATA_DIR)/rebound_parity_retrograde_apsis.csv \
+		$(DATA_DIR)/rebound_parity_retrograde_rebound.csv
+	python $(SCRIPTS_DIR)/rebound_parity_brouwer.py
+
+figures-rebound-parity-trajectories: $(FIGURES_DIR)/rebound_parity_trajectories.pdf
+figures-rebound-parity-brouwer: $(FIGURES_DIR)/rebound_parity_brouwer.pdf
 
 # ── Paper ────────────────────────────────────────────────────────────── #
 
