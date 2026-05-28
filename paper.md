@@ -72,7 +72,13 @@ covering everything.
 Each extension carries implicit preconditions about the base
 integrator: the softening model, the force-determinism guarantee,
 the units of `G`, `c`, and `M`, and the step-control assumptions.
-When any of these is violated, the integrator reports no error and
+Existing frameworks guard some of these at runtime — REBOUNDx, for
+one, distinguishes forces from operators and warns when a composition
+is incompatible with the active integrator [@Tamayo2020] — but those
+checks live in the framework's integrator dispatch rather than being
+declared by the extension, and physics-model preconditions such as the
+kernel's softening or continuity fall outside them. When such a
+precondition is violated, the integrator reports no error and
 continues to satisfy conservation invariants to machine precision.
 The only signal that something is wrong is a quantitative
 comparison against an analytic reference — the step a researcher
