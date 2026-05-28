@@ -443,17 +443,12 @@ solar-mass body) opted in — Exactness violated — the measured per-orbit
 cumulative drift agrees with the closed-form softened-Plummer
 apsidal-precession prediction
 $\Delta\varpi_\text{orbit} = -3\pi\varepsilon^2 / [a^2(1-e^2)^2]$
-to 2.55 % (5 % gated), derived from the Plummer pair potential in the
-companion lab notebook and cross-checked against an independent scipy
-DOP853 integration at 3.2 % residual; the 5 % envelope absorbs both
-the apsis and the scipy residuals with $\sim 2\times$ margin. Scaled to
-arcseconds per Earth century, the prediction is
-$\dot\varpi_\text{Plummer} \approx -2.35\times 10^6$ arcsec/century —
-$\sim 5\times 10^4$ times the relativistic effect and of the wrong
-sign, while energy and angular momentum remain conserved to machine
-precision throughout. The contract enforcement returns this
-quantitatively-bracketed signature at registration time, not as a
-numerical artifact emerging only under post-hoc analytic comparison.
+to 2.55 % (5 % gated), cross-checked against an independent scipy
+DOP853 integration at 3.2 % residual. Scaled to arcseconds per Earth
+century, $\dot\varpi_\text{Plummer} \approx -2.35\times 10^6$
+arcsec/century — $\sim 5\times 10^4$ times the relativistic effect
+and of the wrong sign, while energy and angular momentum remain
+conserved to machine precision throughout.
 
 ## Continuity counter-test: TruncatedPlummer
 
@@ -482,10 +477,9 @@ $|\Delta E|/|E_0| \le \Delta F \cdot v_\text{cross} \cdot \mathrm{d}t / |E_0|
 = 4.00\times 10^{-4}$ derived from the shadow-Hamiltonian breakdown
 at the discontinuity, where $|E_0| = G(m_1+m_2)/(2a) = 0.5$ is the
 specific energy of the relative motion (closed form in the companion
-lab notebook); the measured peak sits at 50 % of this bound, with the remaining
-$2\times$ margin and the magnitude spread both reflecting the
-seven Yoshida-4 substep weights, which partially cancel the
-wrong-side work whenever the crossing is not centred in the step.
+lab notebook); the measured peak sits at 50 % of this bound, the $2\times$ margin
+reflecting Yoshida-4 substep cancellation when the crossing is
+off-centre in the step.
 A reference run with the smooth PlummerKernel on the same bodies
 exhibits no events above $2.7 \times 10^{-14}$ per step, separating
 the Continuity signature from the symplectic round-off floor by

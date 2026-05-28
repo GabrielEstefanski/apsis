@@ -1,18 +1,6 @@
-//! Theory-match harness for the Exactness counter-test.
-//!
-//! Pair to `mercury_precession_gate.rs`: that gate locks the *satisfied*
-//! case ($\varepsilon = 0$, 1PN on) against the GR prediction. This file
-//! locks the *violated* case ($\varepsilon \approx 0.02$ AU softened
-//! Plummer, 1PN on) against the closed-form softened-Plummer apsidal-
-//! precession prediction derived in
-//! `paper/notebooks/2026-05-28-plummer-apsidal-derivation.md`.
-//!
-//! Both gates are release-mode integration tests; run with
-//! `cargo test --release -p apsis-1pn --tests -- --ignored`. The
-//! drift-measurement function samples the periapsis longitude per orbit
-//! and accumulates the unwrapped step-by-step drift, avoiding the
-//! end-vs-initial mod-$2\pi$ alias that hides the true ($\sim 13.7$ rad
-//! over 500 orbits) Plummer-induced cumulative drift.
+//! Theory-match harness for the Exactness counter-test — pairs the
+//! satisfied case from `mercury_precession_gate.rs` with the closed-form
+//! softened-Plummer prediction for the violated case (paper §3.2).
 
 use std::f64::consts::PI;
 
@@ -30,9 +18,6 @@ const M_MERCURY: f64 = 1.660_114e-7;
 const N_ORBITS: u64 = 500;
 const EPSILON_VIOLATED: f64 = 0.02;
 
-/// Mercury orbital period in Earth days (87.969 d). Used to scale per-orbit
-/// drift to per-century. Hardcoded to the physical value rather than the
-/// canonical-units literal so the comparison stays in observational units.
 const T_MERCURY_DAYS: f64 = 87.969;
 const DAYS_PER_CENTURY: f64 = 36_525.0;
 const RAD_TO_ARCSEC: f64 = 180.0 * 3600.0 / PI;
@@ -41,40 +26,17 @@ fn orbits_per_century() -> f64 {
     DAYS_PER_CENTURY / T_MERCURY_DAYS
 }
 
-/// Closed-form prediction for the apsidal-precession rate induced by a
-/// Plummer-softened pair potential `U(r) = -G M m / sqrt(r^2 + eps^2)`
-/// at the given Sun–Mercury orbital parameters, expressed in arcseconds
-/// per Earth century.
-///
-/// Derived in `paper/notebooks/2026-05-28-plummer-apsidal-derivation.md`
-/// by two independent routes (near-circular frequency decomposition and
-/// orbital-averaged disturbing-function Lagrange equation) and verified
-/// against an independent scipy DOP853 integration to 3.2% relative
-/// agreement at $\varepsilon^2/a^2 = 2.67\times 10^{-3}$:
-///
-/// $$\Delta\varpi_\text{orbit} = -\frac{3\pi\,\varepsilon^2}{a^2\,(1-e^2)^2}.$$
-///
-/// The sign is negative (retrograde) because Plummer softening shallows
-/// the effective well at small $r$, delaying the next periapsis. The
-/// leading-order $\varepsilon^2/a^2$ expansion is accurate to $\sim 3\%$
-/// at Mercury parameters; higher-order corrections enter at $O(\varepsilon^4)$.
+/// $\Delta\varpi_\text{orbit} = -3\pi\varepsilon^2 / [a^2(1-e^2)^2]$
+/// (paper §3.2), scaled to arcseconds per Earth century.
 fn predicted_softened_plummer_drift_arcsec_per_century(a_au: f64, e: f64, epsilon_au: f64) -> f64 {
     let per_orbit_rad = -3.0 * PI * epsilon_au.powi(2) / (a_au.powi(2) * (1.0 - e.powi(2)).powi(2));
     per_orbit_rad * RAD_TO_ARCSEC * orbits_per_century()
 }
 
-/// Run the §3.2 violated case (Sun + Mercury, Plummer-softened kernel
-/// at `epsilon` AU, 1PN registered) for 500 orbits and return the
-/// cumulative apsidal drift in arcsec per Earth century.
-///
-/// **Per-orbit unwrap.** Samples the periapsis longitude at every orbit
-/// and accumulates the unwrapped step-by-step drift. The end-vs-initial
-/// `omega` difference modulo $2\pi$ aliases for large drifts: the
-/// Plummer-violated cumulative is $\sim -13.7$ rad over 500 orbits,
-/// well outside $(-\pi, \pi]$. Per-orbit unwrap is lossless because the
-/// per-orbit step magnitude is bounded by the closed-form prediction
-/// $3\pi\varepsilon^2 / [a^2(1-e^2)^2] \approx 2.7\times 10^{-2}$ rad,
-/// safely inside $\pm\pi$.
+/// Per-orbit unwrap of `omega` — the end-vs-initial mod-$2\pi$ form
+/// aliases the true $\sim -13.7$ rad cumulative drift to a fractional
+/// value. The per-orbit step ($\sim 2.7 \times 10^{-2}$ rad) stays well
+/// inside $\pm\pi$, so the running sum is lossless.
 fn measure_drift_arcsec_per_century(epsilon: f64) -> f64 {
     let sun = Body::star(1.0);
     let r_peri = A_MERCURY * (1.0 - E_MERCURY);
@@ -114,10 +76,6 @@ fn measure_drift_arcsec_per_century(epsilon: f64) -> f64 {
     drift_rad * RAD_TO_ARCSEC * orbits_per_century() / (N_ORBITS as f64)
 }
 
-/// Smoke gate — the violated case produces a drift large enough that
-/// the upcoming theory-match comparison has a real signal to lock onto.
-/// Records the measured value via `--nocapture` for cross-check against
-/// the literal cited in `paper.md` §3.2.
 #[test]
 #[ignore = "release-mode integration test; run with `cargo test --release -- --ignored`"]
 fn plummer_violated_case_drift_is_measured() {
@@ -133,14 +91,8 @@ fn plummer_violated_case_drift_is_measured() {
     );
 }
 
-/// Theory-match gate — measured drift matches the closed-form prediction
-/// from the lab notebook within the acceptance tolerance.
-///
-/// Tolerance is 5 %: the leading-order $\varepsilon^2/a^2$ expansion is
-/// 3.2 % accurate at Mercury parameters per the scipy DOP853 cross-check
-/// recorded in `paper/notebooks/2026-05-28-plummer-apsidal-derivation.md`,
-/// and 5 % gives margin for the $O(\varepsilon^4)$ correction plus
-/// any IAS15 substep-cadence noise.
+/// 5 % gate — absorbs the ~3 % residual between the closed form and an
+/// independent scipy DOP853 reference (see notebook).
 #[test]
 #[ignore = "release-mode integration test; run with `cargo test --release -- --ignored`"]
 fn plummer_drift_matches_softened_theory() {

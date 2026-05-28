@@ -49,14 +49,9 @@ fn c_solar_gaussian() -> f64 {
 }
 
 /// Energy drift rate for a circular β=0.5 dust grain matches the Burns
-/// 1979 analytic prediction within 5 % over 10 orbits.
-///
-/// 5 % is the regression bound. The analytic derivation assumes
-/// constant r; the orbit drifts ~0.5 % inward over 10 orbits which
-/// shifts the v² · GM / r² scaling by < 2 %. Empirical agreement
-/// at the centre: 1.2 % (was 0.7 % before #133 — back-reaction
-/// suppression at extreme mass ratios removed a partial cancellation
-/// between spurious primary motion and the constant-r approximation).
+/// 1979 analytic prediction within 5 % over 10 orbits. The 5 % gate
+/// absorbs the constant-r approximation bias (~2 %) plus residual
+/// integrator/operator noise. Empirical centre: 1.2 %.
 #[test]
 fn pr_drag_energy_drift_matches_burns_1979_to_5_percent() {
     let units = UnitSystem::solar_canonical();

@@ -22,8 +22,6 @@ const M_TOTAL: f64 = 1.0;
 const DELTA_F: f64 = M_TOTAL * (1.0 - ALPHA) / (R_CUT * R_CUT); // 0.2
 const EPS_REL_ABS: f64 = M_TOTAL / (2.0 * A_ORBIT); // 0.5
 
-/// Equal-mass two-body at `a = 1`, `e = 0.5`, COM at origin.
-/// Mirrors the helper in `kernel_continuity_counter_test.rs`.
 fn two_body_eccentric() -> Vec<Body> {
     const A: f64 = 1.0;
     const E: f64 = 0.5;
@@ -59,9 +57,6 @@ struct Sample {
     v_rel: f64,
 }
 
-/// Per-crossing record: time, interpolated relative speed at the
-/// crossing, and the matching spike magnitude `|ΔE / E|` from the
-/// adjacent step pair.
 #[derive(Debug, Clone, Copy)]
 struct CrossingMeasurement {
     t: f64,
@@ -70,9 +65,6 @@ struct CrossingMeasurement {
     e_total: f64,
 }
 
-/// Walk the sample stream, pair each `r = R_c` crossing with the
-/// largest `|ΔE / E|` event in a `±MATCHING_WINDOW * dt` window, and
-/// linearly interpolate `v_rel` to the crossing time.
 fn measure_crossings(samples: &[Sample]) -> Vec<CrossingMeasurement> {
     const MATCHING_WINDOW_STEPS: usize = 10;
     let mut out = Vec::new();
@@ -114,9 +106,6 @@ fn predicted_spike_bound_relative(v_cross: f64, dt: f64, delta_f: f64, eps_rel_a
     delta_f * v_cross * dt / eps_rel_abs
 }
 
-/// Run the §3.3 truncated-Plummer configuration, return the per-crossing
-/// measurements. Mirrors the `truncated_kernel_energy_spikes_are_in_bijection`
-/// scenario but records `v_rel` and pairs each crossing with its spike.
 fn measure_crossing_sequence() -> Vec<CrossingMeasurement> {
     let kernel = Arc::new(TruncatedPlummerKernel::new(R_CUT));
     let mut sys = System::new(two_body_eccentric(), UnitSystem::solar_canonical())
@@ -149,9 +138,6 @@ fn measure_crossing_sequence() -> Vec<CrossingMeasurement> {
     measure_crossings(&samples)
 }
 
-/// Smoke gate — record per-crossing `(t, v_cross, spike_magnitude)`
-/// so the lab notebook's *Numerical evaluation per crossing* table can
-/// be filled directly from `cargo test --release ... --nocapture`.
 #[test]
 #[ignore = "release-mode integration test; run with `cargo test --release -- --ignored`"]
 fn continuity_per_crossing_measurements_are_recorded() {
@@ -183,8 +169,7 @@ fn continuity_per_crossing_measurements_are_recorded() {
     );
 }
 
-/// Every measured spike sits below the worst-case envelope from the
-/// notebook. `SAFETY_FACTOR = 1.0` because the bound is already strict.
+/// `SAFETY_FACTOR = 1.0` — the worst-case envelope is already strict.
 #[test]
 #[ignore = "release-mode integration test; run with `cargo test --release -- --ignored`"]
 fn spike_magnitudes_satisfy_jump_bound() {

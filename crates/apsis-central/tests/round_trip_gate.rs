@@ -144,11 +144,8 @@ fn keplerian_baseline_does_not_precess() {
     let omega_dot_baseline = linear_slope(&ts, &omegas_unwrapped);
 
     eprintln!("[kepler-baseline] ω̇ = {omega_dot_baseline:.4e}");
-    // Gate 1e-9: pure Keplerian closure under IAS15 sits ~10 orders
-    // below this (measured ω̇ ~ 2e-17, near the ULP floor for 50
-    // samples of ω at magnitude π). Gate leaves ~8 orders of headroom
-    // — enough to catch real regression (IAS15 drift, accidental
-    // operator activation) without flagging ULP noise.
+    // 1e-9 sits ~8 orders above the measured ULP-floor ω̇ (~2e-17 here);
+    // tight enough to catch real regression, loose enough to avoid noise.
     assert!(
         omega_dot_baseline.abs() < 1e-9,
         "Keplerian baseline drift exceeds floor: ω̇ = {omega_dot_baseline:.4e} (bound 1e-9)",
