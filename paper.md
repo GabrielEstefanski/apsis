@@ -23,7 +23,7 @@ abstract: |
   end reproducibility. We exercise the architecture with three
   first-party operator crates — `apsis-1pn` (first-post-Newtonian
   Schwarzschild correction), `apsis-radiation` (radiation pressure
-  and Poynting–Robertson drag, validated to 0.7 % of the Burns 1979
+  and Poynting–Robertson drag, validated to 1.2 % of the Burns 1979
   analytic law), and `apsis-central` (parametric central-force
   precession with an observable-inversion constructor, round-trip
   agreement to 2.7 %) — spanning Hamiltonian and non-conservative
@@ -35,8 +35,9 @@ abstract: |
   under the adaptive Gauss–Radau IAS15 scheme, reproduced bit-
   identically across Windows and Linux on x86_64; violating the
   kernel-exactness precondition with Plummer softening surfaces a
-  registration warning and yields a drift three orders of magnitude
-  larger and of the wrong sign, never as a numerical artifact. The
+  registration warning and yields a drift more than four orders of
+  magnitude larger and of the wrong sign, never as a numerical
+  artifact. The
   federated model and the reproducibility certificate — not
   empirical superiority in any numerical regime — are the
   contributions the architecture supports.
@@ -71,7 +72,13 @@ covering everything.
 Each extension carries implicit preconditions about the base
 integrator: the softening model, the force-determinism guarantee,
 the units of `G`, `c`, and `M`, and the step-control assumptions.
-When any of these is violated, the integrator reports no error and
+Existing frameworks guard some of these at runtime — REBOUNDx, for
+one, distinguishes forces from operators and warns when a composition
+is incompatible with the active integrator [@Tamayo2020] — but those
+checks live in the framework's integrator dispatch rather than being
+declared by the extension, and physics-model preconditions such as the
+kernel's softening or continuity fall outside them. When such a
+precondition is violated, the integrator reports no error and
 continues to satisfy conservation invariants to machine precision.
 The only signal that something is wrong is a quantitative
 comparison against an analytic reference — the step a researcher
@@ -372,7 +379,7 @@ measures the total specific-energy change $\Delta E$ between
 endpoints, and compares against the constant-$r$ analytic
 prediction $\Delta E_{\text{analytic}} = -\beta\, G M v^2 m\, T /
 (r^2 c)$ derived from the tangential PR force at the initial
-epoch; empirical agreement is 0.7 % at the gated 5 % tolerance,
+epoch; empirical agreement is 1.2 % at the gated 5 % tolerance,
 with the gate width set to absorb the $\sim 2$ % bias of the
 constant-$r$ approximation as the orbit drifts $\sim 0.5$ %
 inward over the window. A counter-test on the same orbit without
@@ -396,7 +403,7 @@ documented Tamayo-formula bias ($\sim 11$ % from using the
 instantaneous separation rather than the secular semi-major axis,
 partially cancelled by the $(1-e^2)$ correction) dominating the
 residual. A Keplerian baseline counter-test holds the apsidal
-drift below $10^{-7}$ when the operator is not registered.
+drift below $10^{-9}$ when the operator is not registered.
 
 The two gates use disjoint physics (radiation back-reaction and
 apsidal precession from a $1/r^\gamma$ central force) and
@@ -438,11 +445,16 @@ total, consistent with the per-orbit precision reported in
 
 With a Plummer-softened kernel (`NewtonKernel::new(eps)` with
 $\varepsilon \approx 0.02$ AU, the cluster-scale softening for a
-solar-mass body) opted in — Exactness violated — the drift is
-$-83\,128$ arcseconds per century: three orders of magnitude larger
-than the relativistic effect and of the wrong sign, while energy
-and angular momentum remain conserved to machine precision
-throughout.
+solar-mass body) opted in — Exactness violated — the measured per-orbit
+cumulative drift agrees with the closed-form softened-Plummer
+apsidal-precession prediction
+$\Delta\varpi_\text{orbit} = -3\pi\varepsilon^2 / [a^2(1-e^2)^2]$
+to 2.55 % (5 % gated), cross-checked against an independent scipy
+DOP853 integration at 3.2 % residual. Scaled to arcseconds per Earth
+century, $\dot\varpi_\text{Plummer} \approx -2.35\times 10^6$
+arcsec/century — $\sim 5\times 10^4$ times the relativistic effect
+and of the wrong sign, while energy and angular momentum remain
+conserved to machine precision throughout.
 
 ## Continuity counter-test: TruncatedPlummer
 
@@ -460,15 +472,23 @@ apoapse sits near $r \approx 2.06$, well inside the marginal-
 binding threshold at $\alpha \approx 0.5$ for these parameters).
 
 Under fourth-order Yoshida composition at fixed timestep
-$10^{-3} \cdot T$, the orbit crosses $R_c$ eleven times over 60
-simulation units and the integrator produces impulsive energy-
-error events of magnitude $4.7 \times 10^{-6}$ to
-$2.0 \times 10^{-4}$ — in one-to-one correspondence with the
-crossings, each event temporally matched to its crossing within
-$10 \cdot dt$, and no events between crossings. A reference run
-with the smooth PlummerKernel on the same bodies exhibits no
-events above $2.7 \times 10^{-14}$ per step, separating the
-Continuity signature from the symplectic round-off floor by
+$\mathrm{d}t = 10^{-3}$ in canonical time units, the orbit crosses
+$R_c$ eleven times over 60 simulation units and the integrator
+produces impulsive energy-error events of magnitude
+$4.7 \times 10^{-6}$ to $2.0 \times 10^{-4}$ — in one-to-one
+correspondence with the crossings, each event temporally matched
+to its crossing within $10 \cdot \mathrm{d}t$, and no events between
+crossings. Every spike falls within the a-priori envelope
+$|\Delta E|/|E_0| \le \Delta F \cdot v_\text{cross} \cdot \mathrm{d}t / |E_0|
+= 4.00\times 10^{-4}$ derived from the shadow-Hamiltonian breakdown
+at the discontinuity, where $|E_0| = G(m_1+m_2)/(2a) = 0.5$ is the
+specific energy of the relative motion (closed form in the companion
+lab notebook); the measured peak sits at 50 % of this bound, the $2\times$ margin
+reflecting Yoshida-4 substep cancellation when the crossing is
+off-centre in the step.
+A reference run with the smooth PlummerKernel on the same bodies
+exhibits no events above $2.7 \times 10^{-14}$ per step, separating
+the Continuity signature from the symplectic round-off floor by
 roughly eight orders of magnitude.
 
 The observed signature is a consequence of the continuity
@@ -490,10 +510,11 @@ initial timestep $10^{-4} \cdot T$ and adaptivity enabled for the
 Exactness counter-test (Sun–Mercury standard orbital elements,
 $\varepsilon = 0$ for the satisfied case, $\varepsilon \approx 0.02$
 AU for the violated case, 500-period integration); fourth-order
-Yoshida at fixed $dt = 10^{-3} \cdot T$ for the Continuity counter-
-test (equal-mass two-body $a = 1$, $e = 0.5$, default exact kernel,
-$R_c = 1$, $\alpha = 0.8$, 60 simulation-unit integration). Sources
-at `crates/apsis-1pn/tests/mercury_precession_gate.rs` and
+Yoshida at fixed $\mathrm{d}t = 10^{-3}$ (canonical units) for the
+Continuity counter-test (equal-mass two-body $a = 1$, $e = 0.5$,
+default exact kernel, $R_c = 1$, $\alpha = 0.8$, 60 simulation-unit
+integration). Sources at
+`crates/apsis-1pn/tests/mercury_precession_gate.rs` and
 `crates/apsis-1pn/tests/kernel_continuity_counter_test.rs`; both
 reproduce on a clean checkout per the command in §Data and code
 availability.
@@ -656,24 +677,12 @@ unless a specific historical reproduction motivates otherwise.
 
 ## Future work
 
-The work below is prioritised: the first tier closes a gap in the
-contribution's claim shape, the second quantifies a current floor,
-the third generalises the cross-platform analysis.
-
-*Theory-confirmed counter-tests.* The drift under the violated
-Exactness condition ($-83\,128$ arcsec/century for Mercury under
-$\varepsilon = 0.02$ AU) reproduces a value the softened Plummer
-apsidal-precession formula predicts in closed form. Deriving the
-prediction in the paper converts the counter-test from *measured a
-large wrong number* to *measured exactly what the violation theory
-predicts*. The same upgrade applies to the Continuity counter-test:
-the spike magnitudes are bounded a priori by the force jump $\Delta
-F$, the orbital velocity at the crossing, and the timestep $dt$,
-and reproducing this prediction sharpens the bijection result from
-"events coincide with crossings" to "events coincide with crossings
-*at the predicted magnitude*". Both upgrades are pure derivations
-against existing data and are prerequisite to the journal
-submission.
+The work below is prioritised: the first tier quantifies a current
+floor of the satisfied 1PN result, the second generalises the
+cross-platform analysis. (The theory-confirmed counter-test
+prerequisite identified in earlier drafts has closed; the §3.2
+Plummer and §3.3 continuity predictions are now reported as
+closed-form expressions backed by independent scipy verification.)
 
 *Error budget for Mercury 1PN agreement.* The 28 ppm relative
 agreement reported in §Results is currently undisaggregated. A
@@ -757,7 +766,6 @@ g = 1.0000000000000002
 length = "AU"
 mass = "Msun"
 time = "T_G"
-density = "Msun/AU3"
 
 [integrator]
 kind = "IAS15 (15th, adaptive)"

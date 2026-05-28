@@ -15,10 +15,13 @@
 //!
 //! Attaching 1PN to a softened kernel (`NewtonKernel::new(ε > 0)`)
 //! invalidates the physical model: numerical apsidal precession from a
-//! Plummer-style 1/√(r²+ε²) potential is ~2 × 10³ larger than the
-//! relativistic signal and of opposite sign at Mercury's orbit. The
-//! default `NewtonKernel::exact()` is silent against the kernel-
-//! requirement check; opting into ε > 0 emits a structured warning.
+//! Plummer-style 1/√(r²+ε²) potential is ~5 × 10⁴ larger than the
+//! relativistic signal and of opposite sign at Mercury's orbit
+//! (closed-form $\dot\varpi_\text{Plummer} = -3 n \varepsilon^2 /
+//! [2 a^2 (1 - e^2)^2] \approx -2.35 \times 10^6$ arcsec/century;
+//! see `tests/exactness_theory_match.rs`). The default
+//! `NewtonKernel::exact()` is silent against the kernel-requirement
+//! check; opting into ε > 0 emits a structured warning.
 //!
 //! # Use
 //!

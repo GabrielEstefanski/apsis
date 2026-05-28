@@ -246,9 +246,13 @@ part of the library's validated surface or release cadence.
 
 A Plummer-softened kernel with `ε ≈ 0.02 AU` (a typical cluster-scale
 ε for a solar-mass body) introduces a numerical apsidal precession
-**≈ 2 × 10³ larger** than the 43 arcsec/century GR effect for Mercury.
-It is invisible at the integrator level — energy still conserves to
-machine precision.
+**≈ 5 × 10⁴ larger** than the 43 arcsec/century GR effect for Mercury,
+with the *opposite* sign — the closed-form prediction is
+$\dot\varpi_\text{Plummer} = -3 n \varepsilon^2 / [2 a^2 (1 - e^2)^2]
+\approx -2.35 \times 10^6$ arcsec/century (derivation cited in
+[`paper.md`](paper.md) §3.2; verified independently against scipy
+DOP853 to 3.2 %). It is invisible at the integrator level —
+energy still conserves to machine precision.
 
 This class of error is otherwise difficult to detect: the standard
 conservation invariants (energy, angular momentum) remain satisfied bit-for-bit
