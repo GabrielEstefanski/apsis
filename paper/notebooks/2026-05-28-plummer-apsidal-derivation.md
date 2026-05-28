@@ -188,9 +188,14 @@ $(-\pi, \pi]$. For the Plummer-violated case the true cumulative drift
 over 500 orbits is $\approx -13.71$ rad, well outside that interval —
 the unwrap aliased it to $-13.71 + 4\pi = -1.14$ rad and reported the
 fractional value. The pre-fix diagnostics ($-83\,128$ and $-136\,732$
-arcsec/century) were aliased fractions of the true rate; the current
-test uses per-orbit accumulation of the unwrapped step and reports
-the full drift directly.
+arcsec/century) were aliased fractions of the true rate, and the two
+differ because $-83\,128$ predates a softening-setup change (per-body
+$\varepsilon$ pair-averaged to $\varepsilon_\text{eff} \approx 0.0141$
+AU, versus the current flat $\varepsilon = 0.02$ AU); the jump to the
+current $-2.289\times 10^6$ is therefore partly that setup change and
+partly the unwrap fix, not unwrap alone. The current test uses
+per-orbit accumulation of the unwrapped step and reports the full
+drift directly.
 
 An independent scipy DOP853 integration over 50 orbits (script:
 `paper/notebooks/scripts/plummer_check.py`) gives:
