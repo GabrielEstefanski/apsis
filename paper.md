@@ -766,7 +766,6 @@ g = 1.0000000000000002
 length = "AU"
 mass = "Msun"
 time = "T_G"
-density = "Msun/AU3"
 
 [integrator]
 kind = "IAS15 (15th, adaptive)"
