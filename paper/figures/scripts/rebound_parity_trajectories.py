@@ -135,7 +135,9 @@ def main() -> None:
     panel_pythagorean(axes[2], *load("pythagorean"))
     fig.suptitle("REBOUND parity: configuration-space trajectories", fontsize=11)
     fig.tight_layout(rect=(0.0, 0.0, 1.0, 0.95))
-    fig.savefig(OUT, format="pdf", bbox_inches="tight")
+    # Pin metadata date so re-runs are byte-identical (matplotlib stamps
+    # CreationDate=now by default, which otherwise dirties git on every regen).
+    fig.savefig(OUT, format="pdf", bbox_inches="tight", metadata={"CreationDate": None})
     print(f"wrote {OUT}")
 
 
