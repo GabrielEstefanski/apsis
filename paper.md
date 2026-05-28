@@ -397,7 +397,7 @@ documented Tamayo-formula bias ($\sim 11$ % from using the
 instantaneous separation rather than the secular semi-major axis,
 partially cancelled by the $(1-e^2)$ correction) dominating the
 residual. A Keplerian baseline counter-test holds the apsidal
-drift below $10^{-7}$ when the operator is not registered.
+drift below $10^{-9}$ when the operator is not registered.
 
 The two gates use disjoint physics (radiation back-reaction and
 apsidal precession from a $1/r^\gamma$ central force) and

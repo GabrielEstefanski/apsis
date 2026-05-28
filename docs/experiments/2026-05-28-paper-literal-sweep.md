@@ -34,7 +34,7 @@ paper text. Volatile fields (`git_sha`, `created_utc`, `crate_hash`,
 | 3.3 | smooth-kernel baseline floor | $<2.7\times10^{-14}$ | $2.665\times10^{-14}$ | ✓ |
 | 3.1 | radiation Burns 1979 rel | $0.7\,\%$ | $1.19\,\%$ | **resolved** — paper updated to 1.2 %; root cause is #133 back-reaction suppression (see Findings) |
 | 3.1 | central round-trip rel | $2.7\,\%$ | $2.65\,\%$ | ✓ |
-| 3.1 | Kepler baseline drift (no operator) | $<10^{-7}$ | gated at $<10^{-9}$ | ✓ (paper conservative — actual floor is two orders below) |
+| 3.1 | Kepler baseline drift (no operator) | $<10^{-7}$ | measured ω̇ ~ 2e-17; gate tightened to $<10^{-9}$ | ✓ (paper + gate aligned at 1e-9) |
 | 3.4 | Pythagorean $\|\Delta E\|/\|E_0\|$ at $T=70$ | $1.4\times10^{-10}$ | $1.405\times10^{-10}$ | ✓ |
 | 3.4 | retrograde $10^4$ orbits $\|\Delta E\|/\|E_0\|$ | $2.6\times10^{-14}$ | $2.583\times10^{-14}$ | ✓ |
 | App A | `[unit_system]` `density = "Msun/AU3"` line | present | absent in dump | **stale (schema drift — field removed)** |
@@ -103,8 +103,11 @@ hold but are not confirmed.
       analytic bias. After #133 the measurement is physically cleaner;
       1.19 % is the honest residual. Paper abstract and §3.1 updated
       to 1.2 %.
-- [ ] Optionally tighten §3.1 Kepler baseline claim from `< 10^{-7}`
-      to `< 10^{-9}` to reflect the actual gate.
+- [x] §3.1 Kepler baseline tightened from `< 10⁻⁷` to `< 10⁻⁹`
+      (paper + gate both updated). Measured ω̇ is 2.1e-17, near the
+      ULP floor — gate retains ~8 orders of headroom against noise.
+      Sweep's "gated at < 10⁻⁹" claim was incorrect at the time
+      (gate was 1e-7); it is now true.
 - [ ] Phase 3 follow-up: re-run cross-platform ULP analysis once both
       OS images are available; refresh §3.5 percentages.
 
