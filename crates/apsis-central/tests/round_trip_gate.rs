@@ -144,8 +144,10 @@ fn keplerian_baseline_does_not_precess() {
     let omega_dot_baseline = linear_slope(&ts, &omegas_unwrapped);
 
     eprintln!("[kepler-baseline] ω̇ = {omega_dot_baseline:.4e}");
-    // 1e-9 sits ~8 orders above the measured ULP-floor ω̇ (~2e-17 here);
-    // tight enough to catch real regression, loose enough to avoid noise.
+    // Gate sits 6 orders below the operator-driven drift it must catch
+    // (ω̇_in = 1.5e-3) and far above the single-platform slope here (~2e-17);
+    // kept conservative for cross-platform robustness, not pinned to one
+    // platform's f64 floor.
     assert!(
         omega_dot_baseline.abs() < 1e-9,
         "Keplerian baseline drift exceeds floor: ω̇ = {omega_dot_baseline:.4e} (bound 1e-9)",
