@@ -1,0 +1,66 @@
+{
+  "all_passed": true,
+  "n_samples": 101,
+  "t_final": 628.3187878673331,
+  "metrics": [
+    {
+      "name": "|\u0394a|/a (semi-major axis)",
+      "observed": 3.1086337948145198e-15,
+      "tolerance": 1e-13,
+      "passed": true,
+      "detail": {}
+    },
+    {
+      "name": "|\u0394e| (eccentricity)",
+      "observed": 2.3314683517128287e-15,
+      "tolerance": 1e-13,
+      "passed": true,
+      "detail": {}
+    },
+    {
+      "name": "|\u0394\u03c9| (periapsis orient.)",
+      "observed": 3.1086244689504383e-15,
+      "tolerance": 1e-12,
+      "passed": true,
+      "detail": {}
+    },
+    {
+      "name": "|\u0394h|/h (angular momentum)",
+      "observed": 1.4101726366812802e-15,
+      "tolerance": 1e-13,
+      "passed": true,
+      "detail": {}
+    },
+    {
+      "name": "|\u0394E/E_0| apsis",
+      "observed": 2.117576015414056e-15,
+      "tolerance": 1e-13,
+      "passed": true,
+      "detail": {}
+    },
+    {
+      "name": "|\u0394E/E_0| rebound",
+      "observed": 2.541091218496867e-15,
+      "tolerance": 1e-13,
+      "passed": true,
+      "detail": {}
+    },
+    {
+      "name": "cross-impl |\u0394E|/|E_0|",
+      "observed": 2.541091218496867e-15,
+      "tolerance": 1e-13,
+      "passed": true,
+      "detail": {}
+    }
+  ],
+  "informational": {
+    "name": "|\u0394r| (secondary, NOT gated)",
+    "observed": 2.180395150048991e-12,
+    "tolerance": Infinity,
+    "passed": true,
+    "detail": {
+      "argmax_orbit": 32,
+      "note": "phase-drift contaminated; not invariant across adaptive integrators"
+    }
+  }
+}

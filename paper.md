@@ -46,7 +46,7 @@ fontsize: 11pt
 header-includes:
   - \usepackage{microtype}
   - \usepackage{inconsolata}
-  - \usepackage[htt]{hyphenat}
+  - \usepackage{hyphenat}
   - \usepackage{float}
   - \floatplacement{figure}{!ht}
   - \setlength{\emergencystretch}{3em}
@@ -145,8 +145,10 @@ three operator crates spanning both operator categories
 (Hamiltonian and non-conservative) and both supported constructor
 patterns, then exercises the contract mechanism in depth on
 `apsis-1pn` (Exactness counter-test on Mercury 1PN, Continuity
-counter-test on a truncated Plummer kernel), and closes with the
-cross-platform reproducibility test. §Discussion covers the scope
+counter-test on a truncated Plummer kernel), checks external-
+implementation parity against REBOUND IAS15 on four canonical
+scenarios, and closes with the cross-platform reproducibility
+test. §Discussion covers the scope
 of the cross-platform claim (including ARM64 hardware not yet
 verified), solver-family guidance, and a prioritised future-work
 agenda. The per-run *Apsis Record* binary format specification is
@@ -496,6 +498,56 @@ at `crates/apsis-1pn/tests/mercury_precession_gate.rs` and
 reproduce on a clean checkout per the command in §Data and code
 availability.
 
+## REBOUND parity portfolio {#sec:rebound-parity}
+
+apsis IAS15 is checked against REBOUND IAS15 [@ReinSpiegel2015] on
+four canonical scenarios spanning regular (Kepler, figure-8
+choreography), chaotic (Pythagorean three-body, Burrau 1913), and
+long-horizon (retrograde Kepler over $10^4$ orbits) regimes. Both
+implementations are exercised at matched IAS15 tolerance
+($\epsilon_b = 10^{-9}$, the REBOUND default) with identical
+initial conditions; trajectories are sampled at one position per
+orbital period for the regular scenarios and at fixed $\Delta t =
+0.1$ for the Pythagorean run, with total energy sampled at the
+same cadence, and compared post-hoc. Per-scenario harnesses live
+at `validation/rebound-parity/`.
+
+The configuration-space comparison (Fig. \ref{fig:rebound-traj})
+shows apsis and REBOUND trajectories overlapping at the ULP floor
+for the two regular scenarios. In the Pythagorean three-body the
+two implementations track each other at the ULP floor through the
+regular regime; in the chaotic close-encounter cluster, both
+diverge from initial conditions at the IAS15 f64 round-off rate,
+yielding $|\Delta E|/|E_0| \sim 10^{-10}$ at $T=70$ — the
+regime-limited precision rather than an apsis–REBOUND divergence.
+
+![apsis IAS15 trajectories (filled / coloured) overlaid by REBOUND
+IAS15 (dotted black) across three configuration-space scenarios.
+Kepler $e=0.5$ samples are stroboscopic at periapsis; the
+analytical ellipse is shown for reference and the maximum
+apsis–REBOUND position residual over the run is annotated as
+$|\Delta r|_{\max}$ in the panel callout. Figure-8 choreography
+over 10 periods; the three apsis bodies trace the same closed
+curve and are visually indistinguishable in the choreography
+phase. Pythagorean three-body (Burrau 1913) integrated to $T=70$
+through the close-encounter cluster; bodies 0, 1, 2 carry masses
+3, 4, 5 in canonical units.](paper/figures/rebound_parity_trajectories.pdf){#fig:rebound-traj width=100%}
+
+The fourth scenario — the retrograde Kepler over $10^4$ orbits —
+is the long-horizon parity check and is shown separately in
+Fig. \ref{fig:rebound-brouwer} because its log-log energy-error
+structure does not share axes with the configuration-space panels
+above. Both implementations track Brouwer's $\sqrt{N}$ random-walk
+law [@Brouwer1937] and agree to $|\Delta E|/|E_0| = 2.6\times10^{-14}$
+at the long-horizon checkpoint — consistent with the per-step
+rounding propagation expected at this horizon.
+
+![Relative energy drift $|E(t) - E_0|/|E_0|$ on the retrograde Kepler
+scenario over $10^4$ orbits, apsis IAS15 (solid) and REBOUND IAS15
+(dotted) on the same axes. The Brouwer $\sqrt{N}$ reference is
+shown as a dashed line for visual anchoring. Cross-implementation
+agreement at the long-horizon checkpoint is annotated.](paper/figures/rebound_parity_brouwer.pdf){#fig:rebound-brouwer}
+
 ## Cross-platform reproducibility {#sec:cross-platform}
 
 The `Cargo.lock`-as-experiment claim is operationalised by an
@@ -507,10 +559,10 @@ pinned, the full v0.1 federation portfolio — `apsis-1pn` Mercury
 long-horizon under IAS15, the MERCURIUS hybrid on a Sun + four
 outer planets configuration with a Jupiter-crossing test particle,
 Wisdom–Holman on the same outer-planets initial conditions, the
-`apsis-central` round-trip gate, and the four-scenario REBOUND
-parity portfolio (Kepler, figure-8, Pythagorean, retrograde) —
-produces byte-identical trajectory output on heterogeneous x86_64
-hosts (Windows on AMD Zen 4 against Linux on Intel Ice Lake).
+`apsis-central` round-trip gate, and the four REBOUND parity
+scenarios reported in §REBOUND parity portfolio — produces
+byte-identical trajectory output on heterogeneous x86_64 hosts
+(Windows on AMD Zen 4 against Linux on Intel Ice Lake).
 Verification covers per-column ULP agreement, file size, and
 SHA256 of the captured trajectory CSVs.
 
@@ -546,7 +598,8 @@ The methodology and per-implementation analysis are recorded in
 `paper/notebooks/2026-05-22-controller-pow-implementations.md`
 (controller `pow` ULP-distribution analysis).
 
-The library demonstrates the federated perturbation model across
+**Synthesis.** Across the five Results subsections, the library
+demonstrates the federated perturbation model along five axes:
 three operator crates (`apsis-1pn`, `apsis-radiation`,
 `apsis-central`), two operator categories (Hamiltonian and non-
 conservative), two constructor patterns (regime-based and
@@ -704,6 +757,7 @@ g = 1.0000000000000002
 length = "AU"
 mass = "Msun"
 time = "T_G"
+density = "Msun/AU3"
 
 [integrator]
 kind = "IAS15 (15th, adaptive)"
@@ -730,21 +784,57 @@ version = "0.1.0"
 crate_hash = "workspace:9d6e1f50449d72f5499ee520daa049451d4d24cb-dirty"
 
 [operators.requirements]
+
+[bodies]
+count = 2
+
+[[bodies.list]]
+name = "Sun"
+mass = 1.0
+density = 2370030.08
+physical_radius = 0.004652851346847559
+color = [
+    255,
+    220,
+    100,
+]
+q_pr = 0.0
+albedo = 0.0
+class = "Star"
+
+[[bodies.list]]
+name = "Mercury"
+mass = 0.000000166
+density = 6652806.314052459
+physical_radius = 0.000018127511930821086
+color = [
+    139,
+    90,
+    43,
+]
+q_pr = 0.0
+albedo = 0.3
+class = "Planet"
 ```
 
-(Body metadata follows under `[bodies]` with one `[[bodies.list]]`
-entry per registered body — explicit name (`"Sun"`, `"Mercury"` in
-this run), mass, density, physical radius, render colour,
-radiation-coupling coefficients, and dynamical class.)
-Numeric fields are in the canonical units declared above
-(`length = AU`, `mass = Msun`, `time = T_G`); the explicit
-`unit_system` block lets a replay convert to SI or to a different
-canonical system without ambiguity. The `g` field is computed from
-the canonical SI scales rather than hardcoded, which records the
-1-ULP residual that `time_s = sqrt(AU³/(G_SI·MSUN))` produces under
-f64 — the integrator runs with this `G_code` and the replay must
-see the same value. Material physical events (collisions, escapes)
-are recorded inline in the binary frame stream that follows.
+Each `[[bodies.list]]` entry records the physical and rendering
+metadata for one body; `q_pr` and `albedo` are the radiation-
+coupling coefficients consumed by `apsis-radiation`. Numeric fields
+are in the canonical units declared above (`length = AU`,
+`mass = Msun`, `time = T_G`); the explicit `unit_system` block lets
+a replay convert to SI or to a different canonical system without
+ambiguity. The `g` field is computed from the canonical SI scales
+rather than hardcoded, which records the 1-ULP residual that
+`time_s = sqrt(AU³/(G_SI·MSUN))` produces under f64 — the
+integrator runs with this `G_code` and the replay must see the same
+value. The `dt_mode = "Fixed"` field indicates that `initial_dt`
+was supplied explicitly by the caller rather than auto-derived;
+IAS15's adaptive substep selection remains active per the
+declared integrator kind, so the value records the seed step the
+controller takes before the first adaptive adjustment, not a
+fixed-step mode override. Material physical events (collisions,
+escapes) are recorded inline in the binary frame stream that
+follows.
 
 The federation thesis — that a simulation's physical model is
 captured in `Cargo.lock` — is here extended to the run itself:

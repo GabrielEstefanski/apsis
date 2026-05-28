@@ -1,0 +1,125 @@
+{
+  "all_passed": true,
+  "n_samples": 2001,
+  "t_final": 63.26238897516969,
+  "tier1_hard": [
+    {
+      "name": "|\u0394E/E_0| apsis",
+      "tier": 1,
+      "observed": 8.625489897207176e-16,
+      "tolerance": 1e-13,
+      "passed": true,
+      "detail": {}
+    },
+    {
+      "name": "|\u0394E/E_0| rebound",
+      "tier": 1,
+      "observed": 8.625489897207176e-16,
+      "tolerance": 1e-13,
+      "passed": true,
+      "detail": {}
+    },
+    {
+      "name": "cross-impl |\u0394E|/|E_0|",
+      "tier": 1,
+      "observed": 1.0350587876648612e-15,
+      "tolerance": 1e-13,
+      "passed": true,
+      "detail": {}
+    },
+    {
+      "name": "|\u0394\ud835\udc0b| apsis (abs)",
+      "tier": 1,
+      "observed": 3.608224830031759e-16,
+      "tolerance": 1e-13,
+      "passed": true,
+      "detail": {}
+    },
+    {
+      "name": "|\u0394\ud835\udc0b| rebound (abs)",
+      "tier": 1,
+      "observed": 3.3306690738754696e-16,
+      "tolerance": 1e-13,
+      "passed": true,
+      "detail": {}
+    },
+    {
+      "name": "cross-impl |\u0394\ud835\udc0b| (abs)",
+      "tier": 1,
+      "observed": 4.440892098500626e-16,
+      "tolerance": 1e-13,
+      "passed": true,
+      "detail": {}
+    }
+  ],
+  "tier2_sanity": [
+    {
+      "name": "|\u0394\ud835\udc0f| apsis (abs)",
+      "tier": 2,
+      "observed": 4.965068306494546e-16,
+      "tolerance": 1e-13,
+      "passed": true,
+      "detail": {}
+    },
+    {
+      "name": "|\u0394\ud835\udc0f| rebound (abs)",
+      "tier": 2,
+      "observed": 5.095246377785861e-16,
+      "tolerance": 1e-13,
+      "passed": true,
+      "detail": {}
+    },
+    {
+      "name": "cross-impl |\u0394\ud835\udc0f| (abs)",
+      "tier": 2,
+      "observed": 4.577566798522237e-16,
+      "tolerance": 1e-13,
+      "passed": true,
+      "detail": {}
+    },
+    {
+      "name": "|\u0394\ud835\udc2b_COM| apsis (abs)",
+      "tier": 2,
+      "observed": 3.1107061285225897e-15,
+      "tolerance": 1e-12,
+      "passed": true,
+      "detail": {}
+    },
+    {
+      "name": "|\u0394\ud835\udc2b_COM| rebound (abs)",
+      "tier": 2,
+      "observed": 3.8146502182784986e-15,
+      "tolerance": 1e-12,
+      "passed": true,
+      "detail": {}
+    },
+    {
+      "name": "cross-impl |\u0394\ud835\udc2b_COM| (abs)",
+      "tier": 2,
+      "observed": 7.513967412811429e-16,
+      "tolerance": 1e-12,
+      "passed": true,
+      "detail": {}
+    }
+  ],
+  "tier3_informational": {
+    "name": "|\u0394\ud835\udc2b| max over bodies (NOT gated)",
+    "tier": 3,
+    "observed": 9.435954660448695e-13,
+    "tolerance": Infinity,
+    "passed": true,
+    "detail": {
+      "per_body_max_dr": [
+        9.403580529601047e-13,
+        9.133605386265727e-13,
+        9.435954660448695e-13
+      ],
+      "argmax_sample_per_body": [
+        1832,
+        1967,
+        2000
+      ],
+      "note": "phase-drift contaminated; not invariant across adaptive integrators"
+    }
+  }
+}
