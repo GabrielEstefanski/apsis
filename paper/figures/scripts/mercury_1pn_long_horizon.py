@@ -133,7 +133,9 @@ def render(csv_path: Path, output_path: Path) -> None:
         fontsize=11,
     )
 
-    fig.savefig(output_path, bbox_inches="tight")
+    # Pin metadata date so re-runs are byte-identical (matplotlib stamps
+    # CreationDate=now by default, which otherwise dirties git on every regen).
+    fig.savefig(output_path, bbox_inches="tight", metadata={"CreationDate": None})
     plt.close(fig)
     print(f"wrote {output_path}")
 

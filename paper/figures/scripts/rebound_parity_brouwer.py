@@ -64,7 +64,9 @@ def main() -> None:
     ax.grid(True, which="both", alpha=0.3)
 
     fig.tight_layout()
-    fig.savefig(OUT, format="pdf", bbox_inches="tight")
+    # Pin metadata date so re-runs are byte-identical (matplotlib stamps
+    # CreationDate=now by default, which otherwise dirties git on every regen).
+    fig.savefig(OUT, format="pdf", bbox_inches="tight", metadata={"CreationDate": None})
     print(f"wrote {OUT}")
 
 
