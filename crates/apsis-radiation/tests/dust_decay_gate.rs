@@ -51,13 +51,12 @@ fn c_solar_gaussian() -> f64 {
 /// Energy drift rate for a circular β=0.5 dust grain matches the Burns
 /// 1979 analytic prediction within 5 % over 10 orbits.
 ///
-/// 5 % is the regression bound, not the typical agreement. The
-/// analytic derivation assumes constant r; the orbit drifts ~0.5 %
-/// inward over 10 orbits which by itself shifts the v² · GM / r²
-/// scaling by < 2 %. IAS15's own truncation contribution is
-/// negligible at this β and integration length. Empirical agreement
-/// when this test was written: 0.7 % at the centre, gate 5 % to
-/// survive future ULP noise without false positives.
+/// 5 % is the regression bound. The analytic derivation assumes
+/// constant r; the orbit drifts ~0.5 % inward over 10 orbits which
+/// shifts the v² · GM / r² scaling by < 2 %. Empirical agreement
+/// at the centre: 1.2 % (was 0.7 % before #133 — back-reaction
+/// suppression at extreme mass ratios removed a partial cancellation
+/// between spurious primary motion and the constant-r approximation).
 #[test]
 fn pr_drag_energy_drift_matches_burns_1979_to_5_percent() {
     let units = UnitSystem::solar_canonical();
@@ -96,6 +95,9 @@ fn pr_drag_energy_drift_matches_burns_1979_to_5_percent() {
     let de_analytic = -beta * v_k * v_k * m_dust * t_total / (r0 * r0 * c_solar_gaussian());
 
     let rel = ((de_observed - de_analytic) / de_analytic).abs();
+    eprintln!(
+        "[burns-pr] observed = {de_observed:.6e}, analytic = {de_analytic:.6e}, rel = {rel:.4}"
+    );
     assert!(
         rel < 0.05,
         "PR drag dE disagreement vs Burns 1979 analytic: \

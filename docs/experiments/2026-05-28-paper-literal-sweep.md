@@ -32,7 +32,7 @@ paper text. Volatile fields (`git_sha`, `created_utc`, `crate_hash`,
 | 3.3 | $R_c$ crossings | 11 | 11 | ✓ |
 | 3.3 | spike magnitude range | $[4.7\times10^{-6},\,2.0\times10^{-4}]$ | $[4.664\times10^{-6},\,2.013\times10^{-4}]$ | ✓ |
 | 3.3 | smooth-kernel baseline floor | $<2.7\times10^{-14}$ | $2.665\times10^{-14}$ | ✓ |
-| 3.1 | radiation Burns 1979 rel | $0.7\,\%$ | $1.19\,\%$ | **drifted (+70 %, still ≪ 5 % gate)** |
+| 3.1 | radiation Burns 1979 rel | $0.7\,\%$ | $1.19\,\%$ | **resolved** — paper updated to 1.2 %; root cause is #133 back-reaction suppression (see Findings) |
 | 3.1 | central round-trip rel | $2.7\,\%$ | $2.65\,\%$ | ✓ |
 | 3.1 | Kepler baseline drift (no operator) | $<10^{-7}$ | gated at $<10^{-9}$ | ✓ (paper conservative — actual floor is two orders below) |
 | 3.4 | Pythagorean $\|\Delta E\|/\|E_0\|$ at $T=70$ | $1.4\times10^{-10}$ | $1.405\times10^{-10}$ | ✓ |
@@ -55,15 +55,16 @@ paper text. Volatile fields (`git_sha`, `created_utc`, `crate_hash`,
    longer emitted by the record header. The schema dropped this
    field at some point; the embedded example wasn't refreshed.
 
-**Drifted, qualitatively intact, root cause uncertain:**
+**Drifted but root cause now known:**
 
-3. §3.1 — radiation Burns 1979 agreement `0.7 %` → `1.19 %`. Still
-   well under the gated `5 %` tolerance, so the operator's contract
-   is not broken. The orbit-decay docstring notes the constant-$r$
-   analytic biases by $\sim 0.5\,\%$; the discrepancy with `0.7 %` is
-   not explained by that bias alone. Possible causes worth checking:
-   subtle change in the PR-drag force prefactor, the IAS15 substep
-   schedule under the operator, or the orbit drift over 10 orbits.
+3. §3.1 — radiation Burns 1979 agreement `0.7 %` → `1.19 %`. Root
+   cause is PR #133 (test-particle back-reaction suppression at
+   extreme mass ratios): the pre-fix Sun absorbed spurious velocity
+   from the m=1e-15 dust grain, which partially cancelled the
+   constant-r analytic bias. After #133 the Sun is physically fixed
+   (correct), and the residual reflects only the constant-r
+   approximation — well within the 5 % gate. Paper abstract and
+   §3.1 updated to 1.2 %.
 
 **Tighter than paper claims (could tighten or leave conservative):**
 
@@ -93,11 +94,15 @@ hold but are not confirmed.
 - [x] §Future work *Theory-confirmed counter-tests*: closed; both
       §3.2 (Plummer) and §3.3 (continuity) now have closed-form
       backing notebooks.
-- [ ] Remove `density = "Msun/AU3"` line from Appendix A TOML block
-      (regenerate via `paper/scripts/dump_record_header.py` or hand-edit).
-- [ ] Decide on §3.1 radiation Burns: investigate the `0.7 %` → `1.19 %`
-      shift, then either (a) update the literal to `1.2 %`, or (b)
-      identify the regression and restore the original agreement.
+- [x] Remove `density = "Msun/AU3"` line from Appendix A TOML block —
+      done by hand-edit, matches current schema.
+- [x] §3.1 radiation Burns: investigated. Root cause is #133
+      (test-particle back-reaction suppression at extreme mass ratios):
+      the pre-fix Sun accumulated spurious velocity from the dust
+      (m_ratio 1e-15) which partially cancelled the constant-r
+      analytic bias. After #133 the measurement is physically cleaner;
+      1.19 % is the honest residual. Paper abstract and §3.1 updated
+      to 1.2 %.
 - [ ] Optionally tighten §3.1 Kepler baseline claim from `< 10^{-7}`
       to `< 10^{-9}` to reflect the actual gate.
 - [ ] Phase 3 follow-up: re-run cross-platform ULP analysis once both

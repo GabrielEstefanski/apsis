@@ -23,7 +23,7 @@ abstract: |
   end reproducibility. We exercise the architecture with three
   first-party operator crates — `apsis-1pn` (first-post-Newtonian
   Schwarzschild correction), `apsis-radiation` (radiation pressure
-  and Poynting–Robertson drag, validated to 0.7 % of the Burns 1979
+  and Poynting–Robertson drag, validated to 1.2 % of the Burns 1979
   analytic law), and `apsis-central` (parametric central-force
   precession with an observable-inversion constructor, round-trip
   agreement to 2.7 %) — spanning Hamiltonian and non-conservative
@@ -373,7 +373,7 @@ measures the total specific-energy change $\Delta E$ between
 endpoints, and compares against the constant-$r$ analytic
 prediction $\Delta E_{\text{analytic}} = -\beta\, G M v^2 m\, T /
 (r^2 c)$ derived from the tangential PR force at the initial
-epoch; empirical agreement is 0.7 % at the gated 5 % tolerance,
+epoch; empirical agreement is 1.2 % at the gated 5 % tolerance,
 with the gate width set to absorb the $\sim 2$ % bias of the
 constant-$r$ approximation as the orbit drifts $\sim 0.5$ %
 inward over the window. A counter-test on the same orbit without
