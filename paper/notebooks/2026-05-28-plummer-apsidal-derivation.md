@@ -28,14 +28,13 @@ and `paper.md` §3.2):
 | Integration window | 500 | orbital periods |
 | Integrator | IAS15, $dt_0 = 10^{-4} T$ | — |
 
-Reported measurement in `paper.md`: drift $\approx -83\,128$
-arcsec/century (three orders of magnitude larger than the GR signal
-and of the wrong sign).
-
-The harness at `crates/apsis-1pn/tests/exactness_theory_match.rs`
-re-measures the drift under the same conditions and exposes the value
-through `cargo test --release ... --nocapture` for cross-check against
-the literal cited in §3.2.
+Apsis measurement (post-unwrap): drift $\approx -2.289 \times 10^6$
+arcsec/century, $\sim 5\times 10^4$ times the GR signal and of the
+wrong sign. The harness at
+`crates/apsis-1pn/tests/exactness_theory_match.rs` re-measures the
+drift under the same conditions and exposes the value through
+`cargo test --release ... --nocapture` for cross-check against the
+closed-form prediction cited in §3.2.
 
 ## References
 
