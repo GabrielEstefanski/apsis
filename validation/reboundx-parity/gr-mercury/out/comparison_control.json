@@ -1,0 +1,39 @@
+{
+  "mode": "control",
+  "n_samples": 501,
+  "all_passed": true,
+  "gated": [
+    {
+      "name": "|\u0394a|/a cross",
+      "observed": 5.162522017265794e-15,
+      "tolerance": 1e-13,
+      "passed": true
+    },
+    {
+      "name": "|\u0394e| cross",
+      "observed": 4.3021142204224816e-15,
+      "tolerance": 1e-13,
+      "passed": true
+    },
+    {
+      "name": "|\u0394h|/h cross",
+      "observed": 2.3704165908316252e-15,
+      "tolerance": 1e-13,
+      "passed": true
+    },
+    {
+      "name": "|\u0394E|/E0 cross",
+      "observed": 5.431451468441284e-15,
+      "tolerance": 1e-13,
+      "passed": true
+    }
+  ],
+  "reported": {
+    "max_dr": 1.1977316320436813e-11,
+    "drift_apsis": 5.184567310784862e-15,
+    "drift_rebound": 2.715725734220642e-15,
+    "precession_apsis": -2.7136599007637883e-09,
+    "precession_rebound": 2.9766450455662586e-10,
+    "precession_analytic": 42.98235815418064
+  }
+}
