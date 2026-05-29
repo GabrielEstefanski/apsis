@@ -25,10 +25,9 @@
 //! [`warn_diag!`](apsis::warn_diag) naming the violated invariant: at
 //! Mercury's perihelion, an ε ≈ 0.02 AU softening produces a numerical
 //! apsidal drift ~5 × 10⁴ larger than the 43 arcsec/century GR effect
-//! and of the opposite sign — the closed-form prediction is
-//! $\dot\varpi_\text{Plummer} \approx -2.35 \times 10^6$ arcsec/century;
-//! see paper §3.2 and the theory-match gate in
-//! `tests/exactness_theory_match.rs`.
+//! and of the opposite sign — a full-potential apsidal-angle quadrature
+//! puts it at ϖ̇ ≈ −2.29 × 10⁶ arcsec/century (see paper §3.2 and the
+//! softened-Plummer precession validation gate).
 
 use apsis::core::system::System;
 use apsis::domain::body::Body;
