@@ -1,0 +1,11 @@
+# REBOUNDx parity (Sun-Mercury 1PN) — Linux only.
+#
+# REBOUNDx does not build on Windows/MSVC (C99 VLAs in gr_full.c); use WSL,
+# a container, or Linux CI. reboundx MUST be compiled fresh against its
+# co-installed rebound, or the librebound RPATH baked into the wheel breaks
+# on reuse. Install with:
+#
+#     pip install --no-cache-dir rebound reboundx
+#
+rebound==4.6.0
+reboundx==4.6.2
