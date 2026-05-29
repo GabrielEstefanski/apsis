@@ -83,15 +83,22 @@ fn main() {
         System::new(vec![sun, mercury], units).with_integrator(IntegratorKind::Ias15).with_dt(dt0);
 
     if with_1pn {
-        sys.add_hamiltonian_perturbation(Box::new(PostNewtonian1PN::from_raw_c(C_SOLAR_UNITS, units)))
-            .expect("apsis-1pn shares UnitSystem::solar_canonical() with the system");
+        sys.add_hamiltonian_perturbation(Box::new(PostNewtonian1PN::from_raw_c(
+            C_SOLAR_UNITS,
+            units,
+        )))
+        .expect("apsis-1pn shares UnitSystem::solar_canonical() with the system");
     }
 
     // ── CSV output (schema identical to the rebound-parity scenarios) ────── //
     let file = File::create(&output_path).expect("failed to open output file");
     let mut w = BufWriter::new(file);
 
-    let mode = if with_1pn { "apsis-1pn (test-particle pairwise)" } else { "Newtonian (1PN off, control)" };
+    let mode = if with_1pn {
+        "apsis-1pn (test-particle pairwise)"
+    } else {
+        "Newtonian (1PN off, control)"
+    };
     writeln!(w, "# REBOUNDx parity — Sun-Mercury 1PN — apsis side").unwrap();
     writeln!(w, "# protocol: paper/notebooks/2026-05-29-reboundx-parity-gr.md").unwrap();
     writeln!(w, "# integrator: IAS15 (apsis); force: {mode}").unwrap();
