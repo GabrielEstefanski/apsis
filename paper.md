@@ -445,16 +445,21 @@ total, consistent with the per-orbit precision reported in
 
 With a Plummer-softened kernel (`NewtonKernel::new(eps)` with
 $\varepsilon \approx 0.02$ AU, the cluster-scale softening for a
-solar-mass body) opted in — Exactness violated — the measured per-orbit
-cumulative drift agrees with the closed-form softened-Plummer
-apsidal-precession prediction
-$\Delta\varpi_\text{orbit} = -3\pi\varepsilon^2 / [a^2(1-e^2)^2]$
-to 2.55 % (5 % gated), cross-checked against an independent scipy
-DOP853 integration at 3.2 % residual. Scaled to arcseconds per Earth
-century, $\dot\varpi_\text{Plummer} \approx -2.35\times 10^6$
-arcsec/century — $\sim 5\times 10^4$ times the relativistic effect
-and of the wrong sign, while energy and angular momentum remain
-conserved to machine precision throughout.
+solar-mass body) opted in — Exactness violated — the apsidal precession
+agrees with the full-potential apsidal-angle quadrature for the softened
+kernel to within $1\,\%$: apsis to $0.04\,\%$ ($0.5\,\%$ gated) and an
+independent scipy DOP853 integration to $0.58\,\%$ (over a shorter
+50-orbit window). The quadrature oracle (no $\varepsilon$-expansion,
+independent of apsis; §3.2 derivation notebook) gives
+$\dot\varpi = -2.288\times 10^6$ arcsec/century — $\sim 5\times 10^4$
+times the relativistic effect and of the wrong sign, while energy and
+angular momentum remain conserved to machine precision throughout. The
+measured drift carries the 1PN operator whose precondition is violated,
+but the softening artifact dominates it by $\sim 5\times 10^4$, so 1PN
+contributes $\sim 2\times 10^{-5}$ — below the gate. The leading-order
+closed form $\Delta\varpi_\text{orbit} = -3\pi\varepsilon^2 / [a^2(1-e^2)^2]$
+sits 2.66 % above the quadrature — a quantified $O(\varepsilon^2)$
+next-order effect, not a discrepancy.
 
 ## Continuity counter-test: TruncatedPlummer
 
@@ -680,9 +685,10 @@ unless a specific historical reproduction motivates otherwise.
 The work below is prioritised: the first tier quantifies a current
 floor of the satisfied 1PN result, the second generalises the
 cross-platform analysis. (The theory-confirmed counter-test
-prerequisite identified in earlier drafts has closed; the §3.2
-Plummer and §3.3 continuity predictions are now reported as
-closed-form expressions backed by independent scipy verification.)
+prerequisite identified in earlier drafts has closed: §3.2 is anchored
+to the exact apsidal-angle quadrature for the full softened potential,
+§3.3 to the closed-form spike-magnitude bound, both with independent
+numerical cross-checks.)
 
 *Error budget for Mercury 1PN agreement.* The 28 ppm relative
 agreement reported in §Results is currently undisaggregated. A

@@ -31,7 +31,7 @@ and `paper.md` §3.2):
 Apsis measurement (post-unwrap): drift $\approx -2.289 \times 10^6$
 arcsec/century, $\sim 5\times 10^4$ times the GR signal and of the
 wrong sign. The harness at
-`crates/apsis-1pn/tests/exactness_theory_match.rs` re-measures the
+`crates/apsis-1pn/tests/softened_plummer_precession_validation.rs` re-measures the
 drift under the same conditions and exposes the value through
 `cargo test --release ... --nocapture` for cross-check against the
 closed-form prediction cited in §3.2.
@@ -47,6 +47,10 @@ closed-form prediction cited in §3.2.
 - Goldstein, Poole & Safko (2002). *Classical Mechanics* (3rd ed.),
   §3.6 (orbit equation in a central potential), §3.8 (apsidal
   angle and conditions for closed orbits).
+- Landau, L. D., & Lifshitz, E. M. (1976). *Mechanics* (3rd ed.),
+  §15. Perihelion-precession formula for a small perturbation to the
+  Kepler potential; used for the first-order $\varepsilon^4$ next-order
+  term below.
 - Touma, J., & Tremaine, S. (1997). *MNRAS* 292, 905. Secular
   perturbation theory in non-Keplerian potentials; references the
   apsidal-angle formula in a form ready for power-series expansion
@@ -180,9 +184,32 @@ with §3.2's qualitative claim "wrong sign, orders of magnitude larger"
 and tightening the pre-unwrap-fix "$\sim 3 \times 10^3$ times" to
 $5 \times 10^4$.
 
+## Full-potential apsidal-angle quadrature (rigorous oracle)
+
+The closed form above is the leading order in $\varepsilon^2$. The
+apsidal precession for the *full* Plummer potential needs no expansion:
+for a central potential the angle swept periapse-to-periapse is the
+quadrature (Goldstein §3.6)
+
+$$\Delta\varpi = 2\int_{r_\text{min}}^{r_\text{max}}\frac{L/r^2}{\sqrt{2\,(E-\Phi(r)) - L^2/r^2}}\,\mathrm{d}r - 2\pi,
+\qquad \Phi(r) = -\frac{GM}{\sqrt{r^2+\varepsilon^2}},$$
+
+with $E$, $L$ fixed by the §3.2 initial condition (periapsis
+$r_0 = a(1-e)$, tangential vis-viva speed under the Kepler $\mu$). The
+companion script `plummer_apsidal_quadrature.py` evaluates it (numpy
+Gauss–Legendre + bisection; no scipy). At $\varepsilon = 0$ it
+returns $\Delta\varpi = 1.7\times10^{-11}$ rad/orbit — the Kepler orbit
+closes, so the quadrature is trustworthy to $\sim10^{-11}$ rad, eight
+orders below the signal.
+
+Being a spatial quadrature of the full potential, it is independent of
+the LRL-vector $\omega$ definition, of Kepler-vs-radial sampling, and of
+any time-integrator. It is the oracle the closed form and the
+time-integrators are compared against below.
+
 ## Comparison vs measured
 
-Earlier diagnostics in `exactness_theory_match.rs` returned the
+Earlier diagnostics in `softened_plummer_precession_validation.rs` returned the
 final-vs-initial periapsis-angle difference modulo $2\pi$, mapped to
 $(-\pi, \pi]$. For the Plummer-violated case the true cumulative drift
 over 500 orbits is $\approx -13.71$ rad, well outside that interval —
@@ -197,39 +224,72 @@ partly the unwrap fix, not unwrap alone. The current test uses
 per-orbit accumulation of the unwrapped step and reports the full
 drift directly.
 
-An independent scipy DOP853 integration over 50 orbits (script:
-`paper/notebooks/scripts/plummer_check.py`) gives:
+The cleanest comparison is the precession *rate* (rad per unit time):
+dividing each source by its own period removes the per-radial-vs-per-
+Kepler "which orbit" ambiguity (the radial period exceeds the Kepler
+period by $0.80\%$ here, an $O(\varepsilon^2)$ effect that would bias a
+naive per-orbit comparison).
 
-| Quantity | scipy DOP853 | Closed-form | Ratio |
-| --- | --- | --- | --- |
-| $\Delta\varpi$ per orbit | $-2.656\times 10^{-2}$ rad | $-2.743\times 10^{-2}$ rad | 0.968 |
-| cumulative over 50 orbits | $-1.328$ rad | $-1.371$ rad | 0.968 |
-
-The $\sim 3\%$ gap exceeds the $O(\varepsilon^4/a^4) \sim 7\times
-10^{-6}$ next-order expansion term by three orders of magnitude. Its
-source is not the leading-order truncation; candidate explanations
-(higher-order coefficient, sampling at Kepler vs radial period,
-secular vs instantaneous $a$) are not disambiguated here. The 5%
-gate absorbs the gap regardless.
-
-| Source | Value (arcsec/century) | Notes |
+| Source | Rate (rad/time) | vs quadrature |
 | --- | --- | --- |
-| Predicted (closed form) | $-2.349\times 10^{6}$ | this notebook |
-| Independent scipy DOP853 | $-2.275\times 10^{6}$ | 3.2 % below closed form |
-| Apsis IAS15, 500 orbits | $-2.289\times 10^{6}$ | 2.55 % below closed form (`exactness_theory_match.rs`) |
-| Acceptance bound (gate) | 5 % | absorbs the gap with $\sim 2\times$ margin |
+| Quadrature (full Plummer) | $-1.76559\times10^{-2}$ | — (oracle) |
+| Closed form (leading order) | $-1.81261\times10^{-2}$ | $+2.66\%$ |
+| Apsis IAS15, 500 orbits | $-1.76624\times10^{-2}$ | $+0.04\%$ |
+| scipy DOP853, 50 orbits | $-1.75543\times10^{-2}$ | $-0.58\%$ |
+
+The integrator entries are their reported drift of the osculating
+$\omega$ per Kepler period, converted to a rate (sources
+`softened_plummer_precession_validation.rs` and `plummer_check.py`). The apsis run
+carries Plummer + 1PN by design — the counter-test is precisely the
+exactness-requiring 1PN operator on a softened kernel; the softening
+artifact dominates the relativistic signal by $\sim 5\times10^4$, so the
+1PN term is $\approx 2\times10^{-5}$ of the measured drift (below the
+gate) and the comparison to the pure-Plummer quadrature holds. Apsis
+reproduces the quadrature apsidal-precession rate to $0.04\%$ for this
+orbit. The earlier "$\sim3\%$ gap vs the
+closed form" is the closed form's own leading-order truncation
+($+2.66\%$) plus scipy's residual ($-0.58\%$, over a shorter 50-orbit
+window) — not an apsis error.
+
+**Next-order structure.** An earlier draft mis-stated the next-order
+term as $O(\varepsilon^4/a^4)\approx7\times10^{-6}$ — that is the
+*square* of the expansion parameter. The correct relative next-order is
+$O(\varepsilon^2/a^2)$: the rate sweep gives a clean $\varepsilon^2$ law
+(closed/quadrature $-\,1 = +66.8\,\varepsilon^2 + \ldots$, flat across
+$\varepsilon\in[0.002,\,0.02]$). The $O(\varepsilon^4)$ per-orbit
+correction splits into two pieces:
+
+- the first-order contribution of the $\varepsilon^4$ potential term
+  $V_4 = -3GM\varepsilon^4/8r^5$, via the Landau–Lifshitz §15 precession
+  formula $\Delta\varpi = \partial_L\!\oint \delta U\,\mathrm{d}t$ (which
+  reproduces the leading term exactly):
+  $$\Delta\varpi_a = \frac{15\pi\,(4+3e^2)\,\varepsilon^4}{8\,a^4(1-e^2)^4},$$
+  confirmed against the quadrature — subtracting it cuts the
+  $\varepsilon=0.02$ per-radial-period gap from $-1.81\%$ to $-1.06\%$;
+- the second-order contribution of $V_2 = GM\varepsilon^2/2r^3$, isolated
+  numerically as the residual (a clean $\varepsilon^4$ term), whose
+  closed form requires second-order secular theory and is not derived
+  here.
+
+The quadrature captures the full precession (all orders in
+$\varepsilon$) to its $\sim10^{-11}$ floor, so it — not the truncated
+series — is the value the gate asserts against.
 
 ## Result for the paper
 
-Apsis IAS15 over 500 orbits agrees with the closed-form prediction
-to 2.55 %, between scipy's 3.2 % residual and zero — consistent with
-the gap being a real physical effect rather than scheme noise.
+§3.2 reports the full-potential apsidal-angle quadrature as the oracle —
+$-1.766\times10^{-2}$ rad/time for the full Plummer potential on this
+orbit — against which apsis agrees to $0.04\%$. The leading-order closed
+form $\Delta\varpi_\text{orbit} = -3\pi\varepsilon^2/[a^2(1-e^2)^2]$ sits
+$+2.66\%$ above it, a quantified $O(\varepsilon^2)$ next-order effect
+(the piece $\Delta\varpi_a$ derived above, plus a clean $\varepsilon^4$
+residual) — a converging approximation, not a discrepancy.
 
-Paper §3.2 cites the closed form $\Delta\varpi_\text{orbit} =
--3\pi\varepsilon^2 / [a^2(1-e^2)^2]$ derived above and the measured
-apsis rate $-2.289\times 10^6$ arcsec/century. The
-`plummer_drift_matches_softened_theory` gate in
-`crates/apsis-1pn/tests/exactness_theory_match.rs` asserts the 5 %
-agreement; the per-orbit unwrap in `measure_drift_arcsec_per_century`
-recovers the full cumulative drift that the earlier mod-$2\pi$
-diagnostic aliased.
+The gate `plummer_drift_matches_quadrature` in
+`crates/apsis-1pn/tests/softened_plummer_precession_validation.rs` asserts apsis against
+the quadrature oracle (reference value pinned from the
+`plummer_apsidal_quadrature.py` script), so the bound reflects the
+measurement's own precision rather than absorbing the closed form's
+truncation. The per-orbit unwrap in `measure_drift_arcsec_per_century`
+recovers the full cumulative drift the earlier mod-$2\pi$ diagnostic
+aliased.

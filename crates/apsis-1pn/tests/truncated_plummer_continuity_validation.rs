@@ -1,6 +1,7 @@
-//! Theory-match harness for the Continuity counter-test — sharpens the
-//! `kernel_continuity_counter_test.rs` bijection gate to also pin each
-//! spike magnitude against the closed-form bound from paper §3.3.
+//! Validation harness for the truncated-Plummer continuity counter-test
+//! (paper §3.3) — sharpens the `kernel_continuity_counter_test.rs`
+//! bijection gate to also pin each spike magnitude against the closed-form
+//! envelope from §3.3.
 
 use std::sync::Arc;
 
@@ -115,7 +116,7 @@ fn measure_crossing_sequence() -> Vec<CrossingMeasurement> {
     sys.add_hamiltonian_perturbation(Box::new(PostNewtonian1PN::for_units(
         UnitSystem::solar_canonical(),
     )))
-    .expect("continuity-theory match: matched UnitSystem");
+    .expect("continuity validation: matched UnitSystem");
     sys.step();
 
     let mut samples: Vec<Sample> = Vec::with_capacity(N_STEPS);
@@ -142,11 +143,11 @@ fn measure_crossing_sequence() -> Vec<CrossingMeasurement> {
 #[ignore = "release-mode integration test; run with `cargo test --release -- --ignored`"]
 fn continuity_per_crossing_measurements_are_recorded() {
     let crossings = measure_crossing_sequence();
-    eprintln!("[continuity-theory] {} crossings recorded", crossings.len());
-    eprintln!("[continuity-theory] # | t_cross    | v_cross   | spike |dE/E|  | e_total");
+    eprintln!("[continuity-validation] {} crossings recorded", crossings.len());
+    eprintln!("[continuity-validation] # | t_cross    | v_cross   | spike |dE/E|  | e_total");
     for (i, c) in crossings.iter().enumerate() {
         eprintln!(
-            "[continuity-theory] {:>2} | {:>9.5} | {:>9.5} | {:>13.3e} | {:>10.5}",
+            "[continuity-validation] {:>2} | {:>9.5} | {:>9.5} | {:>13.3e} | {:>10.5}",
             i + 1,
             c.t,
             c.v_cross,
@@ -196,7 +197,7 @@ fn spike_magnitudes_satisfy_jump_bound() {
         );
     }
     eprintln!(
-        "[continuity-theory] {} crossings within bound; worst measured/predicted = {:.3}",
+        "[continuity-validation] {} crossings within bound; worst measured/predicted = {:.3}",
         crossings.len(),
         worst_ratio,
     );

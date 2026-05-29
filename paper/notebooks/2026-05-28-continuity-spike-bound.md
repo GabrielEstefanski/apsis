@@ -40,7 +40,7 @@ Reported measurement in `paper.md`: spike magnitudes $|\Delta E / E|
 \in [4.7 \times 10^{-6},\, 2.0 \times 10^{-4}]$ over 11 crossings.
 Smooth-kernel reference floor: $< 2.7 \times 10^{-14}$ per step.
 
-The harness at `crates/apsis-1pn/tests/continuity_theory_match.rs`
+The harness at `crates/apsis-1pn/tests/truncated_plummer_continuity_validation.rs`
 re-measures spike magnitudes and the bracketing velocity at each
 crossing, then compares against the bound the author derives.
 
@@ -176,7 +176,7 @@ $$\left|\frac{\Delta E}{|E_0|}\right|_\text{bound} = 4.000\times 10^{-4} \quad\t
 | 11 | 55.3373 | 0.999840 | $4.000\times 10^{-4}$ | $6.346\times 10^{-5}$ |
 
 Measured values from `continuity_per_crossing_measurements_are_recorded`
-in `crates/apsis-1pn/tests/continuity_theory_match.rs`. Worst-case
+in `crates/apsis-1pn/tests/truncated_plummer_continuity_validation.rs`. Worst-case
 crossing is #4 ($2.013\times 10^{-4}$ = 50.3% of bound); floor is #6
 ($4.664\times 10^{-6}$ = 1.2% of bound).
 
@@ -214,5 +214,5 @@ sign-alternation cancelling the wrong-side work whenever the
 crossing is not centred in the step.
 
 The theory-match gate `spike_magnitudes_satisfy_jump_bound` in
-`crates/apsis-1pn/tests/continuity_theory_match.rs` asserts the bound
+`crates/apsis-1pn/tests/truncated_plummer_continuity_validation.rs` asserts the bound
 at safety factor 1.0.
