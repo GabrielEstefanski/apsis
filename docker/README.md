@@ -49,8 +49,37 @@ Or run a single command without an interactive shell:
 docker run --rm -v "$PWD:/apsis" apsis-validation make figures
 ```
 
+## File ownership on Linux hosts
+
+The container runs as root and the repo is bind-mounted, so on a **Linux
+host** anything written back into the tree — `make figures` (PDFs under
+`paper/figures/`), `run.py` (`out/*.csv`) — lands root-owned, and you need
+`sudo` to edit or `git checkout` it afterwards. (On macOS and Windows/Docker
+Desktop the bind-mount remaps ownership, so this does not bite.)
+
+To keep outputs owned by you, run as your host UID:
+
+```bash
+docker run --rm -it --user "$(id -u):$(id -g)" -v "$PWD:/apsis" apsis-validation
+```
+
+The Python figure/parity flows need only `--user`. A non-root UID cannot write
+cargo's default `CARGO_HOME` (`/root/.cargo`), so for `cargo` flows also point
+it at a writable path:
+
+```bash
+docker run --rm -it --user "$(id -u):$(id -g)" -e CARGO_HOME=/tmp/.cargo \
+  -v "$PWD:/apsis" apsis-validation \
+  cargo test --release -p apsis-1pn --tests -- --ignored
+```
+
 ## Notes
 
+- **git provenance:** the image sets `safe.directory` for `/apsis` (`git
+  config --system`) so the build scripts' `git rev-parse` works on the
+  bind-mounted repo despite the root/host-UID ownership split. Without it git
+  refuses the repo ("dubious ownership") and records ship an empty
+  `apsis.git_sha`.
 - **reboundx install:** the Dockerfile uses `pip install --no-cache-dir` so
   reboundx is compiled against its co-installed rebound. Reusing a cached
   wheel bakes a stale `librebound` RPATH that fails to load — do not drop

@@ -41,6 +41,10 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
         | sh -s -- -y --default-toolchain "${RUST_VERSION}" --profile minimal
 ENV PATH=/root/.cargo/bin:${VIRTUAL_ENV}/bin:$PATH
 
+# Bind-mounted repo is host-UID-owned; as root, git refuses it ("dubious
+# ownership") and the build scripts' rev-parse silently yields an empty git_sha.
+RUN git config --system --add safe.directory /apsis
+
 # Python venv with the validation/figure deps. reboundx is compiled fresh
 # against its co-installed rebound (--no-cache-dir): reusing a cached wheel
 # bakes a stale librebound RPATH that fails to load. rebound 4.6.0 is pinned
