@@ -6,7 +6,7 @@
 # snapshot, run the corresponding validation harness and copy its
 # output into `paper/figures/data/`.
 
-.PHONY: help figures paper validation clean data
+.PHONY: help figures paper validation clean data lint-paper
 .PHONY: figures-mercury-1pn figures-rebound-parity-trajectories figures-rebound-parity-brouwer
 .PHONY: figures-plummer-apsidal-convergence data-plummer-convergence
 .PHONY: validation-mercury-1pn validation-recommended-dt
@@ -30,6 +30,7 @@ help:
 	@echo "  make clean                 Remove generated figures, paper.pdf, harness outputs"
 	@echo
 	@echo "  make data                  Regenerate figure data snapshots (slow; runs harnesses)"
+	@echo "  make lint-paper            Check paper.md for hyphen-wrap render artifacts"
 	@echo
 	@echo "Per-figure / per-harness:"
 	@echo "  make figures-mercury-1pn"
@@ -108,6 +109,13 @@ paper.pdf: paper.md paper.bib $(PAPER_FIGURES)
 		--highlight-style=tango \
 		--pdf-engine=xelatex \
 		-o paper.pdf
+
+# Guard against the hard-wrap-after-hyphen artifact: a markdown soft line
+# break renders as a space, so a line ending in a word hyphen (`bit-` with
+# `identically` on the next line) prints as "bit- identically". Fails if any
+# paper.md line ends in a hyphen other than the YAML `---` fences.
+lint-paper:
+	@if grep -nP -- '-$$' paper.md | grep -vP ':---+$$'; then echo "ERROR: paper.md has a line ending in a hyphen (renders as 'word- word'); join the compound onto one line." && exit 1; else echo "lint-paper OK: no trailing-hyphen wraps in paper.md"; fi
 
 # ── Validation ───────────────────────────────────────────────────────── #
 
