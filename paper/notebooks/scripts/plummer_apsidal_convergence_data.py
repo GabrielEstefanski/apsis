@@ -17,11 +17,8 @@ oracle and closed form are evaluated from the quadrature module.
 from __future__ import annotations
 
 import csv
-import sys
 from pathlib import Path
 
-# Sibling import from this script's own directory (robust to CWD).
-sys.path.insert(0, str(Path(__file__).resolve().parent))
 from plummer_apsidal_quadrature import (
     closed_form_per_orbit_rad,
     precession_per_orbit_rad,
@@ -46,7 +43,7 @@ def read_apsis() -> dict[float, float]:
 def main() -> None:
     apsis = read_apsis()
 
-    rows = []
+    rows: list[tuple[float, float, float, float, float, float]] = []
     for eps in sorted(apsis):
         oracle = precession_per_orbit_rad(eps)
         closed = closed_form_per_orbit_rad(eps)
