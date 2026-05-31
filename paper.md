@@ -19,8 +19,7 @@ abstract: |
   registration and emits a structured diagnostic for every violated
   invariant; the same registration step is the load-bearing
   mechanism for the contract surface and for the per-run *Apsis
-  Record* that pins the operator stack to a `Cargo.lock` for end-to-
-  end reproducibility. We exercise the architecture with three
+  Record* that pins the operator stack to a `Cargo.lock` for end-to-end reproducibility. We exercise the architecture with three
   first-party operator crates — `apsis-1pn` (first-post-Newtonian
   Schwarzschild correction), `apsis-radiation` (radiation pressure
   and Poynting–Robertson drag, validated to 1.2 % of the Burns 1979
@@ -32,8 +31,7 @@ abstract: |
   mechanism: it reproduces Mercury's perihelion precession to
   within $2.8 \times 10^{-5}$ of
   the closed-form general-relativistic prediction over 500 orbits
-  under the adaptive Gauss–Radau IAS15 scheme, reproduced bit-
-  identically across Windows and Linux on x86_64; violating the
+  under the adaptive Gauss–Radau IAS15 scheme, reproduced bit-identically across Windows and Linux on x86_64; violating the
   kernel-exactness precondition with Plummer softening surfaces a
   registration warning and yields a drift more than four orders of
   magnitude larger and of the wrong sign, never as a numerical
@@ -136,8 +134,7 @@ production code is not served by replacing it with `apsis`. The
 narrow scope ($N \le 10^3$ in the validated regime) is a deliberate
 trade: ship a verification infrastructure with a complete physical
 demonstration, rather than a wider simulation platform with
-verification deferred to later work. These two properties — type-
-expressed preconditions and out-of-tree verified federated
+verification deferred to later work. These two properties — type-expressed preconditions and out-of-tree verified federated
 extensions — are not, to the author's knowledge, combined in any
 existing N-body code.
 
@@ -152,8 +149,7 @@ three operator crates spanning both operator categories
 (Hamiltonian and non-conservative) and both supported constructor
 patterns, then exercises the contract mechanism in depth on
 `apsis-1pn` (Exactness counter-test on Mercury 1PN, Continuity
-counter-test on a truncated Plummer kernel), checks external-
-implementation parity against REBOUND IAS15 on four canonical
+counter-test on a truncated Plummer kernel), checks external-implementation parity against REBOUND IAS15 on four canonical
 scenarios, and closes with the cross-platform reproducibility
 test. §Discussion covers the scope
 of the cross-platform claim (including ARM64 hardware not yet
@@ -272,8 +268,7 @@ state rather than returning a fixed value.
 *Composition rules* — registration is commutative at the IEEE-754
 accumulator step for $N = 2$; associative within the IEEE-754
 summation envelope for $N \ge 3$; additive (perturbations
-contribute by `+=`, never overwrite, verified by sentinel pre-
-population of the accumulator); the system's effective
+contribute by `+=`, never overwrite, verified by sentinel pre-population of the accumulator); the system's effective
 `KernelRequirements` is the set-union of the individual
 perturbations'. Four tests. The trajectory-level corollary of
 associativity (registering $[A, B, C]$ versus $[C, B, A]$ produces
@@ -293,14 +288,12 @@ registration still observes the warning. Four tests. The two
 counter-tests demonstrated in §Results are specific instances of
 the first guarantee (one Exactness diagnostic on softened-kernel
 violation; one Continuity diagnostic on truncated-Plummer
-violation); the remaining tests pin the audit-trail and no-silent-
-acceptance properties that the kernel-precondition demonstration
+violation); the remaining tests pin the audit-trail and no-silent-acceptance properties that the kernel-precondition demonstration
 alone would not exhibit.
 
 Twelve tests in total at `crates/apsis/src/contract.rs`. The same
 file holds the prose statement of every guarantee, the rationale
-for the invariants the contract does *not* extend to (cross-
-platform bit-exactness, cross-thread determinism, build-flag
+for the invariants the contract does *not* extend to (cross-platform bit-exactness, cross-thread determinism, build-flag
 invariance), and the load-bearing iteration-order property of the
 perturbation storage that a future refactor must not break.
 
@@ -412,10 +405,10 @@ supporting the claim that the federation contract does not bind
 to a specific operator family.
 
 The remaining subsections demonstrate the contract mechanism in
-depth on a single operator (`apsis-1pn`): the Exactness counter-
-test on Mercury's perihelion precession, the Continuity counter-
-test on a truncated-Plummer kernel, and the cross-platform bit-
-exactness of the entire portfolio.
+depth on a single operator (`apsis-1pn`): the Exactness
+counter-test on Mercury's perihelion precession, the Continuity
+counter-test on a truncated-Plummer kernel, and the cross-platform
+bit-exactness of the entire portfolio.
 
 ## Exactness counter-test: Mercury 1PN
 
@@ -429,9 +422,10 @@ $\Delta\omega_{\text{orbit}} = 6\pi GM / (c^2 a (1 - e^2))$ summed
 over 500 orbits (51.7720 arcsec in canonical f64 evaluation) within
 $2.8 \times 10^{-5}$ relative agreement. The per-century rate is
 42.991 arcsec; the historical 43 arcsec/century [@Will1993] is
-matched to four significant figures. The measurement reproduces bit-
-identically across Windows and Linux on x86_64; the hardware-
-specific reproducibility detail is in §Cross-platform reproducibility.
+matched to four significant figures. The measurement reproduces
+bit-identically across Windows and Linux on x86_64; the
+hardware-specific reproducibility detail is in §Cross-platform
+reproducibility.
 
 Extending the same scenario to 4153 orbits (figure below) shows the
 cumulative perihelion advance tracking the GR prediction linearly
@@ -461,6 +455,25 @@ closed form $\Delta\varpi_\text{orbit} = -3\pi\varepsilon^2 / [a^2(1-e^2)^2]$
 sits 2.66 % above the quadrature — a quantified $O(\varepsilon^2)$
 next-order effect, not a discrepancy.
 
+Sweeping the softening over two decades ($\varepsilon \in [10^{-3},
+10^{-1}]$ AU; figure below) extends this single point to the full
+regime. Measuring the *geometric* apsidal precession — the angle
+between successive periapses, the quantity the quadrature itself
+computes — apsis tracks the exact oracle to $\sim 10^{-7}$ across the
+resolvable range, while the leading closed form follows its
+$\varepsilon^2$ scaling up to a 44 % error at $\varepsilon = 0.1$. The
+figure bounds the method on both sides rather than cropping to the
+favourable interval: at small $\varepsilon$ the apsis curve rises as the
+precession signal ($\propto \varepsilon^2$) falls toward the measurement
+resolution, and at large $\varepsilon$ the closed form's leading-order
+truncation dominates. The $0.04\,\%$ gate above measures the osculating
+argument of periapsis sampled per Kepler period, not the geometric
+apsidal angle; that the geometric quantity agrees to $\sim 10^{-7}$
+identifies the $0.04\,\%$ as the osculating-versus-geometric definition
+difference, not a dynamical error.
+
+![Softened-Plummer apsidal precession across a softening sweep, as relative deviation $|1 - \Delta\varpi / \Delta\varpi_{\text{exact}}|$ from the exact full-potential apsidal-angle quadrature. `apsis` (IAS15; geometric apsidal angle from periapsis-passage detection) reproduces the oracle to $\sim 10^{-7}$ across the resolvable range; the leading closed form ($\propto \varepsilon^2$; slope-2 reference dashed) reaches a 44 % error at $\varepsilon = 0.1$. Both measurement edges are shown rather than cropped: the apsis curve rises at small $\varepsilon$ as the precession signal vanishes (resolution floor), and the closed-form error grows without bound at large $\varepsilon$. The apsis points are freshly measured; the oracle and closed form are evaluated from the quadrature, with no tuned constants.](paper/figures/plummer_apsidal_convergence.pdf){#fig:plummer-apsidal-convergence width=85%}
+
 ## Continuity counter-test: TruncatedPlummer
 
 The Continuity counter-test is a distinct configuration designed
@@ -473,8 +486,7 @@ $\alpha = 0.8$ chosen so that $K$ is continuous at $R_c$, the
 force $-dK/dr$ has a finite jump of
 $(1 - \alpha) \cdot R_c / (R_c^2 + \varepsilon^2)^{3/2} = 0.2$
 there, and the trajectory remains reliably bound (the orbit's
-apoapse sits near $r \approx 2.06$, well inside the marginal-
-binding threshold at $\alpha \approx 0.5$ for these parameters).
+apoapse sits near $r \approx 2.06$, well inside the marginal-binding threshold at $\alpha \approx 0.5$ for these parameters).
 
 Under fourth-order Yoshida composition at fixed timestep
 $\mathrm{d}t = 10^{-3}$ in canonical time units, the orbit crosses
@@ -607,8 +619,7 @@ require correctly-rounded results). The 1-ULP differences in the
 remaining cases propagate through the controller's substep-cadence
 selection to a 0.002 arcsec/century absolute shift in cumulative
 Mercury $\Delta\omega$ over 500 orbits, separating the
-$4.4 \times 10^{-6}$ relative agreement on Windows UCRT (scenario-
-specific accidental cancellation in UCRT's rounding distribution)
+$4.4 \times 10^{-6}$ relative agreement on Windows UCRT (scenario-specific accidental cancellation in UCRT's rounding distribution)
 from the $2.8 \times 10^{-5}$ result reproduced bit-identically by
 `libm` and glibc. Both values sit several orders of magnitude below
 the current observational precision of Mercury's perihelion
@@ -627,8 +638,7 @@ The methodology and per-implementation analysis are recorded in
 **Synthesis.** Across the five Results subsections, the library
 demonstrates the federated perturbation model along five axes:
 three operator crates (`apsis-1pn`, `apsis-radiation`,
-`apsis-central`), two operator categories (Hamiltonian and non-
-conservative), two constructor patterns (regime-based and
+`apsis-central`), two operator categories (Hamiltonian and non-conservative), two constructor patterns (regime-based and
 observable-inversion), two kernel invariants (Exactness and
 Continuity, each caught independently by the registration check),
 and bit-exact reproduction across deployment platforms. This — not
@@ -832,8 +842,7 @@ class = "Planet"
 ```
 
 Each `[[bodies.list]]` entry records the physical and rendering
-metadata for one body; `q_pr` and `albedo` are the radiation-
-coupling coefficients consumed by `apsis-radiation`. Numeric fields
+metadata for one body; `q_pr` and `albedo` are the radiation-coupling coefficients consumed by `apsis-radiation`. Numeric fields
 are in the canonical units declared above (`length = AU`,
 `mass = Msun`, `time = T_G`); the explicit `unit_system` block lets
 a replay convert to SI or to a different canonical system without
@@ -855,8 +864,7 @@ captured in `Cargo.lock` — is here extended to the run itself:
 `{record, Cargo.lock}` is the content-addressable closure of the
 experiment. The record's frame stream and the trailer's BLAKE3 are
 bit-exactly reproducible across replays with the same
-configuration; the only per-run difference is the header's wall-
-clock `created_utc` field, which is metadata and excluded from the
+configuration; the only per-run difference is the header's wall-clock `created_utc` field, which is metadata and excluded from the
 content hash. A reviewer with both files reproduces the run. The
 default policy emits initial + final bookend snapshots and every
 material event, which keeps records small and diff-friendly; dense
