@@ -28,7 +28,7 @@ The contract is enforced once, in the core: opting into a softened kernel via `S
 
 ## Validation signal
 
-With the contract enforced, this crate reproduces Mercury's textbook 43 arcsec/century rate to **28 ppm** of the GR prediction, bit-identical across Windows and Linux on x86_64:
+With the contract enforced, this crate reproduces Mercury's textbook 43 arcsec/century rate to within **100 ppm** of the GR prediction, gated in CI and bit-identical across Windows and Linux on x86_64. Example output (the recommended `for_units` API path):
 
 ```text
 $ cargo run --release -p apsis-1pn --example mercury_perihelion
@@ -40,7 +40,7 @@ $ cargo run --release -p apsis-1pn --example mercury_perihelion
   rate              = 42.991 arcsec/century  (GR expects 43)
 ```
 
-The number is gated in CI at 100 ppm (`mercury-gate` job in [`.github/workflows/rust.yml`](../../.github/workflows/rust.yml)). The cross-platform deterministic floor is documented in [`paper/notebooks/2026-05-22-controller-pow-implementations.md`](../../paper/notebooks/2026-05-22-controller-pow-implementations.md).
+The Mercury agreement is gated in CI at 100 ppm (`mercury-gate` job in [`.github/workflows/rust.yml`](../../.github/workflows/rust.yml)). The cross-platform deterministic floor is documented in [`paper/notebooks/2026-05-22-controller-pow-implementations.md`](../../paper/notebooks/2026-05-22-controller-pow-implementations.md).
 
 ## Why this matters
 

@@ -29,7 +29,7 @@ abstract: |
   categories and both supported constructor patterns. Among these,
   `apsis-1pn` carries the deepest demonstration of the contract
   mechanism: it reproduces Mercury's perihelion precession to
-  within $2.8 \times 10^{-5}$ of
+  within $10^{-4}$ of
   the closed-form general-relativistic prediction over 500 orbits
   under the adaptive Gauss–Radau IAS15 scheme, reproduced bit-identically across Windows and Linux on x86_64; violating the
   kernel-exactness precondition with Plummer softening surfaces a
@@ -417,16 +417,35 @@ The Exactness counter-test is the Sun–Mercury configuration
 integrated for 500 orbital periods under the adaptive Gauss–Radau
 IAS15 scheme [@ReinSpiegel2015]. Under the default
 `NewtonKernel::exact()` ($\varepsilon = 0$) — Exactness satisfied —
-the measured cumulative perihelion advance is 51.7705 arcsec,
-matching the closed-form general-relativistic prediction
-$\Delta\omega_{\text{orbit}} = 6\pi GM / (c^2 a (1 - e^2))$ summed
-over 500 orbits (51.7720 arcsec in canonical f64 evaluation) within
-$2.8 \times 10^{-5}$ relative agreement. The per-century rate is
-42.991 arcsec; the historical 43 arcsec/century [@Will1993] is
-matched to four significant figures. The measurement reproduces
-bit-identically across Windows and Linux on x86_64; the
+the osculating-$\omega$ end-vs-start measurement of the cumulative
+perihelion advance agrees with the closed-form
+general-relativistic prediction $\Delta\omega_{\text{orbit}} = 6\pi
+GM / (c^2 a (1 - e^2))$ summed over 500 orbits to within $10^{-4}$
+relative agreement, reproduced bit-identically across Windows and
+Linux on x86_64 (`mercury_precession_gate.rs`). The per-century
+rate agrees with the historical 43 arcsec/century [@Will1993]; the
 hardware-specific reproducibility detail is in §Cross-platform
 reproducibility.
+
+The same scenario re-measured via geometric apsidal precession
+(periapsis-passage detection over $N$ radial periods, the
+observable the softened-Plummer convergence figure below uses)
+converges to the Schwarzschild prediction as $N$ grows: relative
+error $2.6\times 10^{-2}$ at $N = 500$ and $5.5\times 10^{-4}$ at
+$N = 2\times 10^4$, the measured per-orbit rate oscillating around
+the prediction with a shrinking envelope. The convergence is
+integration-noise-limited rather than dynamical — Mercury's
+per-orbit precession ($\approx 5\times 10^{-7}$ rad) is comparable
+to the integrator's accumulated per-step floor after $\sim 10^3$
+orbits, so the geometric per-orbit observable is far noisier here
+than the osculating cumulative one, which averages that noise into
+a single endpoint comparison. Neither measurement reaches the
+physical agreement bound set by the test-particle approximation,
+$m_\text{Mercury}/M_\odot \approx 1.7\times 10^{-7}$. This is the
+opposite regime to that figure, where the per-orbit signal is large
+($\sim 10^{-2}$ rad) and the geometric measurement saturates the
+f64 floor at $\sim 10^{-7}$: which observable is tighter depends on
+the per-orbit signal-to-noise of the specific physics.
 
 Extending the same scenario to 4153 orbits (figure below) shows the
 cumulative perihelion advance tracking the GR prediction linearly
@@ -707,14 +726,22 @@ to the exact apsidal-angle quadrature for the full softened potential,
 §3.3 to the closed-form spike-magnitude bound, both with independent
 numerical cross-checks.)
 
-*Error budget for Mercury 1PN agreement.* The 28 ppm relative
-agreement reported in §Results is currently undisaggregated. A
-decomposition into IAS15 truncation, `libm` transcendental
-tolerance, and the unmodelled $v^4/c^4$ next-order post-Newtonian
-correction (estimable from Mercury's orbital parameters and the 1PN
-expansion structure) would identify which floor the v0.1
-implementation actually sits on and which is the next obstacle to
-tightening the claim.
+*Error budget for Mercury 1PN agreement.* The gated agreement
+(within $10^{-4}$, §Results) is integration-noise-limited and
+convention-dependent, not dynamical. The recommended `for_units`
+(Gaussian-$c$) path sits at $2.8 \times 10^{-5}$ (§Cross-platform
+reproducibility), the IAU-$c$ regression gate
+(`from_raw_c(C_SOLAR_UNITS)`) at $\sim 10^{-4}$: the $\approx 190$
+ppm gap between the two $c$ conventions shifts the 1PN force
+prefactor ($\propto 1/c^2$), and IAS15's adaptive substep schedule
+carries that shift to the result at the ULP level — the same
+propagation that separates the UCRT and `libm` `pow` results above.
+Both lie well above the test-particle ceiling
+$m_\text{Mercury}/M_\odot \approx 1.7 \times 10^{-7}$ and far below
+current observational precision, so the residual measures the
+integrator's accumulated round-off, not the 1PN derivation. A finer
+split into IAS15 truncation, `libm` tolerance, and the unmodelled
+$v^4/c^4$ correction would resolve that round-off floor further.
 
 *Cross-platform ULP-distribution analysis.* The summary statistics
 in §Cross-platform reproducibility (UCRT 96.97 % oracle-exact, libm
