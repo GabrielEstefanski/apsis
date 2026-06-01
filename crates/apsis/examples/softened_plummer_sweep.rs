@@ -34,7 +34,6 @@
 //! ```
 
 use std::env;
-use std::f64::consts::PI;
 use std::fs::{File, create_dir_all};
 use std::io::{BufWriter, Write};
 use std::path::PathBuf;
@@ -44,7 +43,7 @@ use apsis::core::system::System;
 use apsis::domain::body::Body;
 use apsis::physics::gravity::NewtonKernel;
 use apsis::physics::integrator::IntegratorKind;
-use apsis::physics::orbital::compute_elements;
+use apsis::physics::orbital::geometric_apsidal_precession_per_radial;
 use apsis::units::UnitSystem;
 
 const A_MERCURY: f64 = 0.387_098;
@@ -52,36 +51,12 @@ const E_MERCURY: f64 = 0.205_63;
 const M_MERCURY: f64 = 1.660_114e-7;
 const DEFAULT_N_RADIAL: u64 = 300;
 const DT: f64 = 1.0e-4;
-/// Sampling sub-steps per Kepler period for the periapsis search and the
-/// continuous angle unwrap. 360 keeps the per-step swept angle well under π even
-/// at periapsis (fastest point), so the unwrap never skips a turn.
-const SAMPLES_PER_PERIOD: f64 = 360.0;
 
-/// Relative-orbit angle, radial velocity, and separation (Mercury w.r.t. Sun).
-fn state(sys: &System) -> (f64, f64) {
-    let b = sys.bodies();
-    let dx = b[1].pos_x - b[0].pos_x;
-    let dy = b[1].pos_y - b[0].pos_y;
-    let dvx = b[1].vel_x - b[0].vel_x;
-    let dvy = b[1].vel_y - b[0].vel_y;
-    let r = (dx * dx + dy * dy).sqrt();
-    let rdot = (dx * dvx + dy * dvy) / r;
-    (dy.atan2(dx), rdot)
-}
-
-fn wrap_to_pi(mut d: f64) -> f64 {
-    while d > PI {
-        d -= 2.0 * PI;
-    }
-    while d <= -PI {
-        d += 2.0 * PI;
-    }
-    d
-}
-
-/// Geometric apsidal precession per radial period (rad) under a softened
-/// `NewtonKernel(ε)`, from periapsis-passage detection. Pure Newtonian, no 1PN.
-fn measure_geometric_precession_per_radial_rad(epsilon: f64, n_radial: u64) -> f64 {
+/// Build the Sun–Mercury softened-Plummer system and measure its geometric
+/// apsidal precession per radial period (rad). Pure Newtonian, no 1PN — the
+/// measurement itself lives in `apsis::physics::orbital` and is shared with the
+/// `softened_plummer_geometric_gate` test, so figure and gate cannot diverge.
+fn measure(epsilon: f64, n_radial: u64) -> f64 {
     let sun = Body::star(1.0);
     let r_peri = A_MERCURY * (1.0 - E_MERCURY);
     let v_peri = (2.0 / r_peri - 1.0 / A_MERCURY).sqrt();
@@ -92,35 +67,7 @@ fn measure_geometric_precession_per_radial_rad(epsilon: f64, n_radial: u64) -> f
         .with_integrator(IntegratorKind::Ias15)
         .with_dt(DT);
 
-    let period = compute_elements(sys.bodies(), 1, 0, 1.0).expect("initial elements").period;
-    let h = period / SAMPLES_PER_PERIOD;
-
-    // IC is the 0th periapsis: Mercury on +x with ṙ=0, so Θ=0, θ=0.
-    let (mut theta_last, mut rdot_prev) = state(&sys);
-    let mut theta_cont = 0.0_f64;
-    let mut peri_count = 0_u64;
-    let mut t = 0.0_f64;
-
-    loop {
-        t += h;
-        sys.integrate_until(t);
-        let (theta, rdot) = state(&sys);
-        let dtheta = wrap_to_pi(theta - theta_last);
-        theta_cont += dtheta;
-        theta_last = theta;
-
-        if rdot_prev < 0.0 && rdot >= 0.0 {
-            peri_count += 1;
-            if peri_count == n_radial {
-                // Linear interp of Θ to the ṙ=0 crossing inside [prev, now]:
-                let frac = rdot_prev / (rdot_prev - rdot); // ∈ [0, 1]
-                let theta_cont_prev = theta_cont - dtheta;
-                let theta_peri = theta_cont_prev + frac * dtheta;
-                return theta_peri / (n_radial as f64) - 2.0 * PI;
-            }
-        }
-        rdot_prev = rdot;
-    }
+    geometric_apsidal_precession_per_radial(&mut sys, 1, 0, 1.0, n_radial)
 }
 
 /// Log-spaced softening sweep spanning both honest edges: small ε where the
@@ -131,9 +78,7 @@ fn epsilon_sweep() -> Vec<f64> {
     const N: usize = 17;
     const LOG_LO: f64 = -3.0; // 1e-3 AU
     const LOG_HI: f64 = -1.0; // 1e-1 AU
-    (0..N)
-        .map(|i| 10f64.powf(LOG_LO + (LOG_HI - LOG_LO) * (i as f64) / ((N - 1) as f64)))
-        .collect()
+    (0..N).map(|i| 10f64.powf(LOG_LO + (LOG_HI - LOG_LO) * (i as f64) / ((N - 1) as f64))).collect()
 }
 
 fn main() {
@@ -156,7 +101,7 @@ fn main() {
     writeln!(w, "eps,precession_per_radial_rad").unwrap();
 
     for eps in epsilon_sweep() {
-        let prec = measure_geometric_precession_per_radial_rad(eps, n_radial);
+        let prec = measure(eps, n_radial);
         writeln!(w, "{eps:.18e},{prec:.18e}").unwrap();
         eprintln!("  eps={eps:.4e} AU -> {prec:.9e} rad/radial-period");
     }

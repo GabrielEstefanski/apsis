@@ -193,6 +193,10 @@ jobs:
         env:
           RUSTFLAGS: ""
         run: cargo nextest run --release -p apsis-1pn --tests --run-ignored only
+      - name: release validation (softened-Plummer geometric apsidal precession)
+        env:
+          RUSTFLAGS: ""
+        run: cargo nextest run --release -p apsis --test softened_plummer_geometric_gate --run-ignored only
 
   # ── recommended_dt heuristic gate ─────────────────────────────────────────
   # Runs the validation harness for the `recommended_dt` utility function.
