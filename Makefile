@@ -7,8 +7,8 @@
 # output into `paper/figures/data/`.
 
 .PHONY: help figures paper validation clean data lint-paper
-.PHONY: figures-mercury-1pn figures-rebound-parity-trajectories figures-rebound-parity-brouwer
-.PHONY: figures-plummer-apsidal-convergence data-plummer-convergence
+.PHONY: figures-continuity-spike-bound figures-rebound-parity-trajectories figures-rebound-parity-brouwer
+.PHONY: figures-plummer-apsidal-convergence data-plummer-convergence data-continuity-spike-bound
 .PHONY: validation-mercury-1pn validation-recommended-dt
 
 FIGURES_DIR  := paper/figures
@@ -17,7 +17,7 @@ DATA_DIR     := $(FIGURES_DIR)/data
 NOTEBOOK_DIR := paper/notebooks/scripts
 
 PAPER_FIGURES := \
-	$(FIGURES_DIR)/mercury_1pn_long_horizon.pdf \
+	$(FIGURES_DIR)/continuity_spike_bound.pdf \
 	$(FIGURES_DIR)/rebound_parity_trajectories.pdf \
 	$(FIGURES_DIR)/rebound_parity_brouwer.pdf \
 	$(FIGURES_DIR)/plummer_apsidal_convergence.pdf
@@ -33,7 +33,7 @@ help:
 	@echo "  make lint-paper            Check paper.md for hyphen-wrap render artifacts"
 	@echo
 	@echo "Per-figure / per-harness:"
-	@echo "  make figures-mercury-1pn"
+	@echo "  make figures-continuity-spike-bound"
 	@echo "  make figures-rebound-parity-trajectories"
 	@echo "  make figures-rebound-parity-brouwer"
 	@echo "  make figures-plummer-apsidal-convergence"
@@ -45,12 +45,13 @@ help:
 
 figures: $(PAPER_FIGURES)
 
-$(FIGURES_DIR)/mercury_1pn_long_horizon.pdf: \
-		$(SCRIPTS_DIR)/mercury_1pn_long_horizon.py \
-		$(DATA_DIR)/mercury_1pn_long_horizon_ias15.csv
-	python $(SCRIPTS_DIR)/mercury_1pn_long_horizon.py
+$(FIGURES_DIR)/continuity_spike_bound.pdf: \
+		$(SCRIPTS_DIR)/continuity_spike_bound.py \
+		$(DATA_DIR)/continuity_spike_bound.csv \
+		$(DATA_DIR)/continuity_trajectory.csv
+	python $(SCRIPTS_DIR)/continuity_spike_bound.py
 
-figures-mercury-1pn: $(FIGURES_DIR)/mercury_1pn_long_horizon.pdf
+figures-continuity-spike-bound: $(FIGURES_DIR)/continuity_spike_bound.pdf
 
 REBOUND_PARITY_DATA := \
 	$(DATA_DIR)/rebound_parity_kepler_apsis.csv \
@@ -88,7 +89,7 @@ figures-plummer-apsidal-convergence: $(FIGURES_DIR)/plummer_apsidal_convergence.
 # frozen CSVs above and stay deterministic). Refresh a snapshot only when the
 # underlying physics or protocol changes, then commit the updated CSV.
 
-data: data-plummer-convergence
+data: data-plummer-convergence data-continuity-spike-bound
 
 # apsis geometric sweep (Rust) -> apsis CSV; quadrature oracle + closed form
 # (numpy) merge -> the convergence CSV the figure reads.
@@ -96,6 +97,11 @@ data-plummer-convergence:
 	cargo run --release --example softened_plummer_sweep -p apsis -- \
 		--output $(DATA_DIR)/apsis_softened_sweep.csv
 	python $(NOTEBOOK_DIR)/plummer_apsidal_convergence_data.py
+
+# Continuity counter-test spikes + r(t) trajectory (one example writes both).
+data-continuity-spike-bound:
+	cargo run --release --example continuity_spike_bound -p apsis-1pn -- \
+		--output $(DATA_DIR)/continuity_spike_bound.csv
 
 # ── Paper ────────────────────────────────────────────────────────────── #
 
