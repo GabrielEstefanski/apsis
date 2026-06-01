@@ -201,7 +201,8 @@ kernel is *Exact* if $K(r) = 1/r$, *Softened* if
 
 $$K(r) = \frac{1}{\sqrt{r^2 + \varepsilon^2}}$$
 
-with non-trivial $\varepsilon$, and *Modified* otherwise.
+with non-trivial $\varepsilon$ (Plummer softening [@Plummer1911]), and
+*Modified* otherwise.
 **Continuity**: a kernel is in $C^n$ if the force $-dK/dr$ belongs
 to $C^n(\mathbb{R}_+)$, and *Smooth* if $C^\infty$. A perturbation
 declares the minimum invariants it requires (typed as
@@ -465,14 +466,20 @@ $\varepsilon^2$ scaling up to a 44 % error at $\varepsilon = 0.1$. The
 figure bounds the method on both sides rather than cropping to the
 favourable interval: at small $\varepsilon$ the apsis curve rises as the
 precession signal ($\propto \varepsilon^2$) falls toward the measurement
-resolution, and at large $\varepsilon$ the closed form's leading-order
-truncation dominates. The $0.04\,\%$ gate above measures the osculating
-argument of periapsis sampled per Kepler period, not the geometric
-apsidal angle; that the geometric quantity agrees to $\sim 10^{-7}$
-identifies the $0.04\,\%$ as the osculating-versus-geometric definition
-difference, not a dynamical error.
+resolution, and at large $\varepsilon$ the closed form's $\varepsilon^2$
+error, though still a clean power law, grows large. The osculating-$\omega$
+agreement above ($0.04\,\%$, gated at $0.5\,\%$) is the argument of
+periapsis sampled per Kepler period, not the geometric apsidal angle;
+the geometric quantity itself agrees to $\sim 10^{-7}$, which places the
+$0.04\,\%$ in the definition of the observable rather than in the
+dynamics. The closed-form percentages switch convention the
+same way: the single-point $2.66\,\%$ above is the rate comparison (each
+precession divided by its own period), while the figure plots the
+per-radial-period deviation ($\approx 1.8\,\%$ at $\varepsilon = 0.02$);
+the two reconcile through the radial-to-Kepler period ratio
+($1.008$ at this $\varepsilon$).
 
-![Softened-Plummer apsidal precession across a softening sweep, as relative deviation $|1 - \Delta\varpi / \Delta\varpi_{\text{exact}}|$ from the exact full-potential apsidal-angle quadrature. `apsis` (IAS15; geometric apsidal angle from periapsis-passage detection) reproduces the oracle to $\sim 10^{-7}$ across the resolvable range; the leading closed form ($\propto \varepsilon^2$; slope-2 reference dashed) reaches a 44 % error at $\varepsilon = 0.1$. Both measurement edges are shown rather than cropped: the apsis curve rises at small $\varepsilon$ as the precession signal vanishes (resolution floor), and the closed-form error grows without bound at large $\varepsilon$. The apsis points are freshly measured; the oracle and closed form are evaluated from the quadrature, with no tuned constants.](paper/figures/plummer_apsidal_convergence.pdf){#fig:plummer-apsidal-convergence width=85%}
+![Softened-Plummer apsidal precession across a softening sweep, as relative deviation $|1 - \Delta\varpi / \Delta\varpi_{\text{exact}}|$ from the exact full-potential apsidal-angle quadrature. `apsis` (IAS15; geometric apsidal angle from periapsis-passage detection) reproduces the oracle to $\sim 10^{-7}$ across the resolvable range; the leading closed form ($\propto \varepsilon^2$; slope-2 reference dashed) reaches a 44 % error at $\varepsilon = 0.1$. Both measurement edges are shown rather than cropped: the apsis curve rises at small $\varepsilon$ as the precession signal vanishes (resolution floor), while the closed form stays a clean $\varepsilon^2$ law — large ($44\,\%$) but not diverging — at large $\varepsilon$. The apsis points are freshly measured; the oracle and closed form are evaluated from the quadrature, with no tuned constants.](paper/figures/plummer_apsidal_convergence.pdf){#fig:plummer-apsidal-convergence width=85%}
 
 ## Continuity counter-test: TruncatedPlummer
 
@@ -498,7 +505,7 @@ to its crossing within $10 \cdot \mathrm{d}t$, and no events between
 crossings. Every spike falls within the a-priori envelope
 $|\Delta E|/|E_0| \le \Delta F \cdot v_\text{cross} \cdot \mathrm{d}t / |E_0|
 = 4.00\times 10^{-4}$ derived from the shadow-Hamiltonian breakdown
-at the discontinuity, where $|E_0| = G(m_1+m_2)/(2a) = 0.5$ is the
+[@HairerLubichWanner2006] at the discontinuity, where $|E_0| = G(m_1+m_2)/(2a) = 0.5$ is the
 specific energy of the relative motion (closed form in the companion
 lab notebook); the measured peak sits at 50 % of this bound, the $2\times$ margin
 reflecting Yoshida-4 substep cancellation when the crossing is
