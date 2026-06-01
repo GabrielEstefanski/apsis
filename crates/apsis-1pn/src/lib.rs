@@ -1,9 +1,8 @@
 //! First post-Newtonian gravitational correction (Schwarzschild,
 //! test-particle form applied pairwise) per Anderson et al. (1975,
 //! *ApJ* 200, 221). Recovers the GR perihelion precession
-//! `Δφ = 6π G M / (c² a (1 − e²))` at leading order. CI gate
-//! reproduces Mercury's 43 arcsec/century to 28 ppm; threshold at
-//! 100 ppm.
+//! `Δφ = 6π G M / (c² a (1 − e²))` at leading order. The CI gate
+//! reproduces Mercury's 43 arcsec/century to within 100 ppm of GR.
 //!
 //! Force expression on receiver `i` from source `j ≠ i`:
 //!

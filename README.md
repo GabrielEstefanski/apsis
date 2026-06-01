@@ -22,8 +22,8 @@ canonical regimes (Kepler $e = 0.5$, Chenciner–Montgomery figure-8,
 Pythagorean, $10^4$-orbit retrograde Kepler); under
 [`apsis.gr`](crates/apsis-1pn/) (post-Newtonian 1PN), Mercury's
 perihelion precession matches the analytic 1PN GR prediction to
-within **28 ppm**, reproduced bit-identically across Windows and
-Linux on x86_64.
+within **100 ppm** (osculating-ω end-vs-start over 500 orbits),
+reproduced bit-identically across Windows and Linux on x86_64.
 
 > **Status.** Pre-release (`v0.1.0` alpha). 3D-aware physics core
 > (Vec3, inclined orbits, 3D observables). Multiple published operator
@@ -306,8 +306,8 @@ What is verified in CI:
   (Tamayo 2019 round-trip).
 - **Release-mode Mercury gate**: `cargo test --release -p apsis-1pn
   -- --ignored` asserts Mercury's precession within 100 ppm of the
-  analytic 1PN GR prediction over 500 orbits, with the achieved
-  figure 28 ppm bit-identical across Windows and Linux on x86_64.
+  analytic 1PN GR prediction over 500 orbits, reproduced
+  bit-identically across Windows and Linux on x86_64.
 - **Cross-implementation parity portfolio**: against REBOUND's IAS15
   on four canonical scenarios spanning periodic 2-body, periodic
   3-body, chaotic 3-body, and sign-flipped 2-body regimes. All gated
