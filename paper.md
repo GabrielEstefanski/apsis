@@ -447,16 +447,6 @@ opposite regime to that figure, where the per-orbit signal is large
 f64 floor at $\sim 10^{-7}$: which observable is tighter depends on
 the per-orbit signal-to-noise of the specific physics.
 
-Extending the same scenario to 4153 orbits (figure below) shows the
-cumulative perihelion advance tracking the GR prediction linearly
-across a 1000-year horizon. The per-orbit precession rate inherits
-the f64 round-off floor of the integrator; the residual at the end
-of the run sits at $2.2 \times 10^{-4}$ relative to the predicted
-total, consistent with the per-orbit precision reported in
-§Cross-platform reproducibility scaled to the longer horizon.
-
-![Mercury perihelion precession under `apsis` (IAS15 + apsis-1pn) versus the closed-form Schwarzschild GR prediction over 4153 orbits ($\sim 1000$ years). Top: cumulative $\Delta\omega$ as a function of orbit number; the measured trajectory (solid) is visually indistinguishable from the GR prediction (dashed) on this scale. Bottom: the residual measured $-$ GR, showing a linear secular drift consistent with the per-orbit precision floor reported in §Cross-platform reproducibility.](paper/figures/mercury_1pn_long_horizon.pdf){#fig:mercury-1pn-long-horizon width=85%}
-
 With a Plummer-softened kernel (`NewtonKernel::new(eps)` with
 $\varepsilon \approx 0.02$ AU, the cluster-scale softening for a
 solar-mass body) opted in — Exactness violated — the apsidal precession
@@ -533,6 +523,8 @@ A reference run with the smooth PlummerKernel on the same bodies
 exhibits no events above $2.7 \times 10^{-14}$ per step, separating
 the Continuity signature from the symplectic round-off floor by
 roughly eight orders of magnitude.
+
+![Continuity counter-test (§3.3): a truncated-Plummer kernel (a $C^0$ force discontinuity at $R_c$) under fourth-order Yoshida, with the smoothness-requiring 1PN operator attached. *Top:* the energy-error spike $|\Delta E / E|$ at each of the eleven $R_c$ crossings against the closed-form jump-bound $\Delta F\,v_\text{cross}\,\delta t / |E_0| = 4.0 \times 10^{-4}$ (with $|E_0| = G(m_1+m_2)/(2a) = 0.5$, the specific energy of the relative motion); every spike sits below it, the worst at 50 %. *Bottom:* the separation $r(t)$ crossing $R_c$ — each spike aligns in time with a crossing, so the spike-per-crossing bijection is observable rather than asserted. A smooth-kernel reference run produces no event above $2.7 \times 10^{-14}$ per step, $\sim 8$ orders below the spikes (omitted here for vertical scale). The apsis points are freshly measured; the bound is evaluated from the shadow-Hamiltonian breakdown with no tuned constants.](paper/figures/continuity_spike_bound.pdf){#fig:continuity-spike-bound width=85%}
 
 The observed signature is a consequence of the continuity
 violation itself, not of the specific `TruncatedPlummerKernel`
