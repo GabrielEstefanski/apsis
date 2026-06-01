@@ -35,11 +35,11 @@
 //! where `c` is the [`apsis_1pn::C_SOLAR_UNITS`] literal (derived from
 //! `c_SI · YR_S/(2π) / AU`, the IAU julian-year convention).
 //! `for_units(UnitSystem::solar_canonical())` derives `c` from
-//! Gaussian time (`sqrt(AU³/(G·M))`) instead — numerically ~190 ppm
+//! Gaussian time (`sqrt(AU³/(G·M))`) instead — numerically ~110 ppm
 //! off the IAU literal. Both are physically valid; they differ only
 //! by the historical IAU-vs-Gaussian gap.
 //!
-//! That ~190 ppm shift in `c` translates into a corresponding shift
+//! That ~110 ppm shift in `c` translates into a corresponding shift
 //! in the 1PN force prefactor (`∝ 1/c²`), which IAS15's adaptive
 //! substep schedule responds to at the ULP level. The 2D path
 //! absorbs the perturbation (still passes within 100 ppm everywhere);

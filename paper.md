@@ -731,7 +731,7 @@ numerical cross-checks.)
 convention-dependent, not dynamical. The recommended `for_units`
 (Gaussian-$c$) path sits at $2.8 \times 10^{-5}$ (§Cross-platform
 reproducibility), the IAU-$c$ regression gate
-(`from_raw_c(C_SOLAR_UNITS)`) at $\sim 10^{-4}$: the $\approx 190$
+(`from_raw_c(C_SOLAR_UNITS)`) at $\sim 10^{-4}$: the $\approx 110$
 ppm gap between the two $c$ conventions shifts the 1PN force
 prefactor ($\propto 1/c^2$), and IAS15's adaptive substep schedule
 carries that shift to the result at the ULP level — the same
