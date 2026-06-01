@@ -530,8 +530,8 @@ required on both registrations. The full suite completes in under
 twenty seconds on a 2024-class x64 workstation.
 
 **Run configuration.** All measurements correspond to: IAS15 with
-initial timestep $10^{-4} \cdot T$ and adaptivity enabled for the
-Exactness counter-test (Sun–Mercury standard orbital elements,
+initial timestep $10^{-4}$ in canonical units and adaptivity enabled
+for the Exactness counter-test (Sun–Mercury standard orbital elements,
 $\varepsilon = 0$ for the satisfied case, $\varepsilon \approx 0.02$
 AU for the violated case, 500-period integration); fourth-order
 Yoshida at fixed $\mathrm{d}t = 10^{-3}$ (canonical units) for the
