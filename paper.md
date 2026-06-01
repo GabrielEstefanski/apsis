@@ -519,7 +519,7 @@ specific energy of the relative motion (closed form in the companion
 lab notebook); the measured peak sits at 50 % of this bound, the $2\times$ margin
 reflecting Yoshida-4 substep cancellation when the crossing is
 off-centre in the step.
-A reference run with the smooth PlummerKernel on the same bodies
+A reference run with the smooth NewtonKernel on the same bodies
 exhibits no events above $2.7 \times 10^{-14}$ per step, separating
 the Continuity signature from the symplectic round-off floor by
 roughly eight orders of magnitude.
