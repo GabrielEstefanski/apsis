@@ -344,8 +344,7 @@ impl Operator for PoyntingRobertsonDrag {
     }
 
     fn citation(&self) -> Option<Citation> {
-        // Same paper, different equation — Burns et al. eq. (7) for
-        // the PR drag, eq. (4–5) for the radial pressure.
+        // Same paper as RadiationPressure — both are terms of Burns et al. eq. (5).
         Some(Citation {
             bibtex: BURNS_LAMY_SOTER_BIBTEX,
             doi: Some("10.1016/0019-1035(79)90050-2"),
@@ -404,14 +403,8 @@ impl NonConservativeOperator for PoyntingRobertsonDrag {
             let v_radial = vx * rhat_x + vy * rhat_y + vz * rhat_z;
 
             let pref = beta * src.mass / r2;
-            // Burns et al. eq. (7): F_PR = − (β·GM/r²) · [(2·v_r/c)·r̂ + v/c]
-            //
-            // The sign is opposite to radiation pressure on the radial
-            // component — PR drag opposes motion, radial pressure pushes
-            // outward. The (v/c) term decelerates the receiver's
-            // tangential motion → angular momentum loss → semi-major
-            // axis decay.
-            let s_rhat = -2.0 * v_radial * inv_c;
+            // Burns 1979 eq. (5) / REBOUNDx: F_PR = −(β·GM/r²c)·[v_r·r̂ + v].
+            let s_rhat = -v_radial * inv_c;
             let s_v = -inv_c;
             acc[i].x += pref * (s_rhat * rhat_x + s_v * vx);
             acc[i].y += pref * (s_rhat * rhat_y + s_v * vy);
@@ -549,8 +542,38 @@ mod tests {
         assert!(acc[1].y < 0.0, "PR drag must oppose tangential motion (ay < 0), got {}", acc[1].y);
     }
 
+    /// PR-drag force vs Burns 1979 eq. (5): a_PR = −(βM/r²c)[v_r·r̂ + v].
+    /// Radial + tangential velocity pins both coefficients (each 1): a_y fixes
+    /// the v term, a_x then fixes the r̂ term — net radial 2·v_r, not 3.
+    #[test]
+    fn pr_drag_force_matches_burns_eq5() {
+        let units = UnitSystem::custom(299_792_458.0, 1.0, 1.0).expect("c = 1"); // c = c_SI·t/L
+        let (beta, m_src, r, vx, vy) = (0.1_f64, 1.0_f64, 2.0_f64, 0.3_f64, 0.5_f64);
+        let bodies = vec![Body::star(m_src), Body::rocky(1e-10).at(r, 0.0).with_velocity(vx, vy)];
+        let mut acc = vec![Vec3::ZERO; 2];
+        PoyntingRobertsonDrag::from_raw_betas(0, vec![0.0, beta], units)
+            .accumulate_force(&bodies, &mut acc);
+
+        // r̂ = receiver→source = (−1,0,0); v_radial = −vx; c = 1. Burns coeff 1 on each:
+        //   a_x = −(βM/r²)·2·vx (r̂ term + radial part of v);  a_y = −(βM/r²)·vy (tangential).
+        let pref = beta * m_src / (r * r);
+        let (exp_x, exp_y) = (-pref * 2.0 * vx, -pref * vy);
+        assert!(
+            (acc[1].x - exp_x).abs() / exp_x.abs() < 1e-12,
+            "a_x = {:.4e} vs Burns {:.4e}",
+            acc[1].x,
+            exp_x
+        );
+        assert!(
+            (acc[1].y - exp_y).abs() / exp_y.abs() < 1e-12,
+            "a_y = {:.4e} vs Burns {:.4e}",
+            acc[1].y,
+            exp_y
+        );
+    }
+
     /// At c → ∞ the PR drag vanishes. The 1/c prefactor in Burns
-    /// eq. (7) governs the scale.
+    /// eq. (5) governs the scale.
     #[test]
     fn pr_drag_vanishes_at_infinite_c() {
         let bodies = vec![Body::star(1.0), Body::rocky(1e-10).at(1.0, 0.0).with_velocity(0.0, 1.0)];
