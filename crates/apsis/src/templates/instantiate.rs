@@ -1,11 +1,11 @@
-use crate::domain::body::{Body, NamedBody};
+use crate::domain::body::Body;
 use crate::templates::Template;
 
 /// Instantiate a template at the origin while preserving explicit body
 /// names. Bodies without an explicit name fall back to the preset's
 /// `display_name` so the system-level auto-numbering produces
 /// `"Rocky 1"`, `"Comet 1"`, etc.
-pub fn instantiate(template: &Template) -> Vec<NamedBody> {
+pub fn instantiate(template: &Template) -> Vec<Body> {
     instantiate_at(template, 0.0, 0.0)
 }
 
@@ -16,7 +16,7 @@ pub fn instantiate(template: &Template) -> Vec<NamedBody> {
 /// origin; this function shifts the whole system so its CoM lands at
 /// the requested 2D drop point. Z is preserved per body (templates
 /// with non-zero z keep their out-of-plane structure intact).
-pub fn instantiate_at(template: &Template, cx: f64, cy: f64) -> Vec<NamedBody> {
+pub fn instantiate_at(template: &Template, cx: f64, cy: f64) -> Vec<Body> {
     let total_mass: f64 = template.bodies.iter().map(|t| t.mass).sum();
 
     let (com_x, com_y) = if total_mass > 0.0 {
@@ -70,7 +70,7 @@ pub fn instantiate_at(template: &Template, cx: f64, cy: f64) -> Vec<NamedBody> {
             let name =
                 t.name.map(str::to_owned).unwrap_or_else(|| t.preset.display_name.to_owned());
 
-            NamedBody { body: b, name: Some(name) }
+            b.with_name(name)
         })
         .collect()
 }

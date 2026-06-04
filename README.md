@@ -22,8 +22,8 @@ canonical regimes (Kepler $e = 0.5$, Chenciner–Montgomery figure-8,
 Pythagorean, $10^4$-orbit retrograde Kepler); under
 [`apsis.gr`](crates/apsis-1pn/) (post-Newtonian 1PN), Mercury's
 perihelion precession matches the analytic 1PN GR prediction to
-within **28 ppm**, reproduced bit-identically across Windows and
-Linux on x86_64.
+within **100 ppm** (osculating-ω end-vs-start over 500 orbits),
+reproduced bit-identically across Windows and Linux on x86_64.
 
 > **Status.** Pre-release (`v0.1.0` alpha). 3D-aware physics core
 > (Vec3, inclined orbits, 3D observables). Multiple published operator
@@ -163,10 +163,10 @@ Mercury + Sun + 1PN @ IAS15
   integrating    = 500 orbits  →  t = 756.63
   ...
 ── GR comparison over 500 orbits ──
-  predicted Δω      = +2.509976e-04 rad  (+51.7720 arcsec)
-  measured  Δω      = +2.509906e-04 rad  (+51.7705 arcsec)
-  relative error    = -2.802e-05
-  rate              = 42.991 arcsec/century  (GR expects 43)
+  predicted Δω      = +2.509332e-04 rad  (+51.7587 arcsec)
+  measured  Δω      = +2.509130e-04 rad  (+51.7545 arcsec)
+  relative error    = -8.053e-05
+  rate              = 42.978 arcsec/century  (GR expects 43)
 ```
 
 The same number is asserted in CI, gate-style:
@@ -246,7 +246,12 @@ part of the library's validated surface or release cadence.
 
 A Plummer-softened kernel with `ε ≈ 0.02 AU` (a typical cluster-scale
 ε for a solar-mass body) introduces a numerical apsidal precession
-**≈ 2 × 10³ larger** than the 43 arcsec/century GR effect for Mercury.
+**≈ 5 × 10⁴ larger** than the 43 arcsec/century GR effect for Mercury,
+with the *opposite* sign — the leading-order closed form
+$\dot\varpi_\text{Plummer} = -3 n \varepsilon^2 / [2 a^2 (1 - e^2)^2]$
+sets the scale; the exact value from the full-potential apsidal-angle
+quadrature is $\approx -2.29 \times 10^6$ arcsec/century, which apsis
+reproduces to $0.04\,\%$ (derivation in [`paper.md`](paper.md) §3.2).
 It is invisible at the integrator level — energy still conserves to
 machine precision.
 
@@ -301,8 +306,8 @@ What is verified in CI:
   (Tamayo 2019 round-trip).
 - **Release-mode Mercury gate**: `cargo test --release -p apsis-1pn
   -- --ignored` asserts Mercury's precession within 100 ppm of the
-  analytic 1PN GR prediction over 500 orbits, with the achieved
-  figure 28 ppm bit-identical across Windows and Linux on x86_64.
+  analytic 1PN GR prediction over 500 orbits, reproduced
+  bit-identically across Windows and Linux on x86_64.
 - **Cross-implementation parity portfolio**: against REBOUND's IAS15
   on four canonical scenarios spanning periodic 2-body, periodic
   3-body, chaotic 3-body, and sign-flipped 2-body regimes. All gated
@@ -338,12 +343,13 @@ What is verified in CI:
     ($\sim 8\times$ across $100\times$ horizon, slightly below
     $\sqrt{N}$, consistent with IAS15's near-symplectic structure).
     Notebook: [`paper/notebooks/2026-05-01-rebound-parity-retrograde.md`](paper/notebooks/2026-05-01-rebound-parity-retrograde.md).
-- **Heuristic validation portfolio**: 13 scenarios × 3 fixed-step
-  integrators × 100 substeps; 26 / 26 gated cells pass under the
-  isclose-style two-sided Tier 2 bound. Per-cell utilization
-  ($u = \text{peak}/\text{bound}$) emitted for regression-canary
-  detection.
-  Notebook: [`paper/notebooks/2026-05-01-recommended-dt-validation.md`](paper/notebooks/2026-05-01-recommended-dt-validation.md).
+- **`recommended_dt` heuristic** (utility for fixed-step integrators):
+  13 scenarios × 3 integrators × 100 substeps; 18 / 18 gated cells
+  pass, 21 informational cells (WH + four out-of-regime scenarios:
+  high-eccentricity Kepler, periodic and chaotic 3-body). Per-cell
+  utilization ($u = \text{peak}/\text{bound}$) emitted as a
+  regression canary.
+  Note: [`docs/experiments/2026-05-01-recommended-dt-heuristic.md`](docs/experiments/2026-05-01-recommended-dt-heuristic.md).
 ## Further reading
 
 The repository carries the full methodological record a software paper

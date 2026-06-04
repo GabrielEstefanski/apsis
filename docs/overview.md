@@ -91,8 +91,9 @@ crate.
 
 Inside `apsis`, the code is organised by responsibility:
 
-- [`domain/`](../crates/apsis/src/domain/) — `Body`,
-  `NamedBody`, and the body-array layout used by the force kernels.
+- [`domain/`](../crates/apsis/src/domain/) — `Body` (with optional
+  display name carried through to provenance output) and the
+  body-array layout used by the force kernels.
 - [`physics/`](../crates/apsis/src/physics/) — force
   models (direct $O(N^2)$ + Barnes-Hut with a Newton kernel that
   optionally carries Plummer softening), the integrator stack
@@ -152,10 +153,10 @@ The library's headline physical validation is the Mercury perihelion
 precession test shipped by the `apsis-1pn` crate:
 
 - 500 Mercury orbits under IAS15 + 1PN + unsoftened gravity.
-- Measured perihelion drift: $+42.991$ arcsec/century.
-- General-Relativistic prediction: $+43$ arcsec/century.
-- Relative error: $-2.8 \times 10^{-5}$ (28 ppm), reproduced
-  bit-identically across Windows and Linux on x86_64.
+- Measured perihelion advance recovers the GR rate of $+43$
+  arcsec/century to within $10^{-4}$ (100 ppm).
+- Gated in CI and reproduced bit-identically across Windows and
+  Linux on x86_64.
 
 This figure is asserted in CI via
 `cargo test --release -p apsis-1pn -- --ignored` at a 100-ppm

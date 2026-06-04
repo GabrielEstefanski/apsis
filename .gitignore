@@ -11,8 +11,13 @@ __pycache__/
 *.pyc
 *.pyo
 
-# Editor / IDE config.
+# Editor / IDE config and local agent tooling.
 .vscode/
+.claude/
 
 # Runtime record files (apsis-record binary format).
 *.apsis
+
+# Compiled paper (generated via `make paper`). Figures under
+# `paper/figures/` are versioned; the assembled paper.pdf is not.
+/paper.pdf

@@ -331,7 +331,7 @@ impl PySystem {
     /// they enter a System) when material introspection matters.
     #[getter]
     fn bodies(&self) -> Vec<PyBody> {
-        self.inner.bodies().iter().copied().map(|b| PyBody { inner: b, slug: "body" }).collect()
+        self.inner.bodies().iter().cloned().map(|b| PyBody { inner: b, slug: "body" }).collect()
     }
 
     /// Total mechanical energy at the most recently completed step,
@@ -675,6 +675,21 @@ impl PySystem {
     /// graph stayed bit-equal.
     fn provenance(&self) -> String {
         self.inner.provenance()
+    }
+
+    /// Emit a BibTeX ``@software`` block citing every registered
+    /// operator crate, suitable for direct inclusion in a paper's
+    /// ``.bib`` file. One entry per unique crate, deduped by crate
+    /// name, in registration order. Each entry pins the crate against
+    /// the workspace ``Cargo.lock`` blake3 hash and reports its
+    /// declared ``kernel_requirements``.
+    ///
+    /// The workspace ``Cargo.lock`` is best-effort: when it cannot
+    /// be located (typical of pip-installed wheels run outside a
+    /// Cargo workspace) the ``blake3`` slot in each entry's ``note``
+    /// field reads ``unknown``; the rest of the entry is unaffected.
+    fn cite(&self) -> String {
+        self.inner.cite()
     }
 
     fn __repr__(&self) -> String {

@@ -45,7 +45,6 @@ pub enum HookPhaseKind {
 #[derive(Clone)]
 pub struct HookContext<'a> {
     pub bodies: &'a [Body],
-    pub names: &'a [String],
     pub t: f64,
     pub dt: f64,
     pub steps: u64,
@@ -183,7 +182,6 @@ mod tests {
     fn empty_ctx<'a>(phase: HookPhaseKind) -> HookContext<'a> {
         HookContext {
             bodies: &[],
-            names: &[],
             t: 0.0,
             dt: 0.0,
             steps: 0,

@@ -5,13 +5,11 @@ pub fn binary_star(_seed: u64) -> Template {
     let a = 1.0_f64;
     let m = 1.0_f64;
 
-    let v = (m / a).sqrt();
-
-    let r = 0.5;
-
-    let v_body = v * 0.5;
-
-    let _omega = v_body / r;
+    // Each body orbits the COM at r = a/2. The circular-orbit speed
+    // from centripetal balance against the other body is
+    // v² = G · m_other / (2 a), with G = 1 in canonical solar-AU units.
+    let r = a * 0.5;
+    let v_body = (m / (2.0 * a)).sqrt();
 
     Template {
         name: "Binary Stars",

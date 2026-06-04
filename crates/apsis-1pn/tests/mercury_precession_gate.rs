@@ -1,16 +1,20 @@
 //! Integration test — release-mode gate on the Mercury 1PN vs GR claim.
 //!
 //! Runs the Sun–Mercury 1PN scenario over 500 orbits and asserts the
-//! measured perihelion precession matches the closed-form GR prediction
-//! within 100 ppm (`rel_err < 10⁻⁴`). The threshold absorbs the
-//! cross-platform f64 / LLVM / libm variance observed between
-//! developer hardware (Windows MSVC, ~1 ppm) and the CI runner
-//! (Linux glibc, ~30 ppm); both numbers sit at the f64 noise floor of
-//! the test-particle 1PN approximation, but the floor itself is
-//! platform-dependent at the ULP level. The headline figure cited in
-//! `README.md` and `paper.md` (~1 ppm) is the developer-hardware
-//! achievement; the gate is the portable lower bound — anything above
-//! 100 ppm is a regression class, not a platform difference.
+//! osculating-ω end-vs-start measurement of the perihelion advance
+//! matches the closed-form GR prediction within 100 ppm
+//! (`rel_err < 10⁻⁴`). The gated number is bit-identical across Windows
+//! (MSVC/UCRT) and Linux (glibc) on x86_64 — the determinism-hardened
+//! transcendental routing (§Cross-platform reproducibility) leaves no
+//! platform variance — so anything above 100 ppm is a regression class,
+//! not a platform difference.
+//!
+//! This is the *cumulative* (osculating-ω) observable, which averages
+//! the per-orbit integration noise into a single endpoint comparison.
+//! For the *geometric* apsidal precession (periapsis-passage) of the
+//! same scenario — integration-noise-limited at Mercury's ~5e-7
+//! rad/orbit signal — see `examples/mercury_1pn_geometric.rs` and
+//! paper §3.2.
 //!
 //! If this test fails, one of four things is true:
 //!
@@ -27,27 +31,16 @@
 //!
 //! ## Why `from_raw_c(C_SOLAR_UNITS, …)` instead of `for_units(…)`
 //!
-//! The gate is calibrated against the apsis-1pn historical baseline,
-//! where `c` is the [`apsis_1pn::C_SOLAR_UNITS`] literal (derived from
-//! `c_SI · YR_S/(2π) / AU`, the IAU julian-year convention).
-//! `for_units(UnitSystem::solar_canonical())` derives `c` from
-//! Gaussian time (`sqrt(AU³/(G·M))`) instead — numerically ~190 ppm
-//! off the IAU literal. Both are physically valid; they differ only
-//! by the historical IAU-vs-Gaussian gap.
+//! Regression stability: the gated number sits on one fixed `c` literal
+//! ([`apsis_1pn::C_SOLAR_UNITS`], the IAU julian-year value
+//! `c_SI · YR_S/(2π) / AU`), so it cannot move under a units-system
+//! refactor. `for_units(UnitSystem::solar_canonical())` instead derives
+//! `c` from Gaussian time (`sqrt(AU³/GM_sun)`); both are physically valid
+//! and differ by only ~19 ppm (the IAU-vs-Gaussian gap). See ADR-014 for
+//! the GM calibration.
 //!
-//! That ~190 ppm shift in `c` translates into a corresponding shift
-//! in the 1PN force prefactor (`∝ 1/c²`), which IAS15's adaptive
-//! substep schedule responds to at the ULP level. The 2D path
-//! absorbs the perturbation (still passes within 100 ppm everywhere);
-//! the 3D inclined path on Linux glibc + libm has slightly more
-//! ULP-noise headroom and crosses the 100 ppm bound. Pinning the
-//! gate to `C_SOLAR_UNITS` eliminates that confound and keeps the
-//! gate locked against the same `c` value the original 4.4 ppm
-//! headline was measured with.
-//!
-//! The recommended user-facing API is still
-//! [`PostNewtonian1PN::for_units`] — see `examples/mercury_perihelion.rs`,
-//! which demonstrates that path. The gate uses the raw escape
+//! The recommended user-facing API is [`PostNewtonian1PN::for_units`] —
+//! see `examples/mercury_perihelion.rs`. The gate uses the raw escape
 //! deliberately for regression-detection stability.
 
 use std::f64::consts::PI;

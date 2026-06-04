@@ -66,7 +66,8 @@ ALPHA_HILL: float = 3.0
 G_SI: float = 6.67430e-11
 AU_M: float = 1.495978707e11
 YR_S: float = 3.15576e7
-MSUN_KG: float = 1.98892e30
+GM_SUN_SI: float = 1.3271244e20  # IAU 2015 nominal; apsis units.rs GM_SUN_SI
+MSUN_KG: float = GM_SUN_SI / G_SI
 G_SOLAR: float = G_SI * MSUN_KG * YR_S * YR_S / (AU_M * AU_M * AU_M)
 
 

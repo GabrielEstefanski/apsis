@@ -258,15 +258,9 @@ mod tests {
         }
     }
 
-    fn make_ctx<'a>(
-        bodies: &'a [Body],
-        names: &'a [String],
-        t: f64,
-        steps: u64,
-    ) -> HookContext<'a> {
+    fn make_ctx<'a>(bodies: &'a [Body], t: f64, steps: u64) -> HookContext<'a> {
         HookContext {
             bodies,
-            names,
             t,
             dt: 1e-3,
             steps,
@@ -286,8 +280,7 @@ mod tests {
                 RecordHook::with_header(&tmp, fake_header(), RecordPolicy::BookendsAndEvents)
                     .unwrap();
             let bodies = vec![Body::star(1.0).at(0.0, 0.0).with_velocity(0.0, 0.0)];
-            let names = vec!["sun".to_string()];
-            let ctx = make_ctx(&bodies, &names, 0.0, 0);
+            let ctx = make_ctx(&bodies, 0.0, 0);
             hook.pre_step(&ctx);
             // Drop writes trailer.
         }

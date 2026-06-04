@@ -143,12 +143,14 @@ fn keplerian_baseline_does_not_precess() {
     let omegas_unwrapped = unwrap_angles(&omegas);
     let omega_dot_baseline = linear_slope(&ts, &omegas_unwrapped);
 
-    // Bound at 1e-7: pure Keplerian closure under IAS15 keeps ω
-    // stable to many orders below the operator-driven drift target
-    // (1.5e-3) the headline test asserts.
+    eprintln!("[kepler-baseline] ω̇ = {omega_dot_baseline:.4e}");
+    // Gate sits 6 orders below the operator-driven drift it must catch
+    // (ω̇_in = 1.5e-3) and far above the single-platform slope here (~2e-17);
+    // kept conservative for cross-platform robustness, not pinned to one
+    // platform's f64 floor.
     assert!(
-        omega_dot_baseline.abs() < 1e-7,
-        "Keplerian baseline drift exceeds floor: ω̇ = {omega_dot_baseline:.4e} (bound 1e-7)",
+        omega_dot_baseline.abs() < 1e-9,
+        "Keplerian baseline drift exceeds floor: ω̇ = {omega_dot_baseline:.4e} (bound 1e-9)",
     );
 }
 

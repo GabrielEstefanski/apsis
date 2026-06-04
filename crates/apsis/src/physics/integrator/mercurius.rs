@@ -538,12 +538,12 @@ impl Mercurius {
         // Rewind encountering particles to their pre-Kepler state.
         for i in 0..n {
             if self.encounter_map[i] {
-                bodies[i] = self.particles_backup[i];
+                bodies[i] = self.particles_backup[i].clone();
             }
         }
         // The Sun is always rewound (and pinned) — it does not move
         // in DH coords during the encounter sub-integration.
-        bodies[0] = self.particles_backup[0];
+        bodies[0] = self.particles_backup[0].clone();
         bodies[0].vel_x = 0.0;
         bodies[0].vel_y = 0.0;
         bodies[0].vel_z = 0.0;
@@ -593,13 +593,13 @@ impl Mercurius {
         // Restore non-encountering planets to their post-Kepler state.
         // The Sun also returns to its pre-encounter DH state (origin,
         // zero velocity). Encountering particles keep IAS15's result.
-        bodies[0] = self.particles_backup[0];
+        bodies[0] = self.particles_backup[0].clone();
         bodies[0].vel_x = 0.0;
         bodies[0].vel_y = 0.0;
         bodies[0].vel_z = 0.0;
         for i in 1..n {
             if !self.encounter_map[i] {
-                bodies[i] = post_kepler[i];
+                bodies[i] = post_kepler[i].clone();
             }
         }
 
@@ -652,7 +652,7 @@ impl Integrator for Mercurius {
 
         // Resize per-step buffers if N changed.
         if self.last_n != n {
-            self.particles_backup.resize(n, bodies[0]);
+            self.particles_backup.resize(n, bodies[0].clone());
             self.dcrit.resize(n, 0.0);
             self.encounter_map.resize(n, false);
             self.acc_int.resize(n, Vec3::ZERO);
@@ -685,7 +685,7 @@ impl Integrator for Mercurius {
         self.com_step(dt);
 
         // ── 4. backup ──────────────────────────────────────────────────
-        self.particles_backup.copy_from_slice(bodies);
+        self.particles_backup.clone_from_slice(bodies);
 
         // ── 5. kepler(τ) ───────────────────────────────────────────────
         self.kepler_step_all(bodies, mu, dt);

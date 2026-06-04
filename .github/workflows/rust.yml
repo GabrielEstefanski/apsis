@@ -101,12 +101,15 @@ jobs:
           fi
           echo "OK: core resolves no UI dependency"
 
-  # ── Python distribution build + import smoke ─────────────────────────────
+  # ── Python distribution build + lint + typecheck + tests ────────────────
   # Catches FFI link errors, module-name mismatches, and the PyO3
   # `add_submodule` / `sys.modules` registration regression that breaks
   # `from apsis.<operator> import X` even when attribute access works.
+  # Also gates the Python surface against the lint + type-check + smoke
+  # test set so stub drift and API regressions surface in CI rather than
+  # at the next local run.
   python-build:
-    name: maturin build + import smoke
+    name: python build + lint + typecheck + tests
     runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
     needs: fmt-and-clippy
     steps:
@@ -123,12 +126,29 @@ jobs:
             ~/.cargo/git
             target
           key: ${{ runner.os }}-cargo-pybuild-${{ hashFiles('**/Cargo.lock') }}
-      - name: create venv + maturin develop
+      - name: create venv + maturin develop + dev deps
         run: |
           python -m venv .venv
           . .venv/bin/activate
           pip install maturin
           maturin develop --release
+          pip install ruff mypy pyright pytest
+      - name: ruff check
+        run: |
+          . .venv/bin/activate
+          ruff check apsis/ python-tests/ paper/figures/scripts/
+      - name: mypy
+        run: |
+          . .venv/bin/activate
+          mypy apsis/ python-tests/ paper/figures/scripts/
+      - name: pyright
+        run: |
+          . .venv/bin/activate
+          pyright apsis/ python-tests/ paper/figures/scripts/
+      - name: pytest python-tests/
+        run: |
+          . .venv/bin/activate
+          pytest python-tests/
       - name: from apsis import + per-operator import
         run: |
           . .venv/bin/activate
@@ -173,3 +193,35 @@ jobs:
         env:
           RUSTFLAGS: ""
         run: cargo nextest run --release -p apsis-1pn --tests --run-ignored only
+      - name: release validation (softened-Plummer geometric apsidal precession)
+        env:
+          RUSTFLAGS: ""
+        run: cargo nextest run --release -p apsis --test softened_plummer_geometric_gate --run-ignored only
+
+  # ── recommended_dt heuristic gate ─────────────────────────────────────────
+  # Runs the validation harness for the `recommended_dt` utility function.
+  # Catches regressions in the heuristic shape or in template ICs that
+  # would push any gated (scenario × VV/Y4) cell past its conservation bound.
+  recommended-dt-gate:
+    name: release validation (recommended_dt heuristic)
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    needs: fmt-and-clippy
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: rui314/setup-mold@v1
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-recdt-${{ hashFiles('**/Cargo.lock') }}
+      - name: cargo run recommended_dt_validation
+        env:
+          RUSTFLAGS: ""
+        run: cargo run --release --example recommended_dt_validation -p apsis --quiet
+      - name: cargo run recommended_dt_compare
+        env:
+          RUSTFLAGS: ""
+        run: cargo run --release --example recommended_dt_compare -p apsis --quiet

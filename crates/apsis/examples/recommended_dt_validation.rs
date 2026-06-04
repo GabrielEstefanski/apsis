@@ -14,11 +14,11 @@
 //! Default output path: `validation/recommended-dt/out/runs.csv` relative to
 //! the workspace root.
 //!
-//! ## Protocol
+//! ## Heuristic note
 //!
-//! Specified in
-//! [`paper/notebooks/2026-05-01-recommended-dt-validation.md`](../../../../paper/notebooks/2026-05-01-recommended-dt-validation.md).
-//! Constants here mirror the protocol; changes are protocol changes.
+//! Formula, gates, and current verdict in
+//! [`docs/experiments/2026-05-01-recommended-dt-heuristic.md`](../../../../docs/experiments/2026-05-01-recommended-dt-heuristic.md).
+//! Constants here mirror that note; changes flow through it.
 
 use std::env;
 use std::fs::{File, create_dir_all};
@@ -97,7 +97,7 @@ fn main() {
     let mut w = BufWriter::new(file);
 
     writeln!(w, "# Validation — recommended_dt heuristic for fixed-step integrators").unwrap();
-    writeln!(w, "# protocol: paper/notebooks/2026-05-01-recommended-dt-validation.md").unwrap();
+    writeln!(w, "# note: docs/experiments/2026-05-01-recommended-dt-heuristic.md").unwrap();
     writeln!(w, "# scenarios={}, integrators=3, substeps={N_SUBSTEPS}", SCENARIOS.len()).unwrap();
     writeln!(w, "scenario,integrator,sample,t,e_total,lz,dt_recommended").unwrap();
 

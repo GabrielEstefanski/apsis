@@ -25,9 +25,11 @@ built for `UnitSystem::solar()` (IAU, G≈4π²) into a
 `UnitSystem::solar_canonical()` system (G=1) and the integration
 proceeded silently with a `c` value off by ~0.009 %. Register on a
 softened kernel and the numerical apsidal precession from softening
-alone exceeded the GR signal by ~2 × 10³ — energy and angular
-momentum stayed conserved at machine precision while the trajectory
-was physically wrong.
+alone exceeded the GR signal by ~5 × 10⁴ at Mercury parameters
+(exact apsidal-angle quadrature $\dot\varpi_\text{Plummer} \approx
+-2.29 \times 10^6$ arcsec/century; derivation in paper §3.2) — energy
+and angular momentum stayed conserved at machine precision while the
+trajectory was physically wrong.
 
 The locked memory entry [[feedback_fine_physics_traps]] catalogues
 this pattern: precision physics derived around a clean baseline can

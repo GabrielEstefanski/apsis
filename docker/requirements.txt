@@ -1,0 +1,16 @@
+# Python deps for the apsis validation/figures container (Linux).
+#
+# rebound/reboundx are Linux-only (no Windows/MSVC build) and reboundx must be
+# compiled fresh against its co-installed rebound — the Dockerfile installs
+# with --no-cache-dir for that reason. rebound 4.6.0 is pinned by reboundx
+# 4.6.2 (no rebound-5 reboundx release yet).
+#
+# numpy/matplotlib/rebound/reboundx are pinned to the versions used to produce
+# the committed figures and parity references. scipy/pandas are floored; pin
+# them exactly from `pip freeze` after the first build for full repro.
+numpy==2.2.6
+matplotlib==3.10.9
+scipy>=1.13
+pandas>=2.0
+rebound==4.6.0
+reboundx==4.6.2

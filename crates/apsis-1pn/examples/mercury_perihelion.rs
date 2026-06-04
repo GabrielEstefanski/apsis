@@ -24,7 +24,10 @@
 //! softened kernel (`NewtonKernel::new(ε > 0)`) on top of 1PN gets a
 //! [`warn_diag!`](apsis::warn_diag) naming the violated invariant: at
 //! Mercury's perihelion, an ε ≈ 0.02 AU softening produces a numerical
-//! apsidal drift ~2 × 10³ larger than the 43 arcsec/century GR effect.
+//! apsidal drift ~5 × 10⁴ larger than the 43 arcsec/century GR effect
+//! and of the opposite sign — a full-potential apsidal-angle quadrature
+//! puts it at ϖ̇ ≈ −2.29 × 10⁶ arcsec/century (see paper §3.2 and the
+//! softened-Plummer precession validation gate).
 
 use apsis::core::system::System;
 use apsis::domain::body::Body;

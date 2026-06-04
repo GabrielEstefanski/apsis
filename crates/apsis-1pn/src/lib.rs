@@ -1,9 +1,8 @@
 //! First post-Newtonian gravitational correction (Schwarzschild,
 //! test-particle form applied pairwise) per Anderson et al. (1975,
 //! *ApJ* 200, 221). Recovers the GR perihelion precession
-//! `Δφ = 6π G M / (c² a (1 − e²))` at leading order. CI gate
-//! reproduces Mercury's 43 arcsec/century to 28 ppm; threshold at
-//! 100 ppm.
+//! `Δφ = 6π G M / (c² a (1 − e²))` at leading order. The CI gate
+//! reproduces Mercury's 43 arcsec/century to within 100 ppm of GR.
 //!
 //! Force expression on receiver `i` from source `j ≠ i`:
 //!
@@ -15,10 +14,13 @@
 //!
 //! Attaching 1PN to a softened kernel (`NewtonKernel::new(ε > 0)`)
 //! invalidates the physical model: numerical apsidal precession from a
-//! Plummer-style 1/√(r²+ε²) potential is ~2 × 10³ larger than the
-//! relativistic signal and of opposite sign at Mercury's orbit. The
-//! default `NewtonKernel::exact()` is silent against the kernel-
-//! requirement check; opting into ε > 0 emits a structured warning.
+//! Plummer-style 1/√(r²+ε²) potential is ~5 × 10⁴ larger than the
+//! relativistic signal and of opposite sign at Mercury's orbit. A
+//! full-potential apsidal-angle quadrature puts it at ϖ̇ ≈ −2.29 × 10⁶
+//! arcsec/century (the leading-order −3 n ε² / [2 a² (1 − e²)²] closed
+//! form is +2.7 % above that); see paper §3.2. The default
+//! `NewtonKernel::exact()` is silent against the kernel-requirement
+//! check; opting into ε > 0 emits a structured warning.
 //!
 //! # Use
 //!
@@ -180,6 +182,9 @@ impl Operator for PostNewtonian1PN {
             crate_name: env!("CARGO_PKG_NAME"),
             crate_version: env!("CARGO_PKG_VERSION"),
             commit_hash: option_env!("APSIS_1PN_GIT_COMMIT").filter(|s| !s.is_empty()),
+            description: Some("First-post-Newtonian Schwarzschild correction"),
+            url: Some("https://github.com/GabrielEstefanski/apsis"),
+            author: Some("Estefanski, G. B."),
         })
     }
 }
@@ -361,31 +366,22 @@ mod tests {
         );
     }
 
-    /// `for_units(UnitSystem::solar_canonical())` returns `c` in the
-    /// G=1 solar convention (L = AU, T = Gaussian time, M = M☉) — the
-    /// apsis-1pn validation portfolio baseline. The Gaussian time
-    /// scale (`sqrt(AU³/(G·M))`) is what makes `G_code = 1` exactly;
-    /// it differs from the IAU `year/(2π)` by ~0.009 % (the historical
-    /// astrodynamics gap between the Gaussian and IAU definitions).
-    /// `C_SOLAR_UNITS` is therefore close to but not bit-equal to
-    /// `for_units(solar_canonical).c()` — the constant uses the IAU
-    /// year for backwards compatibility, the constructor uses the
-    /// Gaussian time so the integrator sees `G = 1` exactly.
+    /// `for_units(solar_canonical)` c uses Gaussian time (`sqrt(AU³/GM_sun)`),
+    /// the G=1 portfolio baseline; it differs from the IAU `year/(2π)`
+    /// literal `C_SOLAR_UNITS` by ~19 ppm (the Gaussian-vs-IAU-year gap).
     #[test]
     fn for_units_solar_canonical_close_to_c_solar_units() {
         let pn = PostNewtonian1PN::for_units(UnitSystem::solar_canonical());
         let rel_diff = (pn.c() - C_SOLAR_UNITS).abs() / C_SOLAR_UNITS;
-        // ~0.009 % gap between Gaussian and IAU year definitions.
+        // ~19 ppm gap; bound guards a GM-primitive regression (the old G·M
+        // primitive widened it to ~110 ppm).
         assert!(
-            rel_diff < 1e-3,
-            "for_units(solar_canonical) c={} differs from C_SOLAR_UNITS={} by {:.3e}, \
-             expected gap < 0.1 %",
+            rel_diff < 5e-5,
+            "for_units(solar_canonical) c={} vs C_SOLAR_UNITS={} gap {:.3e}, expected ~19 ppm",
             pn.c(),
             C_SOLAR_UNITS,
             rel_diff,
         );
-        // But it's NOT bit-equal — the IAU/Gaussian mismatch is the
-        // whole point of using Gaussian time. Lock that.
         assert!(
             pn.c() != C_SOLAR_UNITS,
             "for_units should produce Gaussian-time c, not the IAU C_SOLAR_UNITS literal",

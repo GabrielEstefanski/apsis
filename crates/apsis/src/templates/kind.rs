@@ -282,7 +282,7 @@ mod tests {
 
         // After from_template + manual add, a subsequent with_seed must NOT
         // wipe the manually-added body. This is enforced by the auto-clear
-        // of template_source inside add_body / add_named_bodies / etc.
+        // of template_source inside add_body / add_bodies / etc.
         let mut sys = System::from_template(TemplateKind::JupiterTrojans);
         let n_before = sys.bodies().len();
         sys.add_body(Body::rocky(1.0).at(100.0, 100.0));

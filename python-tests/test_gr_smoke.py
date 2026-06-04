@@ -17,6 +17,7 @@ and it requires a release-mode run.
 from __future__ import annotations
 
 import math
+from typing import Any, cast
 
 import pytest
 
@@ -82,7 +83,7 @@ def test_from_raw_c_rejects_invalid_speed_of_light() -> None:
 
 def test_from_raw_c_requires_keyword_only_arguments() -> None:
     with pytest.raises(TypeError):
-        gr.PostNewtonian1PN.from_raw_c(10000.0, apsis.units.SOLAR_CANONICAL)  # type: ignore[misc]
+        cast(Any, gr.PostNewtonian1PN.from_raw_c)(10000.0, apsis.units.SOLAR_CANONICAL)
 
 
 # ── Integration with apsis.System ────────────────────────────────────────────

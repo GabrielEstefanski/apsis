@@ -94,9 +94,12 @@ pub fn header_from_system(
     let body_meta: Vec<BodyMeta> = sys
         .bodies()
         .iter()
-        .zip(sys.names().iter())
-        .map(|(b, name)| BodyMeta {
-            name: name.clone(),
+        .enumerate()
+        .map(|(i, b)| BodyMeta {
+            name: b
+                .name
+                .clone()
+                .unwrap_or_else(|| panic!("body at index {i} has no name; invariant violated")),
             mass: b.mass,
             density: b.density,
             physical_radius: b.physical_radius,
@@ -170,6 +173,18 @@ fn operator_crate_hash(
         Some(_) if !apsis_sha.is_empty() => format!("workspace:{apsis_sha}"),
         _ => String::new(),
     }
+}
+
+/// Read the workspace `Cargo.lock` (walking up from CWD when
+/// `lock_path` is `None`) and return its BLAKE3 hash as a 64-char
+/// hex string. Same lookup contract as `header_from_system`; callers
+/// that only need the hash (e.g. [`crate::core::system::System::cite`])
+/// avoid building a whole [`Header`] just to read it.
+pub fn lock_blake3(lock_path: Option<&Path>) -> Result<String, ProvenanceError> {
+    let lock_path = resolve_lock_path(lock_path)?;
+    let lock_bytes =
+        std::fs::read(&lock_path).map_err(|e| ProvenanceError::LockRead(lock_path.clone(), e))?;
+    Ok(blake3::hash(&lock_bytes).to_hex().to_string())
 }
 
 fn resolve_lock_path(explicit: Option<&Path>) -> Result<PathBuf, ProvenanceError> {

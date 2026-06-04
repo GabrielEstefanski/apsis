@@ -1,0 +1,12 @@
+# The docker/Dockerfile build context only needs docker/requirements.txt; the
+# repo is bind-mounted at run time. Exclude everything heavy/irrelevant so the
+# context upload stays small.
+.git/
+target/
+**/.venv/
+**/__pycache__/
+**/*.pyc
+.claude/
+node_modules/
+paper.pdf
+**/out/

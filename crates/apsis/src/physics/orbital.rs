@@ -90,8 +90,9 @@
 //! - Bate, Mueller & White (1971). *Fundamentals of Astrodynamics*. Dover.
 //! - Vallado (2013). *Fundamentals of Astrodynamics and Applications*, 4th ed.
 
-use std::f64::consts::TAU;
+use std::f64::consts::{PI, TAU};
 
+use crate::core::system::System;
 use crate::domain::body::Body;
 use crate::math::{Vec3, wrap_pi};
 
@@ -968,6 +969,98 @@ pub fn compute_elements(
     Some(elements_from_invariants(&inv, primary_idx, gm))
 }
 
+/// Sampling sub-steps per Kepler period for the periapsis search and the
+/// continuous angle unwrap in [`geometric_apsidal_precession_per_radial`]. 360
+/// keeps the per-step swept angle well under π even at periapsis (fastest
+/// point), so the unwrap never skips a turn.
+const APSIDAL_SAMPLES_PER_PERIOD: f64 = 360.0;
+
+/// Geometric apsidal precession per radial period (rad) of body `idx` about
+/// `primary_idx`, from periapsis-passage detection over `n_radial` radial
+/// periods. Integrates `sys` in place.
+///
+/// Measures the angle between successive *true* periapses (ṙ: −→+) — the same
+/// observable a central-potential apsidal-angle quadrature computes — not an
+/// osculating element. The osculating argument of periapsis oscillates within
+/// an orbit; sampling it at integer Kepler periods (T_radial ≠ T_Kepler) folds
+/// that wiggle into a sign-oscillating, N-dependent stroboscopic artifact, not
+/// a property of the dynamics. The geometric angle has neither problem.
+///
+/// Method: integrate in fine sub-steps, accumulate the continuously-unwrapped
+/// position angle Θ(t) (total angle swept), and detect periapsis passages. Over
+/// K radial periods the body sweeps K·(2π + Δϖ), so
+/// `Δϖ = Θ(periapsis K) / K − 2π`. The endpoint Θ is linearly interpolated to
+/// the ṙ=0 crossing, an error that enters divided by K and is negligible.
+///
+/// # Preconditions
+///
+/// The orbit must start at periapsis (ṙ ≈ 0), so Θ = 0 at body `idx`'s initial
+/// position. `g_factor` matches [`compute_elements`]. Planar two-body use; the
+/// angle is taken in the xy-plane.
+///
+/// # Panics
+///
+/// Panics if the initial elements are undefined (e.g. an unbound or degenerate
+/// configuration) or if the orbit fails to complete `n_radial` periapsis passes.
+pub fn geometric_apsidal_precession_per_radial(
+    sys: &mut System,
+    idx: usize,
+    primary_idx: usize,
+    g_factor: f64,
+    n_radial: u64,
+) -> f64 {
+    let period = compute_elements(sys.bodies(), idx, primary_idx, g_factor)
+        .expect("initial elements for the periapsis-passage sweep")
+        .period;
+    let h = period / APSIDAL_SAMPLES_PER_PERIOD;
+
+    let (mut theta_last, mut rdot_prev) = relative_angle_and_rdot(sys.bodies(), idx, primary_idx);
+    let mut theta_cont = 0.0_f64;
+    let mut peri_count = 0_u64;
+    let mut t = 0.0_f64;
+
+    loop {
+        t += h;
+        sys.integrate_until(t);
+        let (theta, rdot) = relative_angle_and_rdot(sys.bodies(), idx, primary_idx);
+        // Exact in-range identity: the per-step swept angle is always well
+        // within (−π, π], so the loops never iterate. `math::wrap_pi`'s
+        // `+π … −π` form would inject ~1e-16 per step, biasing Θ over the ~10^5
+        // accumulation steps.
+        let mut dtheta = theta - theta_last;
+        while dtheta > PI {
+            dtheta -= TAU;
+        }
+        while dtheta <= -PI {
+            dtheta += TAU;
+        }
+        theta_cont += dtheta;
+        theta_last = theta;
+
+        if rdot_prev < 0.0 && rdot >= 0.0 {
+            peri_count += 1;
+            if peri_count == n_radial {
+                // Linear interp of Θ to the ṙ=0 crossing inside [prev, now].
+                let frac = rdot_prev / (rdot_prev - rdot);
+                let theta_cont_prev = theta_cont - dtheta;
+                return (theta_cont_prev + frac * dtheta) / (n_radial as f64) - TAU;
+            }
+        }
+        rdot_prev = rdot;
+    }
+}
+
+/// Position angle (xy-plane) and radial velocity of body `idx` relative to
+/// `primary_idx`.
+fn relative_angle_and_rdot(bodies: &[Body], idx: usize, primary_idx: usize) -> (f64, f64) {
+    let dx = bodies[idx].pos_x - bodies[primary_idx].pos_x;
+    let dy = bodies[idx].pos_y - bodies[primary_idx].pos_y;
+    let dvx = bodies[idx].vel_x - bodies[primary_idx].vel_x;
+    let dvy = bodies[idx].vel_y - bodies[primary_idx].vel_y;
+    let r = (dx * dx + dy * dy).sqrt();
+    (dy.atan2(dx), (dx * dvx + dy * dvy) / r)
+}
+
 /// Eccentricity below which [`elements_anchored_to_body`] skips the
 /// geometric anchor and returns the smoothed-direction ellipse instead.
 ///
@@ -1370,7 +1463,7 @@ mod tests {
         // ANCHOR_MIN_E = 0.05). Anchor must NOT engage here.
         let v = 1.005 * v_c;
         let primary = body(0.0, 0.0, 0.0, 0.0, m);
-        let bodies = vec![primary, body(r, 0.0, 0.0, v, 1e-10)];
+        let bodies = vec![primary.clone(), body(r, 0.0, 0.0, v, 1e-10)];
         let inv = compute_invariants(&bodies, 1, 0, G).unwrap();
         assert!(
             inv.e_vec.length() < ANCHOR_MIN_E,
@@ -1405,7 +1498,7 @@ mod tests {
         let v_c = (gm / r).sqrt();
         let v = 1.2 * v_c; // e ≈ 0.44, well above threshold
         let primary = body(0.0, 0.0, 0.0, 0.0, m);
-        let bodies = vec![primary, body(r, 0.0, 0.0, v, 1e-10)];
+        let bodies = vec![primary.clone(), body(r, 0.0, 0.0, v, 1e-10)];
         let inv = compute_invariants(&bodies, 1, 0, G).unwrap();
         let gm_pair = G * (bodies[1].mass + primary.mass);
         let el_a = elements_anchored_to_body(&inv, 0, gm_pair, &bodies[1], &primary);
@@ -2183,7 +2276,7 @@ mod tests {
         let primary = body(0.0, 0.0, 0.0, 0.0, 1e6);
         let satellite = body(7.0, 4.0, -0.6, 0.4, 1e-10);
 
-        let inv = compute_invariants(&[primary, satellite], 1, 0, G).unwrap();
+        let inv = compute_invariants(&[primary.clone(), satellite.clone()], 1, 0, G).unwrap();
         let gm = G * (primary.mass + satellite.mass);
         let el = elements_from_invariants(&inv, 0, gm);
 
@@ -2259,7 +2352,7 @@ mod tests {
             v_hyp * i_target.sin(),
         );
 
-        let el_a = compute_elements(&[primary, satellite], 1, 0, G).unwrap();
+        let el_a = compute_elements(&[primary.clone(), satellite.clone()], 1, 0, G).unwrap();
 
         // 1% perturbation on each velocity component.
         let perturbed = Body::rocky(1e-10).at_3d(r, 0.0, 0.0).with_velocity_3d(
@@ -2267,7 +2360,7 @@ mod tests {
             v_hyp * i_target.cos() * 1.01,
             v_hyp * i_target.sin() * 0.99,
         );
-        let el_b = compute_elements(&[primary, perturbed], 1, 0, G).unwrap();
+        let el_b = compute_elements(&[primary.clone(), perturbed], 1, 0, G).unwrap();
 
         assert!(matches!(el_a.orbit_type, OrbitType::Hyperbolic));
         assert!(matches!(el_b.orbit_type, OrbitType::Hyperbolic));
@@ -2301,7 +2394,7 @@ mod tests {
     #[test]
     fn h_vec_magnitude_equals_h_z_when_planar() {
         let (primary, satellite) = circular_orbit(8.0, 1e6);
-        let inv = compute_invariants(&[primary, satellite], 1, 0, G).unwrap();
+        let inv = compute_invariants(&[primary.clone(), satellite.clone()], 1, 0, G).unwrap();
 
         // Precondition: orbit is in the `xy`-plane, so `h_vec` is along ±ẑ.
         assert_eq!(inv.h_vec.x, 0.0, "test setup: planar input must have h_vec.x == 0");
@@ -2442,7 +2535,7 @@ mod tests {
         let satellite =
             Body::rocky(1e-10).at_3d(r, 0.0, 0.0).with_velocity_3d(0.0, v_c * cos_i, v_c * sin_i);
 
-        let inv = compute_invariants(&[primary, satellite], 1, 0, G).unwrap();
+        let inv = compute_invariants(&[primary.clone(), satellite.clone()], 1, 0, G).unwrap();
         let h_mag = inv.h_vec.length();
 
         // Analytic prediction: r × v with r = (R, 0, 0) and
@@ -2521,7 +2614,7 @@ mod tests {
                 .at_3d(r_inertial.x, r_inertial.y, r_inertial.z)
                 .with_velocity_3d(v_inertial.x, v_inertial.y, v_inertial.z);
 
-            let el = compute_elements(&[primary, satellite], 1, 0, G)
+            let el = compute_elements(&[primary.clone(), satellite.clone()], 1, 0, G)
                 .expect("elements must be computable");
 
             // Tolerance: 1e-9 rad ≈ 0.2 milli-arcsec at 1 AU — captures
