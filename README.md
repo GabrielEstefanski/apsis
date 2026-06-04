@@ -163,10 +163,10 @@ Mercury + Sun + 1PN @ IAS15
   integrating    = 500 orbits  →  t = 756.63
   ...
 ── GR comparison over 500 orbits ──
-  predicted Δω      = +2.509976e-04 rad  (+51.7720 arcsec)
-  measured  Δω      = +2.509906e-04 rad  (+51.7705 arcsec)
-  relative error    = -2.802e-05
-  rate              = 42.991 arcsec/century  (GR expects 43)
+  predicted Δω      = +2.509332e-04 rad  (+51.7587 arcsec)
+  measured  Δω      = +2.509130e-04 rad  (+51.7545 arcsec)
+  relative error    = -8.053e-05
+  rate              = 42.978 arcsec/century  (GR expects 43)
 ```
 
 The same number is asserted in CI, gate-style:
