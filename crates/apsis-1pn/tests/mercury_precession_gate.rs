@@ -31,27 +31,16 @@
 //!
 //! ## Why `from_raw_c(C_SOLAR_UNITS, …)` instead of `for_units(…)`
 //!
-//! The gate is calibrated against the apsis-1pn historical baseline,
-//! where `c` is the [`apsis_1pn::C_SOLAR_UNITS`] literal (derived from
-//! `c_SI · YR_S/(2π) / AU`, the IAU julian-year convention).
-//! `for_units(UnitSystem::solar_canonical())` derives `c` from
-//! Gaussian time (`sqrt(AU³/(G·M))`) instead — numerically ~110 ppm
-//! off the IAU literal. Both are physically valid; they differ only
-//! by the historical IAU-vs-Gaussian gap.
+//! Regression stability: the gated number sits on one fixed `c` literal
+//! ([`apsis_1pn::C_SOLAR_UNITS`], the IAU julian-year value
+//! `c_SI · YR_S/(2π) / AU`), so it cannot move under a units-system
+//! refactor. `for_units(UnitSystem::solar_canonical())` instead derives
+//! `c` from Gaussian time (`sqrt(AU³/GM_sun)`); both are physically valid
+//! and differ by only ~19 ppm (the IAU-vs-Gaussian gap). See ADR-014 for
+//! the GM calibration.
 //!
-//! That ~110 ppm shift in `c` translates into a corresponding shift
-//! in the 1PN force prefactor (`∝ 1/c²`), which IAS15's adaptive
-//! substep schedule responds to at the ULP level. The 2D path
-//! absorbs the perturbation (still passes within 100 ppm everywhere);
-//! the 3D inclined path on Linux glibc + libm has slightly more
-//! ULP-noise headroom and crosses the 100 ppm bound. Pinning the
-//! gate to `C_SOLAR_UNITS` eliminates that confound and keeps the
-//! gated number on a single fixed `c`, independent of the units
-//! convention.
-//!
-//! The recommended user-facing API is still
-//! [`PostNewtonian1PN::for_units`] — see `examples/mercury_perihelion.rs`,
-//! which demonstrates that path. The gate uses the raw escape
+//! The recommended user-facing API is [`PostNewtonian1PN::for_units`] —
+//! see `examples/mercury_perihelion.rs`. The gate uses the raw escape
 //! deliberately for regression-detection stability.
 
 use std::f64::consts::PI;
