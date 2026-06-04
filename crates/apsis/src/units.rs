@@ -25,8 +25,11 @@ pub const AU_M: f64 = 1.495_978_707e11;
 /// Julian year in seconds (365.25 × 86 400).
 pub const YR_S: f64 = 3.155_76e7;
 
-/// Solar mass in kilograms (IAU 2015 nominal).
-pub const MSUN_KG: f64 = 1.988_92e30;
+/// Nominal solar mass parameter GM_sun (m³ s⁻²). IAU 2015 Resolution B3, exact.
+pub const GM_SUN_SI: f64 = 1.327_124_4e20;
+
+/// Solar mass in kilograms, derived from the nominal GM_sun and CODATA G.
+pub const MSUN_KG: f64 = GM_SUN_SI / G_SI;
 
 /// One centimetre in metres.
 pub const CM_M: f64 = 1.0e-2;
@@ -129,7 +132,7 @@ impl UnitSystem {
     /// long-horizon experiments) runs in.
     ///
     /// The Gaussian time unit numerically differs from `YR_S/(2π)`
-    /// (IAU julian year over 2π) by ~0.009 % — the historical
+    /// (IAU julian year over 2π) by ~19 ppm — the historical
     /// astrodynamics gap between the IAU-defined year and the year
     /// implied by the Gaussian gravitational constant. The Gaussian
     /// definition is what yields G = 1 exactly; the IAU julian
@@ -139,9 +142,9 @@ impl UnitSystem {
     /// Not `const fn` because `f64::sqrt` is not stable in const
     /// context; the value is otherwise immutable.
     pub fn solar_canonical() -> Self {
-        // T = sqrt(L³ / (G · M)) so that G_code = G · M · T² / L³ = 1.
+        // T = sqrt(L³ / GM_sun) so that G_code = 1.
         let l3 = AU_M * AU_M * AU_M;
-        let gm = G_SI * MSUN_KG;
+        let gm = GM_SUN_SI;
         let t_gaussian = (l3 / gm).sqrt();
         Self {
             length_m: AU_M,
@@ -384,12 +387,32 @@ mod tests {
         assert_eq!(u.g(), G_SI);
     }
 
+    /// Implied GM of `solar_canonical` equals the IAU 2015 nominal (GM)_sun.
+    #[test]
+    fn solar_canonical_gm_matches_iau_nominal() {
+        const GM_SUN_IAU: f64 = 1.327_124_4e20; // IAU 2015 Resolution B3 (exact, m³/s²)
+        let implied_gm = AU_M.powi(3) / UnitSystem::solar_canonical().time_scale_si().powi(2);
+        let rel = (implied_gm - GM_SUN_IAU).abs() / GM_SUN_IAU;
+        assert!(
+            rel < 1e-9,
+            "solar_canonical GM = {implied_gm:.6e} vs IAU nominal {GM_SUN_IAU:.6e} (off {rel:.3e})"
+        );
+    }
+
+    /// `MSUN_KG` is the GM-primitive mass: `MSUN_KG · G_SI` recovers the
+    /// nominal `GM_sun`, so the kg value is derived, not an independent literal.
+    #[test]
+    fn msun_kg_is_gm_over_g() {
+        let rel = (MSUN_KG * G_SI - GM_SUN_SI).abs() / GM_SUN_SI;
+        assert!(rel < 1e-12, "MSUN_KG·G_SI = {:.6e} vs GM_SUN_SI {GM_SUN_SI:.6e}", MSUN_KG * G_SI);
+    }
+
     /// `solar()`'s derived `G` must land near `4π²` (the dimensionless
     /// form of Kepler's third law for the Sun-Earth system). Tolerance
     /// is 1% — `4π²` is an idealisation that assumes the Earth's orbit
     /// is exactly circular at exactly `1 AU` with exactly `1 yr`
-    /// period. Real CODATA `G_SI` × IAU `MSUN_KG` × Julian `YR_S` /
-    /// `AU_M³` gives `≈ 39.487`, about 0.02% off from `4π² ≈ 39.478`.
+    /// period. The GM-primitive `solar().g()` (`GM_sun · YR_S² / AU_M³`)
+    /// is `≈ 39.4769`, about 0.004 % below `4π² ≈ 39.4784`.
     /// The test pins the order-of-magnitude / sign / shape, not the
     /// idealised value.
     #[test]
