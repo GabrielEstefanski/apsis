@@ -110,6 +110,14 @@ vs-Gaussian gap (both conventions valid).
   old-G `E₀` literal; the cross-impl parity number it feeds the paper
   §Validation table is unaffected (energy/Lz agreement is dimensionless).
   Update tracked with that notebook.
+- The ungated `mercury_perihelion` example's precession rel_err shifts
+  (~28 → ~80 ppm on this box): IAS15's adaptive substep schedule depends
+  on the absolute `c` at the ULP level, so the corrected `for_units` `c`
+  moves the residual — *toward* agreement with the gated `from_raw_c`
+  value (~97 ppm). The CI gate is unchanged. The paper §3.5 cross-platform
+  numbers (`for_units 2.8e-5`) were measured at the old `c` and need
+  re-measurement; the "two conventions, two numbers" framing largely
+  collapses now that the two `c` values differ by ~19 ppm, not ~190.
 - The density-rendering constant `KG_M3_TO_SOLAR_AU3`
   (`templates/builders.rs`) still quotes the textbook solar mass; it is
   a few-percent radius convenience, independent of the dynamics
