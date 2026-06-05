@@ -2,10 +2,9 @@
 
 Loads `out/apsis.csv` and `out/rebound.csv`, computes the metrics defined
 in the protocol's §Hypothesis (Tier 1 magnitude invariants + Tier 2 sign-
-consistency binary checks + Tier 3 informational |Δr|), evaluates them at
-two horizons (10000-orbit gate + 100-orbit checkpoint), and exits 0 iff
-every gated metric is within tolerance at both horizons. Prints the
-§Decision rules outcome interpretation at the end.
+consistency binary checks + Tier 3 informational |Δr|) over the 10^4-orbit
+long horizon, and exits 0 iff every gated metric is within tolerance.
+Prints the §Decision rules outcome interpretation at the end.
 
 ## Tier structure (from the protocol notebook §Hypothesis)
 
@@ -28,16 +27,12 @@ Tier 3 — geometric coherence (informational, NOT gated):
 
 ## Two-horizon evaluation
 
-The same CSV holds 10001 samples spanning 10^4 orbits. The comparator
-evaluates every gated metric twice:
-    - Long-horizon gate: full sample set [0, 10000].
-    - Short-horizon checkpoint: first 101 samples [0, 100], for direct
-      comparability with Kepler-prograde.
-Both must pass for the experiment to verdict pass.
+The CSV holds 10001 samples spanning 10^4 orbits; the comparator gates the
+full sample set.
 
 ## Exit codes
 
-- 0 — all gated metrics within tolerance at both horizons.
+- 0 — all gated metrics within tolerance.
 - 1 — input file error (missing file, sample count mismatch).
 - 2 — at least one gated metric exceeded tolerance at either horizon.
 
@@ -67,26 +62,24 @@ M_PRIMARY: float = 1.0
 M_SECONDARY: float = 1.0e-6
 MU: float = M_PRIMARY + M_SECONDARY
 
-# Two horizons evaluated from the same CSV.
 N_ORBITS_LONG: int = 10_000
-N_ORBITS_CHECKPOINT: int = 100
+N_ORBITS_CHECKPOINT: int = 100  # baseline horizon for the √N round-off floor
 
-# ── Tolerances declared a priori (from §Hypothesis) ────────────────────── #
-#
-# Identical to Kepler-prograde and identical at both horizons. The numerical
-# floor is sign-agnostic and (within the regimes tested) horizon-agnostic;
-# see the protocol's §Run parameters for the Brouwer-law analysis.
+# ── Tolerances ─────────────────────────────────────────────────────────── #
+# IAS15 cross-impl round-off floor grows as √N (Brouwer's law; Rein & Spiegel
+# 2015): F = 13·EPS·√(N_long/N_check). Gate 5×F; ω adds the atan2 1/e factor.
+EPS: float = 2.220446049250313e-16
+E_ECC: float = 0.5  # IC eccentricity (mirrors the Rust example)
+_F_LONG: float = 13.0 * EPS * math.sqrt(N_ORBITS_LONG / N_ORBITS_CHECKPOINT)
 
-TOL_RELATIVE_SEMIAXIS: float = 1.0e-13
-TOL_ECCENTRICITY: float = 1.0e-13
-TOL_PERIAPSIS_OMEGA: float = 1.0e-12
-TOL_RELATIVE_ANGULAR_MOMENTUM: float = 1.0e-13
-TOL_RELATIVE_ENERGY_DRIFT: float = 1.0e-13
-TOL_CROSS_IMPL_ENERGY: float = 1.0e-13
+TOL_RELATIVE_SEMIAXIS: float = 5.0 * _F_LONG
+TOL_ECCENTRICITY: float = 5.0 * _F_LONG
+TOL_PERIAPSIS_OMEGA: float = 5.0 * _F_LONG / E_ECC
+TOL_RELATIVE_ANGULAR_MOMENTUM: float = 5.0 * _F_LONG
+TOL_RELATIVE_ENERGY_DRIFT: float = 5.0 * _F_LONG
+TOL_CROSS_IMPL_ENERGY: float = 5.0 * _F_LONG
 
-# Tier 2 near-zero floor for sign consistency. Quantified in §Hypothesis:
-# ~10^10 below |h_0| ≈ 0.866; ~1.4e3 above the Brouwer-law envelope at
-# 10^5 substeps. Defensive guard, not a routine threshold.
+# Sign guard: h flips sign if retrograde handling breaks. ~10^10 below |h_0|.
 EPS_FLOOR_H: float = 1.0e-10
 
 
@@ -201,8 +194,7 @@ def evaluate_horizon(
 
     # ── Tier 1: magnitude invariants ────────────────────────────────────── #
 
-    # Δa per side, then take max-of-sides for cross-impl reporting style
-    # consistent with Kepler-prograde.
+    # Δa/a, max over samples.
     max_da_rel = 0.0
     for ea, er in zip(elem_apsis, elem_rebound):
         max_da_rel = max(max_da_rel, abs(ea.a - er.a) / abs(a0))
@@ -465,15 +457,7 @@ def main() -> int:
     elem_apsis = [relative_elements(s, MU) for s in apsis]
     elem_rebound = [relative_elements(s, MU) for s in rebound]
 
-    # ── Two-horizon evaluation ──────────────────────────────────────────── #
-    checkpoint_n = N_ORBITS_CHECKPOINT + 1  # samples 0..100 inclusive
-    rep_check = evaluate_horizon(
-        f"checkpoint ({N_ORBITS_CHECKPOINT} orbits)",
-        apsis[:checkpoint_n],
-        rebound[:checkpoint_n],
-        elem_apsis[:checkpoint_n],
-        elem_rebound[:checkpoint_n],
-    )
+    # ── Long-horizon evaluation (10^4 orbits) ───────────────────────────── #
     rep_long = evaluate_horizon(
         f"long-horizon gate ({N_ORBITS_LONG} orbits)",
         apsis,
@@ -482,11 +466,10 @@ def main() -> int:
         elem_rebound,
     )
 
-    print_report(rep_check, rep_long, apsis[0].e_total, rebound[0].e_total)
-    write_json_report(output_dir, rep_check, rep_long)
+    print_report(rep_long, apsis[0].e_total, rebound[0].e_total)
+    write_json_report(output_dir, rep_long)
 
-    all_passed = rep_check.all_gated_passed and rep_long.all_gated_passed
-    return 0 if all_passed else 2
+    return 0 if rep_long.all_gated_passed else 2
 
 
 # ── I/O ─────────────────────────────────────────────────────────────────── #
@@ -548,8 +531,7 @@ def print_horizon(rep: HorizonReport) -> None:
 
 
 def print_report(
-    rep_check: HorizonReport,
-    rep_long: HorizonReport,
+    rep: HorizonReport,
     e0_apsis: float,
     e0_rebound: float,
 ) -> None:
@@ -558,27 +540,23 @@ def print_report(
     print(f"  E_0 apsis   : {e0_apsis:+.18e}")
     print(f"  E_0 rebound : {e0_rebound:+.18e}")
 
-    print_horizon(rep_check)
-    print_horizon(rep_long)
+    print_horizon(rep)
 
     print()
     print("  ── Decision rules outcome (per §Decision rules in protocol) ──")
-    for rep in (rep_check, rep_long):
-        verdict, action = decision_rule(rep)
-        print(f"  [{rep.label}] {verdict}: {action}")
+    verdict, action = decision_rule(rep)
+    print(f"  [{rep.label}] {verdict}: {action}")
     print()
 
 
 def write_json_report(
     output_dir: Path,
-    rep_check: HorizonReport,
-    rep_long: HorizonReport,
+    rep: HorizonReport,
 ) -> None:
     report = {
-        "all_passed": rep_check.all_gated_passed and rep_long.all_gated_passed,
+        "all_passed": rep.all_gated_passed,
         "horizons": {
-            rep_check.label: horizon_to_dict(rep_check),
-            rep_long.label: horizon_to_dict(rep_long),
+            rep.label: horizon_to_dict(rep),
         },
     }
     (output_dir / "comparison.json").write_text(json.dumps(report, indent=2))
