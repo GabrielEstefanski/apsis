@@ -70,36 +70,15 @@ import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-# ── Tolerances declared a priori (mirror the protocol notebook §Hypothesis) ─ #
-#
-# Tier 1 (hard physical invariants):
-#   Energy and angular-momentum bounds at 50× f64 machine epsilon.
-#   The angular-momentum reference scale is O(1) (per-body |m·𝐫×𝐯|);
-#   absolute bound is appropriate because |𝐋_0| ≈ 0 by IC construction.
-#
-# Tier 2 (sanity):
-#   Linear-momentum bound at 50× f64 ULP, absolute (|𝐏_0| ≈ 0).
-#   COM-position bound one decade looser to account for position-scale
-#   accumulation of ULP momentum noise over the 10T integration horizon.
+# All gate tolerances are derived from the IC in main() (mirror the protocol
+# notebook §Hypothesis); the per-gate derivation sits at each computation site.
 
-# Tier 1
-TOL_REL_ENERGY_PER_SIDE: float = 1.0e-13
-TOL_REL_ENERGY_CROSS: float = 1.0e-13
-TOL_ABS_ANGULAR_MOMENTUM_PER_SIDE: float = 1.0e-13
-TOL_ABS_ANGULAR_MOMENTUM_CROSS: float = 1.0e-13
-
-# Tier 2
-TOL_ABS_LINEAR_MOMENTUM_PER_SIDE: float = 1.0e-13
-TOL_ABS_LINEAR_MOMENTUM_CROSS: float = 1.0e-13
-TOL_ABS_COM_PER_SIDE: float = 1.0e-12
-TOL_ABS_COM_CROSS: float = 1.0e-12
-
-# Number of bodies in the figure-8 system (fixed by protocol).
+# Fixed by protocol: 3 equal masses (mirrors the Rust example).
 N_BODIES: int = 3
-# Equal-mass IC; mirrored from the Rust example. Comparator uses this
-# directly rather than parsing the CSV header to keep the metric formula
-# transparent at the comparison site.
 MASS: float = 1.0
+
+# f64 machine epsilon (2^-52).
+EPS: float = 2.220446049250313e-16
 
 
 # ── Data records ───────────────────────────────────────────────────────── #
@@ -143,12 +122,6 @@ def physical_invariants(s: Sample, mass: float) -> Invariants:
 
     Conventions match the apsis-side `total_energy` helper and REBOUND's
     `sim.energy()`: KE = ½ Σ m vᵢ², PE = −Σᵢ<ⱼ G mᵢ mⱼ / rᵢⱼ, with G = 1.
-
-    Angular momentum is computed as the full 3-vector even though the
-    system is planar by IC construction: this exposes any implementation-
-    side breaking of planarity rather than baking the planar assumption
-    into the metric. For the canonical figure-8 ICs, `L_x` and `L_y`
-    must remain at the f64 round-off floor.
     """
     n = len(s.bodies)
     total_mass = mass * n
@@ -166,20 +139,9 @@ def physical_invariants(s: Sample, mass: float) -> Invariants:
             pe -= mass * mass / r
     energy = ke + pe
 
-    # Angular momentum (full 3D vector; for planar ICs Lx = Ly = 0)
-    Lx = 0.0
-    Ly = 0.0
-    Lz = 0.0
-    for x, y, vx, vy in s.bodies:
-        # 𝐫 × 𝐯 with 𝐫 = (x, y, 0), 𝐯 = (vx, vy, 0):
-        #   (𝐫 × 𝐯)_x = y · 0 − 0 · vy = 0
-        #   (𝐫 × 𝐯)_y = 0 · vx − x · 0 = 0
-        #   (𝐫 × 𝐯)_z = x · vy − y · vx
-        # Compute all three explicitly so any future migration to 3D
-        # data flows through this formula unchanged.
-        Lx += mass * (y * 0.0 - 0.0 * vy)
-        Ly += mass * (0.0 * vx - x * 0.0)
-        Lz += mass * (x * vy - y * vx)
+    # Angular momentum: planar data, so only Lz is non-zero.
+    Lx = Ly = 0.0
+    Lz = sum(mass * (x * vy - y * vx) for (x, y, vx, vy) in s.bodies)
 
     # Linear momentum
     Px = sum(mass * vx for (_, _, vx, _) in s.bodies)
@@ -213,6 +175,33 @@ def vec_diff_norm3(a, b) -> float:
 
 def vec_diff_norm2(a, b) -> float:
     return math.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2)
+
+
+def scale_P(bodies: list[tuple[float, float, float, float]], mass: float) -> float:
+    """Wilkinson cancellation scale of 𝐏 = Σ mᵢ𝐯ᵢ (0 by IC): Σ|mᵢ𝐯ᵢ| per axis."""
+    return math.hypot(
+        sum(abs(mass * vx) for (_, _, vx, _) in bodies),
+        sum(abs(mass * vy) for (_, _, _, vy) in bodies),
+    )
+
+
+def scale_L(bodies: list[tuple[float, float, float, float]], mass: float) -> float:
+    """Wilkinson cancellation scale of L_z = Σ mᵢ(xᵢvyᵢ − yᵢvxᵢ) (0 by IC)."""
+    return sum(abs(mass * x * vy) + abs(mass * y * vx) for (x, y, vx, vy) in bodies)
+
+
+def scale_E(bodies: list[tuple[float, float, float, float]], mass: float) -> float:
+    """Condition number of E = KE + PE: (KE + |PE|)/|E|, the relative round-off
+    amplified by the KE↔PE cancellation in a bound system (G = 1)."""
+    ke = sum(0.5 * mass * (vx * vx + vy * vy) for (_, _, vx, vy) in bodies)
+    pe = 0.0
+    n = len(bodies)
+    for i in range(n):
+        xi, yi, _, _ = bodies[i]
+        for j in range(i + 1, n):
+            xj, yj, _, _ = bodies[j]
+            pe -= mass * mass / math.hypot(xi - xj, yi - yj)
+    return (ke + abs(pe)) / abs(ke + pe)
 
 
 # ── Main ───────────────────────────────────────────────────────────────── #
@@ -265,6 +254,25 @@ def main() -> int:
     e0_apsis = inv0_apsis.energy
     e0_rebound = inv0_rebound.energy
 
+    # 𝐏, 𝐋 = 0 by IC → Wilkinson cancellation floor EPS·max_t Σ|terms|;
+    # cross-impl √2×, 10× headroom.
+    p_scale = max(scale_P(s.bodies, MASS) for s in apsis)
+    l_scale = max(scale_L(s.bodies, MASS) for s in apsis)
+    tol_p_per_side = 10.0 * EPS * p_scale
+    tol_p_cross = 10.0 * math.sqrt(2.0) * EPS * p_scale
+    tol_l_per_side = 10.0 * EPS * l_scale
+    tol_l_cross = 10.0 * math.sqrt(2.0) * EPS * l_scale
+
+    # Energy floor = EPS·κ, κ = (KE+|PE|)/|E| condition number; 15× headroom.
+    tol_e = 15.0 * EPS * max(scale_E(s.bodies, MASS) for s in apsis)
+
+    # COM = 0 by IC; drift dominated by momentum-residual accumulation →
+    # floor EPS·P_SCALE·t_final/M; cross-impl 2×, 1.5× safety.
+    t_final = apsis[-1].t
+    com_acc = EPS * p_scale * t_final / (MASS * N_BODIES)
+    tol_com_per_side = 1.5 * com_acc
+    tol_com_cross = 1.5 * 2.0 * com_acc
+
     # ════════════════════════════════════════════════════════════════════ #
     # Tier 1 — Hard physical invariants (gated)
     # ════════════════════════════════════════════════════════════════════ #
@@ -278,15 +286,15 @@ def main() -> int:
         name="|ΔE/E_0| apsis",
         tier=1,
         observed=max_de_apsis,
-        tolerance=TOL_REL_ENERGY_PER_SIDE,
-        passed=max_de_apsis <= TOL_REL_ENERGY_PER_SIDE,
+        tolerance=tol_e,
+        passed=max_de_apsis <= tol_e,
     )
     m_e_rebound = MetricResult(
         name="|ΔE/E_0| rebound",
         tier=1,
         observed=max_de_rebound,
-        tolerance=TOL_REL_ENERGY_PER_SIDE,
-        passed=max_de_rebound <= TOL_REL_ENERGY_PER_SIDE,
+        tolerance=tol_e,
+        passed=max_de_rebound <= tol_e,
     )
 
     # 1b. cross-impl |ΔE|/|E_0|
@@ -298,8 +306,8 @@ def main() -> int:
         name="cross-impl |ΔE|/|E_0|",
         tier=1,
         observed=max_de_cross,
-        tolerance=TOL_REL_ENERGY_CROSS,
-        passed=max_de_cross <= TOL_REL_ENERGY_CROSS,
+        tolerance=tol_e,
+        passed=max_de_cross <= tol_e,
     )
 
     # 1c. |Δ𝐋| per side (vector norm of the drift from t=0)
@@ -309,15 +317,15 @@ def main() -> int:
         name="|Δ𝐋| apsis (abs)",
         tier=1,
         observed=max_dL_apsis,
-        tolerance=TOL_ABS_ANGULAR_MOMENTUM_PER_SIDE,
-        passed=max_dL_apsis <= TOL_ABS_ANGULAR_MOMENTUM_PER_SIDE,
+        tolerance=tol_l_per_side,
+        passed=max_dL_apsis <= tol_l_per_side,
     )
     m_L_rebound = MetricResult(
         name="|Δ𝐋| rebound (abs)",
         tier=1,
         observed=max_dL_rebound,
-        tolerance=TOL_ABS_ANGULAR_MOMENTUM_PER_SIDE,
-        passed=max_dL_rebound <= TOL_ABS_ANGULAR_MOMENTUM_PER_SIDE,
+        tolerance=tol_l_per_side,
+        passed=max_dL_rebound <= tol_l_per_side,
     )
 
     # 1d. cross-impl |Δ𝐋|
@@ -328,8 +336,8 @@ def main() -> int:
         name="cross-impl |Δ𝐋| (abs)",
         tier=1,
         observed=max_dL_cross,
-        tolerance=TOL_ABS_ANGULAR_MOMENTUM_CROSS,
-        passed=max_dL_cross <= TOL_ABS_ANGULAR_MOMENTUM_CROSS,
+        tolerance=tol_l_cross,
+        passed=max_dL_cross <= tol_l_cross,
     )
 
     # ════════════════════════════════════════════════════════════════════ #
@@ -343,15 +351,15 @@ def main() -> int:
         name="|Δ𝐏| apsis (abs)",
         tier=2,
         observed=max_dP_apsis,
-        tolerance=TOL_ABS_LINEAR_MOMENTUM_PER_SIDE,
-        passed=max_dP_apsis <= TOL_ABS_LINEAR_MOMENTUM_PER_SIDE,
+        tolerance=tol_p_per_side,
+        passed=max_dP_apsis <= tol_p_per_side,
     )
     m_P_rebound = MetricResult(
         name="|Δ𝐏| rebound (abs)",
         tier=2,
         observed=max_dP_rebound,
-        tolerance=TOL_ABS_LINEAR_MOMENTUM_PER_SIDE,
-        passed=max_dP_rebound <= TOL_ABS_LINEAR_MOMENTUM_PER_SIDE,
+        tolerance=tol_p_per_side,
+        passed=max_dP_rebound <= tol_p_per_side,
     )
 
     # 2b. cross-impl |Δ𝐏|
@@ -362,8 +370,8 @@ def main() -> int:
         name="cross-impl |Δ𝐏| (abs)",
         tier=2,
         observed=max_dP_cross,
-        tolerance=TOL_ABS_LINEAR_MOMENTUM_CROSS,
-        passed=max_dP_cross <= TOL_ABS_LINEAR_MOMENTUM_CROSS,
+        tolerance=tol_p_cross,
+        passed=max_dP_cross <= tol_p_cross,
     )
 
     # 2c. |Δ𝐫_COM| per side (drift from origin, since r_COM(0) ≈ 0)
@@ -375,15 +383,15 @@ def main() -> int:
         name="|Δ𝐫_COM| apsis (abs)",
         tier=2,
         observed=max_com_apsis,
-        tolerance=TOL_ABS_COM_PER_SIDE,
-        passed=max_com_apsis <= TOL_ABS_COM_PER_SIDE,
+        tolerance=tol_com_per_side,
+        passed=max_com_apsis <= tol_com_per_side,
     )
     m_com_rebound = MetricResult(
         name="|Δ𝐫_COM| rebound (abs)",
         tier=2,
         observed=max_com_rebound,
-        tolerance=TOL_ABS_COM_PER_SIDE,
-        passed=max_com_rebound <= TOL_ABS_COM_PER_SIDE,
+        tolerance=tol_com_per_side,
+        passed=max_com_rebound <= tol_com_per_side,
     )
 
     # 2d. cross-impl |Δ𝐫_COM|
@@ -394,8 +402,8 @@ def main() -> int:
         name="cross-impl |Δ𝐫_COM| (abs)",
         tier=2,
         observed=max_com_cross,
-        tolerance=TOL_ABS_COM_CROSS,
-        passed=max_com_cross <= TOL_ABS_COM_CROSS,
+        tolerance=tol_com_cross,
+        passed=max_com_cross <= tol_com_cross,
     )
 
     tier1 = [m_e_apsis, m_e_rebound, m_e_cross, m_L_apsis, m_L_rebound, m_L_cross]
