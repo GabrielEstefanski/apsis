@@ -67,17 +67,12 @@ M_SECONDARY: float = 1.0e-6
 # Reduced-mass parameter for relative motion: μ = G(m_primary + m_secondary)
 MU: float = M_PRIMARY + M_SECONDARY
 
-# ── Tolerances: IAS15 cross-impl round-off floor ───────────────────────── #
-#
-# Orbital elements of a regular orbit have no cancellation structure — the
-# cross-impl drift is two IAS15 round-off walks, bounded at the f64 floor
-# ~10·EPS (Brouwer's law; Rein & Spiegel 2015). Measured at 4-13·EPS
-# (a/e/h/E over 100 orbits). One floor for all, 10× headroom (cross-platform
-# REBOUND-version spread). ω carries the atan2 condition factor 1/e
-# (|δω| ≤ |δe_vec|/e), so its gate is the floor / e.
+# ── Tolerances ─────────────────────────────────────────────────────────── #
+# IAS15 cross-impl round-off floor ×10 (Brouwer's law; Rein & Spiegel 2015);
+# ω adds the atan2 1/e condition factor.
 EPS: float = 2.220446049250313e-16
 E_ECC: float = 0.5  # IC eccentricity (mirrors the Rust example)
-ELEMENT_FLOOR: float = 13.0 * EPS  # IAS15 cross-impl round-off, 100-orbit horizon
+ELEMENT_FLOOR: float = 13.0 * EPS
 
 TOL_RELATIVE_SEMIAXIS: float = 10.0 * ELEMENT_FLOOR
 TOL_ECCENTRICITY: float = 10.0 * ELEMENT_FLOOR
