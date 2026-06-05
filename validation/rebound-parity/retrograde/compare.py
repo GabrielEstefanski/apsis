@@ -28,8 +28,7 @@ Tier 3 — geometric coherence (informational, NOT gated):
 ## Two-horizon evaluation
 
 The CSV holds 10001 samples spanning 10^4 orbits; the comparator gates the
-full sample set. (A 100-orbit checkpoint was removed — it was bit-identical
-to the prograde Kepler scenario, so it validated nothing new.)
+full sample set.
 
 ## Exit codes
 
@@ -67,10 +66,8 @@ N_ORBITS_LONG: int = 10_000
 N_ORBITS_CHECKPOINT: int = 100  # baseline horizon for the √N round-off floor
 
 # ── Tolerances ─────────────────────────────────────────────────────────── #
-# Single long-horizon gate. The IAS15 cross-impl round-off floor grows as √N
-# (Brouwer's law; Rein & Spiegel 2015): F = 13·EPS·√(N_long/N_check) ≈ 130·EPS.
-# Gate 5×F — kept tight to detect departure from √N (a ∝N drift); ω adds the
-# atan2 1/e condition factor.
+# IAS15 cross-impl round-off floor grows as √N (Brouwer's law; Rein & Spiegel
+# 2015): F = 13·EPS·√(N_long/N_check). Gate 5×F; ω adds the atan2 1/e factor.
 EPS: float = 2.220446049250313e-16
 E_ECC: float = 0.5  # IC eccentricity (mirrors the Rust example)
 _F_LONG: float = 13.0 * EPS * math.sqrt(N_ORBITS_LONG / N_ORBITS_CHECKPOINT)
@@ -82,8 +79,7 @@ TOL_RELATIVE_ANGULAR_MOMENTUM: float = 5.0 * _F_LONG
 TOL_RELATIVE_ENERGY_DRIFT: float = 5.0 * _F_LONG
 TOL_CROSS_IMPL_ENERGY: float = 5.0 * _F_LONG
 
-# Near-zero sign guard: h flips sign if retrograde handling breaks. ~10^10
-# below |h_0| ≈ 0.866 — defensive, not a routine threshold.
+# Sign guard: h flips sign if retrograde handling breaks. ~10^10 below |h_0|.
 EPS_FLOOR_H: float = 1.0e-10
 
 
@@ -198,8 +194,7 @@ def evaluate_horizon(
 
     # ── Tier 1: magnitude invariants ────────────────────────────────────── #
 
-    # Δa per side, then take max-of-sides for cross-impl reporting style
-    # consistent with Kepler-prograde.
+    # Δa/a, max over samples.
     max_da_rel = 0.0
     for ea, er in zip(elem_apsis, elem_rebound):
         max_da_rel = max(max_da_rel, abs(ea.a - er.a) / abs(a0))
@@ -463,9 +458,6 @@ def main() -> int:
     elem_rebound = [relative_elements(s, MU) for s in rebound]
 
     # ── Long-horizon evaluation (10^4 orbits) ───────────────────────────── #
-    # The 100-orbit checkpoint was removed: it was bit-identical to the prograde
-    # Kepler scenario (round-off is sign-agnostic), validating nothing new. The
-    # long-horizon carries the unique value (Brouwer √N + sign convention).
     rep_long = evaluate_horizon(
         f"long-horizon gate ({N_ORBITS_LONG} orbits)",
         apsis,
