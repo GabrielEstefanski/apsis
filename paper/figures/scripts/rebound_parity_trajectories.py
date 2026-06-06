@@ -24,6 +24,21 @@ DATA = ROOT / "data"
 OUT = ROOT / "rebound_parity_trajectories.pdf"
 
 
+def sci(v: float) -> str:
+    """Format as LaTeX m×10ⁿ with a two-decimal mantissa."""
+    exp = int(np.floor(np.log10(abs(v))))
+    return rf"{v / 10 ** exp:.2f}\times10^{{{exp}}}"
+
+
+def cross_energy(apsis: pd.DataFrame, rebound: pd.DataFrame) -> float:
+    """Max over the run of |E_apsis − E_rebound| / |E_0|."""
+    m = min(len(apsis), len(rebound))
+    e0 = abs(float(apsis["e_total"].iloc[0]))
+    ea = np.asarray(apsis["e_total"])[:m]
+    er = np.asarray(rebound["e_total"])[:m]
+    return float(np.max(np.abs(ea - er) / e0))
+
+
 def load(scenario: str) -> tuple[pd.DataFrame, pd.DataFrame]:
     a = pd.read_csv(
         DATA / f"rebound_parity_{scenario}_apsis.csv", comment="#", encoding="latin-1"
@@ -68,7 +83,7 @@ def panel_kepler(ax: Axes, apsis: pd.DataFrame, rebound: pd.DataFrame) -> None:
     ax.set_ylabel("y")
     ax.set_title(r"Kepler $e=0.5$ — 100 orbits", fontsize=10)
     ax.legend(loc="lower left", fontsize=7, framealpha=0.85)
-    annotate(ax, rf"cross-impl $|\Delta\mathbf{{r}}|_{{\max}} = {dr.max():.1e}$")
+    annotate(ax, rf"cross-impl $|\Delta\mathbf{{r}}|_{{\max}} = {sci(dr.max())}$")
 
 
 def panel_figure8(ax: Axes, apsis: pd.DataFrame, rebound: pd.DataFrame) -> None:
@@ -93,7 +108,7 @@ def panel_figure8(ax: Axes, apsis: pd.DataFrame, rebound: pd.DataFrame) -> None:
     ax.set_xlabel("x")
     ax.set_ylabel("y")
     ax.set_title("Figure-8 choreography — 10 periods", fontsize=10)
-    annotate(ax, r"cross-impl $|\Delta E|/|E_0| = 1.0\times10^{-15}$")
+    annotate(ax, rf"cross-impl $|\Delta E|/|E_0| = {sci(cross_energy(apsis, rebound))}$")
 
 
 def panel_pythagorean(ax: Axes, apsis: pd.DataFrame, rebound: pd.DataFrame) -> None:
@@ -123,7 +138,7 @@ def panel_pythagorean(ax: Axes, apsis: pd.DataFrame, rebound: pd.DataFrame) -> N
     ax.legend(loc="lower right", fontsize=7, framealpha=0.85)
     annotate(
         ax,
-        r"cross-impl $|\Delta E|/|E_0| = 1.4\times10^{-10}$"
+        rf"cross-impl $|\Delta E|/|E_0| = {sci(cross_energy(apsis, rebound))}$"
         + "\n(chaotic; both at f64 floor)",
     )
 

@@ -18,6 +18,12 @@ DATA = ROOT / "data"
 OUT = ROOT / "rebound_parity_brouwer.pdf"
 
 
+def sci(v: float) -> str:
+    """Format as LaTeX m×10ⁿ with a two-decimal mantissa."""
+    exp = int(np.floor(np.log10(abs(v))))
+    return rf"{v / 10 ** exp:.2f}\times10^{{{exp}}}"
+
+
 def load(scenario: str) -> tuple[pd.DataFrame, pd.DataFrame]:
     a = pd.read_csv(
         DATA / f"rebound_parity_{scenario}_apsis.csv", comment="#", encoding="latin-1"
@@ -48,13 +54,18 @@ def main() -> None:
     sqrt_n = floor * np.sqrt(n_vals / np.median(orbit_a[mask_a]))
     ax.loglog(n_vals, sqrt_n, "k--", linewidth=0.8, alpha=0.5, label=r"$\sqrt{N}$ (Brouwer 1937)")
 
+    m = min(len(apsis), len(rebound))
+    ea = np.asarray(apsis["e_total"])[:m]
+    er = np.asarray(rebound["e_total"])[:m]
+    cross_max = float(np.max(np.abs(ea - er) / abs(e0_r)))
+
     ax.set_xlabel("orbit")
     ax.set_ylabel(r"$|E(t) - E_0|\,/\,|E_0|$")
     ax.set_title(r"Retrograde Kepler $e=0.5$ — $10^4$ orbits", fontsize=10)
     ax.text(
         0.03,
         0.97,
-        r"cross-impl $|\Delta E|/|E_0| = 2.6\times10^{-14}$ at $N=10^4$",
+        rf"max cross-impl $|\Delta E|/|E_0| = {sci(cross_max)}$",
         transform=ax.transAxes,
         fontsize=9,
         verticalalignment="top",
