@@ -61,9 +61,6 @@ def main() -> None:
         PostNewtonian1PN.for_units(units=apsis.units.SOLAR_CANONICAL),
     )
 
-    # Snapshots every 50 steps + Diagnostic frames every 50 steps for
-    # post-hoc verification of the precession claim. capture_resume
-    # opts into ResumeState frames so the run can be branched mid-flight.
     sys.attach_record(
         "mercury_1pn.apsis",
         seed=42,
