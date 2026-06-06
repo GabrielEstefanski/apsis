@@ -404,21 +404,25 @@ def main() -> int:
     e0_apsis = inv0_apsis.energy
     e0_rebound = inv0_rebound.energy
 
-    # 𝐏, 𝐋 = 0 by IC → Wilkinson cancellation floor EPS·max_t Σ|terms|; the scale
-    # self-calibrates on the run's deepest encounter. Cross-impl √2×, 10× headroom.
-    p_scale = max(scale_P(s.bodies, MASSES) for s in apsis)
-    l_scale = max(scale_L(s.bodies, MASSES) for s in apsis)
-    tol_p_per_side = 10.0 * EPS * p_scale
-    tol_p_cross = 10.0 * math.sqrt(2.0) * EPS * p_scale
-    tol_l_per_side = 10.0 * EPS * l_scale
-    tol_l_cross = 10.0 * math.sqrt(2.0) * EPS * l_scale
+    # 𝐏, 𝐋 = 0 by IC → Wilkinson floor 10·EPS·max_t Σ|terms|, each side on its
+    # own scale; cross √2× the larger.
+    p_scale_a = max(scale_P(s.bodies, MASSES) for s in apsis)
+    p_scale_r = max(scale_P(s.bodies, MASSES) for s in rebound)
+    l_scale_a = max(scale_L(s.bodies, MASSES) for s in apsis)
+    l_scale_r = max(scale_L(s.bodies, MASSES) for s in rebound)
+    tol_p_apsis = 10.0 * EPS * p_scale_a
+    tol_p_rebound = 10.0 * EPS * p_scale_r
+    tol_p_cross = 10.0 * math.sqrt(2.0) * EPS * max(p_scale_a, p_scale_r)
+    tol_l_apsis = 10.0 * EPS * l_scale_a
+    tol_l_rebound = 10.0 * EPS * l_scale_r
+    tol_l_cross = 10.0 * math.sqrt(2.0) * EPS * max(l_scale_a, l_scale_r)
 
-    # COM = 0 by IC; drift dominated by momentum-residual accumulation →
-    # floor EPS·P_SCALE·t_final/M; cross-impl 2×, 1.5× safety.
+    # 𝐫_COM = 0 by IC → 1.5·EPS·P_scale·t_final/M (drift term; representation
+    # subdominant), each side on its own scale; cross 2×.
     t_final = apsis[-1].t
-    com_acc = EPS * p_scale * t_final / sum(MASSES)
-    tol_com_per_side = 1.5 * com_acc
-    tol_com_cross = 1.5 * 2.0 * com_acc
+    tol_com_apsis = 1.5 * EPS * p_scale_a * t_final / sum(MASSES)
+    tol_com_rebound = 1.5 * EPS * p_scale_r * t_final / sum(MASSES)
+    tol_com_cross = 1.5 * 2.0 * EPS * max(p_scale_a, p_scale_r) * t_final / sum(MASSES)
 
     # ════════════════════════════════════════════════════════════════════ #
     # Tier 1 — Hard physical invariants (gated)
@@ -464,15 +468,15 @@ def main() -> int:
         name="|Δ𝐋| apsis (abs)",
         tier=1,
         observed=max_dL_apsis,
-        tolerance=tol_l_per_side,
-        passed=max_dL_apsis <= tol_l_per_side,
+        tolerance=tol_l_apsis,
+        passed=max_dL_apsis <= tol_l_apsis,
     )
     m_L_rebound = MetricResult(
         name="|Δ𝐋| rebound (abs)",
         tier=1,
         observed=max_dL_rebound,
-        tolerance=tol_l_per_side,
-        passed=max_dL_rebound <= tol_l_per_side,
+        tolerance=tol_l_rebound,
+        passed=max_dL_rebound <= tol_l_rebound,
     )
 
     # 1d. cross-impl |Δ𝐋|
@@ -498,15 +502,15 @@ def main() -> int:
         name="|Δ𝐏| apsis (abs)",
         tier=2,
         observed=max_dP_apsis,
-        tolerance=tol_p_per_side,
-        passed=max_dP_apsis <= tol_p_per_side,
+        tolerance=tol_p_apsis,
+        passed=max_dP_apsis <= tol_p_apsis,
     )
     m_P_rebound = MetricResult(
         name="|Δ𝐏| rebound (abs)",
         tier=2,
         observed=max_dP_rebound,
-        tolerance=tol_p_per_side,
-        passed=max_dP_rebound <= tol_p_per_side,
+        tolerance=tol_p_rebound,
+        passed=max_dP_rebound <= tol_p_rebound,
     )
 
     # 2b. cross-impl |Δ𝐏|
@@ -530,15 +534,15 @@ def main() -> int:
         name="|Δ𝐫_COM| apsis (abs)",
         tier=2,
         observed=max_com_apsis,
-        tolerance=tol_com_per_side,
-        passed=max_com_apsis <= tol_com_per_side,
+        tolerance=tol_com_apsis,
+        passed=max_com_apsis <= tol_com_apsis,
     )
     m_com_rebound = MetricResult(
         name="|Δ𝐫_COM| rebound (abs)",
         tier=2,
         observed=max_com_rebound,
-        tolerance=tol_com_per_side,
-        passed=max_com_rebound <= tol_com_per_side,
+        tolerance=tol_com_rebound,
+        passed=max_com_rebound <= tol_com_rebound,
     )
 
     # 2d. cross-impl |Δ𝐫_COM|
