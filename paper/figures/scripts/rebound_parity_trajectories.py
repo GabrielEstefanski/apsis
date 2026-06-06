@@ -143,7 +143,7 @@ def panel_pythagorean(ax: Axes, apsis: pd.DataFrame, rebound: pd.DataFrame) -> N
     annotate(
         ax,
         rf"cross-impl $|\Delta E|/|E_0| = {sci(cross_energy(apsis, rebound))}$"
-        + "\n(chaotic; both at f64 floor)",
+        + "\n(chaotic; both at REBOUND-class floor)",
     )
 
 
