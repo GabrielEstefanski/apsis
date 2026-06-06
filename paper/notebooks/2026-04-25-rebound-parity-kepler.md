@@ -1,9 +1,13 @@
 # REBOUND Parity — Kepler e=0.5
 
 **Date:** 2026-04-25
+
 **Subject:** Numerical agreement between IAS15 (apsis) and IAS15 (REBOUND) on a canonical Kepler orbit
+
 **Baseline commit:** `cc66c1b` (validation harness + this notebook)
+
 **Tooling:** apsis IAS15 (`crates/apsis/src/physics/integrator/ias15.rs`), REBOUND 4.6.0 via Python 3.10 (`reb.IAS15`)
+
 **Status:** *Single run executed 2026-04-25; protocol revised post-pilot when the original metric was found inadequate for adaptive integrators. All seven revised gated metrics pass at 1–10 ULP margins.*
 
 ---
@@ -76,10 +80,10 @@ The single run produced 101 samples per side. The original-metric verdicts were:
 
 | Metric                                                              | Observed     | Tolerance | Verdict |
 | ------------------------------------------------------------------- | -----------: | --------: | :------ |
-| max $\lvert \Delta r \rvert$ (secondary)                            | **1.57e-9**  | 1.00e-10  | **FAIL** (16$\times$ over) |
-| max $\lvert \Delta E / E_0 \rvert$ apsis                            | 2.12e-15     | 1.00e-13  | pass (47$\times$ under) |
-| max $\lvert \Delta E / E_0 \rvert$ rebound                          | 3.81e-15     | 1.00e-13  | pass (26$\times$ under) |
-| Cross-implementation $\lvert \Delta E \rvert / \lvert E_0 \rvert$   | 4.24e-15     | 1.00e-13  | pass (24$\times$ under) |
+| max $\lvert \Delta r \rvert$ (secondary)                            | **$1.57 \times 10^{-9}$**  | $1.00 \times 10^{-10}$  | **FAIL** ($16\times$ over) |
+| max $\lvert \Delta E / E_0 \rvert$ apsis                            | $2.12 \times 10^{-15}$     | $1.00 \times 10^{-13}$  | pass ($47\times$ under) |
+| max $\lvert \Delta E / E_0 \rvert$ rebound                          | $3.81 \times 10^{-15}$     | $1.00 \times 10^{-13}$  | pass ($26\times$ under) |
+| Cross-implementation $\lvert \Delta E \rvert / \lvert E_0 \rvert$   | $4.24 \times 10^{-15}$     | $1.00 \times 10^{-13}$  | pass ($24\times$ under) |
 
 Energy conservation passed comfortably on both sides at machine precision (~1–4 ULP). Position parity exceeded the *a priori* bound by a factor of 16.
 
@@ -88,14 +92,14 @@ Energy conservation passed comfortably on both sides at machine precision (~1–
 | orbit | $t$        | $\lvert \Delta r \rvert$   |
 | ----: | ---------: | ---------: |
 |     0 | 0          | 0 (ICs bit-identical) |
-|     1 | 6.29       | 1.91e-13   |
-|     2 | 12.6       | 8.71e-13   |
-|    10 | 62.8       | 2.39e-11   |
-|    25 | 157        | 1.06e-10   |
-|    50 | 314        | 2.13e-10   |
-|    75 | 471        | 1.31e-9    |
-|    81 | 509        | 1.57e-9 *(peak)* |
-|   100 | 628        | 5.82e-10   |
+|     1 | 6.29       | $1.91 \times 10^{-13}$   |
+|     2 | 12.6       | $8.71 \times 10^{-13}$   |
+|    10 | 62.8       | $2.39 \times 10^{-11}$   |
+|    25 | 157        | $1.06 \times 10^{-10}$   |
+|    50 | 314        | $2.13 \times 10^{-10}$   |
+|    75 | 471        | $1.31 \times 10^{-9}$    |
+|    81 | 509        | $1.57 \times 10^{-9}$ *(peak)* |
+|   100 | 628        | $5.82 \times 10^{-10}$   |
 
 Three observations from this growth pattern:
 
@@ -178,19 +182,19 @@ The data underlying the revised analysis is the *same* set of CSVs produced by t
 
 | Metric (gated)                                                      | Observed     | Tolerance | Margin       |
 | ------------------------------------------------------------------- | -----------: | --------: | -----------: |
-| $\lvert \Delta a \rvert / a$ (semi-major axis)                      | 3.553e-15    | 1.00e-13  | 28$\times$ under  |
-| $\lvert \Delta e \rvert$ (eccentricity)                             | 2.887e-15    | 1.00e-13  | 35$\times$ under  |
-| $\lvert \Delta\omega \rvert$ (periapsis orientation)                | 2.220e-15    | 1.00e-12  | 450$\times$ under |
-| $\lvert \Delta h \rvert / h$ (angular momentum)                     | 6.410e-16    | 1.00e-13  | 156$\times$ under |
-| $\lvert \Delta E / E_0 \rvert$ apsis                                | 2.118e-15    | 1.00e-13  | 47$\times$ under  |
-| $\lvert \Delta E / E_0 \rvert$ rebound                              | 3.812e-15    | 1.00e-13  | 26$\times$ under  |
-| Cross-implementation $\lvert \Delta E \rvert / \lvert E_0 \rvert$   | 4.235e-15    | 1.00e-13  | 24$\times$ under  |
+| $\lvert \Delta a \rvert / a$ (semi-major axis)                      | $3.553 \times 10^{-15}$    | $1.00 \times 10^{-13}$  | $28\times$ under  |
+| $\lvert \Delta e \rvert$ (eccentricity)                             | $2.887 \times 10^{-15}$    | $1.00 \times 10^{-13}$  | $35\times$ under  |
+| $\lvert \Delta\omega \rvert$ (periapsis orientation)                | $2.220 \times 10^{-15}$    | $1.00 \times 10^{-12}$  | $450\times$ under |
+| $\lvert \Delta h \rvert / h$ (angular momentum)                     | $6.410 \times 10^{-16}$    | $1.00 \times 10^{-13}$  | $156\times$ under |
+| $\lvert \Delta E / E_0 \rvert$ apsis                                | $2.118 \times 10^{-15}$    | $1.00 \times 10^{-13}$  | $47\times$ under  |
+| $\lvert \Delta E / E_0 \rvert$ rebound                              | $3.812 \times 10^{-15}$    | $1.00 \times 10^{-13}$  | $26\times$ under  |
+| Cross-implementation $\lvert \Delta E \rvert / \lvert E_0 \rvert$   | $4.235 \times 10^{-15}$    | $1.00 \times 10^{-13}$  | $24\times$ under  |
 
 **All seven revised gated metrics pass.** Every observed value sits in the 1–10 ULP regime, consistent with the f64 round-off floor for two correct IAS15 implementations.
 
 | Informational (not gated)                                              | Observed   |
 | ---------------------------------------------------------------------- | ---------: |
-| max $\lvert \Delta r \rvert$ (secondary, peak at orbit 81)             | 1.570e-9   |
+| max $\lvert \Delta r \rvert$ (secondary, peak at orbit 81)             | $1.570 \times 10^{-9}$   |
 
 The $\lvert \Delta r \rvert$ value is preserved for reference; see §Pilot Interpretation for why it is not a parity gate.
 
@@ -205,6 +209,20 @@ The two IAS15 implementations agree on the canonical Kepler orbit at machine pre
 The accumulated $\lvert \Delta r \rvert \sim 10^{-9}$ reflects the controller-level phase drift inherent to any cross-implementation comparison of adaptive high-order integrators. It is roughly four orders of magnitude smaller than the GR perihelion advance the v0.1 paper already demonstrates measuring on Mercury, and is therefore well below the threshold of any physical effect within the paper's claim space.
 
 The result places `apsis`'s IAS15 within the same numerical regime as REBOUND's IAS15 for canonical Kepler dynamics. Combined with the existing Mercury 4.4 ppm evidence and the per-side machine-precision energy conservation, this completes the Pillar A (numerical foundation) entry of the v0.1 validation portfolio for the Kepler scenario.
+
+---
+
+## Gate tolerances — revision (2026-06)
+
+The round bounds declared above are superseded by floors set by the IAS15
+round-off behaviour. Regular Kepler motion has no cancellation structure, so the
+cross-implementation drift in each conserved element is the difference of two
+independent round-off walks (Brouwer's law; Rein & Spiegel 2015),
+$\approx 13\,\varepsilon$ per element over 100 orbits. The gates are ten times
+this floor — $2.89 \times 10^{-14}$ for $a$, $e$, $|h|$, and $E$ — with $\omega$
+at $5.77 \times 10^{-14}$, carrying the atan2 $1/e$ condition factor
+($\delta\omega \leq |\delta e|/e$, a factor of two at $e = 0.5$). All seven
+metrics pass.
 
 ---
 
