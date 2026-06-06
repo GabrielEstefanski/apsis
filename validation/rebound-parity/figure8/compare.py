@@ -41,7 +41,7 @@ invariant across implementations) with geometric drift (the actual
 physical signal). The protocol gates on the global integrals of motion
 of the three-body system instead, which two correct implementations
 must agree on regardless of phase. See the Kepler notebook
-(`docs/experiments/2026-04-25-rebound-parity-kepler.md`) §Pilot
+(`paper/notebooks/2026-04-25-rebound-parity-kepler.md`) §Pilot
 Interpretation for the full diagnostic narrative.
 
 ## Exit codes
@@ -57,7 +57,7 @@ Interpretation for the full diagnostic narrative.
 
 ## Protocol notebook
 
-    docs/experiments/2026-04-26-rebound-parity-figure8.md
+    paper/notebooks/2026-04-26-rebound-parity-figure8.md
 """
 
 from __future__ import annotations

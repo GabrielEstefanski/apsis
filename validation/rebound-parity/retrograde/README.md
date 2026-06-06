@@ -1,6 +1,6 @@
 # REBOUND parity — Retrograde Kepler e=0.5
 
-Implementation of the parity protocol declared in [`docs/experiments/2026-05-01-rebound-parity-retrograde.md`](../../../docs/experiments/2026-05-01-rebound-parity-retrograde.md). Constants in this directory's scripts mirror the notebook in lockstep — changes here are protocol changes.
+Implementation of the parity protocol declared in [`paper/notebooks/2026-05-01-rebound-parity-retrograde.md`](../../../paper/notebooks/2026-05-01-rebound-parity-retrograde.md). Constants in this directory's scripts mirror the notebook in lockstep — changes here are protocol changes.
 
 The single IC difference vs the Kepler-prograde scenario is a sign-flip on the secondary's tangential periapsis velocity ($+v_\text{peri} \to -v_\text{peri}$). Every other component, mass, length, and physical scale is held identical. This isolates sign-convention coverage as the only experimental variable; the experiment closes the $L_z < 0$ gap left by the prograde / figure-8 / Pythagorean tests, which all sit at $L_z \ge 0$.
 

@@ -1,6 +1,6 @@
 # REBOUND parity — Figure-8 choreography
 
-Implementation of the parity protocol declared in [`docs/experiments/2026-04-26-rebound-parity-figure8.md`](../../../docs/experiments/2026-04-26-rebound-parity-figure8.md). Constants in this directory's scripts mirror the notebook in lockstep — changes here are protocol changes.
+Implementation of the parity protocol declared in [`paper/notebooks/2026-04-26-rebound-parity-figure8.md`](../../../paper/notebooks/2026-04-26-rebound-parity-figure8.md). Constants in this directory's scripts mirror the notebook in lockstep — changes here are protocol changes.
 
 ## Files
 

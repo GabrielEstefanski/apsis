@@ -1,6 +1,6 @@
 # REBOUND parity — Kepler e=0.5
 
-Implementation of the parity protocol declared in [`docs/experiments/2026-04-25-rebound-parity-kepler.md`](../../../docs/experiments/2026-04-25-rebound-parity-kepler.md). Constants in this directory's scripts mirror the notebook in lockstep — changes here are protocol changes.
+Implementation of the parity protocol declared in [`paper/notebooks/2026-04-25-rebound-parity-kepler.md`](../../../paper/notebooks/2026-04-25-rebound-parity-kepler.md). Constants in this directory's scripts mirror the notebook in lockstep — changes here are protocol changes.
 
 ## Files
 

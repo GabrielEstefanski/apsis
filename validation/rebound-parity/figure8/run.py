@@ -20,7 +20,7 @@ Exit codes:
 - non-zero (other) — apsis or REBOUND side failed.
 
 Protocol notebook:
-    docs/experiments/2026-04-26-rebound-parity-figure8.md
+    paper/notebooks/2026-04-26-rebound-parity-figure8.md
 """
 
 from __future__ import annotations

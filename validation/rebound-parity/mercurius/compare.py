@@ -44,7 +44,7 @@ Tier 2 — test-particle orbital element parity (3 gates, end-of-integration):
 
 ## Protocol notebook
 
-    docs/experiments/2026-05-13-rebound-parity-mercurius.md
+    paper/notebooks/2026-05-13-rebound-parity-mercurius.md
 """
 
 from __future__ import annotations

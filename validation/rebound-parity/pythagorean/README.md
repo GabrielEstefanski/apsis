@@ -1,6 +1,6 @@
 # REBOUND parity — Pythagorean three-body (Burrau 1913)
 
-Implementation of the parity protocol declared in [`docs/experiments/2026-04-30-rebound-parity-pythagorean.md`](../../../docs/experiments/2026-04-30-rebound-parity-pythagorean.md). Constants in this directory's scripts mirror the notebook in lockstep — changes here are protocol changes.
+Implementation of the parity protocol declared in [`paper/notebooks/2026-04-30-rebound-parity-pythagorean.md`](../../../paper/notebooks/2026-04-30-rebound-parity-pythagorean.md). Constants in this directory's scripts mirror the notebook in lockstep — changes here are protocol changes.
 
 ## Files
 

@@ -48,7 +48,7 @@ A protocol gated on `|Δr|` would be guaranteed to report failure
 regardless of which implementation is correct. The protocol gates on
 the global integrals of motion, which two correct implementations must
 agree on regardless of the substep schedule that traces the flow. See
-the Kepler notebook (`docs/experiments/2026-04-25-rebound-parity-kepler.md`)
+the Kepler notebook (`paper/notebooks/2026-04-25-rebound-parity-kepler.md`)
 §Pilot Interpretation for the full diagnostic narrative on adaptive
 high-order integrators.
 
@@ -65,7 +65,7 @@ high-order integrators.
 
 ## Protocol notebook
 
-    docs/experiments/2026-04-30-rebound-parity-pythagorean.md
+    paper/notebooks/2026-04-30-rebound-parity-pythagorean.md
 """
 
 from __future__ import annotations
