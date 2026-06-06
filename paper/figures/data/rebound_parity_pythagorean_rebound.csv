@@ -1,5 +1,5 @@
 # REBOUND parity — Pythagorean three-body (Burrau 1913) — REBOUND IAS15 side
-# protocol: docs/experiments/2026-04-30-rebound-parity-pythagorean.md
+# protocol: paper/notebooks/2026-04-30-rebound-parity-pythagorean.md
 # integrator: IAS15 (REBOUND)
 # rebound_version: 4.6.0
 # units: canonical (G = 1)

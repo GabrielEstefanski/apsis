@@ -1,5 +1,5 @@
 # REBOUND parity — Retrograde Kepler e=0.5 — REBOUND IAS15 side
-# protocol: docs/experiments/2026-05-01-rebound-parity-retrograde.md
+# protocol: paper/notebooks/2026-05-01-rebound-parity-retrograde.md
 # integrator: IAS15 (REBOUND)
 # rebound_version: 4.6.0
 # units: canonical (G = 1)

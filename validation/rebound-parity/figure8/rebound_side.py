@@ -19,7 +19,7 @@ Run:
     python rebound_side.py --apsis-csv ./out/apsis.csv --output ./out/rebound.csv
 
 Protocol notebook:
-    docs/experiments/2026-04-26-rebound-parity-figure8.md
+    paper/notebooks/2026-04-26-rebound-parity-figure8.md
 
 Constants below mirror those in the Rust example. A change here is a
 protocol change — update the notebook in lockstep.
@@ -110,7 +110,7 @@ def main() -> int:
     n_periods = (len(sample_times) - 1) // SAMPLES_PER_PERIOD
     with output_path.open("w", newline="") as f:
         f.write("# REBOUND parity — Figure-8 choreography — REBOUND IAS15 side\n")
-        f.write("# protocol: docs/experiments/2026-04-26-rebound-parity-figure8.md\n")
+        f.write("# protocol: paper/notebooks/2026-04-26-rebound-parity-figure8.md\n")
         f.write("# integrator: IAS15 (REBOUND)\n")
         f.write(f"# rebound_version: {rebound.__version__}\n")
         f.write("# units: canonical (G = 1)\n")

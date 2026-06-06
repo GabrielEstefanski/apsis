@@ -21,7 +21,7 @@ Run:
     python rebound_side.py --apsis-csv ./out/apsis.csv --output ./out/rebound.csv
 
 Protocol notebook:
-    docs/experiments/2026-05-01-rebound-parity-retrograde.md
+    paper/notebooks/2026-05-01-rebound-parity-retrograde.md
 
 Constants below mirror those in the Rust example. A change here is a
 protocol change — update the notebook in lockstep.
@@ -131,7 +131,7 @@ def main() -> int:
     # ── Write CSV with the apsis-side schema ────────────────────────────── #
     with output_path.open("w", newline="") as f:
         f.write("# REBOUND parity — Retrograde Kepler e=0.5 — REBOUND IAS15 side\n")
-        f.write("# protocol: docs/experiments/2026-05-01-rebound-parity-retrograde.md\n")
+        f.write("# protocol: paper/notebooks/2026-05-01-rebound-parity-retrograde.md\n")
         f.write("# integrator: IAS15 (REBOUND)\n")
         f.write(f"# rebound_version: {rebound.__version__}\n")
         f.write("# units: canonical (G = 1)\n")
