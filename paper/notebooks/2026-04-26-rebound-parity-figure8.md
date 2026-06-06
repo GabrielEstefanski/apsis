@@ -3,11 +3,11 @@
 **Date:** 2026-04-26
 **Subject:** Numerical agreement between IAS15 (apsis) and IAS15 (REBOUND) on the Chenciner–Montgomery figure-8 three-body choreography.
 
-**Baseline commit:** `9caaef2` ("feat(ias15): refactor controller to spec-conformant Pascal warmstart, halving rejection, and 7x growth cap").
+**Baseline commit:** `e849d31` ("feat(ias15): refactor controller to spec-conformant Pascal warmstart, halving rejection, and 7x growth cap").
 
 **Tooling:** apsis IAS15 (`crates/apsis/src/physics/integrator/ias15.rs`), REBOUND 4.6.0 via Python 3.10 (`reb.IAS15`).
 
-**Status:** *Run executed 2026-04-26 against `9caaef2`. All twelve Tier-1 and Tier-2 gated metrics pass at 1–10 ULP. The Tier-3 informational $\lvert \Delta r \rvert$ stands at $9.44 \times 10^{-13}$, consistent with controller-level phase drift between two adaptive IAS15 implementations at the f64 round-off floor.*
+**Status:** *Run executed 2026-04-26 against `e849d31`. All twelve Tier-1 and Tier-2 gated metrics pass at 1–10 ULP. The Tier-3 informational $\lvert \Delta r \rvert$ stands at $9.44 \times 10^{-13}$, consistent with controller-level phase drift between two adaptive IAS15 implementations at the f64 round-off floor.*
 
 ---
 
@@ -131,7 +131,7 @@ For the figure-8, gating on per-body $|\Delta r|$ would conflate this controller
 
 ## Results
 
-The run was executed 2026-04-26 against `apsis` commit `9caaef2`. The same run was the original failing case for the IAS15 controller audit documented in the companion notebook `2026-04-26-ias15-warmstart-bug.md`; the audit's resolution (Pascal-triangle warmstart, unconditional halving on truncation rejection, $7\times$ growth cap on accept-path `dt_next`) is what made every Tier-1 and Tier-2 gate pass.
+The run was executed 2026-04-26 against `apsis` commit `e849d31`. The same run was the original failing case for the IAS15 controller audit documented in the companion notebook `2026-04-26-ias15-warmstart-bug.md`; the audit's resolution (Pascal-triangle warmstart, unconditional halving on truncation rejection, $7\times$ growth cap on accept-path `dt_next`) is what made every Tier-1 and Tier-2 gate pass.
 
 Total samples: 2001 (200 per period $\times$ 10 periods + 1). Final time: 63.262389 (canonical units; $10\,T$ to 5 ULP in the period value).
 

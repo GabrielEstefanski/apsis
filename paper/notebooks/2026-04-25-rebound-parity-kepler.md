@@ -229,7 +229,7 @@ at orbit 81) is the original `cc66c1b` controller. Cross-implementation phase
 drift is controller-dependent by construction (§Pilot Interpretation) — it
 measures how differently the two adaptive controllers traverse the shared
 ellipse, not a parity defect. The subsequent Pascal-triangle warmstart refactor
-(`9caaef2`) tightened apsis's step schedule toward REBOUND's; the current figure
+(`e849d31`) tightened apsis's step schedule toward REBOUND's; the current figure
 shows the drift reduced by two orders to a peak of $6.6 \times 10^{-12}$, with the
 gated invariants unchanged at the round-off floor. That a controller revision
 moves $|\Delta r|$ by $10^2$ while leaving every gate at f64 precision is direct
