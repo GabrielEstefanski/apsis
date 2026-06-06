@@ -224,6 +224,17 @@ at $5.77 \times 10^{-14}$, carrying the atan2 $1/e$ condition factor
 ($\delta\omega \leq |\delta e|/e$, a factor of two at $e = 0.5$). All seven
 metrics pass.
 
+The informational Tier-3 $|\Delta r|$ tabulated above (peak $1.57 \times 10^{-9}$
+at orbit 81) is the original `cc66c1b` controller. Cross-implementation phase
+drift is controller-dependent by construction (§Pilot Interpretation) — it
+measures how differently the two adaptive controllers traverse the shared
+ellipse, not a parity defect. The subsequent Pascal-triangle warmstart refactor
+(`9caaef2`) tightened apsis's step schedule toward REBOUND's; the current figure
+shows the drift reduced by two orders to a peak of $6.6 \times 10^{-12}$, with the
+gated invariants unchanged at the round-off floor. That a controller revision
+moves $|\Delta r|$ by $10^2$ while leaving every gate at f64 precision is direct
+confirmation that phase drift is not a cross-implementation invariant.
+
 ---
 
 ## Threats to validity
