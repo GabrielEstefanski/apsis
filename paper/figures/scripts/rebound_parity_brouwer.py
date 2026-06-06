@@ -21,7 +21,11 @@ OUT = ROOT / "rebound_parity_brouwer.pdf"
 def sci(v: float) -> str:
     """Format as LaTeX m×10ⁿ with a two-decimal mantissa."""
     exp = int(np.floor(np.log10(abs(v))))
-    return rf"{v / 10 ** exp:.2f}\times10^{{{exp}}}"
+    mant = v / 10 ** exp
+    if round(mant, 2) >= 10.0:  # 9.999 rounds to 10.00 at 2dp -> renormalise
+        exp += 1
+        mant /= 10.0
+    return rf"{mant:.2f}\times10^{{{exp}}}"
 
 
 def load(scenario: str) -> tuple[pd.DataFrame, pd.DataFrame]:
