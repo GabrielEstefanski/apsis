@@ -78,22 +78,20 @@ import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-# ── Tolerances ─────────────────────────────────────────────────────────── #
-# Chaotic close-encounter regime: energy floor ~1e-10 (ε·κ, κ = U_peak/|E| at
-# the triple encounter; Rein & Spiegel 2015 §4), gated orders above for chaotic
-# r_min. Wrong-gate finding + derivation: see the protocol notebook.
+EPS: float = 2.220446049250313e-16
 
-# Tier 1
+# ── Tolerances ─────────────────────────────────────────────────────────── #
+# Energy: the chaotic regime admits no tight a-priori floor — the deepest r_min
+# is chaotic and shifts under ULP/platform differences. Sanity ceiling at the
+# published f64 energy floor for the Pythagorean problem (Boekholt & Portegies
+# Zwart 2015 §3.1, ~1e-8): ~1.4 decades above our IAS15 observed (~4e-10), ~2
+# below the ~1e-6 gross-error level conventional in collisional N-body work.
+# Deliberately the loose gate — parity is borne by L/P/COM (below) + the
+# close-encounter alignment; energy conservation ≠ converged trajectory
+# (Boekholt & PZ 2015 §3.3). See the protocol notebook.
 TOL_REL_ENERGY_PER_SIDE: float = 1.0e-8
 TOL_REL_ENERGY_CROSS: float = 1.0e-8
-TOL_ABS_ANGULAR_MOMENTUM_PER_SIDE: float = 1.0e-12
-TOL_ABS_ANGULAR_MOMENTUM_CROSS: float = 1.0e-12
-
-# Tier 2 (P, COM near-zero by IC)
-TOL_ABS_LINEAR_MOMENTUM_PER_SIDE: float = 1.0e-13
-TOL_ABS_LINEAR_MOMENTUM_CROSS: float = 1.0e-13
-TOL_ABS_COM_PER_SIDE: float = 1.0e-12
-TOL_ABS_COM_CROSS: float = 1.0e-12
+# L, P, COM = 0 by IC → Wilkinson cancellation floors, derived per-run in main().
 
 # Number of bodies in the Pythagorean system (fixed by protocol).
 N_BODIES: int = 3
@@ -149,12 +147,6 @@ def physical_invariants(s: Sample, masses: tuple[float, ...]) -> Invariants:
     figure-8 comparator's equal-mass scalar form is the special case
     `masses = (M, M, ..., M)`; the formula here generalises it without
     altering the metric semantics.
-
-    Angular momentum is computed as the full 3-vector even though the
-    system is planar by IC construction: this exposes any
-    implementation-side breaking of planarity rather than baking the
-    planar assumption into the metric. For the Burrau ICs, `L_x` and
-    `L_y` must remain at the f64 round-off floor.
     """
     assert len(masses) == len(s.bodies), "masses and bodies length must match"
     n = len(s.bodies)
@@ -176,20 +168,9 @@ def physical_invariants(s: Sample, masses: tuple[float, ...]) -> Invariants:
             pe -= masses[i] * masses[j] / r
     energy = ke + pe
 
-    # Angular momentum (full 3D vector; for planar ICs Lx = Ly = 0)
-    Lx = 0.0
-    Ly = 0.0
-    Lz = 0.0
-    for i, (x, y, vx, vy) in enumerate(s.bodies):
-        # 𝐫 × 𝐯 with 𝐫 = (x, y, 0), 𝐯 = (vx, vy, 0):
-        #   (𝐫 × 𝐯)_x = y · 0 − 0 · vy = 0
-        #   (𝐫 × 𝐯)_y = 0 · vx − x · 0 = 0
-        #   (𝐫 × 𝐯)_z = x · vy − y · vx
-        # All three computed explicitly so a future migration to 3D
-        # data flows through this formula unchanged.
-        Lx += masses[i] * (y * 0.0 - 0.0 * vy)
-        Ly += masses[i] * (0.0 * vx - x * 0.0)
-        Lz += masses[i] * (x * vy - y * vx)
+    # Angular momentum: planar data, so only Lz is non-zero.
+    Lx = Ly = 0.0
+    Lz = sum(masses[i] * (x * vy - y * vx) for i, (x, y, vx, vy) in enumerate(s.bodies))
 
     # Linear momentum
     Px = sum(masses[i] * vx for i, (_, _, vx, _) in enumerate(s.bodies))
@@ -223,6 +204,22 @@ def vec_diff_norm3(a, b) -> float:
 
 def vec_diff_norm2(a, b) -> float:
     return math.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2)
+
+
+def scale_P(bodies: list[tuple[float, float, float, float]], masses: tuple[float, ...]) -> float:
+    """Wilkinson cancellation scale of 𝐏 = Σ mᵢ𝐯ᵢ (0 by IC): Σ|mᵢ𝐯ᵢ| per axis."""
+    return math.hypot(
+        sum(abs(masses[i] * vx) for i, (_, _, vx, _) in enumerate(bodies)),
+        sum(abs(masses[i] * vy) for i, (_, _, _, vy) in enumerate(bodies)),
+    )
+
+
+def scale_L(bodies: list[tuple[float, float, float, float]], masses: tuple[float, ...]) -> float:
+    """Wilkinson cancellation scale of L_z = Σ mᵢ(xᵢvyᵢ − yᵢvxᵢ) (0 by IC)."""
+    return sum(
+        abs(masses[i] * x * vy) + abs(masses[i] * y * vx)
+        for i, (x, y, vx, vy) in enumerate(bodies)
+    )
 
 
 # ── Close-encounter detection (debug telemetry, never gated) ───────────── #
@@ -407,6 +404,22 @@ def main() -> int:
     e0_apsis = inv0_apsis.energy
     e0_rebound = inv0_rebound.energy
 
+    # 𝐏, 𝐋 = 0 by IC → Wilkinson cancellation floor EPS·max_t Σ|terms|; the scale
+    # self-calibrates on the run's deepest encounter. Cross-impl √2×, 10× headroom.
+    p_scale = max(scale_P(s.bodies, MASSES) for s in apsis)
+    l_scale = max(scale_L(s.bodies, MASSES) for s in apsis)
+    tol_p_per_side = 10.0 * EPS * p_scale
+    tol_p_cross = 10.0 * math.sqrt(2.0) * EPS * p_scale
+    tol_l_per_side = 10.0 * EPS * l_scale
+    tol_l_cross = 10.0 * math.sqrt(2.0) * EPS * l_scale
+
+    # COM = 0 by IC; drift dominated by momentum-residual accumulation →
+    # floor EPS·P_SCALE·t_final/M; cross-impl 2×, 1.5× safety.
+    t_final = apsis[-1].t
+    com_acc = EPS * p_scale * t_final / sum(MASSES)
+    tol_com_per_side = 1.5 * com_acc
+    tol_com_cross = 1.5 * 2.0 * com_acc
+
     # ════════════════════════════════════════════════════════════════════ #
     # Tier 1 — Hard physical invariants (gated)
     # ════════════════════════════════════════════════════════════════════ #
@@ -451,15 +464,15 @@ def main() -> int:
         name="|Δ𝐋| apsis (abs)",
         tier=1,
         observed=max_dL_apsis,
-        tolerance=TOL_ABS_ANGULAR_MOMENTUM_PER_SIDE,
-        passed=max_dL_apsis <= TOL_ABS_ANGULAR_MOMENTUM_PER_SIDE,
+        tolerance=tol_l_per_side,
+        passed=max_dL_apsis <= tol_l_per_side,
     )
     m_L_rebound = MetricResult(
         name="|Δ𝐋| rebound (abs)",
         tier=1,
         observed=max_dL_rebound,
-        tolerance=TOL_ABS_ANGULAR_MOMENTUM_PER_SIDE,
-        passed=max_dL_rebound <= TOL_ABS_ANGULAR_MOMENTUM_PER_SIDE,
+        tolerance=tol_l_per_side,
+        passed=max_dL_rebound <= tol_l_per_side,
     )
 
     # 1d. cross-impl |Δ𝐋|
@@ -470,8 +483,8 @@ def main() -> int:
         name="cross-impl |Δ𝐋| (abs)",
         tier=1,
         observed=max_dL_cross,
-        tolerance=TOL_ABS_ANGULAR_MOMENTUM_CROSS,
-        passed=max_dL_cross <= TOL_ABS_ANGULAR_MOMENTUM_CROSS,
+        tolerance=tol_l_cross,
+        passed=max_dL_cross <= tol_l_cross,
     )
 
     # ════════════════════════════════════════════════════════════════════ #
@@ -485,15 +498,15 @@ def main() -> int:
         name="|Δ𝐏| apsis (abs)",
         tier=2,
         observed=max_dP_apsis,
-        tolerance=TOL_ABS_LINEAR_MOMENTUM_PER_SIDE,
-        passed=max_dP_apsis <= TOL_ABS_LINEAR_MOMENTUM_PER_SIDE,
+        tolerance=tol_p_per_side,
+        passed=max_dP_apsis <= tol_p_per_side,
     )
     m_P_rebound = MetricResult(
         name="|Δ𝐏| rebound (abs)",
         tier=2,
         observed=max_dP_rebound,
-        tolerance=TOL_ABS_LINEAR_MOMENTUM_PER_SIDE,
-        passed=max_dP_rebound <= TOL_ABS_LINEAR_MOMENTUM_PER_SIDE,
+        tolerance=tol_p_per_side,
+        passed=max_dP_rebound <= tol_p_per_side,
     )
 
     # 2b. cross-impl |Δ𝐏|
@@ -504,8 +517,8 @@ def main() -> int:
         name="cross-impl |Δ𝐏| (abs)",
         tier=2,
         observed=max_dP_cross,
-        tolerance=TOL_ABS_LINEAR_MOMENTUM_CROSS,
-        passed=max_dP_cross <= TOL_ABS_LINEAR_MOMENTUM_CROSS,
+        tolerance=tol_p_cross,
+        passed=max_dP_cross <= tol_p_cross,
     )
 
     # 2c. |Δ𝐫_COM| per side (drift from origin, since r_COM(0) = 0 by IC)
@@ -517,15 +530,15 @@ def main() -> int:
         name="|Δ𝐫_COM| apsis (abs)",
         tier=2,
         observed=max_com_apsis,
-        tolerance=TOL_ABS_COM_PER_SIDE,
-        passed=max_com_apsis <= TOL_ABS_COM_PER_SIDE,
+        tolerance=tol_com_per_side,
+        passed=max_com_apsis <= tol_com_per_side,
     )
     m_com_rebound = MetricResult(
         name="|Δ𝐫_COM| rebound (abs)",
         tier=2,
         observed=max_com_rebound,
-        tolerance=TOL_ABS_COM_PER_SIDE,
-        passed=max_com_rebound <= TOL_ABS_COM_PER_SIDE,
+        tolerance=tol_com_per_side,
+        passed=max_com_rebound <= tol_com_per_side,
     )
 
     # 2d. cross-impl |Δ𝐫_COM|
@@ -536,8 +549,8 @@ def main() -> int:
         name="cross-impl |Δ𝐫_COM| (abs)",
         tier=2,
         observed=max_com_cross,
-        tolerance=TOL_ABS_COM_CROSS,
-        passed=max_com_cross <= TOL_ABS_COM_CROSS,
+        tolerance=tol_com_cross,
+        passed=max_com_cross <= tol_com_cross,
     )
 
     tier1 = [m_e_apsis, m_e_rebound, m_e_cross, m_L_apsis, m_L_rebound, m_L_cross]
