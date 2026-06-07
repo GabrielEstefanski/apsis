@@ -8,6 +8,7 @@
 
 .PHONY: help figures paper validation clean data lint-paper
 .PHONY: figures-continuity-spike-bound figures-rebound-parity-trajectories figures-rebound-parity-brouwer
+.PHONY: figures-rebound-parity-pythagorean-divergence
 .PHONY: figures-plummer-apsidal-convergence data-plummer-convergence data-continuity-spike-bound
 .PHONY: validation-mercury-1pn validation-recommended-dt
 
@@ -19,6 +20,7 @@ NOTEBOOK_DIR := paper/notebooks/scripts
 PAPER_FIGURES := \
 	$(FIGURES_DIR)/continuity_spike_bound.pdf \
 	$(FIGURES_DIR)/rebound_parity_trajectories.pdf \
+	$(FIGURES_DIR)/rebound_parity_pythagorean_divergence.pdf \
 	$(FIGURES_DIR)/rebound_parity_brouwer.pdf \
 	$(FIGURES_DIR)/plummer_apsidal_convergence.pdf
 
@@ -35,6 +37,7 @@ help:
 	@echo "Per-figure / per-harness:"
 	@echo "  make figures-continuity-spike-bound"
 	@echo "  make figures-rebound-parity-trajectories"
+	@echo "  make figures-rebound-parity-pythagorean-divergence"
 	@echo "  make figures-rebound-parity-brouwer"
 	@echo "  make figures-plummer-apsidal-convergence"
 	@echo "  make data-plummer-convergence"
@@ -68,6 +71,12 @@ $(FIGURES_DIR)/rebound_parity_trajectories.pdf: \
 		$(REBOUND_PARITY_DATA)
 	python $(SCRIPTS_DIR)/rebound_parity_trajectories.py
 
+$(FIGURES_DIR)/rebound_parity_pythagorean_divergence.pdf: \
+		$(SCRIPTS_DIR)/rebound_parity_pythagorean_divergence.py \
+		$(DATA_DIR)/rebound_parity_pythagorean_apsis.csv \
+		$(DATA_DIR)/rebound_parity_pythagorean_rebound.csv
+	python $(SCRIPTS_DIR)/rebound_parity_pythagorean_divergence.py
+
 $(FIGURES_DIR)/rebound_parity_brouwer.pdf: \
 		$(SCRIPTS_DIR)/rebound_parity_brouwer.py \
 		$(DATA_DIR)/rebound_parity_retrograde_apsis.csv \
@@ -75,6 +84,7 @@ $(FIGURES_DIR)/rebound_parity_brouwer.pdf: \
 	python $(SCRIPTS_DIR)/rebound_parity_brouwer.py
 
 figures-rebound-parity-trajectories: $(FIGURES_DIR)/rebound_parity_trajectories.pdf
+figures-rebound-parity-pythagorean-divergence: $(FIGURES_DIR)/rebound_parity_pythagorean_divergence.pdf
 figures-rebound-parity-brouwer: $(FIGURES_DIR)/rebound_parity_brouwer.pdf
 
 $(FIGURES_DIR)/plummer_apsidal_convergence.pdf: \
