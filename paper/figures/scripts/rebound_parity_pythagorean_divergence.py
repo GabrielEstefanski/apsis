@@ -2,9 +2,9 @@
 three-body (Burrau 1913). apsis and REBOUND IAS15 start from identical conditions;
 max_b |Δr_b|(t) climbs from the round-off floor through an exponential
 (positive-Lyapunov) ramp to the ejection, while the cross-implementation energy
-difference stays at the f64 floor — the divergence is chaos, not a solver
-disagreement. Companion to the regular-orbit panels, where the two codes agree to
-machine precision.
+difference stays at the REBOUND-class chaotic floor (~4e-10) — the divergence is
+chaos, not a solver disagreement. Companion to the regular-orbit panels, where the
+two codes agree to machine precision.
 
 Frozen CSV snapshot in `paper/figures/data/rebound_parity_pythagorean_*`. Refresh
 by re-running the harness under `validation/rebound-parity/pythagorean/` and

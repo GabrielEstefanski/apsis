@@ -3,8 +3,9 @@
 Kepler e=0.5 and the figure-8 choreography: apsis and REBOUND IAS15 agree to
 machine precision, so each trajectory is drawn once (the apsis curve) and REBOUND
 is shown as decimated reference markers riding that curve over a single pass —
-the samples land on the line because the cross-implementation separation is at
-the f64 floor. The Pythagorean three-body is chaotic: the trajectories genuinely
+the samples land on the line because the cross-implementation separation stays
+far below plot resolution (the f64 floor for the figure-8; residual phase drift
+for Kepler). The Pythagorean three-body is chaotic: the trajectories genuinely
 diverge, so both are drawn (apsis solid, REBOUND dashed) and the curves visibly
 drift apart.
 
@@ -159,7 +160,7 @@ def panel_pythagorean(ax: Axes, apsis: pd.DataFrame, rebound: pd.DataFrame) -> N
     annotate(
         ax,
         rf"cross-impl $|\Delta E|/|E_0| = {sci(cross_energy(apsis, rebound))}$"
-        + "\n(chaotic; f64 floor)",
+        + "\n(chaotic; REBOUND-class floor)",
     )
 
 
