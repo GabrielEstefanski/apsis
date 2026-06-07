@@ -81,11 +81,12 @@ def panel_kepler(ax: Axes, apsis: pd.DataFrame, rebound: pd.DataFrame) -> None:
     trace_a, trace_r = load("kepler_trace")
     ax.plot(trace_a["x1"], trace_a["y1"], color="#1f77b4", linewidth=1.6, label="apsis")
     ax.plot(
-        np.asarray(trace_r["x1"])[::5],
-        np.asarray(trace_r["y1"])[::5],
-        "k.",
-        markersize=2.5,
-        alpha=0.8,
+        trace_r["x1"],
+        trace_r["y1"],
+        color="black",
+        linewidth=1.0,
+        linestyle="--",
+        alpha=0.9,
         label="REBOUND",
     )
     dr = np.hypot(
@@ -101,25 +102,16 @@ def panel_kepler(ax: Axes, apsis: pd.DataFrame, rebound: pd.DataFrame) -> None:
 
 
 def panel_figure8(ax: Axes, apsis: pd.DataFrame, rebound: pd.DataFrame) -> None:
-    # apsis is the coloured base line; REBOUND overlays as sparse markers. A dotted
-    # line fails here: the choreography's three phase-offset bodies interleave its
-    # dashes into a solid, so markers are used to keep the overlap distinct.
+    # apsis is the coloured solid base; REBOUND overlays as a dashed line (solid
+    # model vs dashed reference). The three choreography bodies trace one curve,
+    # so REBOUND is drawn once (body 0); three phase-offset dashed curves would
+    # interleave into a solid.
     shades = ["#1f77b4", "#4a90d9", "#7fb3e3"]
     for b in range(3):
         ax.plot(apsis[f"x{b}"], apsis[f"y{b}"], color=shades[b], linewidth=1.6)
-    for b in range(3):
-        ax.plot(
-            np.asarray(rebound[f"x{b}"])[::30],
-            np.asarray(rebound[f"y{b}"])[::30],
-            "k.",
-            markersize=2.5,
-            alpha=0.8,
-        )
-    apsis_proxy = Line2D([], [], color=shades[0], linewidth=1.6, label="apsis (bodies 0-2)")
-    reb_proxy = Line2D(
-        [], [], color="black", marker=".", linestyle="none", markersize=4,
-        label="REBOUND (all bodies)",
-    )
+    ax.plot(rebound["x0"], rebound["y0"], color="black", linewidth=1.0, linestyle="--", alpha=0.9)
+    apsis_proxy = Line2D([], [], color=shades[0], linewidth=1.6, label="apsis")
+    reb_proxy = Line2D([], [], color="black", linestyle="--", linewidth=1.0, label="REBOUND")
     ax.legend(handles=[apsis_proxy, reb_proxy], loc="lower right", fontsize=7, framealpha=0.85)
     ax.set_aspect("equal", adjustable="datalim")
     ax.set_xlabel("x")
@@ -143,9 +135,9 @@ def panel_pythagorean(ax: Axes, apsis: pd.DataFrame, rebound: pd.DataFrame) -> N
             rebound[f"x{b}"],
             rebound[f"y{b}"],
             color="black",
-            linewidth=1.1,
-            linestyle=":",
-            alpha=0.6,
+            linewidth=1.0,
+            linestyle="--",
+            alpha=0.7,
             label="REBOUND" if b == 0 else None,
         )
     ax.set_aspect("equal", adjustable="datalim")
