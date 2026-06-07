@@ -4,11 +4,11 @@
 
 **Subject:** Numerical agreement between IAS15 (apsis) and IAS15 (REBOUND) on the canonical Pythagorean three-body problem (Burrau 1913; Szebehely & Peters 1967) — three masses 3, 4, 5 at the vertices of a 3-4-5 right triangle, released from rest, integrated through the chaotic close-encounter regime to ejection.
 
-**Baseline commit:** `ac4b591` ("feat(parity): Pythagorean three-body harness mirroring figure-8").
+**Baseline commit:** `850d4a7` ("feat(parity): Pythagorean three-body harness mirroring figure-8").
 
 **Tooling:** apsis IAS15 (`crates/apsis/src/physics/integrator/ias15.rs`), REBOUND 4.6.0 via Python 3.10 (`reb.IAS15`).
 
-**Status:** *Run executed 2026-04-30 against `ac4b591`. Decisive parity evidence — close-encounter alignment at 98% (44 of 45 prominent local minima of $r_\text{min}(t)$ match within $\sim 3 \times 10^{-2}$ t.u. and within a factor of 2.5 in minimum approach distance) — confirms both implementations integrate the same dynamics. Tier-1 $\lvert \Delta \mathbf{L} \rvert$ and Tier-2 $\lvert \Delta \mathbf{P} \rvert$, $\lvert \Delta \mathbf{r}_\text{COM} \rvert$ pass at the f64 round-off floor on both sides. Tier-1 $\lvert \Delta E / E_0 \rvert$ exceeds the a-priori bound on both sides ($3.85 \times 10^{-11}$ apsis, $1.09 \times 10^{-10}$ REBOUND vs $1.0 \times 10^{-13}$ declared) — the bound's smooth-flow derivation does not apply to the effective stiffness induced by repeated close encounters; the failure reflects the regime, not a parity defect, and is symmetric across the two implementations. **Updated 2026-06:** an IAS15 controller defect (the sub-step cascade) has since been corrected and the gates re-derived — see §Controller fix and re-run; 12/12 gated metrics now pass.*
+**Status:** *Run executed 2026-04-30 against `850d4a7`. Decisive parity evidence — close-encounter alignment at 98% (44 of 45 prominent local minima of $r_\text{min}(t)$ match within $\sim 3 \times 10^{-2}$ t.u. and within a factor of 2.5 in minimum approach distance) — confirms both implementations integrate the same dynamics. Tier-1 $\lvert \Delta \mathbf{L} \rvert$ and Tier-2 $\lvert \Delta \mathbf{P} \rvert$, $\lvert \Delta \mathbf{r}_\text{COM} \rvert$ pass at the f64 round-off floor on both sides. Tier-1 $\lvert \Delta E / E_0 \rvert$ exceeds the a-priori bound on both sides ($3.85 \times 10^{-11}$ apsis, $1.09 \times 10^{-10}$ REBOUND vs $1.0 \times 10^{-13}$ declared) — the bound's smooth-flow derivation does not apply to the effective stiffness induced by repeated close encounters; the failure reflects the regime, not a parity defect, and is symmetric across the two implementations. **Updated 2026-06:** an IAS15 controller defect (the sub-step cascade) has since been corrected and the gates re-derived — see §Controller fix and re-run; 12/12 gated metrics now pass.*
 
 ---
 
@@ -140,9 +140,9 @@ The justification for the invariant-based metric set is the same as the Kepler a
 
 ## Results
 
-The run was executed 2026-04-30 against `ac4b591` (apparatus commit; protocol-only commit `2b7db33` is its parent). Total samples: 2101 ($30 \times 70 + 1$). Final integration time: $7.000378 \times 10^{1}$ — a 5-ULP overshoot beyond the nominal $t = 70$ inherited from IAS15's substep landing on the apsis side.
+The run was executed 2026-04-30 against `850d4a7` (apparatus commit; protocol-only commit `fa1a477` is its parent). Total samples: 2101 ($30 \times 70 + 1$). Final integration time: $7.000378 \times 10^{1}$ — a 5-ULP overshoot beyond the nominal $t = 70$ inherited from IAS15's substep landing on the apsis side.
 
-> The results below are the original `ac4b591` run; its sub-step cascade exposed a controller defect, since corrected. See §Controller fix and re-run for the post-fix re-run (12/12 pass).
+> The results below are the original `850d4a7` run; its sub-step cascade exposed a controller defect, since corrected. See §Controller fix and re-run for the post-fix re-run (12/12 pass).
 
 ### Overview
 
@@ -305,7 +305,7 @@ controllers agree to within 4 %.
 
 | Field | Value |
 | --- | --- |
-| apsis canonical commit | `ac4b591` (apparatus); protocol-only ancestor `2b7db33` |
+| apsis canonical commit | `850d4a7` (apparatus); protocol-only ancestor `fa1a477` |
 | REBOUND version | 4.6.0 |
 | Python version | 3.10.0 (CPython, MSC v.1929 64-bit) |
 | Rust toolchain | apsis Cargo profile `release`; default FP semantics (no `--ffast-math`-equivalent) |
