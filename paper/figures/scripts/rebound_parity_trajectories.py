@@ -5,8 +5,8 @@ machine precision, so each trajectory is drawn once (the apsis curve) and REBOUN
 is shown as decimated reference markers riding that curve over a single pass —
 the samples land on the line because the cross-implementation separation is at
 the f64 floor. The Pythagorean three-body is chaotic: the trajectories genuinely
-diverge, so both are drawn (apsis solid, REBOUND dashed) and a separation inset
-tracks max_b|Δr_b|(t) from the round-off floor to the ejection.
+diverge, so both are drawn (apsis solid, REBOUND dashed) and the curves visibly
+drift apart.
 
 Frozen CSV snapshots in `paper/figures/data/rebound_parity_*`. Refresh by
 re-running the harnesses under `validation/rebound-parity/` and copying their
@@ -78,8 +78,11 @@ def panel_kepler(ax: Axes, apsis: pd.DataFrame, rebound: pd.DataFrame) -> None:
     # 100 orbits); the dense trace draws one clean orbit and REBOUND rides it.
     trace_a, trace_r = load("kepler_trace")
     one = trace_a["orbit"] == 0
+    # The orbit is periodic; the dense trace samples [0, P) and omits the closing
+    # arc, so repeat the first sample to join the ellipse.
+    xa, ya = np.asarray(trace_a["x1"][one]), np.asarray(trace_a["y1"][one])
     ax.plot(
-        trace_a["x1"][one], trace_a["y1"][one], color=APSIS, linewidth=1.7,
+        np.append(xa, xa[0]), np.append(ya, ya[0]), color=APSIS, linewidth=1.7,
         solid_capstyle="round", zorder=2, label="apsis",
     )
     idx = np.arange(0, int(one.sum()), 8)
@@ -88,12 +91,14 @@ def panel_kepler(ax: Axes, apsis: pd.DataFrame, rebound: pd.DataFrame) -> None:
         linestyle="none", marker="o", markerfacecolor="none", markeredgecolor=REBOUND_C,
         markeredgewidth=1.1, markersize=6, zorder=3, label="REBOUND (samples)",
     )
-    ax.plot(0, 0, marker="*", color=REBOUND_C, markersize=8, linestyle="none")
+    ax.plot(0, 0, marker="*", color="goldenrod", markersize=11, linestyle="none",
+            markeredgecolor="#7a5c00", markeredgewidth=0.5, label="primary (focus)")
     dr = np.hypot(
         np.asarray(apsis["x1"]) - np.asarray(rebound["x1"]),
         np.asarray(apsis["y1"]) - np.asarray(rebound["y1"]),
     )
     ax.set_aspect("equal", adjustable="datalim")
+    ax.margins(0.16)  # breathing room so the ellipse sits smaller in the frame
     ax.set_xlabel("x")
     ax.set_ylabel("y")
     ax.set_title(r"Kepler $e=0.5$ — 100 orbits", fontsize=10)
@@ -131,7 +136,7 @@ def panel_figure8(ax: Axes, apsis: pd.DataFrame, rebound: pd.DataFrame) -> None:
 
 def panel_pythagorean(ax: Axes, apsis: pd.DataFrame, rebound: pd.DataFrame) -> None:
     # Chaotic: the trajectories diverge, so both are drawn (apsis solid per body,
-    # REBOUND dashed) and the inset tracks the separation from floor to ejection.
+    # REBOUND dashed) and the curves visibly drift apart.
     for b in range(3):
         ax.plot(apsis[f"x{b}"], apsis[f"y{b}"], color=BODY[b], linewidth=0.9, zorder=2,
                 label=f"body {b}")
@@ -142,6 +147,11 @@ def panel_pythagorean(ax: Axes, apsis: pd.DataFrame, rebound: pd.DataFrame) -> N
             label="REBOUND" if b == 0 else None,
         )
     ax.set_aspect("equal", adjustable="datalim")
+    # Frame the interaction region (tangle + binary recoil) and let the ejected
+    # body's ray exit the top edge; the bottom tracks the binary's recoil depth
+    # so the crop follows the physics, not the arbitrary integration cutoff.
+    ymin = min(float(np.min(apsis[f"y{b}"])) for b in range(3))
+    ax.set_ylim(ymin - 0.5, -ymin)
     ax.set_xlabel("x")
     ax.set_ylabel("y")
     ax.set_title(r"Pythagorean (Burrau 1913) — $T=70$", fontsize=10)
@@ -151,23 +161,6 @@ def panel_pythagorean(ax: Axes, apsis: pd.DataFrame, rebound: pd.DataFrame) -> N
         rf"cross-impl $|\Delta E|/|E_0| = {sci(cross_energy(apsis, rebound))}$"
         + "\n(chaotic; f64 floor)",
     )
-
-    # Separation inset: max over bodies of |Δr_b|(t), round-off floor to ejection.
-    m = min(len(apsis), len(rebound))
-    t = np.asarray(apsis["t"])[:m]
-    sep = np.maximum.reduce([
-        np.hypot(
-            np.asarray(apsis[f"x{b}"])[:m] - np.asarray(rebound[f"x{b}"])[:m],
-            np.asarray(apsis[f"y{b}"])[:m] - np.asarray(rebound[f"y{b}"])[:m],
-        )
-        for b in range(3)
-    ])
-    ai = ax.inset_axes((0.60, 0.58, 0.37, 0.34))
-    ai.semilogy(t, np.clip(sep, 1e-16, None), color=REBOUND_C, linewidth=0.8)
-    ai.set_xlabel("t", fontsize=6)
-    ai.set_ylabel(r"sep $\max_b|\Delta\mathbf{r}_b|$", fontsize=5.5)
-    ai.tick_params(labelsize=5)
-    ai.grid(alpha=0.3)
 
 
 def main() -> None:
