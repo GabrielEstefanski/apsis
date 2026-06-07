@@ -80,9 +80,12 @@ def panel_kepler(ax: Axes, apsis: pd.DataFrame, rebound: pd.DataFrame) -> None:
     ax.plot(ex, ey, color="grey", linewidth=0.6, alpha=0.5, label="analytical")
     trace_a, trace_r = load("kepler_trace")
     ax.plot(trace_a["x1"], trace_a["y1"], color="#1f77b4", linewidth=3.0, alpha=0.35, label="apsis")
+    # REBOUND over one orbit only: it retraces the same ellipse each orbit, and
+    # overlapping passes would fill the dashes into a solid line.
+    one = len(trace_r) // 2 + 1
     ax.plot(
-        trace_r["x1"],
-        trace_r["y1"],
+        trace_r["x1"][:one],
+        trace_r["y1"][:one],
         color="black",
         linewidth=1.1,
         linestyle="--",
@@ -108,9 +111,12 @@ def panel_figure8(ax: Axes, apsis: pd.DataFrame, rebound: pd.DataFrame) -> None:
     shades = ["#1f77b4", "#4a90d9", "#7fb3e3"]
     for b in range(3):
         ax.plot(apsis[f"x{b}"], apsis[f"y{b}"], color=shades[b], linewidth=3.0, alpha=0.35)
-    ax.plot(rebound["x0"], rebound["y0"], color="black", linewidth=1.1, linestyle="--")
-    apsis_proxy = Line2D([], [], color=shades[0], linewidth=1.6, label="apsis")
-    reb_proxy = Line2D([], [], color="black", linestyle="--", linewidth=1.0, label="REBOUND")
+    # REBOUND over one period only: body 0 traces the full figure-8 each period,
+    # and overlapping passes would fill the dashes into a solid line.
+    one = len(rebound) // 10 + 1
+    ax.plot(rebound["x0"][:one], rebound["y0"][:one], color="black", linewidth=1.1, linestyle="--")
+    apsis_proxy = Line2D([], [], color=shades[0], linewidth=3.0, alpha=0.35, label="apsis")
+    reb_proxy = Line2D([], [], color="black", linestyle="--", linewidth=1.1, label="REBOUND")
     ax.legend(handles=[apsis_proxy, reb_proxy], loc="lower right", fontsize=7, framealpha=0.85)
     ax.set_aspect("equal", adjustable="datalim")
     ax.set_xlabel("x")
