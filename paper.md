@@ -572,22 +572,27 @@ The configuration-space comparison (Fig. \ref{fig:rebound-traj})
 shows apsis and REBOUND trajectories overlapping at the ULP floor
 for the two regular scenarios. In the Pythagorean three-body the
 two implementations track each other at the ULP floor through the
-regular regime; in the chaotic close-encounter cluster, both
-diverge from initial conditions at the IAS15 f64 round-off rate,
-yielding $|\Delta E|/|E_0| \sim 10^{-10}$ at $T=70$ — the
-regime-limited precision rather than an apsis–REBOUND divergence.
+regular regime; in the chaotic close-encounter cluster the
+trajectories diverge exponentially — seeded at the f64
+round-off floor and amplified at the problem's Lyapunov rate —
+while the energy difference holds at the regime-limited floor,
+$|\Delta E|/|E_0| \sim 10^{-10}$ at $T=70$, not an
+apsis–REBOUND disagreement.
 
-![apsis IAS15 trajectories (filled / coloured) overlaid by REBOUND
-IAS15 (dotted black) across three configuration-space scenarios.
-Kepler $e=0.5$ samples are stroboscopic at periapsis; the
-analytical ellipse is shown for reference and the maximum
-apsis–REBOUND position residual over the run is annotated as
-$|\Delta r|_{\max}$ in the panel callout. Figure-8 choreography
-over 10 periods; the three apsis bodies trace the same closed
-curve and are visually indistinguishable in the choreography
-phase. Pythagorean three-body (Burrau 1913) integrated to $T=70$
-through the close-encounter cluster; bodies 0, 1, 2 carry masses
-3, 4, 5 in canonical units.](paper/figures/rebound_parity_trajectories.pdf){#fig:rebound-traj width=100%}
+![apsis IAS15 trajectories (solid coloured lines) across three
+configuration-space scenarios. Where the two codes agree to machine
+precision (Kepler, figure-8) each trajectory is drawn once as the
+apsis curve and REBOUND IAS15 rides it as decimated open-circle
+reference markers; the chaotic Pythagorean three-body genuinely
+diverges, so REBOUND is drawn as dashed charcoal curves. Kepler
+$e=0.5$: a dense within-orbit trace closes the ellipse with the
+focus marked, and the maximum apsis–REBOUND position residual over
+the 100-orbit run is annotated as $|\Delta r|_{\max}$ in the panel
+callout. Figure-8 choreography over 10 periods; the three apsis
+bodies share one closed curve and are visually indistinguishable.
+Pythagorean three-body (Burrau 1913) integrated to $T=70$ through
+the close-encounter cluster; bodies 0, 1, 2 carry masses 3, 4, 5 in
+canonical units.](paper/figures/rebound_parity_trajectories.pdf){#fig:rebound-traj width=100%}
 
 The fourth scenario — the retrograde Kepler over $10^4$ orbits —
 is the long-horizon parity check and is shown separately in
