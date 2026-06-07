@@ -74,10 +74,21 @@ def annotate(ax: Axes, text: str) -> None:
 
 
 def panel_kepler(ax: Axes, apsis: pd.DataFrame, rebound: pd.DataFrame) -> None:
+    # apsis/rebound are the once-per-orbit gate samples (the |Δr| headline over
+    # 100 orbits); the dense trace traces the ellipse for the visual.
     ex, ey = kepler_ellipse_xy(1.0, 0.5)
     ax.plot(ex, ey, color="grey", linewidth=0.6, alpha=0.5, label="analytical")
-    ax.plot(apsis["x1"], apsis["y1"], "C0o", markersize=2.0, label="apsis")
-    ax.plot(rebound["x1"], rebound["y1"], "C1x", markersize=3.0, alpha=0.7, label="REBOUND")
+    trace_a, trace_r = load("kepler_trace")
+    ax.plot(trace_a["x1"], trace_a["y1"], color="#1f77b4", linewidth=1.6, label="apsis")
+    ax.plot(
+        trace_r["x1"],
+        trace_r["y1"],
+        color="black",
+        linewidth=1.0,
+        linestyle=(0, (1, 4)),
+        alpha=0.85,
+        label="REBOUND",
+    )
     dr = np.hypot(
         np.asarray(apsis["x1"]) - np.asarray(rebound["x1"]),
         np.asarray(apsis["y1"]) - np.asarray(rebound["y1"]),
@@ -91,21 +102,24 @@ def panel_kepler(ax: Axes, apsis: pd.DataFrame, rebound: pd.DataFrame) -> None:
 
 
 def panel_figure8(ax: Axes, apsis: pd.DataFrame, rebound: pd.DataFrame) -> None:
+    # apsis is the visible coloured base; REBOUND overlays as sparse black dots,
+    # so the overlap (the parity message) reads as a coloured curve with dots on it
+    # rather than a single black line burying the apsis trace.
     shades = ["#1f77b4", "#4a90d9", "#7fb3e3"]
     for b in range(3):
-        ax.plot(apsis[f"x{b}"], apsis[f"y{b}"], color=shades[b], linewidth=0.6)
+        ax.plot(apsis[f"x{b}"], apsis[f"y{b}"], color=shades[b], linewidth=1.6)
     for b in range(3):
         ax.plot(
             rebound[f"x{b}"],
             rebound[f"y{b}"],
             color="black",
-            linewidth=0.9,
-            linestyle=":",
-            alpha=0.55,
+            linewidth=1.0,
+            linestyle=(0, (1, 4)),
+            alpha=0.85,
         )
-    apsis_proxy = Line2D([], [], color=shades[0], linewidth=1.2, label="apsis (bodies 0-2)")
+    apsis_proxy = Line2D([], [], color=shades[0], linewidth=1.6, label="apsis (bodies 0-2)")
     reb_proxy = Line2D(
-        [], [], color="black", linestyle=":", linewidth=0.9, label="REBOUND (all bodies)"
+        [], [], color="black", linestyle=(0, (1, 4)), linewidth=1.0, label="REBOUND (all bodies)"
     )
     ax.legend(handles=[apsis_proxy, reb_proxy], loc="lower right", fontsize=7, framealpha=0.85)
     ax.set_aspect("equal", adjustable="datalim")
