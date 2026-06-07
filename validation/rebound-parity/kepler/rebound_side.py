@@ -52,7 +52,7 @@ def main() -> int:
 
     # ── Discover apsis's actual sample times ────────────────────────────── #
     sample_times = read_apsis_sample_times(apsis_csv)
-    if len(sample_times) != N_ORBITS + 1:
+    if not args.allow_any_count and len(sample_times) != N_ORBITS + 1:
         print(
             f"ERROR: apsis CSV has {len(sample_times)} samples; "
             f"expected {N_ORBITS + 1}",
@@ -178,6 +178,12 @@ def parse_args() -> argparse.Namespace:
         "--output",
         default="out/rebound.csv",
         help="Path for the REBOUND-side CSV output. Default: out/rebound.csv.",
+    )
+    parser.add_argument(
+        "--allow-any-count",
+        action="store_true",
+        help="Skip the gate sample-count check, for the dense figure trace "
+        "(sampled within orbits rather than once per orbit).",
     )
     return parser.parse_args()
 

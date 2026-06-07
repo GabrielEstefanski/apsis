@@ -29,7 +29,7 @@
 use std::env;
 use std::fs::{File, create_dir_all};
 use std::io::{BufWriter, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use apsis::core::system::System;
 use apsis::domain::body::Body;
@@ -50,6 +50,10 @@ const M_SECONDARY: f64 = 1.0e-6;
 const N_ORBITS: u64 = 100;
 /// Initial timestep, expressed as a fraction of the orbital period.
 const DT_FRACTION_OF_PERIOD: f64 = 1.0e-3;
+/// Orbits spanned by the optional dense figure-trace output.
+const TRACE_ORBITS: u64 = 2;
+/// Within-orbit samples per orbit for the dense figure-trace output.
+const TRACE_SAMPLES_PER_ORBIT: u64 = 120;
 
 // ── Main ────────────────────────────────────────────────────────────────── //
 
@@ -122,6 +126,12 @@ fn main() {
 
     w.flush().unwrap();
     eprintln!("wrote {} samples to {}", N_ORBITS + 1, output_path.display());
+
+    // Optional dense within-orbit trace for the figure panel; the gate output
+    // above is unchanged. The REBOUND side mirrors these sample times.
+    if let Some(trace_path) = parse_trace_path() {
+        write_dense_trace(&trace_path);
+    }
 }
 
 // ── Output helper ───────────────────────────────────────────────────────── //
@@ -179,4 +189,60 @@ fn parse_output_path() -> PathBuf {
         }
     }
     PathBuf::from("validation/rebound-parity/kepler/out/apsis.csv")
+}
+
+fn parse_trace_path() -> Option<PathBuf> {
+    let mut args = env::args().skip(1);
+    while let Some(arg) = args.next() {
+        if arg == "--trace-output" {
+            return Some(PathBuf::from(
+                args.next().expect("--trace-output requires a path argument"),
+            ));
+        }
+    }
+    None
+}
+
+/// Dense within-orbit trajectory for the figure panel: re-integrates the same
+/// ICs sampling `TRACE_SAMPLES_PER_ORBIT` points per orbit over `TRACE_ORBITS`,
+/// so the trajectory panel traces the ellipse instead of the stroboscopic
+/// once-per-orbit return. Not part of the gate.
+fn write_dense_trace(path: &Path) {
+    let r_peri = A * (1.0 - E);
+    let v_peri = ((1.0 + E) / (A * (1.0 - E))).sqrt();
+    let m_total = M_PRIMARY + M_SECONDARY;
+    let primary = Body::star(M_PRIMARY)
+        .at(-(M_SECONDARY / m_total) * r_peri, 0.0)
+        .with_velocity(0.0, -(M_SECONDARY / m_total) * v_peri);
+    let secondary = Body::rocky(M_SECONDARY)
+        .at((M_PRIMARY / m_total) * r_peri, 0.0)
+        .with_velocity(0.0, (M_PRIMARY / m_total) * v_peri);
+    let period = 2.0 * std::f64::consts::PI;
+    let dt0 = period * DT_FRACTION_OF_PERIOD;
+    let mut sys = System::new(vec![primary, secondary], UnitSystem::canonical())
+        .with_integrator(IntegratorKind::Ias15)
+        .with_dt(dt0);
+
+    if let Some(parent) = path.parent() {
+        create_dir_all(parent).expect("failed to create trace output directory");
+    }
+    let file = File::create(path).expect("failed to open trace output file");
+    let mut w = BufWriter::new(file);
+    writeln!(w, "# REBOUND parity — Kepler e=0.5 — apsis IAS15 side (dense trajectory trace)").unwrap();
+    writeln!(w, "# protocol: paper/notebooks/2026-04-25-rebound-parity-kepler.md").unwrap();
+    writeln!(w, "# integrator: IAS15 (apsis)").unwrap();
+    writeln!(w, "# units: canonical (G = 1)").unwrap();
+    writeln!(w, "# a={A}, e={E}, m_primary={M_PRIMARY}, m_secondary={M_SECONDARY:e}").unwrap();
+    writeln!(w, "# dense trace: {TRACE_ORBITS} orbits x {TRACE_SAMPLES_PER_ORBIT} samples/orbit").unwrap();
+    writeln!(w, "orbit,t,x0,y0,vx0,vy0,x1,y1,vx1,vy1,e_total").unwrap();
+
+    let n = TRACE_ORBITS * TRACE_SAMPLES_PER_ORBIT;
+    write_sample(&mut w, 0, &sys);
+    for k in 1..=n {
+        let t_target = period * (k as f64) / (TRACE_SAMPLES_PER_ORBIT as f64);
+        sys.integrate_until(t_target);
+        write_sample(&mut w, k / TRACE_SAMPLES_PER_ORBIT, &sys);
+    }
+    w.flush().unwrap();
+    eprintln!("wrote dense trace ({} samples) to {}", n + 1, path.display());
 }
