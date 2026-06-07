@@ -81,12 +81,11 @@ def panel_kepler(ax: Axes, apsis: pd.DataFrame, rebound: pd.DataFrame) -> None:
     trace_a, trace_r = load("kepler_trace")
     ax.plot(trace_a["x1"], trace_a["y1"], color="#1f77b4", linewidth=1.6, label="apsis")
     ax.plot(
-        trace_r["x1"],
-        trace_r["y1"],
-        color="black",
-        linewidth=1.0,
-        linestyle=(0, (1, 4)),
-        alpha=0.85,
+        np.asarray(trace_r["x1"])[::5],
+        np.asarray(trace_r["y1"])[::5],
+        "k.",
+        markersize=2.5,
+        alpha=0.8,
         label="REBOUND",
     )
     dr = np.hypot(
@@ -102,24 +101,24 @@ def panel_kepler(ax: Axes, apsis: pd.DataFrame, rebound: pd.DataFrame) -> None:
 
 
 def panel_figure8(ax: Axes, apsis: pd.DataFrame, rebound: pd.DataFrame) -> None:
-    # apsis is the visible coloured base; REBOUND overlays as sparse black dots,
-    # so the overlap (the parity message) reads as a coloured curve with dots on it
-    # rather than a single black line burying the apsis trace.
+    # apsis is the coloured base line; REBOUND overlays as sparse markers. A dotted
+    # line fails here: the choreography's three phase-offset bodies interleave its
+    # dashes into a solid, so markers are used to keep the overlap distinct.
     shades = ["#1f77b4", "#4a90d9", "#7fb3e3"]
     for b in range(3):
         ax.plot(apsis[f"x{b}"], apsis[f"y{b}"], color=shades[b], linewidth=1.6)
     for b in range(3):
         ax.plot(
-            rebound[f"x{b}"],
-            rebound[f"y{b}"],
-            color="black",
-            linewidth=1.0,
-            linestyle=(0, (1, 4)),
-            alpha=0.85,
+            np.asarray(rebound[f"x{b}"])[::30],
+            np.asarray(rebound[f"y{b}"])[::30],
+            "k.",
+            markersize=2.5,
+            alpha=0.8,
         )
     apsis_proxy = Line2D([], [], color=shades[0], linewidth=1.6, label="apsis (bodies 0-2)")
     reb_proxy = Line2D(
-        [], [], color="black", linestyle=(0, (1, 4)), linewidth=1.0, label="REBOUND (all bodies)"
+        [], [], color="black", marker=".", linestyle="none", markersize=4,
+        label="REBOUND (all bodies)",
     )
     ax.legend(handles=[apsis_proxy, reb_proxy], loc="lower right", fontsize=7, framealpha=0.85)
     ax.set_aspect("equal", adjustable="datalim")
