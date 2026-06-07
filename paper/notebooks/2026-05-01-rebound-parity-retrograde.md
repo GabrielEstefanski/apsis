@@ -4,7 +4,7 @@
 **Subject:** Numerical agreement between IAS15 (apsis) and IAS15 (REBOUND) on a canonical retrograde Kepler orbit, completing the (prograde, retrograde) pair for sign-convention coverage of the Kepler limit.
 **Baseline commit:** `b57ffe9` ("feat(parity): retrograde Kepler apparatus — apsis cargo example + REBOUND side + comparator").
 **Tooling:** apsis IAS15 (`crates/apsis/src/physics/integrator/ias15.rs`), REBOUND 4.6.0 via Python 3.10 (`reb.IAS15`).
-**Status:** *Run executed 2026-05-02 against `b57ffe9`. **All 20 gated outcomes pass — 10 metrics $\times$ 2 horizons (100-orbit checkpoint + $10^4$-orbit long-horizon gate).** Both Tier 1 magnitude invariants and Tier 2 sign-consistency binary checks within tolerance on both sides; Decision rules verdict `PASS` on both horizons. Brouwer-law growth visible from checkpoint to long horizon ($\sim 10\times$ magnitude across the $\sim 100\times$ horizon, consistent with random-walk $\sqrt{N}$ scaling), all observed values $\geq 5\times$ inside the bound. One scientific finding registered in §Interpretation: Tier 3 $|\Delta r|$ at $10^4$ orbits saturated at $4.57 \times 10^{-9}$, well below the $O(1)$ predicted in §Threats #9 — Kepler's lack of Lyapunov amplification preserves phase coherence between two correct IAS15 implementations across $10^4$ orbits in a way the protocol's a-priori prediction underestimated.*
+**Status:** *Run executed 2026-05-02 against `b57ffe9`. **All 20 gated outcomes pass — 10 metrics $\times$ 2 horizons (100-orbit checkpoint + $10^4$-orbit long-horizon gate).** Both Tier 1 magnitude invariants and Tier 2 sign-consistency binary checks within tolerance on both sides; Decision rules verdict `PASS` on both horizons. Brouwer-law growth visible from checkpoint to long horizon ($\sim 10\times$ magnitude across the $\sim 100\times$ horizon, consistent with random-walk $\sqrt{N}$ scaling), all observed values $\geq 5\times$ inside the bound. One scientific finding registered in §Interpretation: Tier 3 $|\Delta r|$ at $10^4$ orbits saturated at $4.57 \times 10^{-9}$, well below the $O(1)$ predicted in §Threats #9 — Kepler's lack of Lyapunov amplification preserves phase coherence between two correct IAS15 implementations across $10^4$ orbits in a way the protocol's a-priori prediction underestimated. **Updated 2026-06:** post-controller-fix re-run gives $\lvert \Delta r \rvert = 3.84 \times 10^{-9}$ at $10^4$ orbits (was $4.57 \times 10^{-9}$); finding stands — see §Gate tolerances — revision.*
 
 ---
 
@@ -276,6 +276,12 @@ $13\,\varepsilon\,\sqrt{N_\text{long} / N_\text{checkpoint}}$ per element
 (Brouwer's law; Rein & Spiegel 2015), gated at five times this floor, with
 $\omega$ carrying the $1/e$ condition factor (a factor of two at $e = 0.5$). All
 gated metrics pass.
+
+The Tier-3 $|\Delta r|$ tabulated above ($2.18 \times 10^{-12}$ checkpoint,
+$4.57 \times 10^{-9}$ long-horizon) is the original `b57ffe9` run. Under the
+corrected IAS15 controller it is $3.84 \times 10^{-9}$ at $10^4$ orbits
+($\approx 6 \times 10^{-12}$ at the checkpoint) — same order; the §Interpretation
+finding stands.
 
 ---
 
