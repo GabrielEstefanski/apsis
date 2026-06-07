@@ -79,14 +79,13 @@ def panel_kepler(ax: Axes, apsis: pd.DataFrame, rebound: pd.DataFrame) -> None:
     ex, ey = kepler_ellipse_xy(1.0, 0.5)
     ax.plot(ex, ey, color="grey", linewidth=0.6, alpha=0.5, label="analytical")
     trace_a, trace_r = load("kepler_trace")
-    ax.plot(trace_a["x1"], trace_a["y1"], color="#1f77b4", linewidth=1.6, label="apsis")
+    ax.plot(trace_a["x1"], trace_a["y1"], color="#1f77b4", linewidth=3.0, alpha=0.35, label="apsis")
     ax.plot(
         trace_r["x1"],
         trace_r["y1"],
         color="black",
-        linewidth=1.0,
+        linewidth=1.1,
         linestyle="--",
-        alpha=0.9,
         label="REBOUND",
     )
     dr = np.hypot(
@@ -108,8 +107,8 @@ def panel_figure8(ax: Axes, apsis: pd.DataFrame, rebound: pd.DataFrame) -> None:
     # interleave into a solid.
     shades = ["#1f77b4", "#4a90d9", "#7fb3e3"]
     for b in range(3):
-        ax.plot(apsis[f"x{b}"], apsis[f"y{b}"], color=shades[b], linewidth=1.6)
-    ax.plot(rebound["x0"], rebound["y0"], color="black", linewidth=1.0, linestyle="--", alpha=0.9)
+        ax.plot(apsis[f"x{b}"], apsis[f"y{b}"], color=shades[b], linewidth=3.0, alpha=0.35)
+    ax.plot(rebound["x0"], rebound["y0"], color="black", linewidth=1.1, linestyle="--")
     apsis_proxy = Line2D([], [], color=shades[0], linewidth=1.6, label="apsis")
     reb_proxy = Line2D([], [], color="black", linestyle="--", linewidth=1.0, label="REBOUND")
     ax.legend(handles=[apsis_proxy, reb_proxy], loc="lower right", fontsize=7, framealpha=0.85)
