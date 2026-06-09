@@ -228,12 +228,14 @@ fn write_dense_trace(path: &Path) {
     }
     let file = File::create(path).expect("failed to open trace output file");
     let mut w = BufWriter::new(file);
-    writeln!(w, "# REBOUND parity — Kepler e=0.5 — apsis IAS15 side (dense trajectory trace)").unwrap();
+    writeln!(w, "# REBOUND parity — Kepler e=0.5 — apsis IAS15 side (dense trajectory trace)")
+        .unwrap();
     writeln!(w, "# protocol: paper/notebooks/2026-04-25-rebound-parity-kepler.md").unwrap();
     writeln!(w, "# integrator: IAS15 (apsis)").unwrap();
     writeln!(w, "# units: canonical (G = 1)").unwrap();
     writeln!(w, "# a={A}, e={E}, m_primary={M_PRIMARY}, m_secondary={M_SECONDARY:e}").unwrap();
-    writeln!(w, "# dense trace: {TRACE_ORBITS} orbits x {TRACE_SAMPLES_PER_ORBIT} samples/orbit").unwrap();
+    writeln!(w, "# dense trace: {TRACE_ORBITS} orbits x {TRACE_SAMPLES_PER_ORBIT} samples/orbit")
+        .unwrap();
     writeln!(w, "orbit,t,x0,y0,vx0,vy0,x1,y1,vx1,vy1,e_total").unwrap();
 
     let n = TRACE_ORBITS * TRACE_SAMPLES_PER_ORBIT;
