@@ -462,6 +462,13 @@ const DT_MIN: f64 = 1e-12;
 /// §3.4.
 const DT_SAFETY: f64 = 0.9;
 
+/// Accept/reject band: a converged sub-step is accepted unless the
+/// error-recommended next step falls below this fraction of the attempt
+/// (a gross overshoot, redone with the recommended step). The error sets
+/// the step size; it is not a hard accept gate (Rein & Spiegel 2015 §3.4).
+/// `0.25` matches the per-step change factor of the REBOUND parity oracle.
+const SAFETY_FACTOR_BAND: f64 = 0.25;
+
 /// Conservative growth factor used only as a fallback when the error
 /// estimate is zero (exact machine-precision step). In all other cases
 /// the error formula drives `dt_next` directly, capped above by
@@ -524,27 +531,29 @@ enum DtDecision {
     /// that only holds when Picard has actually produced valid `b`
     /// coefficients.
     RejectPicard,
-    /// Picard converged but truncation bound `|b₆|/|a₀|` is above `ε`.
-    /// Shrink using the standard controller formula
-    /// `dt · safety · (ε / trunc_err)^(1/7)` — this is the well-posed
-    /// signal the formula was derived for.
+    /// Picard converged but the error-recommended step `dt_new` is a gross
+    /// overshoot (`< SAFETY_FACTOR_BAND · dt_try`) — the attempt was far too
+    /// large. Redo with `dt_new`, the standard controller formula
+    /// `dt · safety · (ε / trunc_err)^(1/7)`.
     RejectTruncation,
 }
 
-/// Pure decision function for the IAS15 adaptive controller. Picard
-/// convergence and truncation error are independent signals — Picard
-/// can diverge while `trunc_err` is incidentally small, and that case
-/// must reject, not accept.
+/// Pure decision function for the IAS15 adaptive controller. The error-
+/// recommended next step `dt_new` and Picard convergence are independent
+/// signals — Picard can diverge while `dt_new` is incidentally large, and
+/// that case must reject. A converged step is accepted unless `dt_new` is
+/// a gross overshoot (`< SAFETY_FACTOR_BAND · dt_try`); the error sets the
+/// step, it is not a hard accept gate (Rein & Spiegel 2015 §3.4).
 ///
-/// | `converged` | `trunc ≤ ε` | `dt ≤ DT_MIN` | → |
+/// | `converged` | `dt_new ≥ band·dt` | `dt ≤ DT_MIN` | → |
 /// |---|---|---|---|
 /// | T | T | — | `Accept { degraded: false }` |
 /// | F | — | T | `Accept { degraded: true }` |
 /// | T | F | T | `Accept { degraded: true }` |
 /// | F | — | F | `RejectPicard` |
 /// | T | F | F | `RejectTruncation` |
-fn decide_dt(picard_converged: bool, trunc_err: f64, dt_try: f64, eps: f64) -> DtDecision {
-    let on_merit = picard_converged && trunc_err <= eps;
+fn decide_dt(picard_converged: bool, dt_new: f64, dt_try: f64) -> DtDecision {
+    let on_merit = picard_converged && dt_new >= SAFETY_FACTOR_BAND * dt_try;
     if on_merit {
         return DtDecision::Accept { degraded: false };
     }
@@ -953,8 +962,9 @@ impl Integrator for Ias15 {
             self.picard_iters_total = self.picard_iters_total.saturating_add(picard_iters as u64);
 
             let trunc_err = self.truncation_error(&a0);
+            let dt_new = self.optimal_dt(dt_try, trunc_err);
 
-            match decide_dt(converged, trunc_err, dt_try, self.epsilon) {
+            match decide_dt(converged, dt_new, dt_try) {
                 DtDecision::RejectPicard => {
                     self.rejections_picard_total = self.rejections_picard_total.saturating_add(1);
                     time_phase!(snapshot_restore, {
@@ -984,11 +994,11 @@ impl Integrator for Ias15 {
                     time_phase!(snapshot_restore, {
                         self.restore_snapshot(bodies);
                     });
-                    // Halving on truncation rejection per R&S 2015 §3.4.
-                    // The `(ε/err)^{1/7}` formula under-shrinks when
-                    // `err` sits just above `ε` and cascades on close
-                    // encounters; halving converges in ~10 retries.
-                    let dt_next_attempt = (dt_try * 0.5).max(DT_MIN);
+                    // Redo with the error-recommended step. Reaching here
+                    // means `dt_new` is a gross overshoot (< band·dt_try),
+                    // so this is one calibrated shrink, not a halving
+                    // cascade (R&S 2015 §3.4).
+                    let dt_next_attempt = dt_new.max(DT_MIN);
                     diag_emit_attempt(
                         self,
                         dt_try,
@@ -1078,8 +1088,7 @@ impl Integrator for Ias15 {
                     self.dt_last_accepted = dt_try;
                     // Propose next dt from the truncation signal, capped
                     // at `dt_try · DT_GROWTH_LIMIT` per R&S 2015 §3.4.
-                    let raw = self.optimal_dt(dt_try, trunc_err);
-                    let new_dt_next = raw.min(dt_try * DT_GROWTH_LIMIT).max(DT_MIN);
+                    let new_dt_next = dt_new.min(dt_try * DT_GROWTH_LIMIT).max(DT_MIN);
 
                     // Shrink-grow chatter detection: a *reversal* fires
                     // when the current step proposed growth (`dt_next >
@@ -2038,6 +2047,62 @@ mod tests {
         );
     }
 
+    /// Guards the accept/reject policy at violent close encounters (Burrau
+    /// 1913 Pythagorean): the canonical controller (R&S 2015 §3.4) accepts
+    /// and rides the error up instead of rejecting-and-halving into the
+    /// `DT_MIN` floor — no floor-pinning, no rejection cascade. Binary/loose
+    /// thresholds stay robust to the chaotic trajectory (a strict `err ≤ ε`
+    /// gate produced ~2.5e5 degraded steps + ~3.7e5 rejections here).
+    #[test]
+    fn ias15_pythagorean_controller_does_not_floor_pin() {
+        const DT: f64 = 0.01;
+        const T_END: f64 = 70.0;
+
+        let bodies = vec![
+            Body::rocky(3.0).at(1.0, 3.0).with_velocity(0.0, 0.0),
+            Body::rocky(4.0).at(-2.0, -1.0).with_velocity(0.0, 0.0),
+            Body::rocky(5.0).at(1.0, -1.0).with_velocity(0.0, 0.0),
+        ];
+        let mut sys = System::new(bodies, UnitSystem::canonical())
+            .with_theta(0.5)
+            .with_dt(DT)
+            .with_max_depth(10);
+        sys.set_integrator(IntegratorKind::Ias15);
+
+        let mut peak = 0.0_f64;
+        while sys.t() < T_END {
+            sys.step();
+            peak = peak.max(sys.metrics().rel_energy_error.unwrap_or(0.0).abs());
+        }
+        let stats = sys.adaptive_stats().expect("IAS15 is adaptive");
+
+        // Must not grind to the DT_MIN floor.
+        assert_eq!(
+            stats.degraded, 0,
+            "DT_MIN floor-pinning ({} degraded steps) on the Pythagorean \
+             (substeps={}, rejections_trunc={}) — controller grinding to the \
+             floor instead of riding the error up",
+            stats.degraded, stats.substeps, stats.rejections_truncation,
+        );
+
+        // No truncation-rejection cascade (canonical: a small handful).
+        assert!(
+            stats.rejections_truncation < 1000,
+            "truncation-rejection cascade ({}) on the Pythagorean (substeps={}, degraded={})",
+            stats.rejections_truncation,
+            stats.substeps,
+            stats.degraded,
+        );
+
+        // Energy still tracks the chaotic close-encounter floor (~1e-10).
+        assert!(
+            peak < 1e-8,
+            "Pythagorean energy peak |δE/E₀| = {:.3e} exceeds 1e-8 (substeps={})",
+            peak,
+            stats.substeps,
+        );
+    }
+
     /// Pythagorean (Burrau 1913) three-body: m=(3,4,5) placed on the
     /// vertices of a 3-4-5 triangle at rest. Pure gravity, ε=0, G=1.
     ///
@@ -2156,45 +2221,45 @@ mod tests {
 
     #[test]
     fn decide_dt_accepts_on_merit() {
-        // Picard converged AND truncation within tolerance → clean accept.
-        let d = decide_dt(true, 5e-10, 1e-3, 1e-9);
+        // Converged AND the recommended step is not a gross overshoot
+        // (dt_new ≈ dt_try) → clean accept.
+        let d = decide_dt(true, 1e-3, 1e-3);
         assert_eq!(d, DtDecision::Accept { degraded: false });
     }
 
     #[test]
     fn decide_dt_rejects_picard_when_not_converged() {
-        // Non-convergence dominates: even an incidentally-small trunc
-        // must not let us accept divergent `b` coefficients.
-        let d = decide_dt(false, 1e-12, 1e-3, 1e-9);
+        // Non-convergence dominates: a large `dt_new` must not let us
+        // accept divergent `b` coefficients.
+        let d = decide_dt(false, 1e-3, 1e-3);
         assert_eq!(d, DtDecision::RejectPicard);
     }
 
     #[test]
-    fn decide_dt_rejects_truncation_when_converged_but_over_tol() {
-        // Picard fine, but trunc_err above ε → standard controller path.
-        let d = decide_dt(true, 1e-6, 1e-3, 1e-9);
+    fn decide_dt_rejects_truncation_on_gross_overshoot() {
+        // Converged, but the recommended step is below band·dt_try → the
+        // attempt was far too large; redo with dt_new.
+        let d = decide_dt(true, 1e-4, 1e-3);
         assert_eq!(d, DtDecision::RejectTruncation);
     }
 
     #[test]
     fn decide_dt_dt_min_escape_degrades() {
-        // At the floor, we accept regardless of error state so the
-        // simulation progresses — but flagged degraded for the caller.
-        let d = decide_dt(false, 1.0, DT_MIN, 1e-9);
+        // At the floor, accept regardless of error state so the simulation
+        // progresses — but flagged degraded for the caller.
+        let d = decide_dt(false, 1.0, DT_MIN);
         assert_eq!(d, DtDecision::Accept { degraded: true });
 
-        // Same floor, different failure class (trunc) — still degraded.
-        let d = decide_dt(true, 1.0, DT_MIN, 1e-9);
+        // Same floor, converged but gross overshoot — still degraded.
+        let d = decide_dt(true, DT_MIN * 0.1, DT_MIN);
         assert_eq!(d, DtDecision::Accept { degraded: true });
     }
 
     #[test]
-    fn decide_dt_trunc_exactly_at_epsilon_is_merit() {
-        // Boundary: trunc_err == ε should be accepted (≤, not <),
-        // following the threshold convention specified in Rein &
-        // Spiegel (2015) §3.4. Flipping this would silently change
-        // step-size distributions in benchmarks.
-        let d = decide_dt(true, 1e-9, 1e-3, 1e-9);
+    fn decide_dt_band_boundary_is_inclusive() {
+        // Boundary: dt_new == band·dt_try is accepted (≥, not >). Flipping
+        // this would silently shift step-size distributions in benchmarks.
+        let d = decide_dt(true, SAFETY_FACTOR_BAND * 1e-3, 1e-3);
         assert_eq!(d, DtDecision::Accept { degraded: false });
     }
 
