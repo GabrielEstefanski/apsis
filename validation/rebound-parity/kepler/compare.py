@@ -47,7 +47,7 @@ Methodology for the derivation.
 
 ## Protocol notebook
 
-    docs/experiments/2026-04-25-rebound-parity-kepler.md
+    paper/notebooks/2026-04-25-rebound-parity-kepler.md
 """
 
 from __future__ import annotations

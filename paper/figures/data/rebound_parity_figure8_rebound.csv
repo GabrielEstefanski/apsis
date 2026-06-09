@@ -1,5 +1,5 @@
 # REBOUND parity — Figure-8 choreography — REBOUND IAS15 side
-# protocol: docs/experiments/2026-04-26-rebound-parity-figure8.md
+# protocol: paper/notebooks/2026-04-26-rebound-parity-figure8.md
 # integrator: IAS15 (REBOUND)
 # rebound_version: 4.6.0
 # units: canonical (G = 1)
