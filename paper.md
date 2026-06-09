@@ -577,7 +577,9 @@ trajectories diverge exponentially — seeded at the f64
 round-off floor and amplified at the problem's Lyapunov rate —
 while the energy difference holds at the regime-limited floor,
 $|\Delta E|/|E_0| \sim 10^{-10}$ at $T=70$, not an
-apsis–REBOUND disagreement.
+apsis–REBOUND disagreement; Fig. \ref{fig:rebound-divergence}
+traces the separation against time, from the round-off floor up
+the Lyapunov ramp to the ejection.
 
 ![apsis IAS15 trajectories (solid coloured lines) across three
 configuration-space scenarios. Where the two codes agree to machine
@@ -593,6 +595,19 @@ bodies share one closed curve and are visually indistinguishable.
 Pythagorean three-body (Burrau 1913) integrated to $T=70$ through
 the close-encounter cluster; bodies 0, 1, 2 carry masses 3, 4, 5 in
 canonical units.](paper/figures/rebound_parity_trajectories.pdf){#fig:rebound-traj width=100%}
+
+![Cross-implementation trajectory divergence on the chaotic
+Pythagorean three-body (Burrau 1913): $\max_b|\Delta\mathbf{r}_b|(t)$
+between apsis IAS15 and REBOUND IAS15 from identical initial
+conditions. The separation climbs from the f64 round-off floor
+($\sim 10^{-15}$) up the exponential Lyapunov ramp (decade crossings
+marked) to $\sim 0.16$ at the ejection ($t \approx 69$), while the
+cross-implementation energy difference holds at the regime-limited
+floor, $|\Delta E|/|E_0| = 4.27\times10^{-10}$ — the configuration-space
+divergence is chaos seeded at round-off, not a solver
+disagreement. Companion to the regular-orbit panels of
+Fig. \ref{fig:rebound-traj}, where the two codes agree to machine
+precision.](paper/figures/rebound_parity_pythagorean_divergence.pdf){#fig:rebound-divergence}
 
 The fourth scenario — the retrograde Kepler over $10^4$ orbits —
 is the long-horizon parity check and is shown separately in
