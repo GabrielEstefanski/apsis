@@ -8,13 +8,15 @@ Neither side's internal energy bookkeeping enters any metric (REBOUND's
 sim.energy() omits the softening term; verified v4.6.0).
 
 Phase 0 (--informational): every metric and BOTH candidate L/P floor models
-are reported; the exit code never signals metric failure. The gated phase-1
-verdict is enabled only after the floor model is frozen in the protocol
-notebook.
+are reported; the exit code never signals metric failure. Gated mode (the
+default) asserts the floors frozen at phase-0 close: scale-only Wilkinson
+for L and P, the drift model for COM, the round-off-walk model for energy
+(protocol notebook, section Phase 0 results and gate freeze).
 
 Run:
     python compare.py --selftest
     python compare.py --ics ics_n256.csv --informational
+    python compare.py --ics ics_n1000.csv
 
 Protocol notebook:
     paper/notebooks/2026-06-09-rebound-parity-plummer-cluster.md
@@ -267,11 +269,44 @@ def main() -> int:
         },
     }
 
+    # Gated verdicts at the frozen floors (phase-0 close): energy at the
+    # round-off-walk model, L/P at the scale-only Wilkinson floor, COM at
+    # the drift model. Informational mode reports the same rows ungated.
+    f_l = floors["L"]["scale_only"]
+    f_p = floors["P"]["scale_only"]
+    f_c = floors["COM"]["drift_model"]
+    gates = [
+        {"name": "|dE/E0| apsis", "observed": de_a, "tolerance": _tol_a},
+        {"name": "|dE/E0| rebound", "observed": de_r, "tolerance": _tol_r},
+        {"name": "cross-impl |dE|/|E0|", "observed": de_x, "tolerance": _tol_cross},
+        {"name": "|dL| apsis", "observed": dL_a, "tolerance": f_l["apsis"]},
+        {"name": "|dL| rebound", "observed": dL_r, "tolerance": f_l["rebound"]},
+        {"name": "cross-impl |dL|", "observed": dL_x, "tolerance": f_l["cross"]},
+        {"name": "|dP| apsis", "observed": dP_a, "tolerance": f_p["apsis"]},
+        {"name": "|dP| rebound", "observed": dP_r, "tolerance": f_p["rebound"]},
+        {"name": "cross-impl |dP|", "observed": dP_x, "tolerance": f_p["cross"]},
+        {"name": "|dr_COM| apsis", "observed": dC_a, "tolerance": f_c["apsis"]},
+        {"name": "|dr_COM| rebound", "observed": dC_r, "tolerance": f_c["rebound"]},
+        {"name": "cross-impl |dr_COM|", "observed": dC_x, "tolerance": f_c["cross"]},
+    ]
+    if not args.informational and any(g["tolerance"] is None for g in gates):
+        print(
+            "ERROR: gated mode requires both step-count stats files "
+            "(energy tolerances are undefined without them)",
+            file=sys.stderr,
+        )
+        return 1
+    for g in gates:
+        g["passed"] = g["tolerance"] is None or g["observed"] <= g["tolerance"]
+    all_passed = all(g["passed"] for g in gates)
+
     half = n_s // 2
     dr = np.linalg.norm(pos_a - pos_r, axis=2)
     max_dr = float(np.max(dr))
 
     report = {
+        "all_passed": all_passed,
+        "gates": gates,
         "informational": args.informational,
         "n": n,
         "eps": eps,
@@ -318,11 +353,20 @@ def main() -> int:
     if args.informational:
         print("\nphase 0 -- informational run: metrics reported, nothing gated")
         return 0
+    n_fail = sum(1 for g in gates if not g["passed"])
+    if all_passed:
+        print(f"\ngated run: {len(gates)}/{len(gates)} metrics within the frozen floors")
+        return 0
     print(
-        "\nERROR: gated mode is blocked until the L/P floor model is frozen "
-        "in the protocol notebook (phase 0 close-out)",
+        f"\ngated run FAILED: {n_fail}/{len(gates)} metrics exceed the frozen floors",
         file=sys.stderr,
     )
+    for g in gates:
+        if not g["passed"]:
+            print(
+                f"  FAIL {g['name']}: observed {g['observed']:.3e} > tol {g['tolerance']:.3e}",
+                file=sys.stderr,
+            )
     return 2
 
 
