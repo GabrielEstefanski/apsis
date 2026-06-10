@@ -47,16 +47,20 @@ def rebound_side(eps: float) -> float:
 
 
 def apsis_side(eps: float) -> float:
-    out = subprocess.run(
-        [
-            "cargo", "run", "--release", "--example", "rebound_parity_plummer_cluster",
-            "-p", "apsis", "--", "--smoke", "--eps", repr(eps),
-        ],
-        cwd=WORKSPACE_ROOT,
-        capture_output=True,
-        text=True,
-        check=True,
-    )
+    try:
+        out = subprocess.run(
+            [
+                "cargo", "run", "--release", "--example", "rebound_parity_plummer_cluster",
+                "-p", "apsis", "--", "--smoke", "--eps", repr(eps),
+            ],
+            cwd=WORKSPACE_ROOT,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except subprocess.CalledProcessError as e:
+        print(e.stderr, file=sys.stderr)
+        raise
     return float(out.stdout.strip().splitlines()[-1])
 
 
