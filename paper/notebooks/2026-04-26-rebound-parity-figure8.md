@@ -2,9 +2,12 @@
 
 **Date:** 2026-04-26
 **Subject:** Numerical agreement between IAS15 (apsis) and IAS15 (REBOUND) on the Chenciner–Montgomery figure-8 three-body choreography.
-**Baseline commit:** `9caaef2` ("feat(ias15): refactor controller to spec-conformant Pascal warmstart, halving rejection, and 7x growth cap").
+
+**Baseline commit:** `e849d31` ("feat(ias15): refactor controller to spec-conformant Pascal warmstart, halving rejection, and 7x growth cap").
+
 **Tooling:** apsis IAS15 (`crates/apsis/src/physics/integrator/ias15.rs`), REBOUND 4.6.0 via Python 3.10 (`reb.IAS15`).
-**Status:** *Run executed 2026-04-26 against `9caaef2`. All twelve Tier-1 and Tier-2 gated metrics pass at 1–10 ULP. The Tier-3 informational $\lvert \Delta r \rvert$ stands at $9.44 \times 10^{-13}$, consistent with controller-level phase drift between two adaptive IAS15 implementations at the f64 round-off floor.*
+
+**Status:** *Run executed 2026-04-26 against `e849d31`. All twelve Tier-1 and Tier-2 gated metrics pass at 1–10 ULP. The Tier-3 informational $\lvert \Delta r \rvert$ stands at $9.44 \times 10^{-13}$, consistent with controller-level phase drift between two adaptive IAS15 implementations at the f64 round-off floor.*
 
 ---
 
@@ -128,7 +131,7 @@ For the figure-8, gating on per-body $|\Delta r|$ would conflate this controller
 
 ## Results
 
-The run was executed 2026-04-26 against `apsis` commit `9caaef2`. The same run was the original failing case for the IAS15 controller audit documented in the companion notebook `2026-04-26-ias15-warmstart-bug.md`; the audit's resolution (Pascal-triangle warmstart, unconditional halving on truncation rejection, 7$\times$ growth cap on accept-path `dt_next`) is what made every Tier-1 and Tier-2 gate pass.
+The run was executed 2026-04-26 against `apsis` commit `e849d31`. The same run was the original failing case for the IAS15 controller audit documented in the companion notebook `2026-04-26-ias15-warmstart-bug.md`; the audit's resolution (Pascal-triangle warmstart, unconditional halving on truncation rejection, $7\times$ growth cap on accept-path `dt_next`) is what made every Tier-1 and Tier-2 gate pass.
 
 Total samples: 2001 (200 per period $\times$ 10 periods + 1). Final time: 63.262389 (canonical units; $10\,T$ to 5 ULP in the period value).
 
@@ -136,23 +139,23 @@ Total samples: 2001 (200 per period $\times$ 10 periods + 1). Final time: 63.262
 
 | Metric | Observed | Tolerance | Margin |
 | --- | ---: | ---: | ---: |
-| $\lvert \Delta E / E_0 \rvert$ apsis | 8.625e-16 | 1.00e-13 | 116$\times$ under |
-| $\lvert \Delta E / E_0 \rvert$ rebound | 8.625e-16 | 1.00e-13 | 116$\times$ under |
-| Cross-impl $\lvert \Delta E \rvert / \lvert E_0 \rvert$ | 1.035e-15 | 1.00e-13 | 97$\times$ under |
-| $\lvert \Delta \mathbf{L} \rvert$ apsis (abs) | 3.608e-16 | 1.00e-13 | 277$\times$ under |
-| $\lvert \Delta \mathbf{L} \rvert$ rebound (abs) | 3.331e-16 | 1.00e-13 | 300$\times$ under |
-| Cross-impl $\lvert \Delta \mathbf{L} \rvert$ (abs) | 4.441e-16 | 1.00e-13 | 225$\times$ under |
+| $\lvert \Delta E / E_0 \rvert$ apsis | $8.625 \times 10^{-16}$ | $1.00 \times 10^{-13}$ | $116\times$ under |
+| $\lvert \Delta E / E_0 \rvert$ rebound | $8.625 \times 10^{-16}$ | $1.00 \times 10^{-13}$ | $116\times$ under |
+| Cross-impl $\lvert \Delta E \rvert / \lvert E_0 \rvert$ | $1.035 \times 10^{-15}$ | $1.00 \times 10^{-13}$ | $97\times$ under |
+| $\lvert \Delta \mathbf{L} \rvert$ apsis (abs) | $3.608 \times 10^{-16}$ | $1.00 \times 10^{-13}$ | $277\times$ under |
+| $\lvert \Delta \mathbf{L} \rvert$ rebound (abs) | $3.331 \times 10^{-16}$ | $1.00 \times 10^{-13}$ | $300\times$ under |
+| Cross-impl $\lvert \Delta \mathbf{L} \rvert$ (abs) | $4.441 \times 10^{-16}$ | $1.00 \times 10^{-13}$ | $225\times$ under |
 
 ### Linear momentum and centre-of-mass (Tier 2)
 
 | Metric | Observed | Tolerance | Margin |
 | --- | ---: | ---: | ---: |
-| $\lvert \Delta \mathbf{P} \rvert$ apsis (abs) | 4.965e-16 | 1.00e-13 | 201$\times$ under |
-| $\lvert \Delta \mathbf{P} \rvert$ rebound (abs) | 5.095e-16 | 1.00e-13 | 196$\times$ under |
-| Cross-impl $\lvert \Delta \mathbf{P} \rvert$ (abs) | 4.578e-16 | 1.00e-13 | 218$\times$ under |
-| $\lvert \Delta \mathbf{r}_\text{COM} \rvert$ apsis (abs) | 3.111e-15 | 1.00e-12 | 322$\times$ under |
-| $\lvert \Delta \mathbf{r}_\text{COM} \rvert$ rebound (abs) | 3.815e-15 | 1.00e-12 | 263$\times$ under |
-| Cross-impl $\lvert \Delta \mathbf{r}_\text{COM} \rvert$ (abs) | 7.514e-16 | 1.00e-12 | 1331$\times$ under |
+| $\lvert \Delta \mathbf{P} \rvert$ apsis (abs) | $4.965 \times 10^{-16}$ | $1.00 \times 10^{-13}$ | $201\times$ under |
+| $\lvert \Delta \mathbf{P} \rvert$ rebound (abs) | $5.095 \times 10^{-16}$ | $1.00 \times 10^{-13}$ | $196\times$ under |
+| Cross-impl $\lvert \Delta \mathbf{P} \rvert$ (abs) | $4.578 \times 10^{-16}$ | $1.00 \times 10^{-13}$ | $218\times$ under |
+| $\lvert \Delta \mathbf{r}_\text{COM} \rvert$ apsis (abs) | $3.111 \times 10^{-15}$ | $1.00 \times 10^{-12}$ | $322\times$ under |
+| $\lvert \Delta \mathbf{r}_\text{COM} \rvert$ rebound (abs) | $3.815 \times 10^{-15}$ | $1.00 \times 10^{-12}$ | $263\times$ under |
+| Cross-impl $\lvert \Delta \mathbf{r}_\text{COM} \rvert$ (abs) | $7.514 \times 10^{-16}$ | $1.00 \times 10^{-12}$ | $1331\times$ under |
 
 **All twelve gated metrics pass.** Every observed value sits in the 1–10 ULP regime, consistent with the f64 round-off floor for two IAS15 implementations integrating the same dynamical system.
 
@@ -160,10 +163,10 @@ Total samples: 2001 (200 per period $\times$ 10 periods + 1). Final time: 63.262
 
 | Metric | Observed |
 | --- | ---: |
-| max $\lvert \Delta \mathbf{r} \rvert$ over all bodies and samples | 9.436e-13 |
-| Body 1, peak at sample 1832 | 9.404e-13 |
-| Body 2, peak at sample 1967 | 9.134e-13 |
-| Body 3, peak at sample 2000 | 9.436e-13 |
+| max $\lvert \Delta \mathbf{r} \rvert$ over all bodies and samples | $9.436 \times 10^{-13}$ |
+| Body 1, peak at sample 1832 | $9.404 \times 10^{-13}$ |
+| Body 2, peak at sample 1967 | $9.134 \times 10^{-13}$ |
+| Body 3, peak at sample 2000 | $9.436 \times 10^{-13}$ |
 
 The three per-body peaks agree to within a factor of 1.04 — the cyclic permutation symmetry of the figure-8 dynamics is preserved across the cross-implementation comparison to ULP precision, as expected from the equal-mass ICs.
 
@@ -178,6 +181,23 @@ The two IAS15 implementations agree on the figure-8 choreography across all four
 The Tier-3 $\lvert \Delta \mathbf{r} \rvert \sim 9.4 \times 10^{-13}$ is roughly three orders of magnitude smaller than the analogous Kepler-parity observation post-controller-fix ($\sim 2.2 \times 10^{-12}$, notebook `2026-04-25` informational entry as updated by the warmstart audit). The improvement reflects the controller now tracking the specification's `dt_next` choices to ULP precision after the warmstart/halving/growth-cap fixes; the per-body equal-magnitude $\lvert \Delta \mathbf{r} \rvert$ corroborates the cyclic permutation symmetry of the choreography across the cross-implementation comparison.
 
 This completes the second entry in Pillar A (numerical foundation) of the v0.1 validation portfolio: the same IAS15 implementation that reproduces the canonical two-body Kepler problem to machine precision (notebook `2026-04-25`) also reproduces the canonical non-Keplerian periodic three-body problem to machine precision in a regime where no central body, no Keplerian decomposition, and recurrent mutual close approaches at the central crossing are all present simultaneously.
+
+---
+
+## Gate tolerances — revision (2026-06)
+
+The round bounds declared above are superseded by floors set by each invariant's
+round-off structure. Linear and angular momentum are zero by construction, so
+their residual is bounded by $\varepsilon \sum |\text{terms}|$ (Wilkinson
+summation); the gates are $10\,\varepsilon \cdot \max_t(\text{scale})$ per side
+and $10\sqrt{2}\,\varepsilon \cdot \max_t(\text{scale})$ cross-implementation,
+the per-side momentum floor reproducing the observed $5.55 \times 10^{-16}$. The
+energy gate is the condition-number floor $15\,\varepsilon\,\kappa$,
+$\kappa = (KE + |PE|)/|E|$; the centre-of-mass drift, set by accumulated
+momentum residual, is bounded by
+$1.5\,\varepsilon \cdot P_\text{scale} \cdot t_\text{final} / M$. Angular
+momentum is evaluated as $L_z$ alone: the configuration is planar, so $L_x$ and
+$L_y$ vanish identically. All twelve metrics pass.
 
 ---
 

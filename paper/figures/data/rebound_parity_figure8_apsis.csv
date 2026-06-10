@@ -1,5 +1,5 @@
 # REBOUND parity — Figure-8 choreography — apsis IAS15 side
-# protocol: docs/experiments/2026-04-26-rebound-parity-figure8.md
+# protocol: paper/notebooks/2026-04-26-rebound-parity-figure8.md
 # integrator: IAS15 (apsis)
 # units: canonical (G = 1)
 # mass=1, period=6.325913986999999850e0

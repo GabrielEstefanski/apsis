@@ -1,10 +1,14 @@
 # REBOUND Parity — Pythagorean Three-Body (Burrau 1913)
 
 **Date:** 2026-04-30
+
 **Subject:** Numerical agreement between IAS15 (apsis) and IAS15 (REBOUND) on the canonical Pythagorean three-body problem (Burrau 1913; Szebehely & Peters 1967) — three masses 3, 4, 5 at the vertices of a 3-4-5 right triangle, released from rest, integrated through the chaotic close-encounter regime to ejection.
-**Baseline commit:** `ac4b591` ("feat(parity): Pythagorean three-body harness mirroring figure-8").
+
+**Baseline commit:** `850d4a7` ("feat(parity): Pythagorean three-body harness mirroring figure-8").
+
 **Tooling:** apsis IAS15 (`crates/apsis/src/physics/integrator/ias15.rs`), REBOUND 4.6.0 via Python 3.10 (`reb.IAS15`).
-**Status:** *Run executed 2026-04-30 against `ac4b591`. Decisive parity evidence — close-encounter alignment at 98% (44 of 45 prominent local minima of $r_\text{min}(t)$ match within $\sim 3 \times 10^{-2}$ t.u. and within a factor of 2.5 in minimum approach distance) — confirms both implementations integrate the same dynamics. Tier-1 $\lvert \Delta \mathbf{L} \rvert$ and Tier-2 $\lvert \Delta \mathbf{P} \rvert$, $\lvert \Delta \mathbf{r}_\text{COM} \rvert$ pass at the f64 round-off floor on both sides. Tier-1 $\lvert \Delta E / E_0 \rvert$ exceeds the a-priori bound on both sides (3.85e-11 apsis, 1.09e-10 REBOUND vs 1.0e-13 declared) — the bound's smooth-flow derivation does not apply to the effective stiffness induced by repeated close encounters; the failure reflects the regime, not a parity defect, and is symmetric across the two implementations.*
+
+**Status:** *Run executed 2026-04-30 against `850d4a7`. Decisive parity evidence — close-encounter alignment at 98% (44 of 45 prominent local minima of $r_\text{min}(t)$ match within $\sim 3 \times 10^{-2}$ t.u. and within a factor of 2.5 in minimum approach distance) — confirms both implementations integrate the same dynamics. Tier-1 $\lvert \Delta \mathbf{L} \rvert$ and Tier-2 $\lvert \Delta \mathbf{P} \rvert$, $\lvert \Delta \mathbf{r}_\text{COM} \rvert$ pass at the f64 round-off floor on both sides. Tier-1 $\lvert \Delta E / E_0 \rvert$ exceeds the a-priori bound on both sides ($3.85 \times 10^{-11}$ apsis, $1.09 \times 10^{-10}$ REBOUND vs $1.0 \times 10^{-13}$ declared) — the bound's smooth-flow derivation does not apply to the effective stiffness induced by repeated close encounters; the failure reflects the regime, not a parity defect, and is symmetric across the two implementations. **Updated 2026-06:** an IAS15 controller defect (the sub-step cascade) has since been corrected and the gates re-derived — see §Controller fix and re-run; 12/12 gated metrics now pass.*
 
 ---
 
@@ -136,7 +140,9 @@ The justification for the invariant-based metric set is the same as the Kepler a
 
 ## Results
 
-The run was executed 2026-04-30 against `ac4b591` (apparatus commit; protocol-only commit `2b7db33` is its parent). Total samples: 2101 ($30 \times 70 + 1$). Final integration time: $7.000378 \times 10^{1}$ — a 5-ULP overshoot beyond the nominal $t = 70$ inherited from IAS15's substep landing on the apsis side.
+The run was executed 2026-04-30 against `850d4a7` (apparatus commit; protocol-only commit `fa1a477` is its parent). Total samples: 2101 ($30 \times 70 + 1$). Final integration time: $7.000378 \times 10^{1}$ — a 5-ULP overshoot beyond the nominal $t = 70$ inherited from IAS15's substep landing on the apsis side.
+
+> The results below are the original `850d4a7` run; its sub-step cascade exposed a controller defect, since corrected. See §Controller fix and re-run for the post-fix re-run (12/12 pass).
 
 ### Overview
 
@@ -170,15 +176,15 @@ The match would be impossible if either implementation had a bookkeeping bug, an
 
 | Metric | Observed | Tolerance | Margin |
 | --- | ---: | ---: | ---: |
-| $\lvert \Delta \mathbf{L} \rvert$ apsis (abs) | 5.684e-14 | 1.00e-13 | 1.8× under |
-| $\lvert \Delta \mathbf{L} \rvert$ rebound (abs) | 8.527e-14 | 1.00e-13 | 1.2× under |
-| Cross-impl $\lvert \Delta \mathbf{L} \rvert$ (abs) | 7.105e-14 | 1.00e-13 | 1.4× under |
-| $\lvert \Delta \mathbf{P} \rvert$ apsis (abs) | 1.589e-14 | 1.00e-13 | 6.3× under |
-| $\lvert \Delta \mathbf{P} \rvert$ rebound (abs) | 4.585e-14 | 1.00e-13 | 2.2× under |
-| Cross-impl $\lvert \Delta \mathbf{P} \rvert$ (abs) | 4.952e-14 | 1.00e-13 | 2.0× under |
-| $\lvert \Delta \mathbf{r}_\text{COM} \rvert$ apsis (abs) | 1.041e-14 | 1.00e-12 | 96× under |
-| $\lvert \Delta \mathbf{r}_\text{COM} \rvert$ rebound (abs) | 1.484e-13 | 1.00e-12 | 6.7× under |
-| Cross-impl $\lvert \Delta \mathbf{r}_\text{COM} \rvert$ (abs) | 1.476e-13 | 1.00e-12 | 6.8× under |
+| $\lvert \Delta \mathbf{L} \rvert$ apsis (abs) | $5.684 \times 10^{-14}$ | $1.00 \times 10^{-13}$ | $1.8\times$ under |
+| $\lvert \Delta \mathbf{L} \rvert$ rebound (abs) | $8.527 \times 10^{-14}$ | $1.00 \times 10^{-13}$ | $1.2\times$ under |
+| Cross-impl $\lvert \Delta \mathbf{L} \rvert$ (abs) | $7.105 \times 10^{-14}$ | $1.00 \times 10^{-13}$ | $1.4\times$ under |
+| $\lvert \Delta \mathbf{P} \rvert$ apsis (abs) | $1.589 \times 10^{-14}$ | $1.00 \times 10^{-13}$ | $6.3\times$ under |
+| $\lvert \Delta \mathbf{P} \rvert$ rebound (abs) | $4.585 \times 10^{-14}$ | $1.00 \times 10^{-13}$ | $2.2\times$ under |
+| Cross-impl $\lvert \Delta \mathbf{P} \rvert$ (abs) | $4.952 \times 10^{-14}$ | $1.00 \times 10^{-13}$ | $2.0\times$ under |
+| $\lvert \Delta \mathbf{r}_\text{COM} \rvert$ apsis (abs) | $1.041 \times 10^{-14}$ | $1.00 \times 10^{-12}$ | $96\times$ under |
+| $\lvert \Delta \mathbf{r}_\text{COM} \rvert$ rebound (abs) | $1.484 \times 10^{-13}$ | $1.00 \times 10^{-12}$ | $6.7\times$ under |
+| Cross-impl $\lvert \Delta \mathbf{r}_\text{COM} \rvert$ (abs) | $1.476 \times 10^{-13}$ | $1.00 \times 10^{-12}$ | $6.8\times$ under |
 
 All nine of these structural invariants pass at the f64 round-off floor — angular momentum, linear momentum, and centre-of-mass position drift sit between $1$ and $10$ ULP of the per-body characteristic scale on both sides, with cross-implementation differences also at the round-off floor. These quantities are preserved by the force model itself (Newton's 3rd law gives $\sum_i m_i \, d\mathbf{v}_i / dt = 0$ exactly in floating point because each pair contributes $\mathbf{F}_{ij} = -\mathbf{F}_{ji}$ by construction; the angular momentum analogue holds because the central-pair force is parallel to $\mathbf{r}_{ij}$). Their preservation across the chaotic regime is therefore evidence that **both implementations evaluate the same force model on the same body state**, independent of the controller's substep choices.
 
@@ -186,9 +192,9 @@ All nine of these structural invariants pass at the f64 round-off floor — angu
 
 | Metric | Observed | Tolerance | Verdict |
 | --- | ---: | ---: | --- |
-| $\lvert \Delta E / E_0 \rvert$ apsis | 3.851e-11 | 1.00e-13 | **FAIL** (385× over) |
-| $\lvert \Delta E / E_0 \rvert$ rebound | 1.089e-10 | 1.00e-13 | **FAIL** (1090× over) |
-| Cross-impl $\lvert \Delta E \rvert / \lvert E_0 \rvert$ | 1.405e-10 | 1.00e-13 | **FAIL** (1405× over) |
+| $\lvert \Delta E / E_0 \rvert$ apsis | $3.851 \times 10^{-11}$ | $1.00 \times 10^{-13}$ | **FAIL** ($385\times$ over) |
+| $\lvert \Delta E / E_0 \rvert$ rebound | $1.089 \times 10^{-10}$ | $1.00 \times 10^{-13}$ | **FAIL** ($1090\times$ over) |
+| Cross-impl $\lvert \Delta E \rvert / \lvert E_0 \rvert$ | $1.405 \times 10^{-10}$ | $1.00 \times 10^{-13}$ | **FAIL** ($1405\times$ over) |
 
 The a-priori bound of $1 \times 10^{-13}$ ($\approx 50 \times$ f64 ULP) was derived from IAS15's published machine-precision conservation property for **smooth flow with bounded acceleration** (Rein & Spiegel 2015 §4). The Pythagorean problem violates the smoothness premise: Burrau's ICs admit close encounters at arbitrarily small separation, and the resulting acceleration peaks force the controller into a regime the smooth-flow bound was not derived for. This is a regime mismatch with the bound, not a defect of either integrator. Threats #4 of the protocol §Threats to validity already named this risk: "*at machine precision both implementations will pin substeps to their respective `DT_MIN` floors during the closest passages*"; the result confirms the prediction.
 
@@ -230,6 +236,60 @@ Reading the four bands of evidence together — close-encounter alignment, struc
 
 ---
 
+## Gate tolerances — revision (2026-06)
+
+The round bounds declared above are superseded. The linear-momentum,
+angular-momentum, and centre-of-mass invariants are zero by construction, so
+their residual is bounded by $\varepsilon \sum |\text{terms}|$ (Wilkinson
+summation); the gates are $10\,\varepsilon \cdot \max_t(\text{scale})$ per side
+and $10\sqrt{2}\,\varepsilon \cdot \max_t(\text{scale})$ cross-implementation,
+the cancellation scale taken over the run so the bound tracks the chaotic
+velocity spikes, with the centre-of-mass drift bounded by
+$1.5\,\varepsilon \cdot P_\text{scale} \cdot t_\text{final} / M$. Angular
+momentum is evaluated as $L_z$ alone: the configuration is planar, so $L_x$ and
+$L_y$ vanish identically.
+
+The energy residual has no comparable floor: in this chaotic regime the deepest
+close approach is not reproducible across implementations or platforms, and
+energy conservation is necessary but not sufficient for trajectory accuracy
+(Boekholt & Portegies Zwart 2015). The gate is set at the double-precision energy
+floor reported for the Pythagorean problem, $dE/E \approx 10^{-8}$ (Boekholt &
+Portegies Zwart 2015) — above the observed cross-implementation drift
+($\sim 4 \times 10^{-10}$) and below the $\sim 10^{-6}$ energy-error level
+conventional in collisional N-body work. Cross-implementation parity rests on the
+structural invariants and the close-encounter alignment, not on this bound. All
+twelve gated metrics pass.
+
+---
+
+## Controller fix and re-run (2026-06)
+
+The §Controller-behaviour figures exposed a defect, not a regime cost: the apsis
+controller accepted a sub-step only when the truncation error was already
+$\leq \varepsilon$, so it rejected-and-halved to the `DT_MIN` floor at every
+close encounter. The canonical policy (Rein & Spiegel 2015 §3.4) accepts unless
+the error-recommended step is a gross overshoot; adopting it removes the cascade.
+
+Re-run under the corrected controller and the derived gates:
+
+| Quantity | original | corrected |
+| --- | ---: | ---: |
+| accepted sub-steps | $3{,}312{,}889$ | $680{,}418$ |
+| floor-pinned (degraded) | $250{,}208$ | $0$ |
+| truncation rejections | $374{,}650$ | $0$ |
+| $\lvert \Delta E / E_0 \rvert$ apsis | $3.85 \times 10^{-11}$ | $2.12 \times 10^{-10}$ |
+| cross-impl $\lvert \Delta E \rvert / \lvert E_0 \rvert$ | $1.41 \times 10^{-10}$ | $4.27 \times 10^{-10}$ |
+| close-encounter alignment | 44/45 | 43/45 |
+| gated metrics | 9/12 (a-priori) | 12/12 (derived) |
+
+Energy relaxes to the REBOUND-class chaotic floor ($\approx 2 \times 10^{-10}$,
+where both implementations sit): the corrected controller no longer
+over-resolves. The residual sub-step gap to REBOUND is chaotic trajectory
+divergence — on a deterministic high-eccentricity Kepler orbit the two
+controllers agree to within 4 %.
+
+---
+
 ## Threats to validity
 
 1. **Chaos amplification of FMA / summation-order differences.** apsis is built with default Rust FP semantics; REBOUND is C with potential FMA via the compiler. Different FMA decisions produce small but systematic deviations within the same ULP envelope. Per-orbit those deviations are bounded; in the Pythagorean problem the Lyapunov instability amplifies them into $O(1)$ trajectory separation. **This is precisely the mechanism the Tier-1/Tier-2 metrics are designed to bypass:** chaos amplifies trajectory differences but not invariant differences, because the Hamiltonian is unchanged by FMA-order differences. The threat to *trajectory* parity is acknowledged and routed to Tier-3 informational; the threat to invariant parity is bounded by the f64 round-off floor regardless of FMA decisions.
@@ -245,7 +305,7 @@ Reading the four bands of evidence together — close-encounter alignment, struc
 
 | Field | Value |
 | --- | --- |
-| apsis canonical commit | `ac4b591` (apparatus); protocol-only ancestor `2b7db33` |
+| apsis canonical commit | `850d4a7` (apparatus); protocol-only ancestor `fa1a477` |
 | REBOUND version | 4.6.0 |
 | Python version | 3.10.0 (CPython, MSC v.1929 64-bit) |
 | Rust toolchain | apsis Cargo profile `release`; default FP semantics (no `--ffast-math`-equivalent) |

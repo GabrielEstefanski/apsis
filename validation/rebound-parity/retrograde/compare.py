@@ -43,7 +43,7 @@ full sample set.
 
 ## Protocol notebook
 
-    docs/experiments/2026-05-01-rebound-parity-retrograde.md
+    paper/notebooks/2026-05-01-rebound-parity-retrograde.md
 """
 
 from __future__ import annotations
