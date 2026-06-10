@@ -4,7 +4,7 @@
 
 **Subject:** Moderate-N validation of apsis IAS15 in the softened-kernel regime: a Plummer sphere of N = 10³ equal-mass bodies in virial equilibrium, integrated with Plummer softening on both apsis and REBOUND from bit-identical initial conditions. Per-side conservation gates, cross-implementation invariant parity, and statistical-equilibrium observables.
 
-**Status:** *Protocol declared a priori, before any apparatus code. Phase 0 (pilot, N = 256) executed 2026-06-10: all twelve metrics within the frozen floors, conventions and floor models settled — see §Phase 0 results and gate freeze. Phase 1 (N = 10³, gated) pending.*
+**Status:** *Protocol declared a priori, before any apparatus code. Phase 0 (pilot, N = 256) executed 2026-06-10: conventions and floor models settled — see §Phase 0 results and gate freeze. Phase 1 (N = 10³, gated) executed 2026-06-10 against the frozen gates: **12/12 metrics pass** — see §Phase 1 results.*
 
 ---
 
@@ -151,6 +151,36 @@ bound of the per-component form declared in §Hypothesis.
 
 ---
 
+## Phase 1 results (2026-06-10) — gated run, N = 10³
+
+All twelve gated metrics pass at the floors frozen in §Phase 0. Per-side
+wall time: apsis 214 s (2412 accepted steps), REBOUND 75 s (1165 steps);
+REBOUND's minimum accepted dt was 2.7 × 10⁻³ — no close-encounter stiffness,
+matching the pilot. The step-count ratio (≈ 2.1×) is consistent across both
+phases.
+
+| Metric (max over samples) | apsis | REBOUND | cross | gate |
+| --- | ---: | ---: | ---: | ---: |
+| \|ΔE/E₀\| | 5.9 × 10⁻¹⁵ | 6.4 × 10⁻¹⁵ | 2.2 × 10⁻¹⁵ | 2.6–4.2 × 10⁻¹² |
+| \|Δ**L**\| | 5.4 × 10⁻¹⁷ | 5.2 × 10⁻¹⁷ | 3.0 × 10⁻¹⁷ | 2.0–2.9 × 10⁻¹⁵ |
+| \|Δ**P**\| | 3.8 × 10⁻¹⁷ | 4.2 × 10⁻¹⁷ | 4.1 × 10⁻¹⁷ | 1.3–1.8 × 10⁻¹⁵ |
+| \|Δ**r**_COM\| | 6.5 × 10⁻¹⁶ | 6.5 × 10⁻¹⁶ | 9.7 × 10⁻¹⁷ | 1.9–3.8 × 10⁻¹⁵ |
+
+Energy sits ~450× under its gate on both sides; the conserved integrals of
+the softened Hamiltonian agree between implementations at the f64 round-off
+floor through 3.5 crossing times at N = 10³.
+
+**Statistical observables.** Q(0) = 0.512 — the softened-measurement offset
+again at its predicted magnitude, O(ε²/a²) ≈ 2.6 % at this ε, scaling down
+from the pilot's 4 % exactly as the ε ratio implies — settling to
+Q = 0.481 ± 0.004. The t = 0 half-mass radius is 0.778, on the Plummer
+r_h ≈ 0.77; Lagrangian radii drift slowly (r₅₀: 0.778 → 0.814) within the
+sub-relaxation window, and the two implementations' radii agree to ~10⁻¹⁵
+throughout. Per-body cross-implementation drift peaks at 2.0 × 10⁻¹⁴ —
+trajectories and statistics both agree, per the revised Tier-3 expectation.
+
+---
+
 ## Threats to validity
 
 1. **Softening-convention mismatch.** A different placement of ε between the two implementations would produce slow, systematic invariant divergence easily mistaken for integrator disagreement. Mitigated twice: the published-convention check and the single-pair smoke test, both before any gated run.
@@ -161,12 +191,14 @@ bound of the per-component form declared in §Hypothesis.
 
 ---
 
-## Reproducibility *(to be completed at run time)*
+## Reproducibility
 
 | Field | Value |
 | --- | --- |
-| apsis canonical commit | *(apparatus commit; this protocol commit is its ancestor)* |
-| REBOUND version | 4.6.0 (pinned, as in the existing parity portfolio) |
-| IC file | committed CSV, seed recorded in header |
-| Harness | `validation/rebound-parity/plummer-cluster/` |
-| Raw outputs | `out/{apsis,rebound}.csv`, `out/comparison.json` |
+| apsis canonical commit | `cbf63a5` (gate freeze; protocol-only ancestor `24a0a91`) |
+| REBOUND version | 4.6.0 (recorded in the run CSV header; requirements bound `>=4.0,<5.0` as in the existing portfolio) |
+| Python | 3.10 (CPython, repo venv) |
+| Operating system | Microsoft Windows 11 Pro for Workstations, x64 |
+| IC files | `ics_n256.csv`, `ics_n1000.csv` (committed; seed 20260609 in headers) |
+| Harness | `validation/rebound-parity/plummer-cluster/run.py` (smoke → registration gate → apsis side → REBOUND side → comparator) |
+| Raw outputs | `out/{apsis,rebound}.csv`, `out/{apsis,rebound}_stats.json`, `out/comparison.json` |
