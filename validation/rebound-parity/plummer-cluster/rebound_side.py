@@ -35,7 +35,7 @@ def read_ics(path: Path) -> tuple[list[tuple[float, ...]], float]:
                 continue
             if line.startswith("#") or line.startswith("body,") or not line.strip():
                 continue
-            parts = line.rstrip("\n").split(",")
+            parts = line.rstrip().split(",")
             rows.append(tuple(float(v) for v in parts[1:]))
     if eps is None:
         raise ValueError(f"no '# eps=' header in {path}")
@@ -43,6 +43,11 @@ def read_ics(path: Path) -> tuple[list[tuple[float, ...]], float]:
 
 
 def read_apsis_sample_times(path: Path) -> list[float]:
+    if not path.exists():
+        raise FileNotFoundError(
+            f"apsis CSV not found at {path}. Run the apsis side first via "
+            f"`cargo run --release --example rebound_parity_plummer_cluster -p apsis`."
+        )
     times: list[float] = []
     seen: set[int] = set()
     with path.open(encoding="utf-8") as f:
@@ -76,6 +81,7 @@ def main() -> int:
 
     out = Path(args.output)
     out.parent.mkdir(parents=True, exist_ok=True)
+    min_dt_observed = float("inf")
     with out.open("w", newline="", encoding="utf-8") as f:
         f.write("# REBOUND parity -- Plummer cluster -- REBOUND IAS15 side\n")
         f.write("# protocol: paper/notebooks/2026-06-09-rebound-parity-plummer-cluster.md\n")
@@ -85,6 +91,8 @@ def main() -> int:
         for s, t_target in enumerate(times):
             if t_target > 0.0:
                 sim.integrate(t_target)
+            if s > 0 and sim.dt > 0.0:
+                min_dt_observed = min(min_dt_observed, abs(sim.dt))
             for i, p in enumerate(sim.particles):
                 f.write(
                     f"{s},{sim.t:.18e},{i},{p.x:.18e},{p.y:.18e},{p.z:.18e},"
@@ -95,6 +103,7 @@ def main() -> int:
     Path(args.stats_output).write_text(json.dumps({"steps_done": steps}), encoding="utf-8")
     print(f"wrote {len(times)} samples to {out}", flush=True)
     print(f"[diag] rebound steps_done: {steps}", file=sys.stderr)
+    print(f"[diag] rebound min dt observed: {min_dt_observed:.6e}", file=sys.stderr)
     return 0
 
 
