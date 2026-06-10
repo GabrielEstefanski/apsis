@@ -14,6 +14,9 @@ al. 2000) and embedded in the header so every consumer parses one source.
 Run:
     python generate_ics.py --n 256
     python generate_ics.py --n 1000
+
+Protocol notebook:
+    paper/notebooks/2026-06-09-rebound-parity-plummer-cluster.md
 """
 
 from __future__ import annotations
@@ -73,12 +76,29 @@ def kinetic_energy(masses: np.ndarray, vel: np.ndarray) -> float:
     return 0.5 * float(np.sum(masses * np.einsum("ij,ij->i", vel, vel)))
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Plummer cluster IC generator (protocol artefact).",
+    )
+    parser.add_argument("--n", type=int, required=True, help="Number of bodies to sample.")
+    parser.add_argument("--seed", type=int, default=SEED, help="RNG seed (default: %(default)s).")
+    parser.add_argument(
+        "--output",
+        default=None,
+        help="Output CSV path (default: ics_n<N>.csv in the current directory).",
+    )
+    return parser.parse_args()
+
+
 def main() -> int:
-    p = argparse.ArgumentParser(description="Plummer cluster IC generator (protocol artefact).")
-    p.add_argument("--n", type=int, required=True)
-    p.add_argument("--seed", type=int, default=SEED)
-    p.add_argument("--output", default=None)
-    args = p.parse_args()
+    args = parse_args()
+
+    if args.n < 3:
+        print(
+            "ERROR: --n must be >= 3 (need at least one pair for potential energy)",
+            file=sys.stderr,
+        )
+        return 1
 
     n = args.n
     out = Path(args.output) if args.output else Path(f"ics_n{n}.csv")
@@ -95,6 +115,7 @@ def main() -> int:
     ke = kinetic_energy(masses, vel)
     vel *= math.sqrt(0.25 / ke)
 
+    # recompute at scaled coords for the asserts + header
     pe = potential_energy(masses, pos)
     ke = kinetic_energy(masses, vel)
     com = np.average(pos, axis=0, weights=masses)
@@ -109,9 +130,10 @@ def main() -> int:
     assert 0.5 < r_half < 1.1, f"half-mass radius {r_half} far from Plummer 0.77"
 
     eps = eps_protocol(n)
-    with out.open("w", newline="\n") as f:
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with out.open("w", newline="\n", encoding="utf-8") as f:
         f.write(
-            "# Plummer cluster ICs — protocol:"
+            "# Plummer cluster ICs -- protocol:"
             " paper/notebooks/2026-06-09-rebound-parity-plummer-cluster.md\n"
         )
         f.write(f"# n={n}\n")
