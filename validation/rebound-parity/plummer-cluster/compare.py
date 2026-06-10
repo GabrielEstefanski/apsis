@@ -88,10 +88,6 @@ def kinetic(masses: np.ndarray, vel: np.ndarray) -> float:
     return 0.5 * float(np.sum(masses * np.einsum("ij,ij->i", vel, vel)))
 
 
-def energy(masses: np.ndarray, pos: np.ndarray, vel: np.ndarray, eps: float) -> float:
-    return kinetic(masses, vel) + softened_pe(masses, pos, eps)
-
-
 def ang_mom(masses: np.ndarray, pos: np.ndarray, vel: np.ndarray) -> np.ndarray:
     return np.sum(masses[:, None] * np.cross(pos, vel), axis=0)
 
@@ -120,10 +116,6 @@ def scale_l(masses: np.ndarray, pos: np.ndarray, vel: np.ndarray) -> float:
             )
         )
     )
-
-
-def virial_q(masses: np.ndarray, pos: np.ndarray, vel: np.ndarray, eps: float) -> float:
-    return -kinetic(masses, vel) / softened_pe(masses, pos, eps)
 
 
 def lagrangian_radii(
@@ -176,8 +168,13 @@ def main() -> int:
     n_pair = n * (n - 1) // 2
 
     n_s = len(t_a)
-    e_a = np.array([energy(masses, pos_a[s], vel_a[s], eps) for s in range(n_s)])
-    e_r = np.array([energy(masses, pos_r[s], vel_r[s], eps) for s in range(n_s)])
+    # compute (ke, pe) once per side; derive energy and virial ratio from the cached pairs
+    ke_pe_a = [(kinetic(masses, vel_a[s]), softened_pe(masses, pos_a[s], eps)) for s in range(n_s)]
+    ke_pe_r = [(kinetic(masses, vel_r[s]), softened_pe(masses, pos_r[s], eps)) for s in range(n_s)]
+    e_a = np.array([ke + pe for ke, pe in ke_pe_a])
+    e_r = np.array([ke + pe for ke, pe in ke_pe_r])
+    q_a = [-ke / pe for ke, pe in ke_pe_a]
+    q_r = [-ke / pe for ke, pe in ke_pe_r]
     L_a = np.array([ang_mom(masses, pos_a[s], vel_a[s]) for s in range(n_s)])
     L_r = np.array([ang_mom(masses, pos_r[s], vel_r[s]) for s in range(n_s)])
     P_a = np.array([lin_mom(masses, vel_a[s]) for s in range(n_s)])
@@ -187,13 +184,21 @@ def main() -> int:
 
     # Energy gate model: round-off walk (13 eps sqrt(N_steps)) + comparator summation
     # floor (eps sqrt(n_pair)), headroom 10. Protocol notebook section Hypothesis.
-    def tol_e(n_steps: int) -> float:
-        walk = 13.0 * EPS64 * math.sqrt(n_steps) if n_steps > 0 else float("nan")
+    def tol_e(n_steps: int) -> float | None:
+        if n_steps <= 0:
+            return None
+        walk = 13.0 * EPS64 * math.sqrt(n_steps)
         return 10.0 * (walk + EPS64 * math.sqrt(n_pair))
 
     de_a = float(np.max(np.abs(e_a - e_a[0]) / abs(e_a[0])))
     de_r = float(np.max(np.abs(e_r - e_r[0]) / abs(e_r[0])))
     de_x = float(np.max(np.abs(e_a - e_r) / abs(e_a[0])))
+    _tol_a = tol_e(n_steps_a)
+    _tol_r = tol_e(n_steps_r)
+    _tol_cross = (
+        None if (_tol_a is None or _tol_r is None)
+        else math.sqrt(2) * max(_tol_a, _tol_r)
+    )
 
     sl_a = max(scale_l(masses, pos_a[s], vel_a[s]) for s in range(n_s))
     sl_r = max(scale_l(masses, pos_r[s], vel_r[s]) for s in range(n_s))
@@ -211,6 +216,7 @@ def main() -> int:
     dC_x = float(np.max(np.linalg.norm(C_a - C_r, axis=1)))
 
     t_final = float(t_a[-1])
+    # floors fall back to sqrt(1) when stats are missing; tolerances go null instead
     sqrt_a = math.sqrt(max(n_steps_a, 1))
     sqrt_r = math.sqrt(max(n_steps_r, 1))
     floors = {
@@ -247,8 +253,6 @@ def main() -> int:
         },
     }
 
-    q_a = [virial_q(masses, pos_a[s], vel_a[s], eps) for s in range(n_s)]
-    q_r = [virial_q(masses, pos_r[s], vel_r[s], eps) for s in range(n_s)]
     half = n_s // 2
     dr = np.linalg.norm(pos_a - pos_r, axis=2)
     max_dr = float(np.max(dr))
@@ -262,11 +266,11 @@ def main() -> int:
         "n_steps": {"apsis": n_steps_a, "rebound": n_steps_r},
         "tier1_energy": {
             "de_apsis": de_a,
-            "tol_apsis": tol_e(n_steps_a),
+            "tol_apsis": _tol_a,
             "de_rebound": de_r,
-            "tol_rebound": tol_e(n_steps_r),
+            "tol_rebound": _tol_r,
             "de_cross": de_x,
-            "tol_cross": math.sqrt(2) * max(tol_e(n_steps_a), tol_e(n_steps_r)),
+            "tol_cross": _tol_cross,
         },
         "tier1_L": {"apsis": dL_a, "rebound": dL_r, "cross": dL_x},
         "tier2_P": {"apsis": dP_a, "rebound": dP_r, "cross": dP_x},
@@ -278,6 +282,7 @@ def main() -> int:
                 "apsis_mean_2nd_half": float(np.mean(q_a[half:])),
                 "apsis_std_2nd_half": float(np.std(q_a[half:])),
                 "rebound_mean_2nd_half": float(np.mean(q_r[half:])),
+                "rebound_std_2nd_half": float(np.std(q_r[half:])),
             },
             "lagrangian_radii": {
                 "apsis_t0": lagrangian_radii(masses, pos_a[0]),
@@ -291,8 +296,10 @@ def main() -> int:
 
     out_dir = Path(args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / "comparison.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
-    print(json.dumps(report, indent=2))
+    (out_dir / "comparison.json").write_text(
+        json.dumps(report, indent=2, allow_nan=False), encoding="utf-8"
+    )
+    print(json.dumps(report, indent=2, allow_nan=False))
 
     if args.informational:
         print("\nphase 0 -- informational run: metrics reported, nothing gated")
