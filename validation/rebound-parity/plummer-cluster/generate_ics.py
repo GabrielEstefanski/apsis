@@ -126,8 +126,8 @@ def main() -> int:
         f.write("body,m,x,y,z,vx,vy,vz\n")
         for i in range(n):
             f.write(
-                f"{i},{masses[i]!r},{pos[i,0]!r},{pos[i,1]!r},{pos[i,2]!r},"
-                f"{vel[i,0]!r},{vel[i,1]!r},{vel[i,2]!r}\n"
+                f"{i},{float(masses[i])!r},{float(pos[i,0])!r},{float(pos[i,1])!r},{float(pos[i,2])!r},"
+                f"{float(vel[i,0])!r},{float(vel[i,1])!r},{float(vel[i,2])!r}\n"
             )
     print(f"wrote {n} bodies to {out} (eps={eps:.6e}, r_half={r_half:.4f})")
     return 0
