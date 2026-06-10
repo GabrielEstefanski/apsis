@@ -143,6 +143,20 @@ def _selftest() -> None:
 
     # KE: 0.5*2*(16+25+36) + 0.5*3*(0+1+1) = 77 + 3 = 80
     assert kinetic(m, v) == 80.0, kinetic(m, v)
+
+    # 3D three-body, all-component-nonzero L, P, COM, KE (integer-exact ground truth)
+    # m=(2,3,1); A=(1,2,3) vA=(4,5,6); B=(-1,0,2) vB=(0,-1,1); C=(0,1,-2) vC=(3,0,2)
+    # L: A: 2*(-3,6,-3)=(-6,12,-6); B: 3*(2,1,1)=(6,3,3); C: 1*(2,-6,-3)=(2,-6,-3) -> (2,9,-6)
+    # P: (8,10,12)+(0,-3,3)+(3,0,2) = (11,7,17)
+    # COM: sum(m*r)=(-1,5,10)/6 = (-1/6, 5/6, 5/3)
+    # KE: 0.5*2*77 + 0.5*3*2 + 0.5*1*13 = 77+3+6.5 = 86.5
+    m3 = np.array([2.0, 3.0, 1.0])
+    p3 = np.array([[1.0, 2.0, 3.0], [-1.0, 0.0, 2.0], [0.0, 1.0, -2.0]])
+    v3 = np.array([[4.0, 5.0, 6.0], [0.0, -1.0, 1.0], [3.0, 0.0, 2.0]])
+    assert np.array_equal(ang_mom(m3, p3, v3), np.array([2.0, 9.0, -6.0])), ang_mom(m3, p3, v3)
+    assert np.array_equal(lin_mom(m3, v3), np.array([11.0, 7.0, 17.0])), lin_mom(m3, v3)
+    assert np.allclose(com(m3, p3), np.array([-1/6, 5/6, 5/3]), rtol=0, atol=1e-15), com(m3, p3)
+    assert kinetic(m3, v3) == 86.5, kinetic(m3, v3)
     print("selftest: ok")
 
 
