@@ -90,8 +90,18 @@ fn main() {
     let stats_path = cli.stats_output.expect("--stats-output is required for a cluster run");
     let mut stats = format!("{{\"substeps_total\": {}", sys.steps());
     if let Some(s) = sys.adaptive_stats() {
-        stats
-            .push_str(&format!(", \"rejections\": {}, \"degraded\": {}", s.rejections, s.degraded));
+        stats.push_str(&format!(
+            ", \"rejections\": {}, \"rejections_picard\": {}, \"rejections_truncation\": {}, \
+             \"degraded\": {}, \"picard_iters\": {}, \"picard_stagnations\": {}, \
+             \"shrink_grow_cycles\": {}",
+            s.rejections,
+            s.rejections_picard,
+            s.rejections_truncation,
+            s.degraded,
+            s.picard_iters,
+            s.picard_stagnations,
+            s.shrink_grow_cycles,
+        ));
     }
     stats.push('}');
     std::fs::write(&stats_path, stats).expect("failed to write stats json");
@@ -143,6 +153,7 @@ fn read_ics(path: &PathBuf) -> (Vec<Body>, f64) {
         }
         let f: Vec<f64> =
             line.split(',').skip(1).map(|v| v.parse().expect("malformed IC row")).collect();
+        assert!(f.len() >= 7, "malformed IC row: expected 7 fields, got {}", f.len());
         bodies.push(Body::rocky(f[0]).at_3d(f[1], f[2], f[3]).with_velocity_3d(f[4], f[5], f[6]));
     }
     (bodies, eps.expect("IC file missing '# eps=' header"))
@@ -171,10 +182,18 @@ fn parse_cli() -> Cli {
             },
             "--smoke" => cli.smoke = true,
             "--eps" => {
-                cli.eps = Some(args.next().expect("--eps requires a float").parse().unwrap());
+                cli.eps = Some(
+                    args.next()
+                        .expect("--eps requires a float")
+                        .parse()
+                        .expect("--eps must be a valid float"),
+                );
             },
             other => panic!("unknown argument: {other}"),
         }
+    }
+    if let Some(e) = cli.eps {
+        assert!(e >= 0.0, "--eps must be >= 0");
     }
     cli
 }
