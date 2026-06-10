@@ -4,7 +4,7 @@
 
 **Subject:** Moderate-N validation of apsis IAS15 in the softened-kernel regime: a Plummer sphere of N = 10³ equal-mass bodies in virial equilibrium, integrated with Plummer softening on both apsis and REBOUND from bit-identical initial conditions. Per-side conservation gates, cross-implementation invariant parity, and statistical-equilibrium observables.
 
-**Status:** *Protocol declared a priori, before any apparatus code. Phase 0 (pilot, N = 256) not yet run. The L/P floor accumulation model is decided and frozen at the end of phase 0, by design (§Hypothesis).*
+**Status:** *Protocol declared a priori, before any apparatus code. Phase 0 (pilot, N = 256) executed 2026-06-10: all twelve metrics within the frozen floors, conventions and floor models settled — see §Phase 0 results and gate freeze. Phase 1 (N = 10³, gated) pending.*
 
 ---
 
@@ -93,6 +93,61 @@ The apsis-side harness registers `PostNewtonian1PN` on the softened system befor
 - **Performance comparison** between implementations.
 - **Softening-parameter studies** (ε sweeps, optimal-softening analysis) — ε is a fixed protocol constant here.
 - **N = 10⁴** — a possible informational follow-up if phase-0 wall-time extrapolation admits it; not part of the gated claim.
+
+---
+
+## Phase 0 results and gate freeze (2026-06-10)
+
+The pilot ran the full harness at N = 256 (ε = 0.1365, t_final = 10, 101
+snapshots): convention smoke test, registration gate, both sides, comparator.
+Per-side wall time: apsis 14.6 s (1693 accepted steps), REBOUND 4.2 s (854
+steps); the N = 10³ run extrapolates to minutes. The single-pair convention
+check agreed with the closed form at 1.5 × 10⁻¹² (apsis) and 3.2 × 10⁻¹³
+(REBOUND); REBOUND's controller never drove dt below 2.8 × 10⁻³ — the
+softening removes the close-encounter stiffness, as intended.
+
+| Metric (max over samples) | apsis | REBOUND | cross |
+| --- | ---: | ---: | ---: |
+| \|ΔE/E₀\| | 2.8 × 10⁻¹⁵ | 3.1 × 10⁻¹⁵ | 1.7 × 10⁻¹⁵ |
+| \|Δ**L**\| | 4.4 × 10⁻¹⁷ | 5.0 × 10⁻¹⁷ | 3.7 × 10⁻¹⁷ |
+| \|Δ**P**\| | 5.6 × 10⁻¹⁷ | 5.5 × 10⁻¹⁷ | 6.1 × 10⁻¹⁷ |
+| \|Δ**r**_COM\| | 3.4 × 10⁻¹⁶ | 3.6 × 10⁻¹⁶ | 9.7 × 10⁻¹⁷ |
+
+**Gate freeze.** The accumulation question left open in §Hypothesis is
+settled by the pilot: the L/P floors are frozen at the **scale-only**
+Wilkinson form, with no √N_steps factor. The observed drifts sit 25–40×
+below the static cancellation floors (\|Δ**L**\| ≈ 5 × 10⁻¹⁷ against
+2.0 × 10⁻¹⁵; \|Δ**P**\| ≈ 6 × 10⁻¹⁷ against 1.3 × 10⁻¹⁵) — pair-force
+antisymmetry and the central-force torque cancellation hold at every step,
+so per-step round-off does not random-walk into these invariants. The
+√N_steps variant would sit three decades above the observable, trading
+detection power for slack. Energy keeps the round-off-walk model of
+§Hypothesis (observed 500× under it on the pilot); COM keeps the drift
+model. All twelve gated metrics pass at the frozen floors on the pilot data.
+
+**Statistical observables.** Q(0) = 0.521 — the +4 % offset of measuring the
+exactly-virialised unsoftened realisation with the softened potential, at the
+predicted O(ε²/a²) magnitude — settling to Q = 0.469 ± 0.011 over the second
+half. Lagrangian radii drift slowly (r₅₀: 0.821 → 0.865) within the
+sub-relaxation expectation.
+
+**Tier-3 expectation revised.** The declared expectation of O(1) per-body
+cross-implementation drift does not apply at the protocol softening: the
+pilot measured max \|Δ**r**\| = 3.2 × 10⁻¹⁴ at 3.5 crossing times. The
+per-star exponential instability that drives the unsoftened e-folding
+(Miller 1964; Goodman, Heggie & Hut 1993) is fed by close encounters, which
+the optimal-softening choice deliberately suppresses; the realised growth
+rate from the round-off floor is correspondingly slow. The Tier-3 quantity
+remains informational; for phase 1 the expectation is drift far below O(1),
+with the contrast "trajectories and statistics both agree" replacing the
+unsoftened "trajectories diverge, statistics agree".
+
+**Convention check, recorded form.** The smoke test gates each side at
+1 × 10⁻⁹ relative to the closed form — three decades above the measured
+agreement, seven below the O(ε²) ≈ 10⁻² signature of a misplaced ε — rather
+than at the f64 floor, which a finite-difference acceleration estimate does
+not reach. The L floor uses the component-summed Wilkinson scale, an upper
+bound of the per-component form declared in §Hypothesis.
 
 ---
 
