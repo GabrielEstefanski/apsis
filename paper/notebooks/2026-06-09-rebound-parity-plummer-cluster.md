@@ -115,7 +115,7 @@ softening removes the close-encounter stiffness, as intended.
 
 **Gate freeze.** The accumulation question left open in §Hypothesis is
 settled by the pilot: the L/P floors are frozen at the **scale-only**
-Wilkinson form, with no √N_steps factor. The observed drifts sit 25–40×
+Wilkinson form, with no √N_steps factor. The observed drifts sit 23–78×
 below the static cancellation floors (\|Δ**L**\| ≈ 5 × 10⁻¹⁷ against
 2.0 × 10⁻¹⁵; \|Δ**P**\| ≈ 6 × 10⁻¹⁷ against 1.3 × 10⁻¹⁵) — pair-force
 antisymmetry and the central-force torque cancellation hold at every step,
@@ -162,7 +162,7 @@ phases.
 | Metric (max over samples) | apsis | REBOUND | cross | gate |
 | --- | ---: | ---: | ---: | ---: |
 | \|ΔE/E₀\| | 5.9 × 10⁻¹⁵ | 6.4 × 10⁻¹⁵ | 2.2 × 10⁻¹⁵ | 2.6–4.2 × 10⁻¹² |
-| \|Δ**L**\| | 5.4 × 10⁻¹⁷ | 5.2 × 10⁻¹⁷ | 3.0 × 10⁻¹⁷ | 2.0–2.9 × 10⁻¹⁵ |
+| \|Δ**L**\| | 5.4 × 10⁻¹⁷ | 5.2 × 10⁻¹⁷ | 3.0 × 10⁻¹⁷ | 1.9–2.8 × 10⁻¹⁵ |
 | \|Δ**P**\| | 3.8 × 10⁻¹⁷ | 4.2 × 10⁻¹⁷ | 4.1 × 10⁻¹⁷ | 1.3–1.8 × 10⁻¹⁵ |
 | \|Δ**r**_COM\| | 6.5 × 10⁻¹⁶ | 6.5 × 10⁻¹⁶ | 9.7 × 10⁻¹⁷ | 1.9–3.8 × 10⁻¹⁵ |
 

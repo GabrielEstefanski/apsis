@@ -33,7 +33,10 @@ python run.py --n 256
 
 Phase 0 is informational: the comparator reports every metric and both candidate
 L/P floor models but never fails the run. The gated phase-1 run (`--n 1000`)
-is blocked until the floor model is frozen in the protocol notebook.
+asserts the floors frozen at phase-0 close (protocol notebook, §Phase 0 results
+and gate freeze). To keep per-phase artefacts side by side, pass
+`--output-dir out-n256` / `--output-dir out-n1000` (the default `out/` is
+overwritten by each run).
 
 ## Single source of truth
 
