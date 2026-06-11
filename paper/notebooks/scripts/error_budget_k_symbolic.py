@@ -88,7 +88,7 @@ residual_at_q = sp.simplify(dIdt.subs(q, q_val))
 if residual_at_q != 0:
     fail(f"G0: residual nonzero at q={q_val}: {residual_at_q}")
 print(f"[G0] PASS  d/dt[ h*exp(q*mu*u/c^2) ] == 0 under the azimuthal EOM, q = {q_val}")
-print(f"      => h(u) = h0 * exp(-{q_val}*mu*u/c^2), h0 = h*exp({q_val}*mu*u/c^2) exact invariant (reference u=0)")
+print(f"      => h0 = h*exp({q_val}*mu*u/c^2) exact invariant (reference u=0)")
 
 # ════════════════════════════════════════════════════════════════════════════
 # Step 1 — reduce to the orbit ODE u'' + u = F(u, u'; c) in phi, exact h(u)
@@ -228,9 +228,9 @@ print(f"[O:2] PASS  w2 = {w2_v},  u2(s) = {u2_v}")
 # G2: solutions are finite trigonometric polynomials with constant
 # coefficients — strictly periodic iff the exp-basis reduction succeeds
 # (any secular s-polynomial term would survive as bare s and fail it).
-for name, val in [("w1", w1_v), ("u1", u1_v), ("w2", w2_v), ("u2", u2_v)]:
+for _name, val in [("w1", w1_v), ("u1", u1_v), ("w2", w2_v), ("u2", u2_v)]:
     _laurent_coeffs(sp.expand(val), 8)
-print("[G2 ] PASS  u1, u2 strictly periodic (finite harmonic polynomials; residuals vanish identically)")
+print("[G2 ] PASS  u1, u2 strictly periodic (finite harmonic polynomials)")
 
 # ════════════════════════════════════════════════════════════════════════════
 # Step 3/4 — apsidal advance per radial period, eps-expansion, k(e)
@@ -258,7 +258,7 @@ print(f"[G3 ] PASS  k(0) = {k0} finite")
 
 print()
 print("RESULT")
-print(f"  Delta_omega = 6*pi*eps*(1 + k(e)*eps + O(eps^2)),  eps = mu/(c^2*p),  p = h0^2/mu")
+print("  Delta_omega = 6*pi*eps*(1 + k(e)*eps + O(eps^2)),  eps = mu/(c^2*p),  p = h0^2/mu")
 print(f"  k(e) = {k}")
 print(f"  k(e) factored = {sp.factor(k)}")
 print(f"  k(0.0) = {sp.N(k.subs(e, 0), 12)}")

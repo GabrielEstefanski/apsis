@@ -27,8 +27,9 @@ the trajectory.
 
 import sys
 import time
+
 import mpmath
-from mpmath import mp, mpf, sqrt, pi, atan2, log10
+from mpmath import atan2, log10, mp, mpf, pi, sqrt
 
 # ─────────────────────────── Precision ────────────────────────────────────────
 mp.dps = 40
@@ -155,8 +156,10 @@ def measure_periapsis_advance(mu, c, a_orb, e, dps_override=None,
             s = sol(t)
             phi_cur = atan2(s[1], s[0])
             dphi    = phi_cur - phi_prev
-            while dphi >   pi: dphi -= 2*pi
-            while dphi <= -pi: dphi += 2*pi
+            while dphi > pi:
+                dphi -= 2*pi
+            while dphi <= -pi:
+                dphi += 2*pi
             phi_total += dphi
             phi_prev  = phi_cur
 
@@ -238,7 +241,7 @@ def run_ladder(e, eps_list, label):
 
     # ── Gate G2: dps=40 vs dps=55 agreement >= 25 significant digits ─────────
     c_min = c_from_eps(eps_min, A_ORB, e)
-    print(f"  [G2] Re-running eps_min at dps=55 ... ", end='', flush=True)
+    print("  [G2] Re-running eps_min at dps=55 ... ", end='', flush=True)
     dw_55 = measure_periapsis_advance(MU, c_min, A_ORB, e, dps_override=55)
     dw_40 = dws[i_min]
     rel = abs(dw_55 - dw_40) / abs(dw_40) if dw_40 != 0 else mpf('0')
@@ -250,7 +253,7 @@ def run_ladder(e, eps_list, label):
         sys.exit(1)
 
     # ── Gate G3: near-Newtonian limit (c=1e30) ────────────────────────────────
-    print(f"  [G3] Near-Newtonian c=1e30 ... ", end='', flush=True)
+    print("  [G3] Near-Newtonian c=1e30 ... ", end='', flush=True)
     dw_newt = measure_periapsis_advance(MU, mpf('1e30'), A_ORB, e)
     g3_val  = abs(dw_newt)
     g3_pass = g3_val < mpf('1e-30')
@@ -278,11 +281,11 @@ def main():
     e1   = mpf('0.2')
     eps1 = [mpf('1e-4'), mpf('5e-5'), mpf('2e-5'), mpf('1e-5'),
             mpf('5e-6'), mpf('2e-6'), mpf('1e-6')]
-    dws1, ys1, k1, m1, ku1 = run_ladder(e1, eps1, "primary  e=0.2")
+    dws1, ys1, k1, _m1, ku1 = run_ladder(e1, eps1, "primary  e=0.2")
 
     e2   = mpf('0.4')
     eps2 = [mpf('1e-4'), mpf('1e-5'), mpf('1e-6')]
-    dws2, ys2, k2, m2, ku2 = run_ladder(e2, eps2, "secondary  e=0.4")
+    dws2, ys2, k2, _m2, ku2 = run_ladder(e2, eps2, "secondary  e=0.4")
 
     # k = k0 + k1_coef * e^2 (two-eccentricity solve)
     de2     = e1**2 - e2**2
