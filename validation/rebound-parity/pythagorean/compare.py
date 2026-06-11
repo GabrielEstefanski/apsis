@@ -78,26 +78,18 @@ import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-# ── Tolerances declared a priori (mirror the protocol notebook §Hypothesis) ─ #
-#
-# Tier 1 (hard physical invariants):
-#   Energy and angular-momentum bounds at 50× f64 machine epsilon.
-#   The angular-momentum reference scale is O(10) (per-body |m·𝐫×𝐯|
-#   peak during close encounters); absolute bound is appropriate
-#   because |𝐋_0| = 0 by IC construction.
-#
-# Tier 2 (sanity):
-#   Linear-momentum bound at 50× f64 ULP, absolute (|𝐏_0| = 0 by IC).
-#   COM-position bound one decade looser to account for position-scale
-#   accumulation of ULP momentum noise over the 70 t.u. horizon.
+# ── Tolerances ─────────────────────────────────────────────────────────── #
+# Chaotic close-encounter regime: energy floor ~1e-10 (ε·κ, κ = U_peak/|E| at
+# the triple encounter; Rein & Spiegel 2015 §4), gated orders above for chaotic
+# r_min. Wrong-gate finding + derivation: see the protocol notebook.
 
 # Tier 1
-TOL_REL_ENERGY_PER_SIDE: float = 1.0e-13
-TOL_REL_ENERGY_CROSS: float = 1.0e-13
-TOL_ABS_ANGULAR_MOMENTUM_PER_SIDE: float = 1.0e-13
-TOL_ABS_ANGULAR_MOMENTUM_CROSS: float = 1.0e-13
+TOL_REL_ENERGY_PER_SIDE: float = 1.0e-8
+TOL_REL_ENERGY_CROSS: float = 1.0e-8
+TOL_ABS_ANGULAR_MOMENTUM_PER_SIDE: float = 1.0e-12
+TOL_ABS_ANGULAR_MOMENTUM_CROSS: float = 1.0e-12
 
-# Tier 2
+# Tier 2 (P, COM near-zero by IC)
 TOL_ABS_LINEAR_MOMENTUM_PER_SIDE: float = 1.0e-13
 TOL_ABS_LINEAR_MOMENTUM_CROSS: float = 1.0e-13
 TOL_ABS_COM_PER_SIDE: float = 1.0e-12

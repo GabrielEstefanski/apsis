@@ -67,24 +67,19 @@ M_SECONDARY: float = 1.0e-6
 # Reduced-mass parameter for relative motion: μ = G(m_primary + m_secondary)
 MU: float = M_PRIMARY + M_SECONDARY
 
-# ── Tolerances declared a priori (revised protocol) ────────────────────── #
-#
-# All four gated orbital invariants are bounded at ~50× f64 machine epsilon
-# (≈ 1e-13), reflecting the ULP-level cross-implementation noise floor for
-# two correct IAS15 implementations conserving Kepler invariants. The
-# periapsis-orientation tolerance is one decade wider because the
-# eccentricity-vector → atan2(ω) path has a 1/|e| condition factor; for
-# e=0.5 this is benign but justifies the extra margin.
-#
-# Energy tolerances are unchanged from the original protocol — they
-# already passed comfortably in the pilot run.
+# ── Tolerances ─────────────────────────────────────────────────────────── #
+# IAS15 cross-impl round-off floor ×10 (Brouwer's law; Rein & Spiegel 2015);
+# ω adds the atan2 1/e condition factor.
+EPS: float = 2.220446049250313e-16
+E_ECC: float = 0.5  # IC eccentricity (mirrors the Rust example)
+ELEMENT_FLOOR: float = 13.0 * EPS
 
-TOL_RELATIVE_SEMIAXIS: float = 1.0e-13
-TOL_ECCENTRICITY: float = 1.0e-13
-TOL_PERIAPSIS_OMEGA: float = 1.0e-12
-TOL_RELATIVE_ANGULAR_MOMENTUM: float = 1.0e-13
-TOL_RELATIVE_ENERGY_DRIFT: float = 1.0e-13
-TOL_CROSS_IMPL_ENERGY: float = 1.0e-13
+TOL_RELATIVE_SEMIAXIS: float = 10.0 * ELEMENT_FLOOR
+TOL_ECCENTRICITY: float = 10.0 * ELEMENT_FLOOR
+TOL_PERIAPSIS_OMEGA: float = 10.0 * ELEMENT_FLOOR / E_ECC
+TOL_RELATIVE_ANGULAR_MOMENTUM: float = 10.0 * ELEMENT_FLOOR
+TOL_RELATIVE_ENERGY_DRIFT: float = 10.0 * ELEMENT_FLOOR
+TOL_CROSS_IMPL_ENERGY: float = 10.0 * ELEMENT_FLOOR
 
 
 # ── Data records ───────────────────────────────────────────────────────── #
