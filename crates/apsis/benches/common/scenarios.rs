@@ -1,30 +1,15 @@
-//! Scenario specifications for the IAS15 benchmark harness.
+//! Scenario specifications for the IAS15 benchmark harness: pure data
+//! (deterministic ICs + integration window); the runtime wiring lives
+//! in [`super::runner`].
 //!
-//! Each builder returns a [`ScenarioSpec`] with fully-deterministic
-//! initial conditions and a fixed integration window. There is no
-//! dependency on the runtime side (no `System`, no force model); that
-//! wiring is done in [`super::runner`], keeping the scenario catalog
-//! pure data — easy to reason about, trivially testable, and safe to
-//! read from both the validation and recording code paths.
+//! Adding a scenario: builder fn → register in [`all`] (order = order
+//! in the baseline file) → `IAS15_BENCH_UPDATE_BASELINE=1 cargo bench`
+//! to record the initial entry.
 //!
-//! # Adding a scenario
-//!
-//! 1. Add a builder fn returning `ScenarioSpec`.
-//! 2. Register it in [`all`]. The order there determines the order
-//!    entries appear in the baseline file.
-//! 3. Run `IAS15_BENCH_UPDATE_BASELINE=1 cargo bench` to record an
-//!    initial entry in `benches/baselines/ias15.toml`.
-//!
-//! # On close-encounter coverage
-//!
-//! We intentionally include Kepler e=0.99 (pericenter at 0.01·a) as a
-//! *controlled* close-encounter scenario in addition to the chaotic
-//! Pythagorean three-body. The two cover different failure modes:
-//! Kepler e=0.99 stresses the controller's `dt` shrink/grow cycle
-//! around a reproducible pericenter passage each orbit; Pythagorean
-//! exercises multiple close encounters in a row without reference
-//! trajectory — more robust to subtle trajectory-altering bugs, but
-//! harder to interpret when a regression fires.
+//! Close-encounter coverage is deliberately double: Kepler e=0.99
+//! stresses a *reproducible* per-orbit dt shrink/grow cycle; the
+//! Pythagorean stresses repeated encounters with no reference
+//! trajectory — broader coverage, harder to interpret on regression.
 
 use apsis::domain::body::Body;
 use rand::rngs::SmallRng;
@@ -42,23 +27,14 @@ pub struct ScenarioSpec {
     pub bodies: Vec<Body>,
     pub dt_budget: f64,
     pub duration: f64,
-    /// Whether this scenario participates in the Criterion wall-time
-    /// benchmark group. `false` for scenarios whose single sub-step is
-    /// expensive enough that Criterion's sample batching (typically 100
-    /// iterations × `STEPS_PER_ITER` sub-steps) would push total bench
-    /// wall time beyond a few minutes. Such scenarios still run through
-    /// the validation + phase-profile path, which is the diagnostic
-    /// signal we care about for them — the Criterion-specific
-    /// statistical comparisons are not worth the wait at large N.
+    /// Whether this scenario joins the Criterion wall-time group.
+    /// `false` where sample batching would cost minutes at large N;
+    /// the validation + phase-profile path still runs.
     pub criterion_bench: bool,
 
-    /// Whether mismatches against the stored baseline are a regression
-    /// (exit 2) or an advisory (scenario runs, phase profile prints,
-    /// exit stays 0). `false` for scenarios still under active
-    /// diagnosis — the metrics are expected to shift as the
-    /// investigation progresses, and a hard gate would block progress
-    /// without adding signal. Flip back to `true` once the scenario
-    /// has a known-good baseline that a PR is supposed to preserve.
+    /// Whether baseline mismatches are a regression (exit 2) or an
+    /// advisory. `false` while a scenario is under active diagnosis;
+    /// flip to `true` once it has a known-good baseline to preserve.
     pub gate_on_baseline: bool,
 }
 
@@ -114,23 +90,10 @@ pub fn pythagorean() -> ScenarioSpec {
     }
 }
 
-/// Uniform disk cluster of 50 equal-mass bodies with circular velocities
-/// around the centre of mass. Seeded random layout under the default
-/// exact `NewtonKernel`.
-///
-/// This is the first scenario in the harness with non-trivial N. Its
-/// purpose is to expose how the IAS15 phases scale with body count —
-/// specifically, the transition where `evaluate` (O(N²) pairwise sum)
-/// overtakes the other phases, and to give `update_g_and_b` (linear
-/// in N) a large enough body axis to
-/// make SIMD / SoA layout arguments testable rather than speculative.
-///
-/// The seed is pinned (`0xc1a55e1` — "cluster seed") so the scenario
-/// is bit-deterministic across runs on the same machine. N=50 sits
-/// just under the Barnes-Hut crossover so the force path is pure
-/// O(N²) — useful both as a baseline for future BH comparisons and
-/// because tree-build overhead would otherwise dominate a single
-/// short scenario.
+/// Seeded uniform-disk cluster, 50 equal masses on circular orbits.
+/// Exposes how the IAS15 phases scale with N (where the O(N²)
+/// `evaluate` overtakes the rest). N=50 sits under the Barnes–Hut
+/// crossover, so the force path stays pure O(N²).
 pub fn cluster_n50() -> ScenarioSpec {
     const N: usize = 50;
     const R_DISK: f64 = 1.0;
@@ -143,27 +106,16 @@ pub fn cluster_n50() -> ScenarioSpec {
     let mut bodies = Vec::with_capacity(N);
 
     for _ in 0..N {
-        // Uniform disk sampling: θ ~ U(0, 2π), r ~ sqrt(U(0,1)) · R.
-        // The square root on r is the inverse CDF for uniform area
-        // density (a linear-in-U sampling would concentrate bodies
-        // near the centre).
+        // sqrt on r = inverse CDF for uniform area density.
         let theta = rng.random::<f64>() * std::f64::consts::TAU;
         let r = R_DISK * rng.random::<f64>().sqrt();
         let x = r * theta.cos();
         let y = r * theta.sin();
 
-        // Circular velocity magnitude for an enclosed-mass-proportional
-        // potential (which a uniform disk approximates at leading
-        // order): v_circ(r) = sqrt(M_enc · G / r) where M_enc ∝ r²
-        // gives v_circ ∝ r. Direction is tangential (CCW).
-        //
-        // This is not the self-consistent solution — the real
-        // uniform disk has a harmonic potential, not Keplerian — but
-        // it produces a bound, non-pathological initial state whose
-        // dynamics exercise the integrator across a mix of tight and
-        // loose pairs. The benchmark target is timing, not orbital
-        // perfection.
-        let v_mag = r; // sqrt(G · r · M_tot / R²) with G = M = R = 1
+        // v_circ grows linearly with r for an enclosed-mass-proportional
+        // potential. Not the self-consistent disk solution; the target is
+        // a bound, non-pathological state for timing, not orbital fidelity.
+        let v_mag = r;
         let vx = -v_mag * theta.sin();
         let vy = v_mag * theta.cos();
 
@@ -174,80 +126,33 @@ pub fn cluster_n50() -> ScenarioSpec {
     ScenarioSpec {
         name: "cluster_n50",
         bodies,
-        // dt_budget comfortably above the controller's natural step
-        // (confirmed empirically after recording the baseline —
-        // dt_p95 << dt_budget, so the budget acts only as an upper
-        // cap during warm-up, never constrains steady state).
-        dt_budget: 0.05,
-        // Short duration by design: chaotic N-body dynamics amplify
-        // bit-level noise into trajectory divergence on long
-        // integrations. Bench relevance — cost per sub-step, phase
-        // distribution — is fully exercised in a fraction of a
-        // dynamical time.
+        dt_budget: 0.05, // above the controller's natural step; caps warm-up only
+        // Short on purpose: per-sub-step cost and phase distribution are
+        // fully exercised in a fraction of a dynamical time.
         duration: 0.5,
         criterion_bench: true,
         gate_on_baseline: true,
     }
 }
 
-/// Central-body + 640 test-particle disk approximating the interactive
-/// app's `solar_system` preset (Sun + planets + asteroid belt +
-/// comets ≈ 641 bodies). Purpose: diagnose IAS15 stutter reported at
-/// this scale in normal playback mode.
-///
-/// Simplifications relative to the full preset:
-///
-///   * All test particles are equal-mass (1e-10 solar masses) rather
-///     than a mix of planets + asteroids + comets. The goal is
-///     allocator pressure and phase distribution at N≈641, not
-///     trajectory fidelity.
-///   * Single annulus [0.5, 5] AU instead of the preset's
-///     planets-and-belt structure. Keplerian circular velocities
-///     around the central mass.
-///   * `G = 1` rather than `G = 4π²` (solar-AU-year). The preset's
-///     physical correctness is preserved elsewhere; the bench only
-///     cares about wall-time / alloc behaviour, which is invariant
-///     under uniform velocity / time scaling.
-///
-/// Marked `criterion_bench: false` — at N=641 a single Criterion
-/// iteration (`STEPS_PER_ITER = 100` accepted sub-steps) takes on
-/// the order of seconds; a 100-sample Criterion run would consume
-/// tens of minutes. The validation + phase-profile path provides
-/// the diagnostic signal we need (per-phase breakdown with the new
-/// `a0_clone` and `dense_snapshot_build` timers).
+/// Central body + 640 test particles in a single annulus,
+/// approximating the interactive app's 641-body `solar_system`
+/// preset. Built to diagnose the IAS15 stutter reported at this
+/// scale; equal masses, plain annulus, and G = 1 on purpose — the
+/// bench measures wall-time/alloc behaviour, not trajectory
+/// fidelity. `criterion_bench: false`: one Criterion iteration
+/// takes seconds at this N; the validation + phase-profile path
+/// carries the diagnostic signal.
 pub fn solar_n641() -> ScenarioSpec {
     const N_TEST: usize = 640; // + 1 central body = 641 total
     const M_CENTRAL: f64 = 1.0;
     const M_TEST: f64 = 1e-10;
-    // Annulus chosen to approximate the interactive app's
-    // `solar_system` preset asteroid belt ([2.2, 3.2] AU), with a bit
-    // of margin on each side so the controller exercises a range of
-    // dynamical periods rather than a single narrow shell.
-    //
-    // ## On the regime and its limits
-    //
-    // Under the default exact `NewtonKernel` (ε = 0),
-    // N=640 random-uniform test particles in a thin annulus concentrate
-    // enough close pairs that the adaptive dt
-    // shrinks toward DT_MIN around close-encounter events, yielding a
-    // baseline `peak_energy_err` of order 10â»â´ — NOT representative of
-    // IAS15's machine-precision regime.
-    //
-    // This is a deliberate *regime stress test*, not a quality
-    // benchmark. It was introduced to reproduce the stutter reported
-    // in the interactive app's 641-body preset and to make the
-    // rejection cascade (pre-RMS-norm-fix: 194% rejection rate)
-    // measurable. The stress test served its purpose — the RMS-norm
-    // fix documented in `docs/experiments/
-    // 2026-04-22-solar-system-stutter-diagnosis.md` reduced rejections
-    // by 36% and wall time by 23% on this scenario. A separate
-    // controlled-quality scenario at N=641 (e.g. structured rings or
-    // a well-spaced Keplerian disk) is future work.
-    //
-    // Because the scenario sits outside IAS15's efficient regime,
-    // `gate_on_baseline` is set to `false`: metric shifts are
-    // expected across algorithmic changes and should be reviewed as
-    // advisories, not treated as regressions.
+    // Annulus around the preset's asteroid belt with margin so the
+    // controller sees a range of dynamical periods. Deliberate regime
+    // stress test: random close pairs under the exact kernel drive dt
+    // toward DT_MIN, so energy error is far above IAS15's smooth-flow
+    // floor and `gate_on_baseline` stays false. See
+    // docs/experiments/2026-04-22-solar-system-stutter-diagnosis.md.
     const R_INNER: f64 = 1.5;
     const R_OUTER: f64 = 3.5;
     const SEED: u64 = 0x501a5; // "solaš"
@@ -278,74 +183,25 @@ pub fn solar_n641() -> ScenarioSpec {
     ScenarioSpec {
         name: "solar_n641",
         bodies,
-        // dt_budget generous: the controller will shrink it at the
-        // inner-radius bodies (shortest orbital periods). Chosen to
-        // leave headroom for the adaptive mechanism rather than
-        // clipping it.
         dt_budget: 0.05,
-        // Very short duration: at N=641 with IAS15 and BH each
-        // accepted sub-step takes on the order of tens of ms, so
-        // even 0.1 time units produces enough sub-steps (~hundreds)
-        // for reliable phase statistics. Longer windows only add
-        // wall time without improving the diagnostic signal.
+        // Hundreds of sub-steps — enough for phase statistics.
         duration: 0.1,
         criterion_bench: false,
         gate_on_baseline: false,
     }
 }
 
-/// Central body + 640 test particles arranged as 20 concentric rings of
-/// 32 bodies each — structured, well-separated geometry intended to
-/// exercise IAS15 at solar-system-class N without the close-encounter
-/// cascade that `solar_n641` exhibits.
-///
-/// ## Status: kept out of the default catalog
-///
-/// This scenario is **not** registered in [`all`]. Building it landed
-/// an unrelated architectural finding instead: IAS15 paired with
-/// Barnes-Hut cascades at large N regardless of the scenario's
-/// scenario-level quality, because BH's tree approximation is not a
-/// deterministic function of state across Picard iterations. After
-/// that finding, the integrator/force pairing became a first-class
-/// concern (see `System::set_integrator` and the integrator
-/// execution-profile ADR), and the app's default integrator moved
-/// from IAS15 to Yoshida 4.
-///
-/// The function is kept because the scenario itself remains valuable:
-///
-///   * It is the cleanest N=641 stress the harness has — regular
-///     geometry, bounded pair separations, no birthday-problem close
-///     encounters. Useful for future work that wants to isolate
-///     integrator behaviour at high N from scenario stiffness.
-///   * Running it under IAS15 with the auto-switch to direct O(N²)
-///     gives a clean reading of IAS15's in-regime quality at N=641.
-///   * Comparing its metrics between force models (direct vs a
-///     hypothetical smooth multipole method in the future) is
-///     exactly the experiment the scenario was designed for.
-///
-/// To use: call [`structured_rings_n641`] directly from a diagnostic
-/// script or add it temporarily to [`all`] for a one-off recording.
-///
-/// ## Geometry
-///
-/// * Radial range: R_INNER = 1.5, R_OUTER = 3.5 (matches
-///   `solar_n641` for an apples-to-apples comparison at N=641).
-/// * 20 rings, linearly spaced in `r` → Î”r ≈ 0.105.
-/// * 32 equally-spaced bodies per ring → minimum intra-ring chord at
-///   R_INNER = 2·R·sin(π/32) ≈ 0.294.
-/// * Per-ring pseudo-random phase offset (seeded) to break radial
-///   alignment between rings without destroying their co-rotating
-///   structure.
-/// * Softening = 0.03 → intra-ring margin 9.8×, inter-ring margin
-///   3.5×. Co-rotating rings preserve intra-ring separation to
-///   leading order; radial ordering preserves inter-ring separation.
-///
-/// ## Expected in-regime targets (when IAS15+direct is used)
-///
-/// * `peak_energy_err` ≤ 1e-11 (machine-precision class at f64).
-/// * `degraded_total` = 0 (controller never saturates DT_MIN).
-/// * `dt_min` ≫ DT_MIN = 1e-12.
-/// * Rejection rate < 10% of accepted substeps.
+/// Central body + 640 test particles as 20 concentric rings of 32 —
+/// structured, well-separated N=641 without `solar_n641`'s
+/// close-encounter cascade. Kept out of [`all`]: building it exposed
+/// the IAS15 + Barnes-Hut non-determinism finding that led to the
+/// integrator/force pairing rule (ADR-003) and the Yoshida-4 default,
+/// but the scenario itself remains the cleanest high-N stress for
+/// isolating integrator behaviour from scenario stiffness. Geometry
+/// matches `solar_n641`'s radial range for apples-to-apples N=641;
+/// per-ring phase offsets break radial alignment. In-regime targets
+/// when run under IAS15 + direct: peak energy error at the f64 class
+/// (~1e-11), zero degraded accepts, rejection rate under 10%.
 #[allow(dead_code)] // kept out of the default `all()` catalog on purpose — see doc.
 pub fn structured_rings_n641() -> ScenarioSpec {
     const N_RINGS: usize = 20;
@@ -387,13 +243,9 @@ pub fn structured_rings_n641() -> ScenarioSpec {
     ScenarioSpec {
         name: "structured_rings_n641",
         bodies,
-        // Budget generous — the controller's natural dt at this scale
-        // is set by the innermost orbit (T_inner ≈ 11.5); budget acts
-        // only as an upper cap during warm-up.
         dt_budget: 0.1,
-        // ~half the innermost orbital period (T_inner/2 ≈ 5.77) —
-        // long enough for the controller to settle and for a credible
-        // `energy_drift_slope` fit.
+        // ~half the innermost orbital period: controller settles and
+        // the energy_drift_slope fit gets a credible window.
         duration: 6.0,
         criterion_bench: false,
         gate_on_baseline: false,

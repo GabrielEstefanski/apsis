@@ -3,45 +3,20 @@
 //! A [`Template`] is a complete initial-condition specification: a named
 //! collection of [`TemplateBody`] descriptors that the simulation engine
 //! converts into live [`Body`] instances via [`Template::instantiate`].
+//! `TemplateBody` is a *descriptor*, not a `Body`: it holds only what the
+//! scenario author specifies; derived properties (density, physical
+//! radius) come from the material model at instantiation.
 //!
-//! ## Design
-//!
-//! `TemplateBody` is intentionally a *descriptor*, not a `Body`. It holds only
-//! the quantities that the scenario author specifies explicitly; all derived
-//! physical properties (density, physical radius) are computed by `Body::of`
-//! at instantiation time using the material model.
-//!
-//! This separation means templates are:
-//! - **Compact** — no redundant derived fields.
-//! - **Material-consistent** — density and radius always agree with the EOS.
-//! - **Forward-compatible** — adding fields to `Body` does not break templates.
-//!
-//! ## Position semantics
-//!
-//! `position` is `None` when the scenario builder wants the engine to place the
-//! body automatically (e.g. centre-of-mass correction, random placement).
-//! Most explicit scenarios set `Some(pos)`.
-//!
-//! ## Velocity semantics
-//!
-//! Velocities are always in the **inertial simulation frame**, not relative to
-//! any parent body.  Scenario builders that construct hierarchical systems
-//! (planet + moon) must add the parent velocity explicitly — see the solar
-//! system template for the canonical pattern.
+//! Velocities are always in the inertial simulation frame, never relative
+//! to a parent body — hierarchical builders (planet + moon) add the
+//! parent velocity explicitly; see the solar system template.
 
 use crate::domain::body_preset::BodyPreset;
 
 // ── TemplateBody ──────────────────────────────────────────────────────────────
 
-/// Descriptor for one body in a simulation template.
-///
-/// Templates pair a mass with a [`BodyPreset`] reference; everything
-/// else (density, colour, q_pr, luminosity) is derived at
-/// instantiation time from the preset. Only the quantities the
-/// scenario author wants to override (position, velocity, optional
-/// name) are stored here directly.
-///
-/// ## What is *not* stored here
+/// Descriptor for one body in a simulation template. Derived
+/// quantities are not stored:
 ///
 /// | Derived quantity    | Computed by                            |
 /// |---------------------|----------------------------------------|
@@ -52,67 +27,44 @@ use crate::domain::body_preset::BodyPreset;
 /// | Luminosity          | `preset.luminosity.compute(...)`       |
 #[derive(Debug, Clone, Copy)]
 pub struct TemplateBody {
-    /// Optional authored display name preserved at instantiation
-    /// time. When `None`, the instantiator falls back to the preset's
-    /// `display_name` (e.g. `"Asteroid"`, `"Star"`).
+    /// Display name; `None` falls back to the preset's `display_name`.
     pub name: Option<&'static str>,
 
     /// Mass [simulation mass units, e.g. M_☉].
     pub mass: f64,
 
-    /// Construction preset — determines colour, q_pr, and (optionally)
-    /// luminosity at instantiation. The preset's density model is also
-    /// consulted unless `density` overrides it. Reference is held by
-    /// `&'static` so the built-in catalogue is zero-cost; user-defined
-    /// presets can be `Box::leak`'d into the same shape.
+    /// Construction preset (colour, q_pr, luminosity, density model).
+    /// Held by `&'static` so the built-in catalogue is zero-cost;
+    /// user-defined presets can be `Box::leak`'d into the same shape.
     pub preset: &'static BodyPreset,
 
-    /// Initial position `[x, y, z]` [simulation length units].
-    ///
-    /// `None` defers placement to the instantiation logic (e.g. the
-    /// engine applies a centre-of-mass correction or places bodies
-    /// on a grid). 2D scenarios set `z = 0`.
+    /// Initial position `[x, y, z]` [simulation length units]. `None`
+    /// defers placement to the instantiation logic (COM correction,
+    /// grid placement). 2D scenarios set `z = 0`.
     pub position: Option<[f64; 3]>,
 
     /// Initial velocity `[vx, vy, vz]` in the inertial simulation
     /// frame [length / time]. 2D scenarios set `vz = 0`.
     pub velocity: [f64; 3],
 
-    /// Override the preset's [`default_class`](BodyPreset::default_class).
-    ///
-    /// `None` keeps the preset's natural class (a `ROCKY` body lands
-    /// as [`BodyClass::Planet`], an `ICY` body as
-    /// [`BodyClass::Moon`]). Use `Some(...)` to tag a body whose role
-    /// in the scene differs from the preset's default — e.g. Earth's
-    /// Moon is a `ROCKY` body that should render as
-    /// [`BodyClass::Moon`].
+    /// Override the preset's [`default_class`](BodyPreset::default_class)
+    /// when a body's role differs from its material — e.g. Earth's Moon
+    /// is `ROCKY` but renders as [`BodyClass::Moon`].
     pub class_override: Option<crate::domain::body_preset::BodyClass>,
 
-    /// Optional explicit density [simulation units].
-    ///
-    /// When `Some(ρ)`, the instantiator overrides whatever the
-    /// preset's density model would have produced for this `mass`.
-    /// The point: templates that quote real bodies (Earth, Jupiter,
-    /// Sun, …) supply published densities directly so the rendered
-    /// `physical_radius` tracks the NASA fact sheet to within a few
-    /// percent rather than being clamped to the preset's
-    /// power-law-EOS bounds. Templates whose bodies are heuristic
-    /// (asteroid swarms, ad-hoc test particles) leave this `None` and
-    /// inherit the preset model.
+    /// Explicit density [simulation units], overriding the preset's
+    /// density model. Real-body templates pass published values so
+    /// `physical_radius` tracks the fact sheet instead of the preset's
+    /// EOS bounds; heuristic bodies leave `None`.
     pub density: Option<f64>,
 
-    /// Optional Bond-albedo override. Templates that quote real
-    /// bodies pass the published Bond value (Earth `0.306`, Moon
-    /// `0.110`, Vesta `0.42`, etc.); bulk-anonymous bodies leave
-    /// `None` and inherit the preset's class-typical placeholder.
+    /// Bond-albedo override. Real-body templates pass the published
+    /// value; `None` inherits the preset's class-typical placeholder.
     pub albedo: Option<f64>,
 }
 
 impl TemplateBody {
-    /// Construct a body at rest with no spin.
-    ///
-    /// Convenience constructor for the common case where position and
-    /// velocity will be filled in by the scenario builder.
+    /// Body at rest; position deferred to the scenario builder.
     pub fn at_rest(mass: f64, preset: &'static BodyPreset) -> Self {
         Self {
             name: None,
@@ -126,7 +78,7 @@ impl TemplateBody {
         }
     }
 
-    /// Construct a body with explicit position and velocity, no spin.
+    /// Body with explicit position and velocity.
     pub fn with_state(
         mass: f64,
         preset: &'static BodyPreset,
@@ -148,39 +100,11 @@ impl TemplateBody {
 
 // ── UnitSystem ────────────────────────────────────────────────────────────────
 
-/// Physical unit system used by a simulation template.
-///
-/// Declares the meaning of the three independent simulation base units —
-/// mass, length, and time — together with optional SI conversion factors.
-///
-/// # Design
-///
-/// The simulator always runs with `G = 1 × g_factor` in internal units.
-/// Different presets use the same numerical equations but assign different
-/// physical interpretations to their numbers:
-///
-/// | Preset class       | Mass unit | Length unit | Time unit           |
-/// |--------------------|-----------|-------------|---------------------|
-/// | Solar system, etc. | M_☉       | AU          | T_AU ≈ 58.1 days    |
-/// | Figure-eight, etc. | –         | –           | –  (dimensionless)  |
-///
-/// The SI conversion factors allow downstream tools (Python, Julia, REBOUND) to
-/// reconstruct physical values from the raw CSV numbers without re-deriving
-/// the unit mapping.  They are `None` for purely dimensionless presets.
-///
-/// # Derived units
-///
-/// Given `mass_unit`, `length_unit`, `time_unit`:
-///
-/// | Quantity              | Derived unit                               |
-/// |-----------------------|--------------------------------------------|
-/// | Velocity              | `length / time`                            |
-/// | Energy                | `mass · length² / time²`                  |
-/// | Angular momentum      | `mass · length² / time`                   |
-/// | Specific ang. mom.    | `length² / time`                           |
-/// | Specific energy       | `length² / time²`                         |
-/// | Period                | `time`                                     |
-/// | Semi-major axis       | `length`                                   |
+/// Physical unit system used by a simulation template: the meaning of
+/// the three base units (mass, length, time) plus optional SI conversion
+/// factors. The factors let downstream tools reconstruct physical values
+/// from raw CSV numbers; they are `None` for dimensionless presets
+/// (figure-eight, Pythagorean, …).
 #[derive(Debug, Clone, Copy)]
 pub struct UnitSystem {
     /// Short label for UI and CSV metadata, e.g. `"AU / M_☉ / T_AU"`.
@@ -206,26 +130,14 @@ pub struct UnitSystem {
 }
 
 impl UnitSystem {
-    /// Solar-system units: mass in M_☉, length in AU, time in T_AU.
-    ///
-    /// The time unit T_AU is defined by setting G = 1 in these base units:
-    ///
-    /// ```text
-    /// T_AU = √(AU³ / (G_SI · M_☉))
-    ///      = √(3.348 × 10³³ / 1.327 × 10²⁰)  s
-    ///      ≈ 5.022 × 10⁶ s  ≈ 58.1 days
-    /// ```
-    ///
-    /// Equivalently, Earth's orbital period is 2π T_AU ≈ 365.25 days ≈ 1 year.
-    ///
-    /// This is the natural unit system for all physically-calibrated presets
-    /// in this simulator (Solar System, TRAPPIST-1, Alpha Centauri, etc.).
+    /// Solar-system units for physically-calibrated presets: M_☉, AU,
+    /// and `T_AU = √(AU³ / (G_SI · M_☉)) ≈ 58.1 days` (G = 1 in these
+    /// base units; Earth's period is 2π T_AU).
     pub const fn solar_au() -> Self {
         Self {
             label: "AU / M_☉ / T_AU",
             mass_unit: "M_☉",
             length_unit: "AU",
-            // T_AU = sqrt(AU³ / (G_SI · M_☉)) ≈ 5.022e6 s ≈ 58.1 days
             time_unit: "T_AU",
             mass_to_kg: Some(1.989e30),
             length_to_m: Some(1.496e11),
@@ -233,13 +145,9 @@ impl UnitSystem {
         }
     }
 
-    /// Dimensionless units: G = 1, no physical anchor.
-    ///
-    /// Used for mathematically-defined scenarios (figure-eight, Pythagorean
-    /// three-body, Lagrange triangle) where the masses and distances are
-    /// chosen to satisfy a specific mathematical condition rather than to
-    /// match any physical system.  Results cannot be directly compared with
-    /// observations without choosing an explicit physical mapping first.
+    /// G = 1, no physical anchor — for mathematically-defined scenarios
+    /// (figure-eight, Pythagorean, Lagrange triangle). Comparing with
+    /// observations requires choosing an explicit physical mapping.
     pub const fn dimensionless() -> Self {
         Self {
             label: "dimensionless (G = 1)",
@@ -261,28 +169,11 @@ impl UnitSystem {
 
 // ── Template ──────────────────────────────────────────────────────────────────
 
-/// Complete initial-condition specification for one simulation scenario.
-///
-/// A template is the *source of truth* for a scenario.  The simulation engine
-/// calls [`Template::instantiate`] (or equivalent) to convert descriptors into
-/// live [`Body`] objects with fully computed physical properties.
-///
-/// ## Centre-of-mass correction
-///
-/// After instantiation the engine should zero the total linear momentum so the
-/// system does not drift off-screen.  This is done by subtracting the
-/// mass-weighted mean velocity from every body:
-///
-/// ```text
-/// v_cm = Σ(mᵢ · vᵢ) / Σmᵢ
-/// vᵢ  ← vᵢ − v_cm
-/// ```
-///
-/// ## Scale
-///
-/// `display_scale` is a hint to the renderer — it does not affect the physics.
-/// It sets the initial pixels-per-AU (or equivalent) so the scenario fills the
-/// viewport sensibly.
+/// Complete initial-condition specification for one simulation
+/// scenario; the engine converts it into live [`Body`] objects via
+/// [`Template::instantiate`]. After instantiation the engine zeroes the
+/// net linear momentum — see
+/// [`centre_of_momentum_velocity`](Self::centre_of_momentum_velocity).
 #[derive(Debug, Clone)]
 pub struct Template {
     /// Short human-readable name shown in the scenario picker UI.
@@ -294,10 +185,8 @@ pub struct Template {
     /// Body descriptors.  Order is preserved through instantiation.
     pub bodies: Vec<TemplateBody>,
 
-    /// Suggested initial display scale [pixels per simulation length unit].
-    ///
-    /// The renderer uses this as the default zoom level when the scenario is
-    /// first loaded.  Users can zoom freely after that.
+    /// Initial display scale [pixels per simulation length unit] —
+    /// renderer hint only, no effect on physics.
     pub display_scale: f64,
 
     /// Orbital plane normal in world coordinates, normalised. The
@@ -315,39 +204,18 @@ pub struct Template {
     /// falls back to bounding-sphere fit.
     pub default_view_distance: Option<f64>,
 
-    /// Suggested simulation time-step [simulation time units].
-    ///
-    /// `None` lets the integrator choose an adaptive step.  Set this for
-    /// scenarios that require a specific cadence (e.g. close binary stars that
-    /// need a small fixed step for accuracy).
+    /// Suggested time-step [simulation time units]; `None` lets the
+    /// integrator choose. Set for scenarios needing a specific cadence
+    /// (close binaries).
     pub suggested_dt: Option<f64>,
 
-    /// Suggested integrator for this scenario.
-    ///
-    /// `None` means the template has no preference — the user's existing
-    /// integrator choice (or the app default, Yoshida 4) wins. `Some(kind)`
-    /// is a recommendation; the app-side consumer is expected to enforce
-    /// the hierarchy
-    ///
-    /// ```text
-    /// explicit user choice  >  template suggestion  >  app default
-    /// ```
-    ///
-    /// In-tree templates currently use this for stiff close-encounter
-    /// problems (Pythagorean → Mercurius) and chaotic regimes that
-    /// benefit from adaptive Gauss–Radau (Chaotic Ejection → IAS15).
+    /// Suggested integrator; `None` = no preference. Consumers enforce
+    /// `explicit user choice > template suggestion > app default`.
     pub suggested_integrator: Option<crate::physics::integrator::IntegratorKind>,
 
-    /// Physical unit system used by this template.
-    ///
-    /// Declares the meaning of the simulation's base units (mass, length, time)
-    /// and provides optional SI conversion factors.  This field is purely
-    /// informational — it does not affect the physics — but it is essential for
-    /// interpreting exported CSV data and for comparing results with the
-    /// literature.
-    ///
-    /// Use [`UnitSystem::solar_au`] for physically-calibrated scenarios and
-    /// [`UnitSystem::dimensionless`] for mathematically-defined ones.
+    /// Unit system — informational only (CSV export, literature
+    /// comparison): [`UnitSystem::solar_au`] for physically-calibrated
+    /// scenarios, [`UnitSystem::dimensionless`] for mathematical ones.
     pub units: UnitSystem,
 }
 

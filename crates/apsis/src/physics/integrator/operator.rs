@@ -90,24 +90,13 @@ pub trait Operator: Send + Sync {
         std::any::type_name::<Self>()
     }
 
-    /// [`UnitSystem`] this operator was constructed for, when its
-    /// parameters are dimensional and tied to a specific unit choice.
-    /// Default: `None` — the operator is unit-system-agnostic
-    /// (constant push, dimensionless coupling, …).
-    ///
-    /// **Registration check.** When this returns `Some(u)`, the
-    /// `System::add_*` registration methods compare `u` against the
-    /// `System`'s own `UnitSystem`. A mismatch panics with a structured
-    /// message naming both unit systems and the operator. The check
-    /// makes silent unit-system confusion structurally impossible —
-    /// you cannot register an operator built for IAU solar units in a
-    /// `System` integrating in canonical solar units, even if the
-    /// numeric values would otherwise produce internally-consistent
-    /// (but physically wrong) dynamics.
-    ///
-    /// Operators whose parameters are dimensional **must** override
-    /// this. The default is the safe choice for dimensionless
-    /// operators only.
+    /// [`UnitSystem`] this operator was constructed for. Default:
+    /// `None` — unit-system-agnostic (constant push, dimensionless
+    /// coupling, …). Operators with dimensional parameters **must**
+    /// override this: `Some(u)` is compared against the `System`'s
+    /// units at registration, and a mismatch returns
+    /// [`UnitSystemMismatch`] instead of silently integrating wrong
+    /// physics.
     fn declared_units(&self) -> Option<UnitSystem> {
         None
     }
@@ -152,36 +141,20 @@ pub trait Operator: Send + Sync {
         Vec::new()
     }
 
-    /// How many outer integration steps between dynamic regime checks.
-    /// Default: 100. Override to a smaller value for operators whose
-    /// regime can change rapidly (close-encounter physics, secular
-    /// growth on short timescales) or a larger value for cheap-but-
-    /// infrequent checks. The dispatcher uses the minimum cadence
-    /// across all registered operators.
-    ///
-    /// Has no effect when [`check_regime`](Self::check_regime) returns
-    /// an empty vector by default.
+    /// Outer steps between dynamic regime checks. Default 100; the
+    /// dispatcher uses the minimum cadence across registered operators.
+    /// Inert when [`check_regime`](Self::check_regime) is the no-op
+    /// default.
     fn regime_check_cadence(&self) -> usize {
         100
     }
 
-    /// Reference card for the operator: BibTeX entry of the paper
-    /// implementing this physics, DOI when available, and the
-    /// implementing crate's name + version + build commit. Default:
-    /// `None` — operator has no canonical citation (test fakes,
-    /// internal tooling).
-    ///
-    /// Federation-thesis-aligned: every published perturbation crate
-    /// should override this so [`crate::core::system::System::citations`]
-    /// produces a complete reference list automatically. The
-    /// `crate_name` / `crate_version` / `commit_hash` fields use
-    /// `env!("CARGO_PKG_NAME")` / `env!("CARGO_PKG_VERSION")` /
-    /// `option_env!(...)` so the captured values are the **operator's
-    /// crate** state, not apsis core's.
-    ///
-    /// See [`Citation`](crate::physics::integrator::Citation) for the
-    /// field contract and [`crate::physics::integrator::render_provenance`]
-    /// for the standard rendering.
+    /// Reference card: BibTeX of the source paper, DOI, and the
+    /// implementing crate's name/version/commit. Default `None` (test
+    /// fakes, internal tooling). Published perturbation crates should
+    /// override it, using `env!("CARGO_PKG_NAME")` etc. so the captured
+    /// values are the operator crate's, not apsis core's. See
+    /// [`Citation`] for the field contract.
     fn citation(&self) -> Option<Citation> {
         None
     }
