@@ -18,7 +18,7 @@ Run:
     python rebound_side.py --apsis-csv ./out/apsis.csv --output ./out/rebound.csv
 
 Protocol notebook:
-    docs/experiments/2026-05-13-rebound-parity-mercurius.md
+    paper/notebooks/2026-05-13-rebound-parity-mercurius.md
 
 Constants below mirror those in the Rust example
 (`crates/apsis/examples/rebound_parity_mercurius.rs`). A change here is
@@ -158,7 +158,7 @@ def main() -> int:
     # ── Write CSV with the apsis-side schema ────────────────────────────── #
     with output_path.open("w", newline="") as f:
         f.write("# REBOUND parity — Mercurius — REBOUND side\n")
-        f.write("# protocol: docs/experiments/2026-05-13-rebound-parity-mercurius.md\n")
+        f.write("# protocol: paper/notebooks/2026-05-13-rebound-parity-mercurius.md\n")
         f.write(f"# integrator: MERCURIUS (REBOUND), r_crit_hill={ALPHA_HILL}\n")
         f.write(f"# rebound_version: {rebound.__version__}\n")
         f.write(f"# units: solar AU-year (G = {G_SOLAR:.18e})\n")

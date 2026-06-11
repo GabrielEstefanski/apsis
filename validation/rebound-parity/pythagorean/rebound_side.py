@@ -19,7 +19,7 @@ Run:
     python rebound_side.py --apsis-csv ./out/apsis.csv --output ./out/rebound.csv
 
 Protocol notebook:
-    docs/experiments/2026-04-30-rebound-parity-pythagorean.md
+    paper/notebooks/2026-04-30-rebound-parity-pythagorean.md
 
 Constants below mirror those in the Rust example. A change here is a
 protocol change — update the notebook in lockstep.
@@ -122,7 +122,7 @@ def main() -> int:
     horizon = sample_times[-1]
     with output_path.open("w", newline="") as f:
         f.write("# REBOUND parity — Pythagorean three-body (Burrau 1913) — REBOUND IAS15 side\n")
-        f.write("# protocol: docs/experiments/2026-04-30-rebound-parity-pythagorean.md\n")
+        f.write("# protocol: paper/notebooks/2026-04-30-rebound-parity-pythagorean.md\n")
         f.write("# integrator: IAS15 (REBOUND)\n")
         f.write(f"# rebound_version: {rebound.__version__}\n")
         f.write("# units: canonical (G = 1)\n")

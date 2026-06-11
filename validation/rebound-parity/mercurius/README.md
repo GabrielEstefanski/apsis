@@ -1,6 +1,6 @@
 # REBOUND parity — Mercurius
 
-Implementation of the parity protocol declared in [`docs/experiments/2026-05-13-rebound-parity-mercurius.md`](../../../docs/experiments/2026-05-13-rebound-parity-mercurius.md). Constants in this directory's scripts mirror the notebook in lockstep — changes here are protocol changes.
+Implementation of the parity protocol declared in [`paper/notebooks/2026-05-13-rebound-parity-mercurius.md`](../../../paper/notebooks/2026-05-13-rebound-parity-mercurius.md). Constants in this directory's scripts mirror the notebook in lockstep — changes here are protocol changes.
 
 ## Files
 

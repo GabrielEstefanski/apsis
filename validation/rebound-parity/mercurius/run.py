@@ -19,7 +19,7 @@ Exit codes:
 - non-zero (other) — apsis or REBOUND side failed.
 
 Protocol notebook:
-    docs/experiments/2026-05-13-rebound-parity-mercurius.md
+    paper/notebooks/2026-05-13-rebound-parity-mercurius.md
 """
 
 from __future__ import annotations
