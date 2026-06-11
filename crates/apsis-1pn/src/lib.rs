@@ -373,8 +373,8 @@ mod tests {
     fn for_units_solar_canonical_close_to_c_solar_units() {
         let pn = PostNewtonian1PN::for_units(UnitSystem::solar_canonical());
         let rel_diff = (pn.c() - C_SOLAR_UNITS).abs() / C_SOLAR_UNITS;
-        // ~19 ppm gap; bound guards a GM-primitive regression (the old G·M
-        // primitive widened it to ~110 ppm).
+        // ~19 ppm Gaussian-vs-IAU-year gap; bound guards a GM-primitive
+        // regression (ADR-014).
         assert!(
             rel_diff < 5e-5,
             "for_units(solar_canonical) c={} vs C_SOLAR_UNITS={} gap {:.3e}, expected ~19 ppm",

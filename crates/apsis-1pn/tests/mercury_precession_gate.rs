@@ -10,11 +10,9 @@
 //! not a platform difference.
 //!
 //! This is the *cumulative* (osculating-ω) observable, which averages
-//! the per-orbit integration noise into a single endpoint comparison.
-//! For the *geometric* apsidal precession (periapsis-passage) of the
-//! same scenario — integration-noise-limited at Mercury's ~5e-7
-//! rad/orbit signal — see `examples/mercury_1pn_geometric.rs` and
-//! paper §3.2.
+//! the per-orbit integration noise into a single endpoint comparison;
+//! the geometric (periapsis-passage) observable is integration-noise-
+//! limited at Mercury's ~5e-7 rad/orbit signal (paper §3.2).
 //!
 //! If this test fails, one of four things is true:
 //!
