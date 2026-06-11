@@ -81,15 +81,8 @@
 //!    statement lives at this per-call level, where the envelope is
 //!    bounded by `~few × ULP × max_contribution`.
 //!
-//!    The trajectory-level corollary (registering `[A, B, C]` vs
-//!    `[C, B, A]` produces equivalent science) is downstream of this and held by
-//!    the validation portfolio rather than the contract: an adaptive
-//!    integrator amplifies ULP-level acceleration differences through
-//!    substep-schedule divergence and chaotic phase drift, so a
-//!    trajectory-level assertion would gate on integrator behavior, not
-//!    on the composition operator. Robust trajectory-level parity is
-//!    measured by orbital invariants (Δa, Δe, ΔE, ΔLz), not point-by-
-//!    point position drift.
+//!    The trajectory-level corollary is held by the validation portfolio
+//!    against orbital invariants (Δa, Δe, ΔE, ΔLz), not by this contract.
 //!    - test: `tests::composition_associative_three_perturbations`
 //!
 //! 6. **Additive composition (sentinel-checked).** Each perturbation
@@ -142,12 +135,10 @@
 //!
 //! ## Observable constructor convention
 //!
-//! Perturbations parametrise physical processes. Parameters come from
-//! physics — fundamental constants, observations, regime choices — not
-//! from raw numerical input pasted from another simulator without
-//! checking. The convention below makes that load-bearing at the API
-//! surface so a contributor cannot ship a perturbation that silently
-//! invites unit-mismatch errors.
+//! The convention below makes the unit-system binding load-bearing at
+//! the API surface (see ADR-006). Parameters must come from physics —
+//! constants, observations, regime choices — not from raw numeric input
+//! without unit checking.
 //!
 //! ### Mandatory unit-system binding
 //!
@@ -205,18 +196,13 @@
 //! ### Observable-inversion constructor (`from_<observable>`)
 //!
 //! Inverts a desired observable to compute the operator's coefficient.
-//! The user names what they measure; the constructor solves for the
-//! parameter. Always takes a `UnitSystem` so the produced operator
-//! survives the registration check.
+//! Always takes a `UnitSystem` so the produced operator survives the
+//! registration check.
 //!
 //! ```text
 //! CentralForce::from_precession_rate(rate, gamma, &primary, units)   // future
 //! Drag::from_orbital_decay_rate(rate, &body, units)                  // future
 //! ```
-//!
-//! Eliminates a class of silent error: the user works in the space
-//! they measure (precession rate, decay rate) instead of the space the
-//! model uses (`Acentral` coefficient, drag constant).
 //!
 //! ### Raw escape (`from_raw_xxx`)
 //!
@@ -256,49 +242,16 @@
 //!
 //! ## Regime-of-validity contract
 //!
-//! `KernelRequirements` is the **numerical contract** every operator
-//! places on the gravitational kernel (Exactness, Continuity).
-//! Regime-of-validity is the **physical contract** every operator
-//! places on the body state itself: a test-particle approximation
-//! assumes `m_secondary ≪ m_primary`, a 1PN expansion assumes
-//! `v ≪ c`, an averaging theory assumes small eccentricity, and so
-//! on. Crossing the bound does not break the integrator; it breaks
-//! the operator's claim to represent the physics it was derived from.
-//!
-//! Operators expose their bounds through
-//! [`crate::physics::integrator::Operator::check_regime`], which
-//! returns one [`crate::physics::integrator::RegimeViolation`] per
-//! crossed bound at the current body state. `System` invokes this:
-//!
-//! - **At registration** — once, against the initial body state.
-//!   Captures bad initial conditions before the integrator starts.
-//! - **During integration** — every
-//!   [`regime_check_cadence`](crate::physics::integrator::Operator::regime_check_cadence)
-//!   outer steps, against the current body state. Captures regime
-//!   crossings that develop dynamically (eccentricity growth,
-//!   periapse passage, mass change). Cadence is per-operator and the
-//!   system uses the minimum across registered operators.
-//!
-//! Each `(operator, bound)` pair fires exactly one `warn_diag` per
-//! `System` lifetime — a violation persisting across many checks does
-//! not respam the bus. The dedup state is reset by
-//! [`crate::core::system::System::reset_regime_warnings`] when the
-//! caller deliberately changes scenario.
-//!
-//! [`Severity`](crate::physics::integrator::Severity) carries three
-//! tiers — `Approaching` (near the bound), `Exceeded` (past it,
-//! integration continues), `Hard` (far outside the derivation
-//! envelope). Encode them at the call site so a reader can match
-//! intent to value without consulting the threshold constants.
+//! Regime-of-validity is the **physical contract** every operator places
+//! on the body state itself (v ≪ c, m_secondary ≪ m_primary, etc.).
+//! Together with `KernelRequirements` (the numerical contract), it
+//! closes the full precondition surface. See
+//! [`crate::physics::integrator::regime`] for the full specification;
+//! the guarantees gated here are:
 //!
 //! - test: `tests::regime_check_fires_at_registration_when_initial_state_violates`
 //! - test: `tests::regime_check_silent_when_initial_state_within_regime`
 //! - test: `tests::regime_check_dedups_persistent_violation_across_steps`
-//!
-//! Together with `KernelRequirements`, the regime contract closes the
-//! precondition surface: numerical (kernel) checked at registration,
-//! physical (regime) checked statically AND dynamically. An operator
-//! that survives both is on its derivation's footing for the run.
 //!
 //! ## Citation provenance
 //!
