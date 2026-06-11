@@ -1,24 +1,13 @@
 use crate::core::adaptive::DtMode;
 use crate::physics::integrator::{AdaptiveStats, IntegratorKind};
 
-/// Snapshot of the physical state of the simulation at a single instant.
+/// Snapshot of the physical state after the most recent integration
+/// step. Pure data, no logic.
 ///
-/// `Metrics` is a pure data-transfer object with no logic or side effects.
-/// It represents the system state **after the most recent integration step**.
-///
-/// # Design principles
-///
-/// - No historical accumulation (no "max" tracking)
-/// - No heuristic scaling
-/// - All values are directly interpretable physically
-///
-/// # Conservation diagnostics
-///
-/// Absolute drifts (`abs_energy_error`, `abs_angular_momentum_error`)
-/// are always defined. Relative drifts (`rel_energy_error`,
-/// `rel_angular_momentum_error`) are `None` when the baseline is
-/// below [`crate::core::system::MIN_RELATIVE_DENOMINATOR`]
-/// (precision-limited regime where round-off dominates the metric).
+/// Absolute conservation drifts are always defined; the relative forms
+/// are `None` when the baseline is below
+/// [`crate::core::system::MIN_RELATIVE_DENOMINATOR`] (round-off
+/// dominates the metric there).
 #[derive(Debug, Clone, Copy)]
 pub struct Metrics {
     // ── Energetics ────────────────────────────────────────────────────────── //
@@ -38,7 +27,6 @@ pub struct Metrics {
     pub rel_energy_error: Option<f64>,
 
     // ── Angular momentum & COM ─────────────────────────────────────────────── //
-    /// Total angular momentum (z-component).
     pub angular_momentum_z: f64,
 
     /// Initial Lz (set after the first state evaluation).
@@ -59,14 +47,10 @@ pub struct Metrics {
     pub com_vz: f64,
 
     // ── Time ──────────────────────────────────────────────────────────────── //
-    /// Total simulated time elapsed.
     pub t: f64,
-
-    /// Number of integration steps completed.
     pub steps: u64,
 
     // ── Simulation parameters ─────────────────────────────────────────────── //
-    /// Active integration algorithm.
     pub integrator_kind: IntegratorKind,
 
     /// Effective gravitational multiplier (G_eff = G₀ · g_factor).
@@ -76,10 +60,9 @@ pub struct Metrics {
     /// [`force_is_direct`](Self::force_is_direct) is `false`.
     pub theta: f64,
 
-    /// `true` when the force model is configured to skip Barnes-Hut
-    /// entirely — i.e. [`ForceModel::is_deterministic`] at the time
-    /// of the snapshot. UI surfaces should hide θ-related readouts
-    /// when this is `true`, since the opening angle has no effect.
+    /// `true` when the force model skips Barnes–Hut entirely
+    /// ([`ForceModel::is_deterministic`] at snapshot time); θ has no
+    /// effect then.
     pub force_is_direct: bool,
 
     /// Current integration timestep (may differ from `user_dt` when
@@ -90,17 +73,12 @@ pub struct Metrics {
     /// `dt_mode == DtMode::Fixed`).
     pub user_dt: f64,
 
-    /// Active timestep management policy.
-    ///
-    /// `DtMode::Adaptive` breaks symplecticity — the UI should surface a
-    /// warning whenever this is not `Fixed`.
+    /// Active timestep policy. `Adaptive` breaks symplecticity.
     pub dt_mode: DtMode,
 
-    /// Whether the adaptive Barnes–Hut θ controller is active.
-    ///
-    /// Varying θ between steps changes the force accuracy per step, making
-    /// error analysis harder than with a fixed θ.  Unlike adaptive dt, this
-    /// does not break symplecticity.
+    /// Whether the adaptive Barnes–Hut θ controller is active. Varying θ
+    /// changes per-step force accuracy (unlike adaptive dt, it does not
+    /// break symplecticity).
     pub adaptive_theta: bool,
 
     // ── Diagnostics ───────────────────────────────────────────────────────── //
@@ -108,10 +86,9 @@ pub struct Metrics {
     pub jerk: f64,
     pub max_vel: f64,
 
-    /// `true` if the most recent step was accepted under duress (e.g. an
-    /// adaptive integrator that hit its minimum step size without meeting
-    /// tolerance). A UI can surface this as a quality warning; for
-    /// fixed-step integrators this is always `false`.
+    /// `true` if the last step was accepted under duress (adaptive
+    /// integrator at its minimum step without meeting tolerance);
+    /// always `false` for fixed-step integrators.
     pub last_step_degraded: bool,
 
     // ── Geometry diagnostics ─────────────────────────────────────────────── //
@@ -141,11 +118,6 @@ pub struct Metrics {
     ///    Available only after the first step (jerk is zero before).
     ///
     /// `None` when no bodies are present or before the first force evaluation.
-    ///
-    /// The UI should display this alongside the current `dt` and offer a
-    /// one-click apply.  Accepting the suggestion and setting
-    /// `dt_mode = DtMode::Fixed` gives a fully symplectic run with
-    /// physics-justified step size.
     ///
     /// # References
     /// - Power et al. (2003). MNRAS 338, 14–34. §3.
