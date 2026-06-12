@@ -12,11 +12,12 @@ single-number framing of the cross-platform section with a budget in
 which every component is either derived in this notebook or measured by
 a declared protocol.
 
-**Status:** *Protocol declared a priori 2026-06-10. Phase A: A1 closed
-2026-06-11 — the second-order coefficient is derived in closed form,
-verified by independent extended-precision integration, and found to be
-parameterization-dependent at $O(\varepsilon^2)$ (see §Phase A results);
-A3 closed as stated; A2 pending. Phase-B gates freeze when A2 closes.*
+**Status:** *Protocol declared a priori 2026-06-10. **Phase A closed
+2026-06-11**: A1 — second-order coefficient in closed form, verified by
+independent extended-precision integration, parameterization-dependent
+at $O(\varepsilon^2)$; A2 — two-body coefficient $C = 8.291$ measured,
+Mercury floor $1.4\times10^{-6}$; A3 — exact. Phase-B gates are frozen
+as declared in §Hypotheses/§Phase B. Phase B pending.*
 
 ---
 
@@ -182,8 +183,33 @@ first order in $\delta = 18.9$ ppm.
 
 ### A2 — two-body $O(m/M)$ correction
 
-Pending: mass-scaling runs ($m$, $m/10$, $m/100$) per the protocol;
-phase-B gates freeze when it closes.
+Two-body integration of the implemented pairwise force in the gate's
+own conventions (primary at rest at the origin, secondary at Newtonian
+periapsis with $\mu = 1$ elements; relative-orbit geometric advance;
+same extended-precision machinery as A1) over a mass-ratio ladder
+$q \in \{0, 10^{-5}, 10^{-4}, 10^{-3}\}$ at $\varepsilon = 10^{-5}$,
+$e = 0.2$:
+
+$$\frac{\Delta\omega(q) - \Delta\omega(0)}{\Delta\omega(0)} = C\,q + O(q^2),
+\qquad C = 8.291,$$
+
+with the quadratic term contributing $0.5\,\%$ at $q = 10^{-3}$, $C$
+independent of $\varepsilon$ to $0.36\,\%$ across a decade, the
+Newtonian null at $3\times10^{-37}$ rad (a Keplerian relative orbit
+does not precess at any $q$ — the effect is purely 1PN-relative), and
+the $q \to 0$ limit matching the single-body A1 integration to 40
+significant digits. $C$ is measured at $e = 0.2 \approx e_\text{Mercury}$;
+its $e$-dependence is not probed and bounds the coefficient only at the
+percent level, which suffices for a floor.
+
+For Mercury, $q = 1.66\times10^{-7}$ gives a two-body floor of
+
+$$C\,q \approx 1.4\times10^{-6}\ \text{(relative)}$$
+
+— roughly $8\times$ the naive $m/M$ ceiling quoted in the paper's
+Results discussion, which treats the coefficient as unity. The floor
+remains ${\sim}60\times$ below the observed gate residual; the paper
+sentence is queued for correction with the derived value.
 
 ---
 
