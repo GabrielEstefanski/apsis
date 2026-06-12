@@ -2,19 +2,20 @@
 //!
 //! Runs the Sun–Mercury 1PN scenario over 500 orbits and asserts the
 //! osculating-ω end-vs-start measurement of the perihelion advance
-//! matches the closed-form GR prediction within 100 ppm
-//! (`rel_err < 10⁻⁴`). The gated number is bit-identical across Windows
-//! (MSVC/UCRT) and Linux (glibc) on x86_64 — the determinism-hardened
-//! transcendental routing (§Cross-platform reproducibility) leaves no
-//! platform variance — so anything above 100 ppm is a regression class,
-//! not a platform difference.
+//! matches the closed-form GR prediction within the derived residual
+//! budget (`rel_err < 9.2e-6`; see the constant below). The gated
+//! number is bit-identical across Windows (MSVC/UCRT) and Linux
+//! (glibc) on x86_64 — the determinism-hardened transcendental routing
+//! (§Cross-platform reproducibility) leaves no platform variance — so
+//! anything above the gate is a regression class, not a platform
+//! difference.
 //!
 //! This is the *cumulative* (osculating-ω) observable, which averages
 //! the per-orbit integration noise into a single endpoint comparison;
 //! the geometric (periapsis-passage) observable is integration-noise-
 //! limited at Mercury's ~5e-7 rad/orbit signal (paper §3.2).
 //!
-//! If this test fails, one of four things is true:
+//! If this test fails, one of five things is true:
 //!
 //! 1. Someone changed the 1PN formula and broke the sign or coefficients.
 //! 2. Someone broke the operator dispatch contract in `apsis`
@@ -26,6 +27,12 @@
 //!    `docs/experiments/2026-04-28-ias15-velocity-prediction-bug.md`.
 //! 4. The Newtonian 2-body baseline regressed below machine-precision
 //!    quality — the GR signal is swamped by numerical noise.
+//! 5. `integrate_until` stopped landing exactly on `t_end` — the
+//!    osculating ω carries an O(ε) short-period term whose periapsis
+//!    slope is `−ε(3−e)(1+e)/e` per radian of true anomaly, so an
+//!    endpoint sampled even half an IAS15 sub-step late moves the
+//!    measurement by ~7e-5 relative (Phase B′ of
+//!    `paper/notebooks/2026-06-10-mercury-1pn-error-budget.md`).
 //!
 //! ## Why `from_raw_c(C_SOLAR_UNITS, …)` instead of `for_units(…)`
 //!
@@ -52,7 +59,7 @@ use apsis_1pn::{C_SOLAR_UNITS, PostNewtonian1PN};
 
 #[test]
 #[ignore = "release-mode integration test; run with `cargo test --release -- --ignored`"]
-fn mercury_precession_matches_gr_within_100ppm() {
+fn mercury_precession_matches_gr_within_budget() {
     const A: f64 = 0.387_098;
     const E: f64 = 0.205_63;
     const M_MERCURY: f64 = 1.660_114e-7;
@@ -91,10 +98,20 @@ fn mercury_precession_matches_gr_within_100ppm() {
     let c = C_SOLAR_UNITS;
     let predicted = 6.0 * PI / (c * c * A * (1.0 - E * E)) * (N_ORBITS as f64);
 
+    // Residual budget at exact finish time (signed, relative): measured
+    // Phase-A floors +1.246e-6 (two-body O(m/M), second-order k·ε) plus
+    // the exact-endpoint phase deficit Q(ν_end = −1.92e-3) = +3.335e-6;
+    // central +4.581e-6, pre-registered and reproduced to 7 significant
+    // digits with ULP-twin spread ~4e-11. Gate = 2× the central — the
+    // dominant floor (A2's two-body coefficient) carries a percent-level
+    // e-dependence bound. Derivation: Phase B′ of
+    // paper/notebooks/2026-06-10-mercury-1pn-error-budget.md.
+    const REL_TOL: f64 = 2.0 * 4.581e-6;
+
     let rel_err = (measured - predicted).abs() / predicted.abs();
     assert!(
-        rel_err < 1e-4,
-        "Mercury precession off by {rel_err:.3e} — measured {measured:.3e} rad vs predicted {predicted:.3e} rad"
+        rel_err < REL_TOL,
+        "Mercury precession off by {rel_err:.3e} (budget {REL_TOL:.3e}) — measured {measured:.3e} rad vs predicted {predicted:.3e} rad"
     );
 }
 
