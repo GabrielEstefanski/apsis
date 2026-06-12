@@ -281,8 +281,10 @@ def measure_advance_twobody(M, q, c, a_orb, e, label='',
         ry = s[5] - s[1]
         phi_cur = atan2(ry, rx)
         dphi = phi_cur - phi_prev
-        while dphi >  pi: dphi -= 2*pi
-        while dphi <= -pi: dphi += 2*pi
+        while dphi > pi:
+            dphi -= 2*pi
+        while dphi <= -pi:
+            dphi += 2*pi
         phi_total += dphi
         phi_prev = phi_cur
 
@@ -360,8 +362,10 @@ def measure_advance_single(M, c, a_orb, e, label='',
         s = sol(mpf(k) * dt_a)
         phi_cur = atan2(s[1], s[0])
         dphi = phi_cur - phi_prev
-        while dphi >  pi: dphi -= 2*pi
-        while dphi <= -pi: dphi += 2*pi
+        while dphi > pi:
+            dphi -= 2*pi
+        while dphi <= -pi:
+            dphi += 2*pi
         phi_total += dphi
         phi_prev = phi_cur
 
@@ -434,8 +438,10 @@ def measure_advance_newtonian_twobody(M, q, a_orb, e, label='',
         ry = s[5] - s[1]
         phi_cur = atan2(ry, rx)
         dphi = phi_cur - phi_prev
-        while dphi >  pi: dphi -= 2*pi
-        while dphi <= -pi: dphi += 2*pi
+        while dphi > pi:
+            dphi -= 2*pi
+        while dphi <= -pi:
+            dphi += 2*pi
         phi_total += dphi
         phi_prev = phi_cur
 
@@ -618,7 +624,8 @@ def main():
     print()
     print("Gates:")
     print(f"  GA sig_digits={sig_GA}: {'PASS' if ga_pass else 'FAIL'}")
-    print(f"  GB |C2*q^2/(C*q)|={mpmath.nstr(gb_ratio,6)}: {'PASS' if gb_pass else 'FAIL (reported scaling above)'}")
+    gb_verdict = 'PASS' if gb_pass else 'FAIL (reported scaling above)'
+    print(f"  GB |C2*q^2/(C*q)|={mpmath.nstr(gb_ratio,6)}: {gb_verdict}")
     print(f"  GC |dw_Newt|={mpmath.nstr(abs(dw_gc),6)}: {'PASS' if gc_pass else 'FAIL'}")
     print("=" * 72)
 
