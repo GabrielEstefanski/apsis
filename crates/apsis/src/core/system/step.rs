@@ -339,11 +339,8 @@ impl System {
     /// early. Returns the number of `step()` calls actually performed.
     ///
     /// Without exact finish time, fixed-time measurements sample the
-    /// state up to one step past `t_end`; on the Mercury 1PN gate that
-    /// endpoint-sampling error dominated the residual (the osculating
-    /// ω slope at periapsis is `−ε(3−e)(1+e)/e` per radian of true
-    /// anomaly — see the Phase-B′ section of
-    /// `paper/notebooks/2026-06-10-mercury-1pn-error-budget.md`).
+    /// state up to one step past `t_end`. See ADR-015 for why that is
+    /// a measurement error and not a rounding detail.
     pub fn integrate_until(&mut self, t_end: f64) -> u64 {
         let start_steps = self.steps;
         while self.t < t_end && !self.stop_requested {

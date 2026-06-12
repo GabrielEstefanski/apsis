@@ -3,8 +3,7 @@
 //! state is at exactly the requested time. Before this contract,
 //! fixed-time measurements sampled the state up to one step past
 //! `t_end` — on the Mercury 1PN gate that endpoint-sampling error was
-//! the dominant residual (see
-//! `paper/notebooks/2026-06-10-mercury-1pn-error-budget.md`, Phase B').
+//! the dominant residual (ADR-015).
 
 use apsis::core::system::System;
 use apsis::domain::body::Body;

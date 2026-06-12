@@ -31,7 +31,7 @@
 //!    osculating ω carries an O(ε) short-period term whose periapsis
 //!    slope is `−ε(3−e)(1+e)/e` per radian of true anomaly, so an
 //!    endpoint sampled even half an IAS15 sub-step late moves the
-//!    measurement by ~7e-5 relative (Phase B′ of
+//!    measurement by ~7e-5 relative (ADR-015; derivation in
 //!    `paper/notebooks/2026-06-10-mercury-1pn-error-budget.md`).
 //!
 //! ## Why `from_raw_c(C_SOLAR_UNITS, …)` instead of `for_units(…)`
@@ -98,13 +98,13 @@ fn mercury_precession_matches_gr_within_budget() {
     let c = C_SOLAR_UNITS;
     let predicted = 6.0 * PI / (c * c * A * (1.0 - E * E)) * (N_ORBITS as f64);
 
-    // Residual budget at exact finish time (signed, relative): measured
-    // Phase-A floors +1.246e-6 (two-body O(m/M), second-order k·ε) plus
-    // the exact-endpoint phase deficit Q(ν_end = −1.92e-3) = +3.335e-6;
-    // central +4.581e-6, pre-registered and reproduced to 7 significant
-    // digits with ULP-twin spread ~4e-11. Gate = 2× the central — the
-    // dominant floor (A2's two-body coefficient) carries a percent-level
-    // e-dependence bound. Derivation: Phase B′ of
+    // Residual budget at exact finish time (signed, relative):
+    // derivation floors +1.246e-6 (two-body O(m/M), second-order k·ε)
+    // plus the exact-endpoint phase deficit Q(ν_end = −1.92e-3) =
+    // +3.335e-6; central +4.581e-6, pre-registered and reproduced to 7
+    // significant digits with ULP-twin spread ~4e-11. Gate = 2× the
+    // central — the dominant floor (the two-body coefficient) carries a
+    // percent-level e-dependence bound. Derivation:
     // paper/notebooks/2026-06-10-mercury-1pn-error-budget.md.
     const REL_TOL: f64 = 2.0 * 4.581e-6;
 

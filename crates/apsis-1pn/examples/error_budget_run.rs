@@ -1,4 +1,7 @@
-//! Phase-B error-budget run — one parameterised Mercury 1PN gate measurement.
+//! Mercury 1PN error-budget measurement — one parameterised run of the
+//! precession-gate scenario, driven by
+//! `validation/mercury-1pn-error-budget/ensemble.py` (protocol:
+//! `paper/notebooks/2026-06-10-mercury-1pn-error-budget.md`).
 //!
 //! Outputs one CSV line to stdout:
 //!
@@ -6,13 +9,13 @@
 //! orbits,ulp,constructor,eps_b,measured_rad,predicted_rad,rel_err,t_overshoot,nu_end
 //! ```
 //!
-//! `rel_err` is SIGNED: `(measured - predicted) / predicted`. `t_overshoot`
-//! is the time by which `integrate_for` exceeded the requested
-//! `N * el0.period` (the loop exits at the first accepted IAS15 step with
-//! `t >= t_end` — see `System::integrate_until`). `nu_end` is the
-//! osculating true anomaly at the endpoint: the Phase-B' endpoint-offset
-//! function `Q(nu)` converts it into the predicted angle residual
-//! (`error_budget_endpoint_symbolic.py`).
+//! `rel_err` is SIGNED: `(measured - predicted) / predicted`.
+//! `t_overshoot` is the time by which `integrate_for` exceeded the
+//! requested `N * el0.period` (zero under exact-finish-time semantics,
+//! ADR-015). `nu_end` is the osculating true anomaly at the endpoint:
+//! the endpoint-offset function `Q(nu)`, derived in
+//! `paper/notebooks/scripts/error_budget_endpoint_symbolic.py`, converts
+//! it into the predicted angle residual.
 //!
 //! Run (release mode required for gate fidelity):
 //!
@@ -28,7 +31,7 @@
 //!   by K ULPs (default 0; K may be negative)
 //! * `--constructor` — `for_units` or `raw_c` (default `raw_c`)
 //! * `--eps-b X` — IAS15 controller tolerance override (default: keep
-//!   the integrator default, 1e-9); Phase-B4 sweep knob
+//!   the integrator default, 1e-9); controller-tolerance sweep knob
 //!
 //! # ULP perturbation
 //!
@@ -104,8 +107,7 @@ fn main() {
     // ── Integrate ─────────────────────────────────────────────────────────────
     let t_requested = el0.period * (n_orbits as f64);
     sys.integrate_for(t_requested);
-    // `integrate_until` exits at the first accepted step with t >= t_end:
-    // the endpoint state sits up to one adaptive sub-step past t_requested.
+    // Zero under exact finish time (ADR-015); kept as a regression sentinel.
     let t_overshoot = sys.t() - t_requested;
 
     // ── Measure perihelion advance ────────────────────────────────────────────
