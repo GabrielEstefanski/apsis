@@ -3,8 +3,16 @@
 //! Outputs one CSV line to stdout:
 //!
 //! ```text
-//! orbits,ulp,constructor,measured_rad,predicted_rad,rel_err
+//! orbits,ulp,constructor,eps_b,measured_rad,predicted_rad,rel_err,t_overshoot,nu_end
 //! ```
+//!
+//! `rel_err` is SIGNED: `(measured - predicted) / predicted`. `t_overshoot`
+//! is the time by which `integrate_for` exceeded the requested
+//! `N * el0.period` (the loop exits at the first accepted IAS15 step with
+//! `t >= t_end` — see `System::integrate_until`). `nu_end` is the
+//! osculating true anomaly at the endpoint: the Phase-B' endpoint-offset
+//! function `Q(nu)` converts it into the predicted angle residual
+//! (`error_budget_endpoint_symbolic.py`).
 //!
 //! Run (release mode required for gate fidelity):
 //!
@@ -19,6 +27,8 @@
 //! * `--ulp K` — signed integer; perturbs Mercury's initial x-position
 //!   by K ULPs (default 0; K may be negative)
 //! * `--constructor` — `for_units` or `raw_c` (default `raw_c`)
+//! * `--eps-b X` — IAS15 controller tolerance override (default: keep
+//!   the integrator default, 1e-9); Phase-B4 sweep knob
 //!
 //! # ULP perturbation
 //!
@@ -55,7 +65,7 @@ const E: f64 = 0.205_63;
 const M_MERCURY: f64 = 1.660_114e-7;
 
 fn main() {
-    let (n_orbits, ulp_k, use_for_units) = parse_args();
+    let (n_orbits, ulp_k, use_for_units, eps_b) = parse_args();
 
     // ── Initial conditions ────────────────────────────────────────────────────
     let sun = Body::star(1.0);
@@ -82,6 +92,9 @@ fn main() {
         .with_dt(1e-4);
     sys.add_hamiltonian_perturbation(Box::new(pn))
         .expect("error_budget_run: shared UnitSystem::solar_canonical()");
+    if let Some(eps) = eps_b {
+        sys.set_ias15_epsilon(eps);
+    }
 
     // ── Reference state ───────────────────────────────────────────────────────
     // mu = 1.0, matching the gate's compute_elements call.
@@ -89,7 +102,11 @@ fn main() {
         .expect("error_budget_run: bound elements at t = 0");
 
     // ── Integrate ─────────────────────────────────────────────────────────────
-    sys.integrate_for(el0.period * (n_orbits as f64));
+    let t_requested = el0.period * (n_orbits as f64);
+    sys.integrate_for(t_requested);
+    // `integrate_until` exits at the first accepted step with t >= t_end:
+    // the endpoint state sits up to one adaptive sub-step past t_requested.
+    let t_overshoot = sys.t() - t_requested;
 
     // ── Measure perihelion advance ────────────────────────────────────────────
     let el_end = compute_elements(sys.bodies(), 1, 0, 1.0)
@@ -112,12 +129,23 @@ fn main() {
     // produce their own self-consistent predictions.
     let predicted = 6.0 * PI / (c * c * A * (1.0 - E * E)) * (n_orbits as f64);
 
-    let rel_err = (measured - predicted).abs() / predicted.abs();
+    // Signed: the Phase-B ensembles are one-sided, |.| would fold the sign.
+    let rel_err = (measured - predicted) / predicted;
+
+    let nu_end = el_end.true_anomaly;
 
     // ── Output ────────────────────────────────────────────────────────────────
     println!(
-        "{},{},{},{:.17e},{:.17e},{:.17e}",
-        n_orbits, ulp_k, constructor_label, measured, predicted, rel_err
+        "{},{},{},{:e},{:.17e},{:.17e},{:.17e},{:.17e},{:.17e}",
+        n_orbits,
+        ulp_k,
+        constructor_label,
+        eps_b.unwrap_or(1e-9),
+        measured,
+        predicted,
+        rel_err,
+        t_overshoot,
+        nu_end
     );
 }
 
@@ -132,13 +160,15 @@ fn apply_ulp(x: f64, k: i64) -> f64 {
     f64::from_bits(perturbed)
 }
 
-/// Parse `--orbits N`, `--ulp K`, `--constructor for_units|raw_c` from argv.
-/// Unknown / extra arguments are silently ignored so the binary stays terse.
-fn parse_args() -> (u64, i64, bool) {
+/// Parse `--orbits N`, `--ulp K`, `--constructor for_units|raw_c`,
+/// `--eps-b X` from argv. Unknown / extra arguments are silently ignored
+/// so the binary stays terse.
+fn parse_args() -> (u64, i64, bool, Option<f64>) {
     let args: Vec<String> = std::env::args().collect();
     let mut n_orbits: u64 = 500;
     let mut ulp_k: i64 = 0;
     let mut use_for_units = false; // default: raw_c
+    let mut eps_b: Option<f64> = None;
 
     let mut i = 1;
     while i < args.len() {
@@ -159,9 +189,13 @@ fn parse_args() -> (u64, i64, bool) {
                     other => panic!("--constructor must be `for_units` or `raw_c`, got `{other}`"),
                 }
             },
+            "--eps-b" => {
+                i += 1;
+                eps_b = Some(args[i].parse().expect("--eps-b requires a positive float"));
+            },
             _ => {},
         }
         i += 1;
     }
-    (n_orbits, ulp_k, use_for_units)
+    (n_orbits, ulp_k, use_for_units, eps_b)
 }
