@@ -2,8 +2,8 @@
 error_budget_endpoint_numerical.py
 ==================================
 
-Phase-B' discriminator: extended-precision verification of the endpoint
-structure of the osculating omega derived in
+Extended-precision discriminator for the endpoint structure of the
+osculating omega derived in
 `error_budget_endpoint_symbolic.py`, in the gate's measurement convention
 (fixed-time endpoint, Newtonian e-vector, mu = 1).
 
@@ -31,6 +31,8 @@ Run:  python paper/notebooks/scripts/error_budget_endpoint_numerical.py
 
 import sys
 import time
+from dataclasses import dataclass
+from typing import Any
 
 import mpmath
 from mpmath import atan2, mp, mpf, pi, sin, sqrt
@@ -104,13 +106,33 @@ def Q_of_nu(eps, e, nu):
 
 # ── One scenario: integrate N orbits, measure at fixed times ──────────────────
 
-def run_scenario(e, eps, n_orbits, dt_grid_frac):
+@dataclass
+class GridPoint:
+    """One displaced-endpoint measurement (all values mpmath mpf)."""
+
+    frac: Any
+    nu: Any
+    meas: Any
+    pred: Any
+    diff: Any
+
+
+@dataclass
+class Scenario:
+    """One (e, eps, N) integration with its endpoint measurements."""
+
+    eps: Any
+    n: int
+    nu_end: Any
+    residual_exact: Any
+    q_end: Any
+    grid: list[GridPoint]
+
+
+def run_scenario(e, eps, n_orbits, dt_grid_frac) -> Scenario:
     """
     Integrate the 1PN EOM through t_end = N*P0 (+ max grid offset),
     measure (omega, nu) at t_end and at each grid offset.
-
-    Returns dict with residual at exact endpoint and per-grid-point
-    measured/predicted shifts.
     """
     c = c_from_eps(eps, A_ORB, e)
     x0, y0, vx0, vy0 = periapsis_ic(A_ORB, e)
@@ -133,15 +155,15 @@ def run_scenario(e, eps, n_orbits, dt_grid_frac):
     predicted_secular = 6 * pi * eps * n_orbits
     residual_exact = omega_end - predicted_secular  # omega(0) = 0 by IC
 
-    grid = []
+    grid: list[GridPoint] = []
     for frac in dt_grid_frac:
         t_g = t_end + frac * P0
         om_g, nu_g = osculating_omega_nu(sol(t_g))
         meas_shift = om_g - omega_end
         pred_shift = Q_of_nu(eps, e, nu_g) - Q_of_nu(eps, e, nu_end)
         grid.append(
-            dict(frac=frac, nu=nu_g, meas=meas_shift, pred=pred_shift,
-                 diff=meas_shift - pred_shift)
+            GridPoint(frac=frac, nu=nu_g, meas=meas_shift, pred=pred_shift,
+                      diff=meas_shift - pred_shift)
         )
     t2 = time.time()
     print(
@@ -149,7 +171,7 @@ def run_scenario(e, eps, n_orbits, dt_grid_frac):
         f"nu_end={mpmath.nstr(nu_end, 8)}  residual={mpmath.nstr(residual_exact, 8)}",
         flush=True,
     )
-    return dict(
+    return Scenario(
         eps=eps, n=n_orbits, nu_end=nu_end,
         residual_exact=residual_exact, q_end=Q_of_nu(eps, e, nu_end), grid=grid,
     )
@@ -189,7 +211,7 @@ def main():
         results.append(run_scenario(e_mercury, eps, n_ladder, grid_frac))
 
     alpha, beta = fit_alpha_beta(
-        [r["eps"] for r in results], [r["residual_exact"] for r in results]
+        [r.eps for r in results], [r.residual_exact for r in results]
     )
     gn1_pass = abs(alpha) < mpf("0.05")
     print("\n  [GN1] residual = alpha*eps + beta*eps^2:")
@@ -205,17 +227,17 @@ def main():
     print("\nGN2 overshoot grid: Delta_omega vs Q(nu_2) - Q(nu_1), per rung")
     gn2_pass = True
     for r in results:
-        bound = 10 * 400 * r["eps"] ** 2
-        print(f"  eps={float(r['eps']):.1e}  bound={float(bound):.3e}")
-        for g in r["grid"]:
-            ok = abs(g["diff"]) < bound
+        bound = 10 * 400 * r.eps ** 2
+        print(f"  eps={float(r.eps):.1e}  bound={float(bound):.3e}")
+        for g in r.grid:
+            ok = abs(g.diff) < bound
             gn2_pass = gn2_pass and ok
-            ratio = g["meas"] / g["pred"] if g["pred"] != 0 else mpf("nan")
+            ratio = g.meas / g.pred if g.pred != 0 else mpf("nan")
             print(
-                f"    dt/P0={float(g['frac']):+.3f}  nu={mpmath.nstr(g['nu'], 6)}  "
-                f"meas={mpmath.nstr(g['meas'], 8)}  pred={mpmath.nstr(g['pred'], 8)}  "
+                f"    dt/P0={float(g.frac):+.3f}  nu={mpmath.nstr(g.nu, 6)}  "
+                f"meas={mpmath.nstr(g.meas, 8)}  pred={mpmath.nstr(g.pred, 8)}  "
                 f"meas/pred={mpmath.nstr(ratio, 8)}  "
-                f"diff={mpmath.nstr(g['diff'], 4)}  {'PASS' if ok else 'FAIL'}"
+                f"diff={mpmath.nstr(g.diff, 4)}  {'PASS' if ok else 'FAIL'}"
             )
     print(f"  [GN2] all grid points within 4000*eps^2: {'PASS' if gn2_pass else 'FAIL'}")
     if not gn2_pass:
@@ -225,8 +247,8 @@ def main():
     # ── GN3: N-constancy probe at eps = 1e-5 (N = 10 vs N = 3) ───────────────
     print("\nGN3 probe: N=10 at eps=1e-5 (exact endpoint)")
     r10 = run_scenario(e_mercury, eps_ladder[0], 10, [])
-    print(f"  residual(N=3)  = {mpmath.nstr(results[0]['residual_exact'], 8)}")
-    print(f"  residual(N=10) = {mpmath.nstr(r10['residual_exact'], 8)}")
+    print(f"  residual(N=3)  = {mpmath.nstr(results[0].residual_exact, 8)}")
+    print(f"  residual(N=10) = {mpmath.nstr(r10.residual_exact, 8)}")
     print("  (physics endpoint residual scales with N through nu_end and the")
     print("   eps^2 secular term — a constant-in-N O(eps) term would not.)")
 
@@ -235,13 +257,13 @@ def main():
     r_e4 = run_scenario(mpf("0.4"), eps_ladder[0], n_ladder, grid_frac)
     gn4_pass = True
     bound = 10 * 400 * eps_ladder[0] ** 2
-    for g in r_e4["grid"]:
-        ok = abs(g["diff"]) < bound
+    for g in r_e4.grid:
+        ok = abs(g.diff) < bound
         gn4_pass = gn4_pass and ok
-        ratio = g["meas"] / g["pred"] if g["pred"] != 0 else mpf("nan")
+        ratio = g.meas / g.pred if g.pred != 0 else mpf("nan")
         print(
-            f"    dt/P0={float(g['frac']):+.3f}  meas/pred={mpmath.nstr(ratio, 8)}  "
-            f"diff={mpmath.nstr(g['diff'], 4)}  {'PASS' if ok else 'FAIL'}"
+            f"    dt/P0={float(g.frac):+.3f}  meas/pred={mpmath.nstr(ratio, 8)}  "
+            f"diff={mpmath.nstr(g.diff, 4)}  {'PASS' if ok else 'FAIL'}"
         )
     print(f"  [GN4] {'PASS' if gn4_pass else 'FAIL'}")
     if not gn4_pass:
@@ -256,8 +278,8 @@ def main():
     print(f"GN1 PASS  alpha = {mpmath.nstr(alpha, 8)}  (|alpha| < 0.05; f64 shows -0.56)")
     print(f"GN1       beta  = {mpmath.nstr(beta, 8)}")
     print("GN2 PASS  Q(nu) reproduces the overshoot response, parameter-free")
-    print(f"GN3       residual(N=3) = {mpmath.nstr(results[0]['residual_exact'], 6)}  "
-          f"residual(N=10) = {mpmath.nstr(r10['residual_exact'], 6)}")
+    print(f"GN3       residual(N=3) = {mpmath.nstr(results[0].residual_exact, 6)}  "
+          f"residual(N=10) = {mpmath.nstr(r10.residual_exact, 6)}")
     print("GN4 PASS  e-dependence of Q validated at e=0.4")
     print("=" * 72)
 

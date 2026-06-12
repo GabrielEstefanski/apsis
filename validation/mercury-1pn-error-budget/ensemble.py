@@ -18,13 +18,14 @@ smoke : 3 ULPs {0,1,2} x both constructors at N=500.
 
 b1    : ULPs 0..24 (25 runs) x both constructors at N=500.
         Writes out/b1.csv.  Per constructor: raw mean/sigma of the signed
-        rel_err, B5 central values, and the Phase-B' Q-corrected budget
-        (residual - Q(nu_end), compared against the Phase-A floors).
+        rel_err, the ulp=0 central values, and the Q-corrected budget
+        (residual - Q(nu_end) against the derivation floors; see below).
 
 b3    : ULPs 0..24 x N in {100, 250, 500, 1000, 2000}, constructor raw_c only.
-        Writes out/b3.csv.  H3 fit on raw sigma AND on Q-corrected sigma
-        (the raw exponent is contaminated by endpoint sampling; the
-        corrected one measures the actual integration-noise regime).
+        Writes out/b3.csv.  Growth-exponent fit of sigma vs N on raw and
+        on Q-corrected residuals (the raw exponent is contaminated by
+        endpoint sampling; the corrected one measures the actual
+        integration-noise regime).
 
 b4    : ULPs 0..11 x eps_b in {1e-7..1e-11} at N=500, raw_c only.
         Writes out/b4.csv.  Per eps_b: mean overshoot, raw and corrected
@@ -32,19 +33,21 @@ b4    : ULPs 0..11 x eps_b in {1e-7..1e-11} at N=500, raw_c only.
         must track the endpoint step size; the corrected one must sit at
         the floors, eps_b-independent.
 
-Phase-B' correction
+Endpoint correction
 -------------------
-`error_budget_endpoint_symbolic.py` (gates GB-h, GB0..GB5) derives the
+`paper/notebooks/scripts/error_budget_endpoint_symbolic.py` derives the
 endpoint-offset function
 
     Q(nu) = eps * (3 nu - (3/e - e) sin nu - (5/2) sin 2 nu)
 
 with eps recovered per-row as predicted_rad / (6 pi N) — no constants
-duplicated here. `integrate_until` exits up to one adaptive IAS15 step
-past t_end, so the endpoint samples osculating omega at true anomaly
-nu_end != 0; Q(nu_end) is the deterministic part of that sampling error
-(verified parameter-free in `error_budget_endpoint_numerical.py`,
-gates GN1, GN2, GN4).
+duplicated here. Under overshoot semantics `integrate_until` exits up
+to one adaptive IAS15 step past t_end, so the endpoint samples the
+osculating omega at true anomaly nu_end != 0; Q(nu_end) is the
+deterministic part of that sampling error (verified parameter-free in
+`error_budget_endpoint_numerical.py`). Phase vocabulary (b1/b3/b4,
+floors, hypotheses) is defined in the protocol notebook,
+`paper/notebooks/2026-06-10-mercury-1pn-error-budget.md`.
 """
 
 from __future__ import annotations
@@ -55,7 +58,9 @@ import math
 import subprocess
 import sys
 import time
+from collections.abc import Callable, Iterable
 from pathlib import Path
+from typing import Any
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 
@@ -98,7 +103,7 @@ def q_of_nu(eps: float, nu: float) -> float:
     return eps * (3.0 * nu - (3.0 / e - e) * math.sin(nu) - 2.5 * math.sin(2.0 * nu))
 
 
-def enrich(row: dict) -> dict:
+def enrich(row: dict[str, Any]) -> dict[str, Any]:
     """Attach derived per-row quantities: eps, angle residual, Q, corrected."""
     n = row["orbits"]
     eps = row["predicted_rad"] / (6.0 * math.pi * n)
@@ -114,7 +119,9 @@ def enrich(row: dict) -> dict:
 
 # ── Runner ────────────────────────────────────────────────────────────────────
 
-def run_one(n_orbits: int, ulp: int, constructor: str, eps_b: float | None = None) -> dict:
+def run_one(
+    n_orbits: int, ulp: int, constructor: str, eps_b: float | None = None
+) -> dict[str, Any]:
     """Execute one error_budget_run and return the parsed result dict."""
     cmd = [
         "cargo", "run", "--release", "--example", "error_budget_run",
@@ -155,7 +162,7 @@ def run_one(n_orbits: int, ulp: int, constructor: str, eps_b: float | None = Non
         )
         sys.exit(1)
 
-    row = {
+    row: dict[str, Any] = {
         "orbits": int(parts[0]),
         "ulp": int(parts[1]),
         "constructor": parts[2],
@@ -197,7 +204,7 @@ def _fit_log_log(xs: list[float], ys: list[float]) -> tuple[float, float]:
     return alpha, stderr
 
 
-def budget_summary(rows: list[dict], label: str) -> None:
+def budget_summary(rows: list[dict[str, Any]], label: str) -> None:
     """Raw + Q-corrected ensemble summary for one (constructor, N) subset."""
     n = rows[0]["orbits"]
     pred = rows[0]["predicted_rad"]
@@ -262,9 +269,13 @@ def phase_smoke() -> None:
 
 # ── CSV writer shared by b1/b3/b4 ─────────────────────────────────────────────
 
-def write_rows(out_path: Path, grid, label_fn) -> list[dict]:
+def write_rows(
+    out_path: Path,
+    grid: Iterable[tuple[int, int, str, float | None]],
+    label_fn: Callable[[dict[str, Any]], str],
+) -> list[dict[str, Any]]:
     OUT_DIR.mkdir(exist_ok=True)
-    rows: list[dict] = []
+    rows: list[dict[str, Any]] = []
     with out_path.open("w", newline="") as fh:
         writer = csv.DictWriter(fh, fieldnames=FIELDNAMES, extrasaction="ignore")
         writer.writeheader()
@@ -301,7 +312,7 @@ def phase_b1() -> None:
         subset = [r for r in rows if r["constructor"] == constructor]
         budget_summary(subset, constructor)
         central = next(r for r in subset if r["ulp"] == 0)
-        print(f"    B5 central (ulp=0): rel_err={central['rel_err']:+.6e}")
+        print(f"    central (ulp=0): rel_err={central['rel_err']:+.6e}")
 
 
 # ── Phase: b3 ─────────────────────────────────────────────────────────────────
@@ -342,7 +353,7 @@ def phase_b3() -> None:
             sig_cor.append(s_cor)
 
     print()
-    print("H3 fit: log(sigma_angle) ~ alpha * log(N)   [angle units, rad]")
+    print("Growth-exponent fit: log(sigma_angle) ~ alpha * log(N)   [angle units, rad]")
     a_raw, e_raw = _fit_log_log(n_vals, sig_raw)
     a_cor, e_cor = _fit_log_log(n_vals, sig_cor)
     print(f"  raw        : alpha = {a_raw:+.4f} ± {e_raw:.4f}   (endpoint-sampling contaminated)")
