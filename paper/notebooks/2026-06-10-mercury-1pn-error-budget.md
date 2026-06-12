@@ -12,9 +12,11 @@ single-number framing of the cross-platform section with a budget in
 which every component is either derived in this notebook or measured by
 a declared protocol.
 
-**Status:** *Protocol draft — phases and hypotheses declared a priori.
-Phase A derivations to be carried out in this notebook before any
-apparatus code; phase-B gates freeze when phase A closes.*
+**Status:** *Protocol declared a priori 2026-06-10. Phase A: A1 closed
+2026-06-11 — the second-order coefficient is derived in closed form,
+verified by independent extended-precision integration, and found to be
+parameterization-dependent at $O(\varepsilon^2)$ (see §Phase A results);
+A3 closed as stated; A2 pending. Phase-B gates freeze when A2 closes.*
 
 ---
 
@@ -102,6 +104,88 @@ integration before it anchors a gate.
   differing by $-2\delta$ to first order in $\delta$; with
   $\delta = 18.9$ ppm (ADR-014), the offset is $37.8$ ppm. Stated, not
   gated — it is exact at this order.
+
+## Phase A results (2026-06-11)
+
+### A1 — second-order secular advance: closed form, two parameterizations
+
+The azimuthal equation admits an exact first integral,
+$h_0 = h\,e^{4\mu u/c^2}$ with $h = r^2\dot\varphi$ and $u = 1/r$ (the
+exponent is determined, not assumed, by the symbolic gate G0). Reducing
+to the orbit equation $u(\varphi)$ with $h(u)$ exact and carrying
+Lindstedt–Poincaré to second order in $\delta = 1/c^2$ gives, with
+$s = \Omega\varphi$ and $u_0 = (\mu/h_0^2)(1 + e\cos s)$:
+
+$$\omega_1 = -\frac{3\mu^2}{h_0^2}, \qquad
+  \omega_2 = -\frac{\mu^4\,(19 + 2e^2)}{2 h_0^4}, \qquad
+  u_1 = \frac{\mu^3 (e^2+5)}{h_0^4},$$
+
+with $u_2$ a finite harmonic polynomial (no secular terms; the
+order-by-order residuals vanish identically). The advance per radial
+period, $\Delta\omega = 2\pi(\Omega^{-1} - 1)$, reproduces
+$6\pi\varepsilon$ exactly at first order (gate G1) and yields
+
+$$k_\text{inv}(e) = \frac{37 + 2e^2}{6}
+  \qquad \text{with} \quad \varepsilon = \frac{\mu}{c^2 p},
+  \quad p = h_0^2/\mu .$$
+
+The independent verification integrates the same force in extended
+precision (40 significant digits, Taylor IVP; periapsis-to-periapsis
+angle by root-finding on $\dot r$) over an amplified ladder
+$\varepsilon \in [10^{-6}, 10^{-4}]$ from Newtonian periapsis initial
+conditions, and measures
+
+$$k(e{=}0.2) = -3.4200004 \pm 3\times10^{-7}, \qquad
+  k(e{=}0.4) = -4.9800003 \pm 3\times10^{-7}$$
+
+— opposite in sign to $k_\text{inv}$. The two are reconciled exactly by
+the parameterization: **the coefficient is convention-dependent at
+$O(\varepsilon^2)$.** The integration's $\varepsilon$ is built from the
+osculating elements of the periapsis initial condition, whose
+semi-latus rectum differs from the invariant one:
+$p_\text{inv} = p_\text{osc}\,e^{8\mu u_0 \delta}$ at the initial point,
+and with $\mu u_0 \delta = \varepsilon_\text{osc}(1+e)$ at periapsis the
+first-order term $6\pi\varepsilon_\text{inv}$ contributes $-8(1+e)$ to
+the osculating-convention coefficient:
+
+$$k_\text{osc}(e) = k_\text{inv}(e) - 8(1+e)
+  = -\frac{11}{6} - 8e + \frac{e^2}{3},$$
+
+predicting $-3.42000$ and $-4.98000$ at the two eccentricities —
+agreement with the measured values at their jackknife uncertainty. The
+linear-in-$e$ term is legitimate in this convention: starting at
+periapsis breaks the $e \to -e$ parity that the invariant
+parameterization respects ($k_\text{inv}$ is even in $e$).
+
+The gate's closed-form prediction uses the osculating elements of the
+initial condition, so the budget takes the osculating convention: for
+Mercury ($e = 0.20563$), $k_\text{osc} \approx -3.46$ and the derivation
+floor is
+
+$$\left|k_\text{osc}\right|\varepsilon \approx 9.4\times10^{-8}
+  \ \text{(relative)},$$
+
+sharpening the order-of-magnitude estimate of §Framing (the floor sits
+three decades below the observed residual, as anticipated). Derivation
+and verification artefacts:
+`paper/notebooks/scripts/error_budget_k_symbolic.py` (exact-integral
+gate, Lindstedt orders, harmonic residuals — all asserted) and
+`paper/notebooks/scripts/error_budget_k_numerical.py` (ladder, gates:
+first-order recovery, 40-vs-55-digit agreement ≥ 25 significant digits,
+Newtonian null at $c \to 10^{30}$).
+
+### A3 — convention offset
+
+Closed as stated in the protocol: $\Delta\omega \propto c^{-2}$ gives a
+$-2\delta = -37.8$ ppm offset between the two $c$ conventions, exact at
+first order in $\delta = 18.9$ ppm.
+
+### A2 — two-body $O(m/M)$ correction
+
+Pending: mass-scaling runs ($m$, $m/10$, $m/100$) per the protocol;
+phase-B gates freeze when it closes.
+
+---
 
 ## Phase B — ensemble measurement *(gates frozen at end of Phase A)*
 
