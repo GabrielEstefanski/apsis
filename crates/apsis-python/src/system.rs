@@ -152,9 +152,10 @@ impl PySystem {
     }
 
     /// Advance the simulation by `duration` time units relative to
-    /// the current `t`. For adaptive integrators, the actual final
-    /// `t` may slightly exceed `current_t + duration` by at most one
-    /// sub-step (the loop exits as soon as the threshold is crossed).
+    /// the current `t`, landing exactly on the target time (the final
+    /// step is clipped). Disable with
+    /// [`set_exact_finish_time`](Self::set_exact_finish_time) to run
+    /// whole steps past the target instead.
     fn integrate_for(&mut self, duration: f64) -> PyResult<u64> {
         if !duration.is_finite() || duration < 0.0 {
             return Err(value_error(
@@ -165,14 +166,25 @@ impl PySystem {
         Ok(self.inner.integrate_for(duration))
     }
 
-    /// Advance the simulation until `t >= t_end`. No-op when the
-    /// current `t` already meets that condition. Returns the number
-    /// of integrator steps executed during the call.
+    /// Advance the simulation until `t == t_end` (exact finish time,
+    /// the default) or until the first step at or past `t_end` when
+    /// exact finish time is disabled. No-op when the current `t`
+    /// already meets the target. Returns the number of integrator
+    /// steps executed during the call.
     fn integrate_until(&mut self, t_end: f64) -> PyResult<u64> {
         if !t_end.is_finite() {
             return Err(value_error("t_end", format!("expected a finite float, got {t_end}")));
         }
         Ok(self.inner.integrate_until(t_end))
+    }
+
+    /// Toggle exact-finish-time semantics for `integrate_for` /
+    /// `integrate_until` (REBOUND's `exact_finish_time`). On by
+    /// default. Disabling preserves a fixed-step symplectic rhythm
+    /// across sampling boundaries, at the cost of sampling the state
+    /// up to one step past the requested time.
+    fn set_exact_finish_time(&mut self, exact: bool) {
+        self.inner.set_exact_finish_time(exact);
     }
 
     /// Close any attached records and fire each hook's lifecycle-end

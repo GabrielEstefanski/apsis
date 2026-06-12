@@ -310,11 +310,14 @@ impl System {
 
     /// Advance the simulation by `duration` time units.
     ///
-    /// Steps until `self.t` has advanced by at least `duration` relative to
-    /// its value at the start of the call. Uses the currently configured
-    /// timestep (`self.current_dt`) — so adaptive integrators (IAS15) decide
-    /// their own sub-cadence within each logical step, while fixed-step
-    /// integrators (Yoshida, Verlet) take exactly `ceil(duration / dt)` steps.
+    /// Steps until `self.t` has advanced by `duration` relative to its
+    /// value at the start of the call, landing exactly on the target
+    /// time (the final step is clipped; see
+    /// [`set_exact_finish_time`](crate::core::system::System::set_exact_finish_time)
+    /// for the opt-out and its symplectic-rhythm caveat). Adaptive
+    /// integrators (IAS15) decide their own sub-cadence; fixed-step
+    /// integrators (Yoshida, Verlet) take `ceil(duration / dt)` steps,
+    /// the last one shortened to fit.
     ///
     /// Respects [`stop_requested`](crate::core::system::System::stop_requested)
     /// and exits early if set — callers who want unconditional progress
@@ -327,18 +330,57 @@ impl System {
         self.integrate_until(t_end)
     }
 
-    /// Advance the simulation until `self.t >= t_end`.
+    /// Advance the simulation until `self.t == t_end` (exact finish
+    /// time, the default) or until the first step at or past `t_end`
+    /// (opt-out; see
+    /// [`set_exact_finish_time`](crate::core::system::System::set_exact_finish_time)).
     ///
-    /// No-op if `t_end <= self.t`. Uses the currently configured timestep
-    /// (`self.current_dt`). Respects `stop_requested` and exits early.
+    /// No-op if `t_end <= self.t`. Respects `stop_requested` and exits
+    /// early. Returns the number of `step()` calls actually performed.
     ///
-    /// Returns the number of `step()` calls actually performed.
+    /// Without exact finish time, fixed-time measurements sample the
+    /// state up to one step past `t_end`; on the Mercury 1PN gate that
+    /// endpoint-sampling error dominated the residual (the osculating
+    /// ω slope at periapsis is `−ε(3−e)(1+e)/e` per radian of true
+    /// anomaly — see the Phase-B′ section of
+    /// `paper/notebooks/2026-06-10-mercury-1pn-error-budget.md`).
     pub fn integrate_until(&mut self, t_end: f64) -> u64 {
         let start_steps = self.steps;
         while self.t < t_end && !self.stop_requested {
+            if self.exact_finish_time {
+                let remaining = t_end - self.t;
+                if remaining < self.current_dt {
+                    if self.integrator.controls_own_step_size() {
+                        self.integrator.cap_next_step(remaining);
+                    } else {
+                        self.current_dt = remaining;
+                    }
+                }
+            }
             self.step();
         }
+        // Collapse the clipped step's `t += dt` round-off so callers
+        // measure at exactly `t_end`. The state is at `t_end` to within
+        // one ULP by construction (every crossing step was clipped).
+        if self.exact_finish_time && !self.stop_requested && self.steps > start_steps {
+            self.t = t_end;
+        }
         self.steps - start_steps
+    }
+
+    /// Toggle exact-finish-time semantics for
+    /// [`integrate_until`](Self::integrate_until) /
+    /// [`integrate_for`](Self::integrate_for). On by default. Disabling
+    /// lets the loop run whole steps past the target — useful when a
+    /// fixed-step symplectic rhythm matters more than the endpoint
+    /// time, at the cost of sampling the state up to one step late.
+    pub fn set_exact_finish_time(&mut self, exact: bool) {
+        self.exact_finish_time = exact;
+    }
+
+    /// Current exact-finish-time setting.
+    pub fn exact_finish_time(&self) -> bool {
+        self.exact_finish_time
     }
 
     /// Fire `on_finish` on every registered hook. Idempotent. Invoked

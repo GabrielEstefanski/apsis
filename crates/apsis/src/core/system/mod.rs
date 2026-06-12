@@ -219,6 +219,14 @@ pub struct System {
     /// Honoured by the run loop; downstream callers may inspect it.
     pub(crate) stop_requested: bool,
 
+    /// Land [`integrate_until`](System::integrate_until) exactly on
+    /// `t_end` by clipping the final step (REBOUND's
+    /// `exact_finish_time=1`). On by default; disable via
+    /// [`set_exact_finish_time`](System::set_exact_finish_time) to run
+    /// whole steps past `t_end`, e.g. to preserve a fixed-step
+    /// symplectic rhythm across sampling boundaries.
+    pub(crate) exact_finish_time: bool,
+
     /// Accumulated world-space COM translation since the last call to
     /// [`take_com_shift`](System::take_com_shift). Downstream visualisers
     /// read and clear this each frame to keep overlays aligned with the
@@ -407,6 +415,7 @@ impl System {
             seed: 0,
             hooks: HookRegistry::new(),
             stop_requested: false,
+            exact_finish_time: true,
             pending_com_shift: (0.0, 0.0),
             last_dense_snapshot: None,
             template_source: None,
