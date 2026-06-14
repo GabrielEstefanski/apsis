@@ -176,28 +176,37 @@ fn parse_args() -> (u64, i64, bool, Option<f64>) {
     while i < args.len() {
         match args[i].as_str() {
             "--orbits" => {
-                i += 1;
-                n_orbits = args[i].parse().expect("--orbits requires a non-negative integer");
+                n_orbits = next_value(&args, &mut i, "--orbits")
+                    .parse()
+                    .expect("--orbits requires a non-negative integer");
             },
             "--ulp" => {
-                i += 1;
-                ulp_k = args[i].parse().expect("--ulp requires a signed integer");
+                ulp_k = next_value(&args, &mut i, "--ulp")
+                    .parse()
+                    .expect("--ulp requires a signed integer");
             },
-            "--constructor" => {
-                i += 1;
-                match args[i].as_str() {
-                    "for_units" => use_for_units = true,
-                    "raw_c" => use_for_units = false,
-                    other => panic!("--constructor must be `for_units` or `raw_c`, got `{other}`"),
-                }
+            "--constructor" => match next_value(&args, &mut i, "--constructor") {
+                "for_units" => use_for_units = true,
+                "raw_c" => use_for_units = false,
+                other => panic!("--constructor must be `for_units` or `raw_c`, got `{other}`"),
             },
             "--eps-b" => {
-                i += 1;
-                eps_b = Some(args[i].parse().expect("--eps-b requires a positive float"));
+                eps_b = Some(
+                    next_value(&args, &mut i, "--eps-b")
+                        .parse()
+                        .expect("--eps-b requires a positive float"),
+                );
             },
             _ => {},
         }
         i += 1;
     }
     (n_orbits, ulp_k, use_for_units, eps_b)
+}
+
+/// Fetch the value following a flag, advancing the cursor. Panics with a
+/// legible message when the flag is the last argument (no value follows).
+fn next_value<'a>(args: &'a [String], i: &mut usize, flag: &str) -> &'a str {
+    *i += 1;
+    args.get(*i).unwrap_or_else(|| panic!("{flag} requires a value")).as_str()
 }
