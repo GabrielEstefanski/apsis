@@ -129,7 +129,7 @@ fn main() {
     // produce their own self-consistent predictions.
     let predicted = 6.0 * PI / (c * c * A * (1.0 - E * E)) * (n_orbits as f64);
 
-    // Signed: the Phase-B ensembles are one-sided, |.| would fold the sign.
+    // Signed: the residual ensembles are one-sided, |.| would fold the sign.
     let rel_err = (measured - predicted) / predicted;
 
     let nu_end = el_end.true_anomaly;

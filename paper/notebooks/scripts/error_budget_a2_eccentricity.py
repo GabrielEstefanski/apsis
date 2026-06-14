@@ -2,19 +2,21 @@
 error_budget_a2_eccentricity.py
 ===============================
 
-A2 follow-up: the eccentricity dependence of the two-body coefficient C.
+Eccentricity dependence of the two-body coefficient C.
 
-The closed Phase-A2 result measured C = 8.291 at e = 0.2; its e-dependence
-was "not probed, bounds the coefficient at the percent level"
-(error_budget_a2_mass_scaling.py). The Q-corrected error budget leaves a
-constant -3.6e-8 relative deficit, and the only floor not evaluated at
-Mercury's e = 0.20563 is A2 (A1's k_osc(e) is closed-form, already at
-Mercury's e). This script measures C(e) on a grid — reusing the A2
-machinery verbatim — to test whether C(0.20563) accounts for the deficit.
+The two-body floor's coefficient was first measured as C = 8.291 at
+e = 0.2 (error_budget_a2_mass_scaling.py), with its e-dependence not
+probed ("bounded at the percent level"). The Q-corrected error budget
+leaves a constant -3.6e-8 relative deficit, and the only floor not
+evaluated at Mercury's e = 0.20563 is the two-body term (the secular
+floor's k_osc(e) is closed-form, already at Mercury's e). This script
+measures C(e) on a grid — reusing the two-body machinery verbatim — to
+test whether C(0.20563) accounts for the deficit.
 
 The measurement is blind to the pre-registered target C(0.20563) ~ 8.074
 (validation/audit/ledger.md, 2026-06-12): it integrates the grid and
-reports. C(e=0.2) reproducing the committed 8.291 is gate EA.
+reports. Reproducing the committed 8.291 at e = 0.2 is the cross-check
+gate (EA).
 
 Run:  python paper/notebooks/scripts/error_budget_a2_eccentricity.py
 """
