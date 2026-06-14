@@ -78,10 +78,11 @@ B4_N_ORBITS = 500
 # Mirrors the gate constant (mercury_precession_gate.rs); consumed only by Q.
 E_MERCURY = 0.20563
 
-# Phase-A derivation floors, relative units (notebook, Phase A results):
-#   A1  k_osc * eps  ~ -9.4e-8     A2  C*q = 8.291 * 1.660114e-7 * ... ~ +1.376e-6
-FLOOR_A1 = -9.4e-8
-FLOOR_A2 = +8.291 * 1.660114e-7
+# Derivation floors at Mercury's e=0.20563, relative units. A1 = k_osc(e)*eps
+# (closed form); A2 = C(e)*q, C measured at e by error_budget_a2_eccentricity.py
+# (strongly e-dependent — not the e=0.2 value 8.291).
+FLOOR_A1 = -3.46428 * 2.662484e-8
+FLOOR_A2 = +8.0617 * 1.660114e-7
 
 FIELDNAMES = [
     "orbits", "ulp", "constructor", "eps_b",
