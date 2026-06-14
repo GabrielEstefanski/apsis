@@ -47,7 +47,7 @@ the operator's crate compile site (not apsis core's).
 ```rust
 pub struct Citation {
     pub bibtex: &'static str,           // Full entry / entries
-    pub doi: Option<&'static str>,       // Bare suffix, e.g. "10.1086/153180"
+    pub doi: Option<&'static str>,       // Bare suffix, e.g. "10.1086/153779"
     pub crate_name: &'static str,        // env!("CARGO_PKG_NAME")
     pub crate_version: &'static str,     // env!("CARGO_PKG_VERSION")
     pub commit_hash: Option<&'static str>, // option_env!("APSIS_<CRATE>_GIT_COMMIT")
@@ -97,7 +97,7 @@ outputs across runs to confirm the operator stack stayed bit-equal.
 Provenance (1 operator):
 
   apsis-1pn 0.1.0 (commit 66a8683)
-    DOI: 10.1086/153180
+    DOI: 10.1086/153779
     @article{anderson1975, ...}
     @book{will1993, ...}
 ```

@@ -357,7 +357,7 @@ mod tests {
     fn full_citation() -> Citation {
         Citation {
             bibtex: "@article{anderson1975, ...}",
-            doi: Some("10.1086/153180"),
+            doi: Some("10.1086/153779"),
             crate_name: "apsis-1pn",
             crate_version: "0.1.0",
             commit_hash: Some("f2d8e91abcdef1234567890"),

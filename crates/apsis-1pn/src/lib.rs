@@ -38,7 +38,7 @@
 //!
 //! Anderson, J. D., Esposito, P. B., Martin, W., Thornton, C. L., &
 //! Muhleman, D. O. (1975). DOI:
-//! [10.1086/153180](https://doi.org/10.1086/153180).
+//! [10.1086/153779](https://doi.org/10.1086/153779).
 
 #![deny(unsafe_code)]
 #![allow(clippy::needless_range_loop)]
@@ -178,7 +178,7 @@ impl Operator for PostNewtonian1PN {
     fn citation(&self) -> Option<Citation> {
         Some(Citation {
             bibtex: PN1_BIBTEX,
-            doi: Some("10.1086/153180"),
+            doi: Some("10.1086/153779"),
             crate_name: env!("CARGO_PKG_NAME"),
             crate_version: env!("CARGO_PKG_VERSION"),
             commit_hash: option_env!("APSIS_1PN_GIT_COMMIT").filter(|s| !s.is_empty()),
@@ -196,7 +196,7 @@ const PN1_BIBTEX: &str = r#"@article{anderson1975,
   volume  = {200},
   pages   = {221--233},
   year    = {1975},
-  doi     = {10.1086/153180}
+  doi     = {10.1086/153779}
 }
 @book{will1993,
   author    = {Will, C. M.},
@@ -578,7 +578,7 @@ mod tests {
         let c = pn.citation().expect("PostNewtonian1PN must publish a citation");
         assert_eq!(c.crate_name, "apsis-1pn", "crate_name must match this crate");
         assert_eq!(c.crate_version, env!("CARGO_PKG_VERSION"));
-        assert_eq!(c.doi, Some("10.1086/153180"));
+        assert_eq!(c.doi, Some("10.1086/153779"));
         assert!(c.bibtex.contains("anderson1975"), "bibtex missing primary reference");
         assert!(c.bibtex.contains("will1993"), "bibtex missing textbook reference");
         assert!(c.bibtex.contains("Mariner"), "Anderson 1975 abstract phrase missing from bibtex");
