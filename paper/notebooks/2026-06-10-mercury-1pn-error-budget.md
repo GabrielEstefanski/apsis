@@ -15,9 +15,13 @@ a declared protocol.
 **Status:** *Protocol declared a priori 2026-06-10. **Phase A closed
 2026-06-11**: A1 — second-order coefficient in closed form, verified by
 independent extended-precision integration, parameterization-dependent
-at $O(\varepsilon^2)$; A2 — two-body coefficient $C = 8.291$ measured,
-Mercury floor $1.4\times10^{-6}$; A3 — exact. Phase-B gates are frozen
-as declared in §Hypotheses/§Phase B. Phase B pending.*
+at $O(\varepsilon^2)$; A2 — two-body coefficient $C(e)$ measured,
+$C(0.20563) = 8.0617$, Mercury floor $1.34\times10^{-6}$; A3 — exact.
+**Phase B closed 2026-06-13**: the residual decomposes as an
+integrator endpoint-sampling term $Q(\nu_\text{end})$ plus the A1+A2
+floors (H1 confirmed, H2 closes to $+4.8\times10^{-12}$, H3 round-off
+class); the endpoint artefact is fixed by exact-finish-time integration
+(ADR-015) and the gate tightens to $9.2\times10^{-6}$.*
 
 ---
 
@@ -39,7 +43,10 @@ while the integration carries the full secular content of the equation,
 so a second-order secular term $k \varepsilon^2$ ($k$ = O(1–10), derived
 in Phase A) bounds the agreement from below at
 
-$$\varepsilon_\text{Mercury} = \frac{1}{10065.32^2 \times 0.387098 \times (1 - 0.20563^2)} \approx 2.7 \times 10^{-8}.$$
+$$\varepsilon_\text{Mercury} = \frac{1}{10065.130^2 \times 0.387098 \times (1 - 0.20563^2)} \approx 2.66 \times 10^{-8},$$
+
+with $c = 10065.130$ the gate's `C_SOLAR_UNITS` (IAU julian-year value;
+the `for_units` Gaussian convention is $10065.32$, 18.9 ppm higher).
 
 Between that floor and the observed residual sit, in expected order of
 size: the c-convention offset (exact: $\Delta\omega \propto c^{-2}$, so
@@ -163,7 +170,7 @@ initial condition, so the budget takes the osculating convention: for
 Mercury ($e = 0.20563$), $k_\text{osc} \approx -3.46$ and the derivation
 floor is
 
-$$\left|k_\text{osc}\right|\varepsilon \approx 9.4\times10^{-8}
+$$\left|k_\text{osc}\right|\varepsilon \approx 9.22\times10^{-8}
   \ \text{(relative)},$$
 
 sharpening the order-of-magnitude estimate of §Framing (the floor sits
@@ -198,18 +205,26 @@ independent of $\varepsilon$ to $0.36\,\%$ across a decade, the
 Newtonian null at $3\times10^{-37}$ rad (a Keplerian relative orbit
 does not precess at any $q$ — the effect is purely 1PN-relative), and
 the $q \to 0$ limit matching the single-body A1 integration to 40
-significant digits. $C$ is measured at $e = 0.2 \approx e_\text{Mercury}$;
-its $e$-dependence is not probed and bounds the coefficient only at the
-percent level, which suffices for a floor.
+significant digits.
 
-For Mercury, $q = 1.66\times10^{-7}$ gives a two-body floor of
+$C$ was first measured at $e = 0.2$; its eccentricity dependence was
+then probed by re-measuring on a grid
+(`paper/notebooks/scripts/error_budget_a2_eccentricity.py`). $C$ falls
+steeply with $e$ — $C(0.15) = 11.08$, $C(0.2) = 8.291$ (reproducing the
+single-$e$ value, cross-check), $C(0.25) = 6.61$, $C(0.30) = 5.49$, a
+local slope $dC/de \approx -33.6$ — so the coefficient must be taken at
+Mercury's own eccentricity, not at $0.2$:
 
-$$C\,q \approx 1.4\times10^{-6}\ \text{(relative)}$$
+$$C(e_\text{Mercury} = 0.20563) = 8.0617 \quad
+  (\text{direct measurement; pre-registered at} \approx 8.074
+  \ \text{before the run}).$$
 
-— roughly $8\times$ the naive $m/M$ ceiling quoted in the paper's
-Results discussion, which treats the coefficient as unity. The floor
-remains ${\sim}60\times$ below the observed gate residual; the paper
-sentence is queued for correction with the derived value.
+For Mercury, $q = 1.66\times10^{-7}$ then gives a two-body floor of
+
+$$C(0.20563)\,q \approx 1.34\times10^{-6}\ \text{(relative)},$$
+
+the dominant derivation floor — roughly $8\times$ the naive $m/M$ ceiling
+that treats the coefficient as unity.
 
 ---
 
@@ -236,6 +251,113 @@ All runs: the gate scenario unchanged (IAS15, initial dt 10⁻⁴,
   the post-ADR-014 constants — the numbers that replace the
   cross-platform section's current values, each then placed in the
   budget table of §Verdict.
+
+## Phase B results (2026-06-13)
+
+### B1 — raw residual
+
+$K = 25$ single-ULP twins per convention at $N = 500$ give a signed
+residual that is *not* centred on zero:
+
+| Constructor | mean | $\sigma_\omega$ | central (ulp = 0) |
+| --- | --- | --- | --- |
+| `from_raw_c` | $-5.53\times10^{-5}$ | $4.10\times10^{-5}$ | $-7.03\times10^{-5}$ |
+| `for_units`  | $-5.89\times10^{-5}$ | $3.70\times10^{-5}$ | $-1.16\times10^{-4}$ |
+
+In angle units both the ensemble mean ($\approx -1.5\times10^{-8}$ rad)
+and $\sigma_\omega$ ($\approx 1.0\times10^{-8}$ rad) are constant in $N$
+over $N \in [100, 2000]$ (B3; raw growth exponent
+$\alpha_\text{angle} = -0.01 \pm 0.05$). A constant-in-$N$ bias *and*
+spread are incompatible with accumulation noise — both live at the
+endpoint, not in the integration.
+
+### B′ — endpoint sampling *(amendment, declared 2026-06-12)*
+
+`System::integrate_until` exited at the first accepted step with
+$t \ge t_\text{end}$, sampling the endpoint up to one adaptive sub-step
+past $t_\text{end} = N P_0$, at a small osculating true anomaly
+$\nu_\text{end} \ne 0$. The osculating $\omega$ (Newtonian e-vector, the
+gate's measurement) carries O($\varepsilon$) short-period structure;
+differentiating the osculating definitions along the 1PN flow — inputs
+the perturbed Binet equation and $h' = -4\mu\delta h u'$, both from the
+force — gives
+
+$$\frac{d\omega}{d\nu} = \varepsilon \left[ -\frac{3}{e}\cos\nu + 3
+  - 5\cos 2\nu + e\cos\nu \right],$$
+
+whose secular part reproduces $6\pi\varepsilon$ per orbit (an independent
+recovery of the A1 first-order result) and whose periodic part is odd in
+$\nu$ — invisible to periapsis-to-periapsis measurements. A fixed-time
+endpoint at anomaly $\nu$ past the N-th periapsis instead sees
+
+$$Q(\nu) = \varepsilon \left[ 3\nu - \left(\tfrac{3}{e} - e\right)\sin\nu
+  - \tfrac{5}{2}\sin 2\nu \right], \qquad
+  Q'(0) = -\varepsilon\,\frac{(3-e)(1+e)}{e}.$$
+
+The $3/e$ amplification is the conditioning of the e-vector direction at
+small $e$; for Mercury $Q'(0) = -16.38\,\varepsilon \approx
+-4.36\times10^{-7}$ rad per radian, so a half-sub-step overshoot
+($\nu \approx 0.03$) produces the observed $-1.4\times10^{-8}$ rad. All
+closed forms are asserted symbolically
+(`paper/notebooks/scripts/error_budget_endpoint_symbolic.py`; gates
+GB-h, GB0–GB5) and verified in extended precision
+(`error_budget_endpoint_numerical.py`): at the *exact* endpoint the
+fitted O($\varepsilon$) coefficient is $-2.4\times10^{-6}$ — against the
+f64 ensembles' $-0.56$, confirming the offset is an integrator-endpoint
+artefact, not a derivation floor — and $Q(\nu)$ reproduces displaced
+endpoints parameter-free to second order in $\varepsilon$.
+
+### Closure
+
+With the endpoint state $(t_\text{overshoot}, \nu_\text{end})$ emitted
+per run, the measured angle residual regresses on $Q(\nu_\text{end})$
+with slope $1.000\,000\,6 \pm 0.000\,000\,2$, and subtracting
+$Q(\nu_\text{end})$ collapses the ULP-twin spread from $10^{-8}$ to
+$10^{-14}$ rad. The corrected mean is the floor sum: with the e-correct
+floors (§A2, $C(0.20563) = 8.0617$, giving $A2 = 1.34\times10^{-6}$ and
+$A1 = -9.22\times10^{-8}$) the prediction $+1.246\times10^{-6}$ relative
+matches the measured corrected floor to $+4.8\times10^{-12}$. The entire
+Phase-B "realisation noise" was endpoint sampling; the gate residual
+decomposes per run as $Q(\nu_\text{end})$ (deterministic) plus the
+A1 + A2 derivation floors.
+
+### Verdicts
+
+- **H1** — confirmed: the libm-vs-UCRT shift sits at $1.1\,\sigma_\omega$
+  of the B1 distribution. The cross-implementation difference is an
+  endpoint re-draw, not accumulated arithmetic.
+- **H2** — closes: the predicted floors match the corrected residual to
+  $+4.8\times10^{-12}$ relative, with no remainder above the
+  $10^{-14}$ rad ensemble noise. Phase C is not required.
+- **H3** — the raw $\alpha_\text{angle} = -0.01 \pm 0.05$ identified the
+  bounded regime, but the bounded quantity was the endpoint-sampling
+  error; on corrected residuals the integration noise grows as
+  $\alpha_\text{angle} = +0.36 \pm 0.01$ at $\sigma \sim 10^{-14}$ rad
+  (round-off class). The B4 tolerance sweep agrees from an independent
+  axis — the corrected residual is $\epsilon_b$-independent across
+  $[10^{-7}, 10^{-11}]$ while the raw offset tracks the sub-step size.
+- **B5** — the single-run central residuals are endpoint-sampling draws
+  under overshoot semantics, not characteristic numbers of the
+  constructors; the budget's reproducible content is the floor sum and
+  the endpoint mechanism.
+
+### Resolution
+
+Exact-finish-time integration (ADR-015) clips the final step onto
+$t_\text{end}$: the overshoot is then zero, the gate residual is the
+floor sum $+4.581\times10^{-6}$ relative (pre-registered from the pre-fix
+endpoint states, reproduced to seven significant digits), and the
+Mercury gate tightens from $10^{-4}$ to $9.2\times10^{-6}$.
+
+### Protocol note
+
+The endpoint floor was identified from Phase-B data, then derived blind:
+closed-form in $e$, evaluated at Mercury's $e$ only afterwards, verified
+in extended precision (no f64 integrator in the loop) and against the
+ensemble with the overshoot pre-registered ($\langle\delta t\rangle =
+5.3\times10^{-3}$ predicted before the instrumented re-run measured
+$5.35\times10^{-3}$). The §Verdict rule "no bound adjusted after gated
+data exists" is met by declaration and blind derivation, not by tuning.
 
 ## Phase C — arithmetic/cadence decomposition *(conditional)*
 
