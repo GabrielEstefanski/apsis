@@ -2,8 +2,8 @@
 error_budget_endpoint_symbolic.py
 =================================
 
-Phase-B' derivation: the O(eps) structure of the *osculating* argument of
-periapsis omega along the truncated-1PN flow, in the gate's measurement
+The O(eps) structure of the *osculating* argument of periapsis omega
+along the truncated-1PN flow, in the gate's measurement
 convention (Newtonian e-vector, mu = 1).
 
 Motivation. The Phase-B ensembles show a constant-in-N angle offset of

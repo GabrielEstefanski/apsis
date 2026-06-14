@@ -609,6 +609,13 @@ pub struct Ias15 {
     /// `dt` on first use; thereafter driven by the error controller.
     dt_next: f64,
 
+    /// One-shot cap on the next `step()` call's advance, set by
+    /// [`Integrator::cap_next_step`] when `System::integrate_until`
+    /// clips the final step onto `t_end`. Consumed (and cleared) at the
+    /// top of `step()`; the controller's `dt_next` rhythm is restored
+    /// after a capped accept.
+    next_step_cap: Option<f64>,
+
     /// The `dt_try` that was accepted on the most recent internal attempt.
     /// Used as `dt_prev` in [`Self::warmstart_b`] so the q = dt_try/dt_prev
     /// ratio is correct. Zero means "no accepted step yet" — warm-start is
@@ -732,6 +739,7 @@ impl Ias15 {
             csx: Vec::new(),
             csv: Vec::new(),
             dt_next: 0.0,
+            next_step_cap: None,
             dt_last_accepted: 0.0,
             substeps_total: 0,
             rejections_picard_total: 0,
@@ -914,6 +922,17 @@ impl Integrator for Ias15 {
 
         let mut dt_try = self.dt_next.max(DT_MIN);
 
+        // One-shot exact-finish-time cap (`System::integrate_until`).
+        // `Some(natural)` marks this call as clipped; the accept path
+        // restores the controller rhythm from it.
+        let clipped_natural_dt = match self.next_step_cap.take() {
+            Some(cap) if cap.max(DT_MIN) < dt_try => {
+                dt_try = cap.max(DT_MIN);
+                Some(self.dt_next)
+            },
+            _ => None,
+        };
+
         // One snapshot per sub-step; `a₀` is restored by `restore_snapshot`
         // so it is evaluated only once even across rejection retries.
         time_phase!(snapshot_capture, {
@@ -1090,28 +1109,39 @@ impl Integrator for Ias15 {
                     // at `dt_try · DT_GROWTH_LIMIT` per R&S 2015 §3.4.
                     let new_dt_next = dt_new.min(dt_try * DT_GROWTH_LIMIT).max(DT_MIN);
 
-                    // Shrink-grow chatter detection: a *reversal* fires
-                    // when the current step proposed growth (`dt_next >
-                    // dt_try`) immediately after a step that proposed a
-                    // shrink (`dt_dir_prev == -1`). On smooth motion the
-                    // controller settles on a near-constant `dt_next`
-                    // and reversals are rare; persistent chatter
-                    // signals warmstart-controller oscillation, which
-                    // is the cumulative-failure fingerprint surfaced
-                    // through `AdaptiveStats::shrink_grow_cycles`.
-                    let dt_dir_now: i8 = if new_dt_next > dt_try {
-                        1
-                    } else if new_dt_next < dt_try {
-                        -1
+                    if let Some(natural) = clipped_natural_dt {
+                        // A clipped step samples the trajectory, not the
+                        // error landscape: restore the pre-clip proposal
+                        // and drop the warmstart record — its `b` history
+                        // is scaled to the clipped dt, and a large-ratio
+                        // extrapolation seeds Picard with garbage (see
+                        // docs/experiments/2026-04-26-ias15-warmstart-bug.md).
+                        self.dt_next = natural;
+                        self.dt_last_accepted = 0.0;
                     } else {
-                        0
-                    };
-                    if self.dt_dir_prev == -1 && dt_dir_now == 1 {
-                        self.shrink_grow_cycles_total =
-                            self.shrink_grow_cycles_total.saturating_add(1);
+                        // Shrink-grow chatter detection: a *reversal* fires
+                        // when the current step proposed growth (`dt_next >
+                        // dt_try`) immediately after a step that proposed a
+                        // shrink (`dt_dir_prev == -1`). On smooth motion the
+                        // controller settles on a near-constant `dt_next`
+                        // and reversals are rare; persistent chatter
+                        // signals warmstart-controller oscillation, which
+                        // is the cumulative-failure fingerprint surfaced
+                        // through `AdaptiveStats::shrink_grow_cycles`.
+                        let dt_dir_now: i8 = if new_dt_next > dt_try {
+                            1
+                        } else if new_dt_next < dt_try {
+                            -1
+                        } else {
+                            0
+                        };
+                        if self.dt_dir_prev == -1 && dt_dir_now == 1 {
+                            self.shrink_grow_cycles_total =
+                                self.shrink_grow_cycles_total.saturating_add(1);
+                        }
+                        self.dt_dir_prev = dt_dir_now;
+                        self.dt_next = new_dt_next;
                     }
-                    self.dt_dir_prev = dt_dir_now;
-                    self.dt_next = new_dt_next;
 
                     let label = if step_degraded { "accept_floor" } else { "accept" };
                     diag_emit_attempt(
@@ -1149,6 +1179,10 @@ impl Integrator for Ias15 {
 
     fn epsilon(&self) -> Option<f64> {
         Some(self.epsilon)
+    }
+
+    fn cap_next_step(&mut self, max_dt: f64) {
+        self.next_step_cap = Some(max_dt);
     }
 
     /// IAS15 owns its step size: the caller's `dt_hint` is a first-call

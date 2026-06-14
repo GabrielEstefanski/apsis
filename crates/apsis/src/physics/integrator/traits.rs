@@ -305,6 +305,14 @@ pub trait Integrator: Send {
         }
     }
 
+    /// One-shot cap on the next `step()` call's time advance. Set by
+    /// `System::integrate_until` to clip the final step onto `t_end`
+    /// (exact finish time). Self-adaptive integrators must honour the
+    /// cap for exactly one call and leave their controller rhythm
+    /// unchanged by the capped step. No-op for fixed-step schemes —
+    /// the orchestrator caps their `dt_hint` directly.
+    fn cap_next_step(&mut self, _max_dt: f64) {}
+
     /// Set the error tolerance for adaptive integrators. No-op
     /// otherwise.
     fn set_epsilon(&mut self, _eps: f64) {}

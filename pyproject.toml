@@ -151,3 +151,26 @@ reportUnknownMemberType = "none"
 reportUnknownArgumentType = "none"
 reportUnknownVariableType = "none"
 reportUnknownParameterType = "none"
+
+# Notebook derivation scripts and validation harnesses lean on sympy and
+# mpmath, which ship no stubs — strict mode reports every touched value
+# as Unknown. Not in `include` (no CI job runs them through pyright);
+# these environments exist so in-editor analysis of an open file reports
+# real defects instead of stub noise.
+[[tool.pyright.executionEnvironments]]
+root = "paper/notebooks/scripts"
+reportUnknownMemberType = "none"
+reportUnknownArgumentType = "none"
+reportUnknownVariableType = "none"
+reportUnknownParameterType = "none"
+reportMissingParameterType = "none"
+reportMissingTypeArgument = "none"
+
+[[tool.pyright.executionEnvironments]]
+root = "validation"
+reportUnknownMemberType = "none"
+reportUnknownArgumentType = "none"
+reportUnknownVariableType = "none"
+reportUnknownParameterType = "none"
+reportMissingParameterType = "none"
+reportMissingTypeArgument = "none"
