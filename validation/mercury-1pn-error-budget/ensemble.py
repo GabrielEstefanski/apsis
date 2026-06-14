@@ -83,10 +83,13 @@ B4_N_ORBITS = 500
 # Mirrors the gate constant (mercury_precession_gate.rs); consumed only by Q.
 E_MERCURY = 0.20563
 
-# Derivation floors at Mercury's e=0.20563, relative units. A1 = k_osc(e)*eps
-# (closed form); A2 = C(e)*q, C measured at e by error_budget_a2_eccentricity.py
-# (strongly e-dependent — not the e=0.2 value 8.291).
-FLOOR_A1 = -3.46428 * 2.662484e-8
+# Derivation floors at Mercury's e=0.20563, relative units.
+#   A1 = k_osc(e) * eps   (k_osc closed form; eps recovered per-row from the
+#                          CSV's own predicted, so it carries the row's c)
+#   A2 = C(e) * q         (eps-independent; C measured at e by
+#                          error_budget_a2_eccentricity.py — strongly
+#                          e-dependent, not the e=0.2 value 8.291)
+K_OSC = -3.46428
 FLOOR_A2 = +8.0617 * 1.660114e-7
 
 FIELDNAMES = [
@@ -214,7 +217,8 @@ def budget_summary(rows: list[dict[str, Any]], label: str) -> None:
     over_m, _ = mean_sigma([r["t_overshoot"] for r in rows])
     nu_m, _ = mean_sigma([r["nu_end"] for r in rows])
     k = len(rows)
-    floors_angle = (FLOOR_A1 + FLOOR_A2) * pred
+    eps = pred / (6.0 * math.pi * n)  # row's own c (raw_c vs for_units)
+    floors_angle = (K_OSC * eps + FLOOR_A2) * pred
     print(f"  {label}: K={k}  N={n}")
     print(f"    raw   : rel_err mean={raw_m:+.3e}  sigma={raw_s:.3e}")
     print(f"    angle : mean={ang_m:+.3e} rad  sigma={ang_s:.3e} rad")

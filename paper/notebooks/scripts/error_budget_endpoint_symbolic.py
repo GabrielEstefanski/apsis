@@ -188,10 +188,11 @@ print()
 
 A_lit = sp.Float("0.387098", 15)
 E_lit = sp.Float("0.20563", 15)
-for label, c_val in [("raw_c   c=10065.3201686", sp.Float("10065.3201686", 15))]:
-    # The numeric c only scales eps; the harness reads eps per-row from the
-    # CSV (eps = predicted/(6 pi N)), so only the e-dependent factors below
-    # are consumed downstream. Printed for the notebook table.
+for label, c_val in [("raw_c   c=C_SOLAR_UNITS", sp.Float("10065.130024", 15))]:
+    # c = C_SOLAR_UNITS (raw_c / gate convention: IAU julian-year value,
+    # apsis_1pn::C_SOLAR_UNITS). The numeric c only scales eps; the harness
+    # reads eps per-row from the CSV (eps = predicted/(6 pi N)), so only the
+    # e-dependent factors below are consumed downstream. Printed for the table.
     eps_val = 1 / (c_val**2 * A_lit * (1 - E_lit**2))
     slope_over_eps = -((3 - E_lit) * (1 + E_lit)) / E_lit
     print(f"{label}:")

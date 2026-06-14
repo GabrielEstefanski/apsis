@@ -225,3 +225,23 @@ jobs:
         env:
           RUSTFLAGS: ""
         run: cargo run --release --example recommended_dt_compare -p apsis --quiet
+
+  # ── Error-budget derivation gates (symbolic) ─────────────────────────────
+  # The Mercury 1PN error-budget floors are derived in closed form with
+  # self-asserting sympy gates. These two scripts are pure-sympy and fast
+  # (~1 s each); they fail the build if any derived coefficient drifts. The
+  # extended-precision mpmath verifiers are multi-minute and stay out of CI.
+  derivation-gates:
+    name: error-budget derivation gates (symbolic)
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: install sympy
+        run: pip install sympy
+      - name: error-budget symbolic gates
+        run: |
+          python paper/notebooks/scripts/error_budget_endpoint_symbolic.py
+          python paper/notebooks/scripts/error_budget_k_symbolic.py

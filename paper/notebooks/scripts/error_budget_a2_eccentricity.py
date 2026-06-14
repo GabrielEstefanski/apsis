@@ -14,9 +14,8 @@ measures C(e) on a grid — reusing the two-body machinery verbatim — to
 test whether C(0.20563) accounts for the deficit.
 
 The measurement is blind to the pre-registered target C(0.20563) ~ 8.074
-(validation/audit/ledger.md, 2026-06-12): it integrates the grid and
-reports. Reproducing the committed 8.291 at e = 0.2 is the cross-check
-gate (EA).
+(notebook §A2): it integrates the grid and reports. Reproducing the
+committed 8.291 at e = 0.2 is the cross-check gate (EA).
 
 Run:  python paper/notebooks/scripts/error_budget_a2_eccentricity.py
 """
@@ -101,7 +100,8 @@ def main():
     q_merc = M_MERCURY
     a2_old = C_AT_E020 * q_merc
     a2_new = c_merc * q_merc
-    eps_merc = 1 / (mpf("10065.3201686") ** 2 * mpf("0.387098") * (1 - E_MERCURY**2))
+    # c = C_SOLAR_UNITS (raw_c / gate convention, apsis_1pn::C_SOLAR_UNITS).
+    eps_merc = 1 / (mpf("10065.130024") ** 2 * mpf("0.387098") * (1 - E_MERCURY**2))
     a1 = k_osc(E_MERCURY) * eps_merc
     pred_old = a1 + a2_old
     pred_new = a1 + a2_new
