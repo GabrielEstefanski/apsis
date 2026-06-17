@@ -1,15 +1,10 @@
-% DRAFT — Fig A: federation architecture (paper.md, Methods).
-% Status: first-pass TikZ layout, RENDERED + visually inspected 2026-06-14 (PDF compiles, no broken render).
-% Toolchain decided 2026-06-14: TikZ standalone. Final home: paper/figures/fig_a_architecture.tex
-% with a `make figures` rule (latexmk/xelatex standalone -> PDF). Every label traces to source:
-% crates/{apsis,apsis-1pn,apsis-central,apsis-radiation,apsis-python}, contract.rs L143-175.
-%
-% Deps kept minimal (tikz + standalone) so it compiles in a stock TeX install.
-% Compile:  latexmk -xelatex fig_a_architecture.tex   (or: xelatex fig_a_architecture.tex)
+% Fig A — federation architecture (paper.md, §Executable contract surface).
+% TikZ standalone (tikz + standalone only).
+% Regenerate the committed PDF: make figures-architecture
 
 \documentclass[border=6pt]{standalone}
 \usepackage{tikz}
-\usetikzlibrary{positioning, arrows.meta, fit, backgrounds, calc}
+\usetikzlibrary{positioning, arrows.meta, calc}
 
 \begin{document}
 \begin{tikzpicture}[
