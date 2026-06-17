@@ -28,17 +28,18 @@ abstract: |
   agreement to 2.7 %) — spanning Hamiltonian and non-conservative
   categories and both supported constructor patterns. Among these,
   `apsis-1pn` carries the deepest demonstration of the contract
-  mechanism: it reproduces Mercury's perihelion precession to
-  within $10^{-4}$ of
-  the closed-form general-relativistic prediction over 500 orbits
-  under the adaptive Gauss–Radau IAS15 scheme, reproduced bit-identically across Windows and Linux on x86_64; violating the
+  mechanism: it reproduces Mercury's perihelion precession to a
+  residual of $4.6\times10^{-6}$ — a derived error budget, gated in
+  continuous integration below $9.2\times10^{-6}$ — of the
+  closed-form general-relativistic prediction over 500 orbits under
+  the adaptive Gauss–Radau IAS15 scheme; violating the
   kernel-exactness precondition with Plummer softening surfaces a
   registration warning and yields a drift more than four orders of
-  magnitude larger and of the wrong sign, never as a numerical
-  artifact. The
-  federated model and the reproducibility certificate — not
-  empirical superiority in any numerical regime — are the
-  contributions the architecture supports.
+  magnitude larger and of the wrong sign while energy and angular
+  momentum stay conserved to machine precision — numerically perfect,
+  physically wrong. The federated model and the reproducibility
+  certificate — not empirical superiority in any numerical regime —
+  are the contributions the architecture supports.
 geometry:
   - margin=1in
 fontsize: 11pt
@@ -413,82 +414,79 @@ bit-exactness of the entire portfolio.
 
 ## Exactness counter-test: Mercury 1PN
 
-The Exactness counter-test is the Sun–Mercury configuration
-integrated for 500 orbital periods under the adaptive Gauss–Radau
-IAS15 scheme [@ReinSpiegel2015]. Under the default
-`NewtonKernel::exact()` ($\varepsilon = 0$) — Exactness satisfied —
-the osculating-$\omega$ end-vs-start measurement of the cumulative
-perihelion advance agrees with the closed-form
-general-relativistic prediction $\Delta\omega_{\text{orbit}} = 6\pi
-GM / (c^2 a (1 - e^2))$ summed over 500 orbits to within $10^{-4}$
-relative agreement, reproduced bit-identically across Windows and
-Linux on x86_64 (`mercury_precession_gate.rs`). The per-century
-rate agrees with the historical 43 arcsec/century [@Will1993]; the
-hardware-specific reproducibility detail is in §Cross-platform
-reproducibility.
+The 1PN operator registers a single precondition,
+`exact_and_smooth`: the gravitational kernel it perturbs must be
+the exact $1/r$ Newtonian potential — unsoftened and untruncated.
+This section exercises the *exactness* half by violating it, and
+the result is the paper's central observation — a configuration
+whose conserved quantities are perfect and whose physics is wrong
+by four orders of magnitude.
 
-The same scenario re-measured via geometric apsidal precession
-(periapsis-passage detection over $N$ radial periods, the
-observable the softened-Plummer convergence figure below uses)
-converges to the Schwarzschild prediction as $N$ grows: relative
-error $2.6\times 10^{-2}$ at $N = 500$ and $5.5\times 10^{-4}$ at
-$N = 2\times 10^4$, the measured per-orbit rate oscillating around
-the prediction with a shrinking envelope. The convergence is
-integration-noise-limited rather than dynamical — Mercury's
-per-orbit precession ($\approx 5\times 10^{-7}$ rad) is comparable
-to the integrator's accumulated per-step floor after $\sim 10^3$
-orbits, so the geometric per-orbit observable is far noisier here
-than the osculating cumulative one, which averages that noise into
-a single endpoint comparison. Neither measurement reaches the
-physical agreement bound set by the test-particle approximation,
-$m_\text{Mercury}/M_\odot \approx 1.7\times 10^{-7}$. This is the
-opposite regime to that figure, where the per-orbit signal is large
-($\sim 10^{-2}$ rad) and the geometric measurement saturates the
-f64 floor at $\sim 10^{-7}$: which observable is tighter depends on
-the per-orbit signal-to-noise of the specific physics.
-
-With a Plummer-softened kernel (`NewtonKernel::new(eps)` with
-$\varepsilon \approx 0.02$ AU, the cluster-scale softening for a
-solar-mass body) opted in — Exactness violated — the apsidal precession
-agrees with the full-potential apsidal-angle quadrature for the softened
-kernel to within $1\,\%$: apsis to $0.04\,\%$ ($0.5\,\%$ gated) and an
-independent scipy DOP853 integration to $0.58\,\%$ (over a shorter
-50-orbit window). The quadrature oracle (no $\varepsilon$-expansion,
-independent of apsis; §3.2 derivation notebook) gives
-$\dot\varpi = -2.288\times 10^6$ arcsec/century — $\sim 5\times 10^4$
-times the relativistic effect and of the wrong sign, while energy and
-angular momentum remain conserved to machine precision throughout. The
-measured drift carries the 1PN operator whose precondition is violated,
-but the softening artifact dominates it by $\sim 5\times 10^4$, so 1PN
-contributes $\sim 2\times 10^{-5}$ — below the gate. The leading-order
-closed form $\Delta\varpi_\text{orbit} = -3\pi\varepsilon^2 / [a^2(1-e^2)^2]$
-sits 2.66 % above the quadrature — a quantified $O(\varepsilon^2)$
-next-order effect, not a discrepancy.
-
-Sweeping the softening over two decades ($\varepsilon \in [10^{-3},
-10^{-1}]$ AU; figure below) extends this single point to the full
-regime. Measuring the *geometric* apsidal precession — the angle
-between successive periapses, the quantity the quadrature itself
-computes — apsis tracks the exact oracle to $\sim 10^{-7}$ across the
-resolvable range, while the leading closed form follows its
-$\varepsilon^2$ scaling up to a 44 % error at $\varepsilon = 0.1$. The
-figure bounds the method on both sides rather than cropping to the
-favourable interval: at small $\varepsilon$ the apsis curve rises as the
-precession signal ($\propto \varepsilon^2$) falls toward the measurement
-resolution, and at large $\varepsilon$ the closed form's $\varepsilon^2$
-error, though still a clean power law, grows large. The osculating-$\omega$
-agreement above ($0.04\,\%$, gated at $0.5\,\%$) is the argument of
-periapsis sampled per Kepler period, not the geometric apsidal angle;
-the geometric quantity itself agrees to $\sim 10^{-7}$, which places the
-$0.04\,\%$ in the definition of the observable rather than in the
-dynamics. The closed-form percentages switch convention the
-same way: the single-point $2.66\,\%$ above is the rate comparison (each
-precession divided by its own period), while the figure plots the
-per-radial-period deviation ($\approx 1.8\,\%$ at $\varepsilon = 0.02$);
-the two reconcile through the radial-to-Kepler period ratio
-($1.008$ at this $\varepsilon$).
+With a Plummer-softened kernel (`NewtonKernel::new(eps)`,
+$\varepsilon \approx 0.02$ AU — the cluster-scale softening one
+would apply to a solar-mass body) opted in, the Sun–Mercury orbit
+integrated under IAS15 [@ReinSpiegel2015] precesses at
+$\dot\varpi = -2.288\times 10^{6}$ arcsec/century: about
+$5\times10^{4}$ times the relativistic signal, and of the *wrong
+sign*. Throughout the integration, energy and angular momentum
+stay conserved to machine precision. The trajectory passes every
+test the field uses as a correctness proxy and is physically
+meaningless — the softening, not relativity, sets the precession.
+The number is not an artifact of apsis: it is fixed by the
+full-potential apsidal-angle quadrature (no $\varepsilon$-expansion,
+independent of the integrator; §3.2), which apsis's measured
+geometric precession tracks to $\sim10^{-7}$ across the resolvable
+softening range (Fig. \ref{fig:plummer-apsidal-convergence}), with
+an independent scipy DOP853 integration agreeing to $0.58\,\%$ over
+a shorter 50-orbit window. Sweeping $\varepsilon$ over two decades
+($[10^{-3}, 10^{-1}]$ AU) bounds the method on both sides: apsis
+holds that agreement while the leading closed form
+$\Delta\varpi_\text{orbit} = -3\pi\varepsilon^2 / [a^2(1-e^2)^2]$
+follows its $\varepsilon^2$ scaling out to a $44\,\%$ error at
+$\varepsilon = 0.1$. The 1PN operator whose precondition is
+violated still contributes — at $\sim2\times10^{-5}$, below its own
+gate — but the softening artifact buries it by $5\times10^{4}$.
 
 ![Softened-Plummer apsidal precession across a softening sweep, as relative deviation $|1 - \Delta\varpi / \Delta\varpi_{\text{exact}}|$ from the exact full-potential apsidal-angle quadrature. `apsis` (IAS15; geometric apsidal angle from periapsis-passage detection) reproduces the oracle to $\sim 10^{-7}$ across the resolvable range; the leading closed form ($\propto \varepsilon^2$; slope-2 reference dashed) reaches a 44 % error at $\varepsilon = 0.1$. Both measurement edges are shown rather than cropped: the apsis curve rises at small $\varepsilon$ as the precession signal vanishes (resolution floor), while the closed form stays a clean $\varepsilon^2$ law — large ($44\,\%$) but not diverging — at large $\varepsilon$. The apsis points are freshly measured; the oracle and closed form are evaluated from the quadrature, with no tuned constants.](paper/figures/plummer_apsidal_convergence.pdf){#fig:plummer-apsidal-convergence width=85%}
+
+This is the contract's reason to exist. Energy conservation — the
+diagnostic that IAS15, GADGET, and the long-horizon drift figure
+all report — certifies nothing here: it holds to the f64 floor
+while the answer is wrong by $5\times10^{4}$. apsis does not
+silently accept the configuration. Registering the 1PN operator
+against a softened kernel violates the declared `exact_and_smooth`
+precondition, and the framework emits a structured Exactness
+diagnostic on the log bus; the integration proceeds — surfacing
+the violation is the contract, and auto-correcting it would erase
+the evidence (ADR-006).
+
+What exactness *satisfied* looks like — and the bound that makes
+the result above trustworthy — is the same scenario under the
+default `NewtonKernel::exact()` ($\varepsilon = 0$). Integrated for
+500 orbital periods, the osculating-$\omega$ measurement of the
+cumulative perihelion advance agrees with the closed form
+$\Delta\omega_\text{orbit} = 6\pi GM / (c^2 a (1 - e^2))$ to a
+residual of $4.6\times10^{-6}$ relative — the *a-priori derived*
+error budget (endpoint-sampling term, two-body floor, second-order
+floor; §3.2), not a fitted tolerance — asserted in continuous
+integration below $9.2\times10^{-6}$ (`mercury_precession_gate.rs`).
+The per-century rate reproduces the historical 43 arcsec/century
+[@Will1993]. The endpoint is taken exactly at the requested time
+(exact-finish-time integration, ADR-015): the overshoot that
+previously dominated the residual and made it host-dependent is
+removed, collapsing its ULP-ensemble scatter from $\sim10^{-8}$ to
+$\sim10^{-14}$ rad and leaving the deterministic budget above.
+Re-measuring the *geometric* precession instead (periapsis-passage
+detection over $N$ radial periods) converges more slowly — relative
+error $2.6\times10^{-2}$ at $N = 500$, $5.5\times10^{-4}$ at
+$N = 2\times10^{4}$ — because Mercury's per-orbit signal
+($\approx 5\times10^{-7}$ rad) sits near the integrator's
+accumulated floor, so the per-orbit observable is noisier than the
+cumulative one that averages the same noise into a single endpoint;
+which observable is tighter is set by the per-orbit
+signal-to-noise, not by the dynamics. Cross-platform reproducibility
+of this portfolio is reported separately in the cross-platform
+reproducibility section.
 
 ## Continuity counter-test: TruncatedPlummer
 
@@ -628,30 +626,43 @@ an integration-critical path (`sin`, `cos`, `cbrt`, `pow`, `log`,
 arithmetic ($+$, $-$, $\times$, $\div$, $\sqrt{}$) is bit-identical
 across IEEE 754-conformant x86_64 implementations by mandate and
 does not require replacement. The IAS15 step-size controller's
-`pow` call was measured against an IEEE-754 correctly-rounded
-mpmath oracle on the 42,662 unique inputs generated during the
-Mercury 1PN run: Windows UCRT and the `libm` crate match the
-oracle on 96.97 % and 95.29 % of inputs respectively, both within
-IEEE-754 tolerance for transcendentals (which permits but does not
-require correctly-rounded results). The 1-ULP differences in the
-remaining cases propagate through the controller's substep-cadence
-selection to a 0.002 arcsec/century absolute shift in cumulative
-Mercury $\Delta\omega$ over 500 orbits, separating the
-$4.4 \times 10^{-6}$ relative agreement on Windows UCRT (scenario-specific accidental cancellation in UCRT's rounding distribution)
-from the $2.8 \times 10^{-5}$ result reproduced bit-identically by
-`libm` and glibc. Both values sit several orders of magnitude below
-the current observational precision of Mercury's perihelion
-advance [@VermaFienga2014] and below the experimental constraint on
-the PPN $\gamma$ parameter from Cassini Doppler tracking
-[@BertottiIessTortora2003]. The choice prioritises trajectory
-determinism across deployment platforms over the scenario-specific
-rounding alignment that the Windows-only result reflected.
+`pow` is the one such call on the integration-critical path. Its
+host implementations are not correctly-rounded: measured against an
+IEEE-754 correctly-rounded mpmath oracle on the 42,662 unique
+inputs generated during the Mercury 1PN run, Windows UCRT and the
+`libm` crate agree with the oracle on 96.97 % and 95.29 % of inputs
+respectively, within the IEEE-754 tolerance for transcendentals. The
+host `pow` therefore differs by up to one ULP between platforms,
+which without intervention would propagate through the controller's
+substep cadence. Routing the call through the `libm` crate on every
+target removes that divergence at the source: both hosts evaluate
+the identical routine, and the cumulative Mercury $\Delta\omega$
+over 500 orbits agrees to $0.000$ arcsec/century between Windows
+(AMD Zen 4) and Linux (Intel Ice Lake), several orders of magnitude
+below the observational precision of Mercury's perihelion advance
+[@VermaFienga2014] and the constraint on the PPN $\gamma$ parameter
+from Cassini Doppler tracking [@BertottiIessTortora2003].
 
 The methodology and per-implementation analysis are recorded in
 `paper/notebooks/2026-05-20-cross-platform-determinism.md`
 (federation portfolio bit-equality protocol) and
 `paper/notebooks/2026-05-22-controller-pow-implementations.md`
 (controller `pow` ULP-distribution analysis).
+
+Beyond x86_64, the same source commit and `Cargo.lock` reproduce
+byte-identical on a different instruction-set architecture: an AWS
+Graviton3 (Neoverse-V1, aarch64) run agrees with the x86_64
+reference at 0 ULP on every column of all eight scenarios, the
+Mercury 1PN rate identical to $0.000$ arcsec/century. The agreement
+is by construction: the only transcendental
+on the integration-critical path is the pure-Rust `libm` crate
+(identical on every target), the remaining arithmetic is IEEE 754
+correctly-rounded, and the build performs no floating-point
+contraction (no `target-cpu=native`, no fused-multiply-add fusion),
+so x86_64 and aarch64 execute the same rounding sequence. The
+determinism is therefore scoped to the pinned toolchain and build
+flags, not to ARM in general: enabling floating-point contraction
+would break it.
 
 **Synthesis.** Across the five Results subsections, the library
 demonstrates the federated perturbation model along five axes:
@@ -719,21 +730,23 @@ to the exact apsidal-angle quadrature for the full softened potential,
 numerical cross-checks.)
 
 *Error budget for Mercury 1PN agreement.* The gated agreement
-(within $10^{-4}$, §Results) is integration-noise-limited and
-convention-dependent, not dynamical. The recommended `for_units`
-(Gaussian-$c$) path sits at $2.8 \times 10^{-5}$ (§Cross-platform
-reproducibility), the IAU-$c$ regression gate
-(`from_raw_c(C_SOLAR_UNITS)`) at $\sim 10^{-4}$: the $\approx 110$
-ppm gap between the two $c$ conventions shifts the 1PN force
-prefactor ($\propto 1/c^2$), and IAS15's adaptive substep schedule
-carries that shift to the result at the ULP level — the same
-propagation that separates the UCRT and `libm` `pow` results above.
-Both lie well above the test-particle ceiling
+(§Results) is the *a-priori derived* error budget, $4.6 \times
+10^{-6}$, and under exact-finish-time integration (ADR-015) it is
+deterministic and convention-independent rather than noise-limited.
+Removing the endpoint-sampling overshoot collapses the residual's
+ULP-ensemble scatter from $\sim 10^{-8}$ to $\sim 10^{-14}$ rad,
+leaving the derived budget. The two light-speed conventions agree
+in residual to $1.4 \times 10^{-10}$ (`from_raw_c(C_SOLAR_UNITS)`,
+IAU, $4.58115 \times 10^{-6}$ versus `for_units`, Gaussian,
+$4.58102 \times 10^{-6}$); the $\approx 19$ ppm difference between
+the conventions shifts the *predicted* rate through the $1/c^2$
+prefactor by $\approx 38$ ppm but not the agreement. The residual
+lies well above the test-particle ceiling
 $m_\text{Mercury}/M_\odot \approx 1.7 \times 10^{-7}$ and far below
-current observational precision, so the residual measures the
-integrator's accumulated round-off, not the 1PN derivation. A finer
-split into IAS15 truncation, `libm` tolerance, and the unmodelled
-$v^4/c^4$ correction would resolve that round-off floor further.
+current observational precision, so it measures the integrator's
+accumulated round-off, not the 1PN derivation. A finer split into
+IAS15 truncation, `libm` tolerance, and the unmodelled $v^4/c^4$
+correction would resolve that round-off floor further.
 
 *Cross-platform ULP-distribution analysis.* The summary statistics
 in §Cross-platform reproducibility (UCRT 96.97 % oracle-exact, libm

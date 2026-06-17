@@ -1,4 +1,4 @@
-﻿=== rustc ===
+=== rustc ===
 rustc 1.94.1 (e408947bf 2026-03-25)
 
 === cargo ===
@@ -10,7 +10,7 @@ Microsoft Windows NT 10.0.26200.0
 === CPU ===
 
 
-Name                      : AMD Ryzen 5 7600X 6-Core Processor             
+Name                      : AMD Ryzen 5 7600X 6-Core Processor
 NumberOfCores             : 6
 NumberOfLogicalProcessors : 12
 MaxClockSpeed             : 4701
@@ -22,7 +22,7 @@ MaxClockSpeed             : 4701
 (blake3 hashed at record-write time; see record header)
 
 === Cargo.lock SHA256 (cross-check) ===
-F39E4946109916E8C8CCBE9D482502CCFB4166391BC8BCFFCF8302743A6EAFE1
+392CD0C5BA1FA6DB8B86AD4519D8392E580813579E90937E50EC8EE70C314D31
 
 === git ===
-06bd0a974e6873c70122d613cb22c4e9d3e2e4be
+22be999e9766812aae0b249ce4cc89e3bd18d0ec
