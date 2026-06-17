@@ -8,7 +8,7 @@
 
 .PHONY: help figures paper validation clean data lint-paper
 .PHONY: figures-continuity-spike-bound figures-rebound-parity-trajectories figures-rebound-parity-brouwer
-.PHONY: figures-plummer-apsidal-convergence data-plummer-convergence data-continuity-spike-bound
+.PHONY: figures-plummer-apsidal-convergence figures-architecture data-plummer-convergence data-continuity-spike-bound
 .PHONY: validation-mercury-1pn validation-recommended-dt
 
 FIGURES_DIR  := paper/figures
@@ -20,7 +20,8 @@ PAPER_FIGURES := \
 	$(FIGURES_DIR)/continuity_spike_bound.pdf \
 	$(FIGURES_DIR)/rebound_parity_trajectories.pdf \
 	$(FIGURES_DIR)/rebound_parity_brouwer.pdf \
-	$(FIGURES_DIR)/plummer_apsidal_convergence.pdf
+	$(FIGURES_DIR)/plummer_apsidal_convergence.pdf \
+	$(FIGURES_DIR)/fig_a_architecture.pdf
 
 help:
 	@echo "Reviewer targets:"
@@ -83,6 +84,13 @@ $(FIGURES_DIR)/plummer_apsidal_convergence.pdf: \
 	python $(SCRIPTS_DIR)/plummer_apsidal_convergence.py
 
 figures-plummer-apsidal-convergence: $(FIGURES_DIR)/plummer_apsidal_convergence.pdf
+
+# Federation architecture — TikZ standalone. SOURCE_DATE_EPOCH pins the PDF
+# /CreationDate so the render is byte-stable (same discipline as the data figures).
+$(FIGURES_DIR)/fig_a_architecture.pdf: $(FIGURES_DIR)/fig_a_architecture.tex
+	cd $(FIGURES_DIR) && SOURCE_DATE_EPOCH=1577836800 xelatex -interaction=nonstopmode -halt-on-error fig_a_architecture.tex && rm -f fig_a_architecture.aux fig_a_architecture.log
+
+figures-architecture: $(FIGURES_DIR)/fig_a_architecture.pdf
 
 # ── Data snapshots ───────────────────────────────────────────────────── #
 # Slow regeneration of figure data (the figures themselves render from the
