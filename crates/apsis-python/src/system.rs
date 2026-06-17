@@ -651,7 +651,7 @@ impl PySystem {
     /// - ``crate_version`` (str)
     /// - ``commit_hash`` (str | None) — full SHA when the implementing
     ///   crate was built from a git checkout, ``None`` otherwise
-    /// - ``doi`` (str | None) — bare DOI suffix (e.g. ``10.1086/153180``)
+    /// - ``doi`` (str | None) — bare DOI suffix (e.g. ``10.1086/153779``)
     /// - ``bibtex`` (str) — full BibTeX entry / entries for the
     ///   underlying paper(s)
     ///
