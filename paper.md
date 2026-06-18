@@ -145,14 +145,16 @@ matches `KernelRequirements` against `KernelProperties` at
 extension registration, the executable contract surface that
 publishes the library's compositional guarantees, and the citable
 operator stack that emits a BibTeX block for the registered force
-composition. §Results opens with the federation evidence across
-three operator crates spanning both operator categories
+composition. §Results opens with the central counter-test — the Exactness
+violation on Mercury 1PN, where a softened kernel leaves
+conservation invariants at machine precision while the physics is
+wrong by four orders of magnitude — then the Continuity
+counter-test on a truncated Plummer kernel, the federation evidence
+across three operator crates spanning both operator categories
 (Hamiltonian and non-conservative) and both supported constructor
-patterns, then exercises the contract mechanism in depth on
-`apsis-1pn` (Exactness counter-test on Mercury 1PN, Continuity
-counter-test on a truncated Plummer kernel), checks external-implementation parity against REBOUND IAS15 on four canonical
-scenarios, and closes with the cross-platform reproducibility
-test. §Discussion covers the scope
+patterns, external-implementation parity against REBOUND IAS15 on
+four canonical scenarios, and closes with the cross-platform
+reproducibility test. §Discussion covers the scope
 of the cross-platform claim (including ARM64 hardware not yet
 verified), solver-family guidance, and a prioritised future-work
 agenda. The per-run *Apsis Record* binary format specification is
@@ -384,66 +386,15 @@ the operational form of that claim.
 
 # Results {#sec:results}
 
-## Federation evidence across operator categories
-
-The three first-party operator crates collectively exercise both
-operator categories defined by the contract surface
-(`HamiltonianOperator` for `apsis-1pn` and `apsis-central`,
-`NonConservativeOperator` for `apsis-radiation`) and both supported
-constructor patterns (regime-based for `apsis-1pn` and
-`apsis-radiation`, observable-inversion via `from_apsidal_rate`
-for `apsis-central`). Each crate is an independent Cargo artifact,
-pinned by version in the simulation's `Cargo.lock` and matched
-against the active kernel at registration through the same
-`KernelRequirements` machinery.
-
-`apsis-radiation` implements radiation pressure and Poynting–
-Robertson drag per [@Burns1979] as a `NonConservativeOperator`.
-The gate (`crates/apsis-radiation/tests/dust_decay_gate.rs`)
-integrates a Sun-orbiting dust grain ($\beta = 0.5$, initial
-circular orbit at $r_0 = 1$ AU, IAS15 at $dt = 10^{-3}$) under
-direct gravity plus radiation forces for ten orbital periods,
-measures the total specific-energy change $\Delta E$ between
-endpoints, and compares against the constant-$r$ analytic
-prediction $\Delta E_{\text{analytic}} = -\beta\, G M v^2 m\, T /
-(r^2 c)$ derived from the tangential PR force at the initial
-epoch; empirical agreement is 1.2 % at the gated 5 % tolerance,
-with the gate width set to absorb the $\sim 2$ % bias of the
-constant-$r$ approximation as the orbit drifts $\sim 0.5$ %
-inward over the window. A counter-test on the same orbit without
-the operator registered confirms IAS15 conserves energy to
-$10^{-12}$, isolating the measured $\Delta E$ to the operator.
-
-`apsis-central` implements the [@Tamayo2020] central-force
-perturbation $\propto 1/r^\gamma$ with two constructors: a
-regime-based one parameterised by coupling amplitude and exponent,
-and `from_apsidal_rate`, an observable-inversion constructor that
-selects the coupling amplitude so the resulting precession
-reproduces a target observable apsidal rate. The round-trip gate
-(`crates/apsis-central/tests/round_trip_gate.rs`) registers a
-target rate $\dot\omega_{\text{in}} = 1.5\times 10^{-3}$ rad per
-Gaussian time unit at $\gamma = -3$, $e = 0.1$, integrates for
-fifty orbital periods sampled phase-locked at integer multiples
-of $2\pi$, fits the linear secular drift of $\omega$ from the
-unwrapped phase-locked series, and compares against the input:
-agreement is 2.7 % at the same 5 % regression bound, with the
-documented Tamayo-formula bias ($\sim 11$ % from using the
-instantaneous separation rather than the secular semi-major axis,
-partially cancelled by the $(1-e^2)$ correction) dominating the
-residual. A Keplerian baseline counter-test holds the apsidal
-drift below $10^{-9}$ when the operator is not registered.
-
-The two gates use disjoint physics (radiation back-reaction and
-apsidal precession from a $1/r^\gamma$ central force) and
-disjoint test scaffolding from `apsis-1pn`'s Mercury gate,
-supporting the claim that the federation contract does not bind
-to a specific operator family.
-
-The remaining subsections demonstrate the contract mechanism in
-depth on a single operator (`apsis-1pn`): the Exactness
-counter-test on Mercury's perihelion precession, the Continuity
-counter-test on a truncated-Plummer kernel, and the cross-platform
-bit-exactness of the entire portfolio.
+This section's central result is one observation about
+correctness: a violated precondition can hold every conserved
+quantity at the machine-precision floor while the physics is wrong
+by four orders of magnitude — conservation is not correctness. We
+open with that counter-test (Exactness, on Mercury's 1PN
+precession), follow with its continuity counterpart, then establish
+that the same contract holds across the federated operator stack,
+against an external implementation, and bit-for-bit across
+platforms.
 
 ## Exactness counter-test: Mercury 1PN
 
@@ -584,6 +535,61 @@ integration). Sources at
 `crates/apsis-1pn/tests/kernel_continuity_counter_test.rs`; both
 reproduce on a clean checkout per the command in §Data and code
 availability.
+
+## Federation evidence across operator categories
+
+The three first-party operator crates collectively exercise both
+operator categories defined by the contract surface
+(`HamiltonianOperator` for `apsis-1pn` and `apsis-central`,
+`NonConservativeOperator` for `apsis-radiation`) and both supported
+constructor patterns (regime-based for `apsis-1pn` and
+`apsis-radiation`, observable-inversion via `from_apsidal_rate`
+for `apsis-central`). Each crate is an independent Cargo artifact,
+pinned by version in the simulation's `Cargo.lock` and matched
+against the active kernel at registration through the same
+`KernelRequirements` machinery.
+
+`apsis-radiation` implements radiation pressure and Poynting–
+Robertson drag per [@Burns1979] as a `NonConservativeOperator`.
+The gate (`crates/apsis-radiation/tests/dust_decay_gate.rs`)
+integrates a Sun-orbiting dust grain ($\beta = 0.5$, initial
+circular orbit at $r_0 = 1$ AU, IAS15 at $dt = 10^{-3}$) under
+direct gravity plus radiation forces for ten orbital periods,
+measures the total specific-energy change $\Delta E$ between
+endpoints, and compares against the constant-$r$ analytic
+prediction $\Delta E_{\text{analytic}} = -\beta\, G M v^2 m\, T /
+(r^2 c)$ derived from the tangential PR force at the initial
+epoch; empirical agreement is 1.2 % at the gated 5 % tolerance,
+with the gate width set to absorb the $\sim 2$ % bias of the
+constant-$r$ approximation as the orbit drifts $\sim 0.5$ %
+inward over the window. A counter-test on the same orbit without
+the operator registered confirms IAS15 conserves energy to
+$10^{-12}$, isolating the measured $\Delta E$ to the operator.
+
+`apsis-central` implements the [@Tamayo2020] central-force
+perturbation $\propto 1/r^\gamma$ with two constructors: a
+regime-based one parameterised by coupling amplitude and exponent,
+and `from_apsidal_rate`, an observable-inversion constructor that
+selects the coupling amplitude so the resulting precession
+reproduces a target observable apsidal rate. The round-trip gate
+(`crates/apsis-central/tests/round_trip_gate.rs`) registers a
+target rate $\dot\omega_{\text{in}} = 1.5\times 10^{-3}$ rad per
+Gaussian time unit at $\gamma = -3$, $e = 0.1$, integrates for
+fifty orbital periods sampled phase-locked at integer multiples
+of $2\pi$, fits the linear secular drift of $\omega$ from the
+unwrapped phase-locked series, and compares against the input:
+agreement is 2.7 % at the same 5 % regression bound, with the
+documented Tamayo-formula bias ($\sim 11$ % from using the
+instantaneous separation rather than the secular semi-major axis,
+partially cancelled by the $(1-e^2)$ correction) dominating the
+residual. A Keplerian baseline counter-test holds the apsidal
+drift below $10^{-9}$ when the operator is not registered.
+
+The two gates use disjoint physics (radiation back-reaction and
+apsidal precession from a $1/r^\gamma$ central force) and
+disjoint test scaffolding from `apsis-1pn`'s Mercury gate,
+supporting the claim that the federation contract does not bind
+to a specific operator family.
 
 ## REBOUND parity portfolio {#sec:rebound-parity}
 
