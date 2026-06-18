@@ -2,7 +2,7 @@
 
 Out-of-tree perturbation crate for [`apsis`](../apsis). Generalized
 central force `a = A · r^γ` per Tamayo, Rein, Shi & Hernandez
-(2019, *MNRAS* 491, 2885).
+(2020, *MNRAS* 491, 2885).
 
 **Observable-inversion exemplar.** This crate is the federation's
 first implementation of the **observable-inversion constructor**
@@ -36,7 +36,7 @@ test gate.
 ## Observable inversion
 
 `CentralForce::from_apsidal_rate(source, target, ω̇, γ, &bodies, units)`
-applies the Tamayo 2019 inversion:
+applies the Tamayo 2020 inversion:
 
 ```text
   A = G · M_source · ω̇ / [(1 + γ/2) · d^(γ+2) · n]
@@ -99,7 +99,7 @@ sys.add_hamiltonian_perturbation(Box::new(force))?;
 
 ## Reference
 
-Tamayo, D., Rein, H., Shi, P., & Hernandez, D. M. (2019). REBOUNDx: a
+Tamayo, D., Rein, H., Shi, P., & Hernandez, D. M. (2020). REBOUNDx: a
 library for adding conservative and dissipative forces to otherwise
 symplectic N-body integrations. *MNRAS* 491, 2885–2901.
 DOI: [10.1093/mnras/stz3018](https://doi.org/10.1093/mnras/stz3018).
