@@ -1,7 +1,11 @@
 # ADR-015 — Exact Finish Time for `integrate_until`
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-06-12
+
+**PR:** [#207](https://github.com/GabrielEstefanski/apsis/pull/207) — shipped the
+exact-finish-time fix and tightened the Mercury 1PN gate to `9.2×10⁻⁶`;
+reconciled into the paper in #211.
 
 **Amends:** the run-loop semantics documented in ADR-004 (sub-step
 granularity); `System::integrate_until` / `integrate_for`.
