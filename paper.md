@@ -547,7 +547,27 @@ constructor patterns (regime-based for `apsis-1pn` and
 for `apsis-central`). Each crate is an independent Cargo artifact,
 pinned by version in the simulation's `Cargo.lock` and matched
 against the active kernel at registration through the same
-`KernelRequirements` machinery.
+`KernelRequirements` machinery. Table \ref{tab:validation}
+consolidates the per-operator gates — the strongest independent
+oracle available for each operator's physics, the achieved
+agreement, and the CI-gated bound — before the per-operator
+detail below.
+
+\begin{table}[ht]
+\centering
+\caption{Per-operator validation. Each first-party operator crate is an independent Cargo artifact, gated in continuous integration against the strongest independent oracle available for its physics. The three crates span both operator categories (Hamiltonian, non-conservative) and both constructor patterns (regime-based, observable-inversion). \texttt{apsis-1pn}'s residual is the derived error budget (endpoint-sampling, two-body, and second-order floors), not a tuned tolerance, and its three oracles are mutually independent --- a closed form, an independent code, and a non-perturbative quadrature; \texttt{apsis-central}'s strongest oracle is a self-consistency round-trip, with no independent-code parity yet.}
+\label{tab:validation}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{@{}lllll@{}}
+\hline
+Operator & Category & Independent oracle(s) & Achieved & Gate (CI test) \\
+\hline
+\texttt{apsis-1pn} & Hamiltonian & Schwarzschild closed form; REBOUNDx \texttt{gr} ($7{\times}10^{-7}$); apsidal quadrature & $+4.6{\times}10^{-6}$ (derived budget) & $<9.2{\times}10^{-6}$ \quad \texttt{mercury\_precession\_gate} \\
+\texttt{apsis-radiation} & non-conservative & analytic constant-$r$ $\Delta E$; Newtonian energy null ($10^{-12}$) & $0.95\,\%$ & $<5\,\%$ \quad \texttt{dust\_decay\_gate} \\
+\texttt{apsis-central} & Hamiltonian & apsidal-rate round-trip; Keplerian apsidal null ($<10^{-9}$) & $2.38\,\%$ & $<5\,\%$ \quad \texttt{round\_trip\_gate} \\
+\hline
+\end{tabular}}
+\end{table}
 
 `apsis-radiation` implements radiation pressure and Poynting–
 Robertson drag per [@Burns1979] as a `NonConservativeOperator`.
@@ -559,7 +579,7 @@ measures the total specific-energy change $\Delta E$ between
 endpoints, and compares against the constant-$r$ analytic
 prediction $\Delta E_{\text{analytic}} = -\beta\, G M v^2 m\, T /
 (r^2 c)$ derived from the tangential PR force at the initial
-epoch; empirical agreement is 1.2 % at the gated 5 % tolerance,
+epoch; empirical agreement is 0.95 % at the gated 5 % tolerance,
 with the gate width set to absorb the $\sim 2$ % bias of the
 constant-$r$ approximation as the orbit drifts $\sim 0.5$ %
 inward over the window. A counter-test on the same orbit without
@@ -578,7 +598,7 @@ Gaussian time unit at $\gamma = -3$, $e = 0.1$, integrates for
 fifty orbital periods sampled phase-locked at integer multiples
 of $2\pi$, fits the linear secular drift of $\omega$ from the
 unwrapped phase-locked series, and compares against the input:
-agreement is 2.7 % at the same 5 % regression bound, with the
+agreement is 2.38 % at the same 5 % regression bound, with the
 documented Tamayo-formula bias ($\sim 11$ % from using the
 instantaneous separation rather than the secular semi-major axis,
 partially cancelled by the $(1-e^2)$ correction) dominating the
@@ -657,7 +677,32 @@ scenarios reported in §REBOUND parity portfolio — produces
 byte-identical trajectory output on heterogeneous x86_64 hosts
 (Windows on AMD Zen 4 against Linux on Intel Ice Lake).
 Verification covers per-column ULP agreement, file size, and
-SHA256 of the captured trajectory CSVs.
+SHA256 of the captured trajectory CSVs. Table
+\ref{tab:reproducibility} lists the portfolio and the per-scenario
+result.
+
+\begin{table}[ht]
+\centering
+\caption{Cross-platform reproducibility as a falsifiable experiment. With the source commit, \texttt{rustc} 1.94.1, and the workspace \texttt{Cargo.lock} (SHA-256 \texttt{392CD0C5}\ldots\texttt{4D31}, pinning \texttt{libm} 0.2.16) fixed, the v0.1 federation portfolio reproduces byte-identical trajectory output across heterogeneous x86\_64 hosts: Windows on AMD Zen 4 versus Linux on Intel Ice Lake (different vendor \emph{and} microarchitecture). Each scenario is verified three independent ways --- per-column ULP distance (zero), file size (exact), and SHA-256 (match).}
+\label{tab:reproducibility}
+\begin{tabular}{@{}lll@{}}
+\hline
+Scenario & Integrator / operator & Windows $\equiv$ Linux \\
+\hline
+Kepler ($e=0.5$) & IAS15 & byte-equal \\
+Figure-8 choreography & IAS15 & byte-equal \\
+Pythagorean (Burrau 1913) & IAS15 & byte-equal \\
+Retrograde Kepler ($10^4$ orbits) & IAS15 & byte-equal \\
+Outer Solar System & MERCURIUS & byte-equal \\
+Outer Solar System (Jupiter-crossing test particle) & Wisdom--Holman & byte-equal$^{a}$ \\
+Central-force inversion (long-horizon) & \texttt{apsis-central} + IAS15 & byte-equal \\
+Mercury 1PN perihelion & \texttt{apsis-1pn} + IAS15 & byte-equal \\
+\hline
+\end{tabular}
+
+\vspace{0.4em}
+{\footnotesize $^{a}$ Physical correctness is not asserted for this scenario --- the Jupiter-crossing test particle deliberately violates the Wisdom--Holman hierarchical-Keplerian assumption to stress-test the Kepler solver's \texttt{libm} calls. Byte-equality is a property of the implementation; physical validity is a separate axis, carried by the MERCURIUS parity row.}
+\end{table}
 
 The mechanism is the routing of every libc-bound transcendental on
 an integration-critical path (`sin`, `cos`, `cbrt`, `pow`, `log`,
