@@ -259,7 +259,7 @@ impl System {
     /// `kernel_requirements`.
     ///
     /// Goes directly into a paper `.bib`; the upstream physics
-    /// references (Anderson 1975, Burns 1979, Tamayo 2019, ...) stay
+    /// references (Anderson 1975, Burns 1979, Tamayo 2020, ...) stay
     /// reachable through [`Self::citations`] `[i].bibtex`.
     ///
     /// The workspace `Cargo.lock` is best-effort: when it cannot be

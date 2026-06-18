@@ -182,7 +182,7 @@ fn short_lock_hash(hash: &str) -> String {
 /// (see [`crate::core::system::System::cite`]).
 ///
 /// Entry shape per Anderson et al. (1975) / Will (1993) / Burns et
-/// al. (1979) / Tamayo et al. (2019) operator stack:
+/// al. (1979) / Tamayo et al. (2020) operator stack:
 ///
 /// ```bibtex
 /// @software{apsis-1pn_0.1.0,

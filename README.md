@@ -227,7 +227,7 @@ consumers; CI enforces the separation.
 | [`apsis`](crates/apsis/) | The library. Physics, integrators, public extension API. | Pure library; no UI or rendering dependencies. |
 | [`apsis-1pn`](crates/apsis-1pn/) | First downstream force crate: 1PN Schwarzschild correction. Reference implementation of the federation contract. | **Only** `apsis`. |
 | [`apsis-radiation`](crates/apsis-radiation/) | Radiation pressure + Poynting–Robertson drag (Burns 1979). | **Only** `apsis`. |
-| [`apsis-central`](crates/apsis-central/) | Central-potential perturbations (observable-inversion exemplar, Tamayo 2019). | **Only** `apsis`. |
+| [`apsis-central`](crates/apsis-central/) | Central-potential perturbations (observable-inversion exemplar, Tamayo 2020). | **Only** `apsis`. |
 | [`apsis-py-core`](crates/apsis-py-core/) | Capsule transport + extractors (rlib) — used by the apsis Python distribution and any external `apsis-plugin-X` cdylib. | `apsis`, `pyo3`. |
 | [`apsis-python`](crates/apsis-python/) | PyO3 cdylib backing the `apsis` Python distribution. Bundles every internal operator behind feature flags. | `apsis`, `apsis-py-core`, operator crates. |
 
@@ -303,7 +303,7 @@ What is verified in CI:
   public API.
 - **Per-operator validation gates**: 1PN (Mercury precession),
   radiation (Burns 1979 β-table dust decay), central-force
-  (Tamayo 2019 round-trip).
+  (Tamayo 2020 round-trip).
 - **Release-mode Mercury gate**: `cargo test --release -p apsis-1pn
   -- --ignored` asserts Mercury's precession within 100 ppm of the
   analytic 1PN GR prediction over 500 orbits, reproduced
