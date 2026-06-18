@@ -250,12 +250,17 @@ named in the module-level documentation, every guarantee is gated
 by a continuous-integration test whose name matches the guarantee,
 and every test is co-located with the prose. Reading the module
 top-to-bottom reads the contract; running
-`cargo test -p apsis --lib contract` verifies it. The library
+`cargo test -p apsis --lib contract::tests` verifies it. The library
 distinguishes itself from comparable surfaces in REBOUND/REBOUNDx
 [@ReinLiu2012; @Tamayo2020] not on test count — REBOUND has a
 wider validation portfolio measured by problem count — but on
 **shape**: that a reviewer can mechanically check the claims the
-contract makes.
+contract makes. The federated structure those guarantees govern —
+independently published operator crates attaching to the core engine
+through one typed registration gate — is shown in
+Fig. \ref{fig:architecture}.
+
+![Federation architecture. Independently published, versioned operator crates (`apsis-1pn`, `apsis-central`, `apsis-radiation`) attach to the core engine through one typed registration gate, each publishing its declared units, kernel requirements, regime bound, and `cite()` citation. A unit-system mismatch is refused (the operator is not registered); a kernel-precondition or regime violation emits a structured diagnostic and registration proceeds (ADR-006). The run's outputs are the trajectory, the provenance chain, and the audit log.](paper/figures/fig_a_architecture.pdf){#fig:architecture width=95%}
 
 The three classes are:
 
@@ -298,6 +303,34 @@ file holds the prose statement of every guarantee, the rationale
 for the invariants the contract does *not* extend to (cross-platform bit-exactness, cross-thread determinism, build-flag
 invariance), and the load-bearing iteration-order property of the
 perturbation storage that a future refactor must not break.
+Table \ref{tab:contract} maps each guarantee to its gating test.
+
+\begin{table}[ht]
+\centering
+\caption{The contract surface as an executable specification: each guarantee maps to a continuous-integration test whose name states it. \texttt{cargo test -p apsis -{}-lib contract::tests} runs all twelve; source in \texttt{crates/apsis/src/contract.rs}.}
+\label{tab:contract}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{@{}lll@{}}
+\hline
+Class & Guarantee & CI test (under \texttt{contract::tests::}) \\
+\hline
+Kernel invariants & determinism, bit-exact & \texttt{invariant\_determinism\_bit\_exact} \\
+ & distinguishes inputs (negative) & \texttt{invariant\_determinism\_distinguishes\_distinct\_inputs} \\
+ & Newtonian consistency (null attach) & \texttt{invariant\_newtonian\_consistency\_under\_null\_perturbation\_attach} \\
+ & pure function of state & \texttt{invariant\_perturbation\_is\_pure\_function\_of\_state} \\
+\hline
+Composition rules & commutativity ($N{=}2$, bit-exact) & \texttt{composition\_commutative\_two\_perturbations} \\
+ & associativity ($N{\ge}3$, within ULP) & \texttt{composition\_associative\_three\_perturbations} \\
+ & additive (sentinel-checked) & \texttt{composition\_perturbation\_is\_additive\_via\_sentinel} \\
+ & union of kernel requirements & \texttt{composition\_kernel\_requirements\_take\_union} \\
+\hline
+Failure model & one warning per violation & \texttt{failure\_exactness\_violation\_emits\_exactly\_one\_warning} \\
+ & (Continuity instance) & \texttt{failure\_continuity\_violation\_emits\_exactly\_one\_warning} \\
+ & faithful audit log & \texttt{failure\_repeated\_registration\_does\_not\_collapse\_audit\_trail} \\
+ & no silent acceptance & \texttt{failure\_silent\_acceptance\_is\_impossible} \\
+\hline
+\end{tabular}}
+\end{table}
 
 ## Citable operator stack
 
