@@ -10,7 +10,7 @@ keywords.workspace = true
 categories.workspace = true
 rust-version.workspace = true
 readme = "README.md"
-description = "Out-of-tree perturbation crate for apsis. Generalized central force a = A·rᵞ per Tamayo, Rein, Shi & Hernandez (2019). Observable-inversion exemplar: `from_apsidal_rate(...)` inverts a measured apsidal precession into the operator's coupling."
+description = "Out-of-tree perturbation crate for apsis. Generalized central force a = A·rᵞ per Tamayo, Rein, Shi & Hernandez (2020). Observable-inversion exemplar: `from_apsidal_rate(...)` inverts a measured apsidal precession into the operator's coupling."
 
 [lib]
 path = "src/lib.rs"

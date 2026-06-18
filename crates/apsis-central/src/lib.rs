@@ -1,5 +1,5 @@
 //! Generalized central force `a = A · r^γ` per Tamayo, Rein, Shi &
-//! Hernandez (2019, *MNRAS* 491, 2885). First federation-grade
+//! Hernandez (2020, *MNRAS* 491, 2885). First federation-grade
 //! exemplar of the **observable-inversion constructor** locked in
 //! [`apsis::contract`] and ADR-005 / ADR-006:
 //! [`CentralForce::from_apsidal_rate`] takes a measured apsidal
@@ -40,7 +40,7 @@
 //!
 //! # Observable inversion
 //!
-//! The Tamayo et al. 2019 result is that a near-circular orbit at
+//! The Tamayo et al. 2020 result is that a near-circular orbit at
 //! instantaneous separation `d` and mean motion `n` precesses at
 //!
 //! ```text
@@ -99,7 +99,7 @@
 //!
 //! # Reference
 //!
-//! Tamayo, D., Rein, H., Shi, P., & Hernandez, D. M. (2019). REBOUNDx:
+//! Tamayo, D., Rein, H., Shi, P., & Hernandez, D. M. (2020). REBOUNDx:
 //! a library for adding conservative and dissipative forces to
 //! otherwise symplectic N-body integrations. *MNRAS* 491, 2885–2901.
 //! DOI: [10.1093/mnras/stz3018](https://doi.org/10.1093/mnras/stz3018).
@@ -159,7 +159,7 @@ impl CentralForce {
     /// **Observable-inversion exemplar.** Construct from a desired apsidal
     /// precession rate `omega_dot` (radians per time, in `units`) on
     /// the orbit of `target` around `source`. Inverts the Tamayo
-    /// et al. 2019 secular result:
+    /// et al. 2020 secular result:
     ///
     /// ```text
     ///   A = G · M_source · ω̇ / [(1 + γ/2) · d^(γ+2) · n]
@@ -364,12 +364,12 @@ impl Operator for CentralForce {
 
     fn citation(&self) -> Option<Citation> {
         Some(Citation {
-            bibtex: TAMAYO_2019_BIBTEX,
+            bibtex: TAMAYO_2020_BIBTEX,
             doi: Some("10.1093/mnras/stz3018"),
             crate_name: env!("CARGO_PKG_NAME"),
             crate_version: env!("CARGO_PKG_VERSION"),
             commit_hash: option_env!("APSIS_CENTRAL_GIT_COMMIT").filter(|s| !s.is_empty()),
-            description: Some("General central force after Tamayo et al. 2019"),
+            description: Some("General central force after Tamayo et al. 2020"),
             url: Some("https://github.com/GabrielEstefanski/apsis"),
             author: Some("Estefanski, G. B."),
         })
@@ -394,7 +394,7 @@ impl HamiltonianOperator for CentralForce {
             }
             let b_i = &bodies[i];
             // r̂ points from source to receiver (force is "outward
-            // from central particle" per Tamayo 2019).
+            // from central particle" per Tamayo 2020).
             let dx = b_i.pos_x - src.pos_x;
             let dy = b_i.pos_y - src.pos_y;
             let dz = b_i.pos_z - src.pos_z;
@@ -459,14 +459,14 @@ impl HamiltonianOperator for CentralForce {
     }
 }
 
-const TAMAYO_2019_BIBTEX: &str = r#"@article{tamayo2019,
+const TAMAYO_2020_BIBTEX: &str = r#"@article{tamayo2020,
   author  = {Tamayo, D. and Rein, H. and Shi, P. and Hernandez, D. M.},
   title   = {{REBOUNDx}: a library for adding conservative and dissipative forces to otherwise symplectic {N}-body integrations},
   journal = {Monthly Notices of the Royal Astronomical Society},
   volume  = {491},
   number  = {2},
   pages   = {2885--2901},
-  year    = {2019},
+  year    = {2020},
   doi     = {10.1093/mnras/stz3018}
 }"#;
 
@@ -675,13 +675,13 @@ mod tests {
     }
 
     #[test]
-    fn citation_pins_tamayo_2019() {
+    fn citation_pins_tamayo_2020() {
         let f = CentralForce::from_raw(0, 1.0, -3.0, solar());
         let c = f.citation().expect("CentralForce must publish a citation");
         assert_eq!(c.crate_name, "apsis-central");
         assert_eq!(c.crate_version, env!("CARGO_PKG_VERSION"));
         assert_eq!(c.doi, Some("10.1093/mnras/stz3018"));
-        assert!(c.bibtex.contains("tamayo2019"));
+        assert!(c.bibtex.contains("tamayo2020"));
         if let Some(h) = c.commit_hash {
             assert!(h.chars().all(|ch| ch.is_ascii_hexdigit()), "bad commit_hash: {h}");
             assert!(h.len() >= 7);
