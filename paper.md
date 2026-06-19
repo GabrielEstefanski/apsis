@@ -647,19 +647,13 @@ through the close-encounter cluster; bodies 0, 1, 2 carry masses
 3, 4, 5 in canonical units.](paper/figures/rebound_parity_trajectories.pdf){#fig:rebound-traj width=100%}
 
 The fourth scenario — the retrograde Kepler over $10^4$ orbits —
-is the long-horizon parity check and is shown separately in
-Fig. \ref{fig:rebound-brouwer} because its log-log energy-error
-structure does not share axes with the configuration-space panels
-above. Both implementations track Brouwer's $\sqrt{N}$ random-walk
-law [@Brouwer1937] and agree to $|\Delta E|/|E_0| = 2.6\times10^{-14}$
-at the long-horizon checkpoint — consistent with the per-step
-rounding propagation expected at this horizon.
-
-![Relative energy drift $|E(t) - E_0|/|E_0|$ on the retrograde Kepler
-scenario over $10^4$ orbits, apsis IAS15 (solid) and REBOUND IAS15
-(dotted) on the same axes. The Brouwer $\sqrt{N}$ reference is
-shown as a dashed line for visual anchoring. Cross-implementation
-agreement at the long-horizon checkpoint is annotated.](paper/figures/rebound_parity_brouwer.pdf){#fig:rebound-brouwer}
+is the long-horizon parity check. Both implementations track
+Brouwer's $\sqrt{N}$ round-off random-walk law [@Brouwer1937] and
+agree to $|\Delta E|/|E_0| = 2.6\times10^{-14}$ at the long-horizon
+checkpoint — the precision expected from the shared IAS15 numerics
+at this horizon, not a property of the federation. The per-orbit
+energy-drift curves are regenerable from `validation/rebound-parity/`
+(`make figures-rebound-parity-brouwer`).
 
 ## Cross-platform reproducibility {#sec:cross-platform}
 
