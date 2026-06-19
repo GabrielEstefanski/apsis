@@ -51,7 +51,8 @@ fn c_solar_gaussian() -> f64 {
 /// Energy drift rate for a circular β=0.5 dust grain matches the Burns
 /// 1979 analytic prediction within 5 % over 10 orbits. The 5 % gate
 /// absorbs the constant-r approximation bias (~2 %) plus residual
-/// integrator/operator noise. Empirical centre: 1.2 %.
+/// integrator/operator noise. Empirical centre (printed by the gate
+/// as `[burns-pr] rel`): 0.95 %.
 #[test]
 fn pr_drag_energy_drift_matches_burns_1979_to_5_percent() {
     let units = UnitSystem::solar_canonical();
