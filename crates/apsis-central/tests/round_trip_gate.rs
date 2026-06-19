@@ -35,14 +35,14 @@ use apsis_central::CentralForce;
 /// - **`(1 − e²)` correction** in Murray-Dermott: ~1% at `e = 0.1`,
 ///   partially cancels the previous bias.
 ///
-/// Empirical agreement when this gate was written: 2.7%. 5% is the
-/// regression bound, matching the tolerance pattern set by
+/// Empirical agreement (printed by the gate as `[central-roundtrip] rel`):
+/// 2.38%. 5% is the regression bound, matching the tolerance pattern set by
 /// `apsis-radiation`'s Burns 1979 gate.
 const ROUND_TRIP_TOLERANCE: f64 = 0.05;
 
 /// Observable-inversion contract: registering with `omega_dot = X` reproduces
 /// `omega_dot = X` within 5 % over 50 orbits at γ = -3, e = 0.1.
-/// Empirical agreement when written: 2.7 %.
+/// Empirical agreement: 2.38 %.
 #[test]
 fn from_apsidal_rate_synthetic_round_trip() {
     let units = UnitSystem::solar_canonical();
@@ -102,6 +102,9 @@ fn from_apsidal_rate_synthetic_round_trip() {
     let omega_dot_measured = linear_slope(&ts, &omegas_unwrapped);
 
     let rel = ((omega_dot_measured - omega_dot_in) / omega_dot_in).abs();
+    eprintln!(
+        "[central-roundtrip] measured = {omega_dot_measured:.6e}, in = {omega_dot_in:.6e}, rel = {rel:.4}"
+    );
     assert!(
         rel < ROUND_TRIP_TOLERANCE,
         "Observable-inversion round-trip: input ω̇ = {omega_dot_in:.4e}, measured ω̇ = {omega_dot_measured:.4e}, \
