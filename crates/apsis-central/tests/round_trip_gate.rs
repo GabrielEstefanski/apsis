@@ -102,7 +102,9 @@ fn from_apsidal_rate_synthetic_round_trip() {
     let omega_dot_measured = linear_slope(&ts, &omegas_unwrapped);
 
     let rel = ((omega_dot_measured - omega_dot_in) / omega_dot_in).abs();
-    eprintln!("[central-roundtrip] measured = {omega_dot_measured:.6e}, in = {omega_dot_in:.6e}, rel = {rel:.4}");
+    eprintln!(
+        "[central-roundtrip] measured = {omega_dot_measured:.6e}, in = {omega_dot_in:.6e}, rel = {rel:.4}"
+    );
     assert!(
         rel < ROUND_TRIP_TOLERANCE,
         "Observable-inversion round-trip: input ω̇ = {omega_dot_in:.4e}, measured ω̇ = {omega_dot_measured:.4e}, \
