@@ -660,17 +660,17 @@ moderate-$N$ point — the regime the softened kernel exists for. A
 Plummer sphere [@Plummer1911] of $N = 10^3$ equal-mass bodies in
 virial equilibrium is integrated with identical Plummer softening
 on both apsis and REBOUND from bit-identical initial conditions
-(Hénon units, the optimal softening $\epsilon \approx 0.096$ for
-this $N$). At cluster $N$ there is no trajectory oracle — the
+(Hénon units, the optimal softening [@Athanassoula2000]
+$\epsilon \approx 0.096$ for this $N$). At cluster $N$ there is no trajectory oracle — the
 system is exponentially unstable on the crossing time
 [@Aarseth2003] — so the protocol gates on the conserved integrals
 of the softened Hamiltonian (energy, angular momentum, linear
 momentum, centre of mass), per side and cross-implementation,
-against round-off floors frozen at an $N = 256$ pilot. All twelve
+against scale-only round-off floors frozen at an $N = 256$ pilot. All twelve
 gated metrics pass on the release build: per-side energy drift is
 $\sim 6\times10^{-15}$, cross-implementation energy agreement is
-$|\Delta E|/|E_0| = 1.2\times10^{-15}$, and the virial ratio holds
-at $q \approx 0.48$. This closes the softening narrative in both
+$|\Delta E|/|E_0| = 1.2\times10^{-15}$, and the virial ratio settles
+to $q \approx 0.48$. This closes the softening narrative in both
 directions: the same kernel the §Exactness counter-test flags as a
 precondition violation on a solar-system orbit is legitimate
 physics in the cluster regime it was built for, while attaching the
