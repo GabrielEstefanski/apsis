@@ -6,15 +6,11 @@
 //! `apsis` enum variant via [`resolve`]; no other path constructs an
 //! `IntegratorKind` from user input.
 //!
-//! The Python enum names follow upper-case acronym convention
-//! (`IAS15`, `YOSHIDA4`, `VELOCITY_VERLET`, `WISDOM_HOLMAN`) — this is
-//! the canonical Python style for symbolic constants and matches what
-//! a researcher reading published IAS15 (Rein & Spiegel 2015) or
-//! Yoshida-4 (Yoshida 1990) papers expects to type. The string slugs
-//! mirror those used by the core `IntegratorKind`'s `FromStr` impl
-//! (`"ias15"`, `"yoshida4"`, `"velocity_verlet"`, `"wisdom_holman"`),
-//! so the same string is accepted in `run.toml` config files, on the
-//! CLI, and at the Python kwarg.
+//! The Python enum names use upper-case acronyms (`IAS15`, `YOSHIDA4`,
+//! `VELOCITY_VERLET`, `WISDOM_HOLMAN`); the string slugs (`"ias15"`,
+//! `"yoshida4"`, ...) mirror the core `IntegratorKind`'s `FromStr`, so
+//! the same string works in `run.toml`, on the CLI, and at the Python
+//! kwarg.
 
 use std::str::FromStr;
 

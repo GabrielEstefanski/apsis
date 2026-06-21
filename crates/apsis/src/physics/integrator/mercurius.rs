@@ -1,13 +1,8 @@
 //! Mercurius — close-encounter hybrid symplectic integrator.
 //!
-//! Implementation of the algorithm specified in:
-//!
-//!   * Rein H., Hernandez D. M., Tamayo D. & Brown G. (2019). *Hybrid
-//!     symplectic integrators for planetary dynamics*, MNRAS **489**,
-//!     4632–4640. [arXiv:1908.03468](https://arxiv.org/abs/1908.03468)
-//!
-//! Implementation of the MERCURIUS hybrid integrator per Rein et al.
-//! 2019 (MNRAS 485, 1377–1393, DOI: 10.1093/mnras/stz769). The
+//! Implements Rein, Hernandez, Tamayo & Brown (2019), *Hybrid symplectic
+//! integrators for planetary dynamics*, MNRAS 485, 5490–5497
+//! (DOI: 10.1093/mnras/stz769). The
 //! algorithm is a **rewind hybrid**: a Wisdom-Holman outer step
 //! advances every particle, an encounter detector identifies pairs
 //! that came within their critical radius during the step, those
@@ -83,7 +78,7 @@
 //!
 //! # References
 //!
-//! - Rein et al. (2019). MNRAS 489, 4632–4640.
+//! - Rein et al. (2019). MNRAS 485, 5490–5497 (DOI 10.1093/mnras/stz769).
 //! - Wisdom & Holman (1991). AJ 102, 1528.
 //! - Rein & Spiegel (2015). MNRAS 446, 1424.
 //! - Lab notebook: `docs/experiments/2026-05-13-mercurius-hybrid.md`.

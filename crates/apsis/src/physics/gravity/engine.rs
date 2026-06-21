@@ -903,7 +903,7 @@ mod tests {
         let mut __arrays = BodyArrays::with_capacity(bodies.len());
 
         __arrays.pack_from(&bodies);
-        // Exato
+        // exact engine
         let mut engine_exact = BarnesHutEngine::new(16);
         engine_exact.set_exact_threshold(usize::MAX);
         engine_exact.build(&__arrays);

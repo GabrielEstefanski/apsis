@@ -2765,7 +2765,7 @@ mod tests {
 
         // Off-periapsis sample: place body at ν = 0.5 rad, verify identity.
         let nu: f64 = 0.5;
-        let p = q * (1.0 + e); // semi-latus rectum = a(1−e²); for hyperbolic q = a(e−1) so a = q/(e−1) and p = q(e+1)/1 ... actually p = q(1+e). check.
+        let p = q * (1.0 + e); // p = q(1+e), semi-latus rectum
         // For hyperbolic: q = a(e−1) with a < 0 by convention or |a| convention.
         // Using p = h²/GM = q(1+e), valid for any conic.
         let r = p / (1.0 + e * nu.cos());

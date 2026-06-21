@@ -1,47 +1,16 @@
 //! Python-side wrapper of [`apsis::domain::body::Body`].
 //!
-//! The wrapper exposes a researcher-first API: nine preset factories
-//! (`Body.star`, `Body.rocky`, `Body.gas_giant`, ...) that mirror the
-//! corresponding constructors in [`apsis::domain::body::Body`], a
-//! kwargs-only signature on each factory so position and velocity
-//! never depend on argument order, and an immutable fluent-builder
-//! tail (`at`, `with_velocity`, `with_density`) for the cases where
-//! chaining reads more naturally than a single call site.
+//! Façade only: each `#[pymethods]` body delegates to a single `Body`
+//! constructor, translating types at the boundary and never composing
+//! physics. Bodies are built through preset factories (`Body.star`,
+//! `Body.rocky`, ...) with kwargs-only `position`/`velocity`, then an
+//! immutable fluent tail (`at`, `with_velocity`, `with_density`); `Body`
+//! is `Copy`, so each builder returns a fresh value rather than mutating
+//! the receiver.
 //!
-//! # Façade-only invariant
-//!
-//! Every `#[pymethods]` body in this file delegates to a single call on
-//! [`apsis::domain::body::Body`] — the wrapper translates types at the
-//! boundary and never composes physics. The set of valid presets, the
-//! density model, and the body-state
-//! invariants are all owned by the core crate; this module is the
-//! Python-shaped door into them.
-//!
-//! # Material slug as binding-layer tag
-//!
-//! [`apsis::domain::body::Body`] no longer carries a runtime material
-//! taxonomy field — physical defaults are applied once at construction
-//! by the preset and never referenced again. The Python wrapper still
-//! exposes a `body.material` slug for ergonomic introspection (`"star"`,
-//! `"rocky"`, ...), tracked locally by [`PyBody::slug`] and propagated
-//! through the fluent builder methods. The slug is a binding-layer
-//! convenience, not a core-crate concept.
-//!
-//! # Why builders return new bodies
-//!
-//! [`apsis::domain::body::Body`] is `Copy`, so each builder method here
-//! produces a fresh `PyBody` rather than mutating the receiver. This
-//! gives Python users the same value-semantics they get from
-//! NumPy scalar operations or `dataclasses.replace`: chaining is safe,
-//! aliasing is not surprising, and a body passed into a `System`
-//! constructor is not retroactively mutated by later calls.
-//!
-//! ```text
-//!   sun = Body.star(mass=1.0)
-//!   far_sun = sun.at((10.0, 0.0))
-//!   assert sun.position == (0.0, 0.0)         # unchanged
-//!   assert far_sun.position == (10.0, 0.0)    # new instance
-//! ```
+//! The `material` slug (`"star"`, `"rocky"`, ...) is a binding-layer tag
+//! for introspection, tracked here by [`PyBody::slug`]; the core `Body`
+//! carries no runtime material field.
 
 use apsis::domain::body::Body as CoreBody;
 use apsis::domain::body_preset::{self, BodyPreset};

@@ -282,7 +282,7 @@ mod tests {
             let bodies = vec![Body::star(1.0).at(0.0, 0.0).with_velocity(0.0, 0.0)];
             let ctx = make_ctx(&bodies, 0.0, 0);
             hook.pre_step(&ctx);
-            // Drop writes trailer.
+            // flushed on drop
         }
         let bytes = std::fs::read(&tmp).unwrap();
         assert_eq!(&bytes[..4], MAGIC, "MAGIC mismatch");

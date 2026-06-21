@@ -62,7 +62,7 @@ pub struct ImplicitMidpoint {
     q_prev: Vec<Vec3>,
     v_prev: Vec<Vec3>,
     v_avg: Vec<Vec3>,
-    /// Accepted steps so far. Equals `picard_iters / mean_iter_count`.
+    /// Accepted steps so far.
     cum_steps: u64,
     /// Sum of iteration counts across all step calls. Mean iteration
     /// count = `cum_iterations / cum_steps`.
