@@ -14,9 +14,7 @@ use crate::convert::value_error;
 ///
 /// Construct via one of the named factories (:meth:`solar`, :meth:`si`,
 /// :meth:`canonical`, :meth:`henon`, :meth:`cgs`) or :meth:`custom`.
-/// Once chosen, a ``UnitSystem`` is immutable — there is no setter
-/// for any of its fields, and every `.replace_*` style call would
-/// return a new instance rather than mutate.
+/// Immutable once chosen — it has no setters.
 ///
 /// All physics inputs (positions, velocities, masses, dt) passed to a
 /// :class:`System` constructed against this unit system are interpreted

@@ -294,7 +294,7 @@ mod tests {
 
     #[test]
     fn truncated_kernel_triggers_both_exactness_and_continuity_violations() {
-        // Representative of a future `TruncatedPlummerKernel`: modified
+        // Representative of a `TruncatedPlummerKernel`: modified
         // exactness, C0 continuity.
         let req = KernelRequirements::exact_and_smooth();
         let props = KernelProperties { exactness: Exactness::Modified, continuity: Continuity::C0 };

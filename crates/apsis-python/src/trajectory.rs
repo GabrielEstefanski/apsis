@@ -22,10 +22,6 @@ use pyo3::prelude::*;
 /// is `plt.plot(traj.t, traj.energy)`. Bodies confined to the
 /// `xy`-plane have `traj.z` and `traj.vz` populated with zeros — the
 /// arrays are always present and always have the documented shape.
-///
-/// `Trajectory` is immutable once constructed — there is no mutator
-/// method on the Python side, and the underlying arrays are stored
-/// behind shared references so reading them is side-effect-free.
 #[pyclass(module = "apsis", name = "Trajectory", frozen)]
 pub(crate) struct PyTrajectory {
     t: Py<PyArray1<f64>>,
@@ -178,9 +174,10 @@ impl PyTrajectory {
     }
 
     /// Relative energy drift `δE / E₀` at each sample. Shape `(n_samples,)`.
-    /// First entry is zero by definition (baseline). Already normalised —
+    /// First entry is zero (baseline); NaN throughout when `|E₀|` is below
+    /// the core's conditioning floor — use `abs_energy_drift` there.
     /// `plt.semilogy(traj.t, np.abs(traj.energy_drift))` is the standard
-    /// conservation diagnostic plot without further arithmetic.
+    /// conservation diagnostic plot.
     #[getter]
     fn energy_drift<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f64>> {
         self.energy_drift.bind(py).clone()

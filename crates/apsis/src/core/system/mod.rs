@@ -227,10 +227,9 @@ pub struct System {
     /// symplectic rhythm across sampling boundaries.
     pub(crate) exact_finish_time: bool,
 
-    /// Dense-output snapshot from the most recent integration step.
-    /// Produced each step; consumed by downstream interpolators (e.g.
-    /// trail samplers, sub-step position renderers) that need a smooth
-    /// curve between integrator step boundaries.
+    /// Dense-output snapshot from the most recent integration step,
+    /// produced each step for sub-step interpolation between integrator
+    /// step boundaries (see `DenseSnapshot`).
     pub(crate) last_dense_snapshot: Option<crate::physics::integrator::DenseSnapshot>,
 
     /// Set on first [`System::finish`] call so subsequent ones are no-ops.

@@ -1,13 +1,10 @@
 //! Typed Python exceptions for apsis core domain errors.
 //!
-//! Currently exposes [`UnitSystemMismatchError`] — raised when
+//! Exposes [`UnitSystemMismatchError`] — raised when
 //! `System.add_*_perturbation` receives an operator built for a
-//! different `UnitSystem` than the `System`'s own. The Rust core
-//! returns [`apsis::physics::integrator::UnitSystemMismatch`]; this
-//! module converts it into a typed Python exception so callers can
-//! catch with `except apsis.UnitSystemMismatchError` instead of the
-//! untyped `BaseException` / `PanicException` previously raised by
-//! Rust panics.
+//! different `UnitSystem` than the `System`. The Rust core returns
+//! [`apsis::physics::integrator::UnitSystemMismatch`]; this module
+//! converts it into a typed exception callers can `except`.
 
 use apsis::physics::integrator::UnitSystemMismatch;
 use pyo3::create_exception;

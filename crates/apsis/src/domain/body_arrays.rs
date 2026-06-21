@@ -34,7 +34,7 @@
 
 use crate::domain::body::Body;
 
-/// Five-field Struct-of-Arrays snapshot of the body state for the gravity
+/// Four-field Struct-of-Arrays snapshot of the body state for the gravity
 /// hot path. See module docs for the lifecycle contract.
 ///
 /// All fields are public so the kernel and tree-build inner loops can read
@@ -88,7 +88,7 @@ impl BodyArrays {
         self.mass.clear();
     }
 
-    /// Overwrite the snapshot with the five hot fields of `bodies`.
+    /// Overwrite the snapshot with the four hot fields of `bodies`.
     ///
     /// Existing buffer capacity is reused; only allocations occur if the
     /// new body count exceeds previous capacity. Field arrays are always
