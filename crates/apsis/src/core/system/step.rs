@@ -187,7 +187,7 @@ impl System {
             && let Some((dx, dy)) = calibration::com_offset(&self.bodies, self.total_mass)
         {
             // Route through the integrator's `recenter_bodies` rather
-            // than the bare `apply_body_shift`: this preserves the
+            // than a bare per-body subtraction: this preserves the
             // per-body compensation accumulators that IAS15 uses to
             // bound round-off error to `O(ε)` over long horizons.
             // Fixed-step integrators inherit the trait default (bare

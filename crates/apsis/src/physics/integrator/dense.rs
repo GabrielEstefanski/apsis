@@ -241,9 +241,7 @@ impl WhDenseData {
             accelerations.push(kepler_pull);
         }
         // Sun's slot was reserved with a default; fill in.
-        if n > 0 {
-            accelerations.insert(0, sun_acc);
-        }
+        accelerations.insert(0, sun_acc);
 
         WhKinematics { positions, velocities, accelerations }
     }

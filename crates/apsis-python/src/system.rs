@@ -708,7 +708,7 @@ impl PySystem {
         let m = self.inner.metrics();
         format!(
             "System(integrator={:?}, n_bodies={}, t={}, dt={}, dE={})",
-            kind_slug(m.integrator_kind),
+            m.integrator_kind.slug(),
             self.inner.bodies().len(),
             m.t,
             m.dt,
@@ -717,18 +717,6 @@ impl PySystem {
                 None => format!("{:.3e} (abs, |E0|~0)", m.abs_energy_error),
             },
         )
-    }
-}
-
-fn kind_slug(kind: CoreIntegratorKind) -> &'static str {
-    match kind {
-        CoreIntegratorKind::Ias15 => "ias15",
-        CoreIntegratorKind::Yoshida4 => "yoshida4",
-        CoreIntegratorKind::VelocityVerlet => "velocity_verlet",
-        CoreIntegratorKind::WisdomHolman => "wisdom_holman",
-        CoreIntegratorKind::Mercurius => "mercurius",
-        CoreIntegratorKind::WHFast => "whfast",
-        CoreIntegratorKind::ImplicitMidpoint => "implicit_midpoint",
     }
 }
 

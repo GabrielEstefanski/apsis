@@ -396,7 +396,6 @@ impl System {
                 accel_epsilon: 0.1,
                 grow_limit: 1.2,
                 shrink_limit: 0.5,
-                dt_slew_fraction: 0.1,
             }),
             theta_ctrl: ThetaController::new(1e-3, 0.05, 1.5).with_initial_theta(theta),
             adaptive_theta: false,

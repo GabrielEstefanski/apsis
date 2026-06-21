@@ -80,17 +80,6 @@ pub fn com_offset(bodies: &[Body], total_mass: f64) -> Option<(f64, f64)> {
     Some((x_cm, y_cm))
 }
 
-/// Translates all bodies by `(-dx, -dy)`, i.e. removes the given COM offset.
-///
-/// This is the body-only half of a full recentering; the caller is responsible
-/// for translating any associated trail data by the same vector.
-pub fn apply_body_shift(bodies: &mut [Body], dx: f64, dy: f64) {
-    for b in bodies.iter_mut() {
-        b.pos_x -= dx;
-        b.pos_y -= dy;
-    }
-}
-
 // ── Unit tests ──────────────────────────────────────────────────────────────── //
 
 #[cfg(test)]

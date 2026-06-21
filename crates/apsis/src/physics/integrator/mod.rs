@@ -66,7 +66,7 @@ mod tests_resume;
 // ── Re-exports ────────────────────────────────────────────────────────────────
 
 pub use citation::{Citation, render_cite_block, render_provenance};
-pub use coefficients::{Y4_C, Y4_D, Y4_W0, Y4_W1};
+pub use coefficients::{Y4_C, Y4_D};
 pub use conservation::{
     ConservationClass, ConservationContribution, ConservationReport, EnergyImpact, OperatorRole,
     PotentialStatus,

@@ -67,9 +67,6 @@ pub fn star_companion(_seed: u64) -> Template {
     let v1 = v_orb * r1 / a;
     let v2 = v_orb * r2 / a;
 
-    // rotações sincronizadas (tidal lock aproximado)
-    let _omega = v_orb / a;
-
     Template {
         name: "Star + Companion",
         description: "A solar-mass star with a brown dwarf companion.",
