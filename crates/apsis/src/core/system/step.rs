@@ -193,8 +193,6 @@ impl System {
             // Fixed-step integrators inherit the trait default (bare
             // subtraction), so behaviour is unchanged for them.
             self.integrator.recenter_bodies(&mut self.bodies, dx, dy);
-            self.pending_com_shift.0 += -dx as f32;
-            self.pending_com_shift.1 += -dy as f32;
         }
 
         self.r_min = compute_closeness(&self.bodies);

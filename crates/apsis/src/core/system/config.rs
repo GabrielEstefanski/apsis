@@ -368,15 +368,4 @@ impl System {
     pub fn last_encounter_flag(&self) -> crate::physics::encounter::EncounterFlag {
         self.last_encounter_flag
     }
-
-    // ── COM shift for TrailRecorder ───────────────────────────────────────────
-
-    /// Takes (and clears) the accumulated COM translation since the last call.
-    ///
-    /// The physics-side COM recentering shifts all body positions; the
-    /// [`TrailRecorder`](crate::core::trail::TrailRecorder) must apply
-    /// the same shift to stored trail positions to keep them aligned.
-    pub fn take_com_shift(&mut self) -> (f32, f32) {
-        std::mem::replace(&mut self.pending_com_shift, (0.0, 0.0))
-    }
 }

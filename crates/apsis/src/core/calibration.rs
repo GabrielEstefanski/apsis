@@ -9,7 +9,6 @@
 //! single-purpose, trivially testable, and reusable across different integrators.
 
 use crate::domain::body::Body;
-use std::collections::VecDeque;
 
 // ── Tuning constants ────────────────────────────────────────────────────────── //
 
@@ -32,34 +31,6 @@ pub fn zero_com_velocity(bodies: &mut [Body], total_mass: f64) {
     for b in bodies.iter_mut() {
         b.vel_x -= vx_cm;
         b.vel_y -= vy_cm;
-    }
-}
-
-/// Recenters the system so that COM is at origin.
-///
-/// Pure translation, does not affect physics.
-pub fn recenter_com(bodies: &mut [Body], trails: &mut [VecDeque<(f64, f64)>], total_mass: f64) {
-    if total_mass <= 0.0 || bodies.is_empty() {
-        return;
-    }
-
-    let x_cm = bodies.iter().map(|b| b.mass * b.pos_x).sum::<f64>() / total_mass;
-    let y_cm = bodies.iter().map(|b| b.mass * b.pos_y).sum::<f64>() / total_mass;
-
-    if x_cm.hypot(y_cm) < 1e-14 {
-        return;
-    }
-
-    for b in bodies.iter_mut() {
-        b.pos_x -= x_cm;
-        b.pos_y -= y_cm;
-    }
-
-    for trail in trails.iter_mut() {
-        for (tx, ty) in trail.iter_mut() {
-            *tx -= x_cm;
-            *ty -= y_cm;
-        }
     }
 }
 
@@ -86,7 +57,6 @@ pub fn com_offset(bodies: &[Body], total_mass: f64) -> Option<(f64, f64)> {
 mod tests {
     use super::*;
     use crate::domain::body::Body;
-    use std::collections::VecDeque;
 
     fn body(x: f64, y: f64, vx: f64, vy: f64, mass: f64) -> Body {
         Body::rocky(mass).at(x, y).with_velocity(vx, vy)
@@ -116,51 +86,6 @@ mod tests {
         assert!(
             (dv_after - dv_before).abs() < 1e-12,
             "relative velocity must not change: only the bulk frame shifts"
-        );
-    }
-
-    // ── recenter_com ─────────────────────────────────────────────────────── //
-
-    #[test]
-    fn com_position_is_zero_after_recentering() {
-        let mut bodies = vec![body(3.0, 1.0, 0.0, 0.0, 1.0), body(7.0, 5.0, 0.0, 0.0, 1.0)];
-        let m = 2.0;
-        let mut trails: Vec<VecDeque<(f64, f64)>> = vec![VecDeque::new(), VecDeque::new()];
-        recenter_com(&mut bodies, &mut trails, m);
-
-        let cx: f64 = bodies.iter().map(|b| b.mass * b.pos_x).sum::<f64>() / m;
-        let cy: f64 = bodies.iter().map(|b| b.mass * b.pos_y).sum::<f64>() / m;
-        assert!(cx.abs() < 1e-12, "x_cm must be 0 after recentering");
-        assert!(cy.abs() < 1e-12, "y_cm must be 0 after recentering");
-    }
-
-    #[test]
-    fn recenter_com_preserves_relative_positions() {
-        let mut bodies = vec![body(100.0, 0.0, 0.0, 0.0, 2.0), body(104.0, 0.0, 0.0, 0.0, 1.0)];
-        let m = 3.0;
-        let mut trails = vec![VecDeque::new(), VecDeque::new()];
-        let dx_before = bodies[1].pos_x - bodies[0].pos_x;
-        recenter_com(&mut bodies, &mut trails, m);
-        let dx_after = bodies[1].pos_x - bodies[0].pos_x;
-        assert!(
-            (dx_after - dx_before).abs() < 1e-12,
-            "separation must not change: recentering is a rigid translation"
-        );
-    }
-
-    #[test]
-    fn recenter_com_shifts_trail_points_consistently() {
-        let mut bodies = vec![body(10.0, 0.0, 0.0, 0.0, 1.0), body(20.0, 0.0, 0.0, 0.0, 1.0)];
-        let m = 2.0;
-        let mut trails: Vec<VecDeque<(f64, f64)>> =
-            vec![VecDeque::from([(10.0_f64, 0.0_f64)]), VecDeque::from([(20.0_f64, 0.0_f64)])];
-        recenter_com(&mut bodies, &mut trails, m);
-
-        // Trail point for body 0 should have shifted by the same -x_cm
-        let trail_dx = trails[1].front().unwrap().0 - trails[0].front().unwrap().0;
-        assert!(
-            (trail_dx - 10.0).abs() < 1e-12,
-            "trail relative positions must match body relative positions after shift"
         );
     }
 }

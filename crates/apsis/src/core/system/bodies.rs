@@ -144,10 +144,6 @@ impl System {
     pub fn recenter_com(&mut self) {
         if let Some((dx, dy)) = calibration::com_offset(&self.bodies, self.total_mass) {
             self.integrator.recenter_bodies(&mut self.bodies, dx, dy);
-            // Notify the render-side TrailRecorder of the shift so it can
-            // keep stored trail positions aligned with the new body coordinates.
-            self.pending_com_shift.0 += -dx as f32;
-            self.pending_com_shift.1 += -dy as f32;
         }
     }
 
