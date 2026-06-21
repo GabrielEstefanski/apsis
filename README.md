@@ -316,21 +316,20 @@ What is verified in CI:
   self-contained Python harness:
   - **Kepler-prograde ($e = 0.5$, 100 orbits):** seven gated metrics
     at 1–3 ULP; informational $\lvert\Delta r\rvert$ at
-    $1.57 \times 10^{-9}$ (peak orbit 81).
+    $4.05 \times 10^{-12}$ (peak orbit 97).
     Notebook: [`paper/notebooks/2026-04-25-rebound-parity-kepler.md`](paper/notebooks/2026-04-25-rebound-parity-kepler.md).
   - **Figure-8 (Chenciner–Montgomery, 10 periods gated + 50 periods
-    informational):** twelve gated metrics organised in three
-    evidentiary tiers (hard physical invariants, construction-level
-    sanity, geometric coherence) at 1 ULP.
+    informational):** twelve gated metrics across two tiers (hard
+    physical invariants, construction-level sanity) at 1 ULP, plus a
+    non-gated geometric-coherence tier.
     Notebook: [`paper/notebooks/2026-04-26-rebound-parity-figure8.md`](paper/notebooks/2026-04-26-rebound-parity-figure8.md).
   - **Pythagorean (Burrau 1913, 70 canonical t.u.):** structural
     invariants ($\mathbf{L}$, $\mathbf{P}$, $\mathbf{r}_\text{COM}$)
-    at f64 round-off floor on both sides; energy bound exceeded
-    symmetrically by both implementations in the chaotic
-    close-encounter regime — a documented regime mismatch with the
-    smooth-flow bound's derivation, not a parity defect. 98 % event
-    alignment (44/45 close-encounter peaks matched within
-    $3 \times 10^{-2}$ t.u.).
+    at f64 round-off floor on both sides; energy agrees to
+    $\sim 10^{-10}$ at $T = 70$ — regime-limited precision in the
+    chaotic close-encounter cluster, not an apsis–REBOUND divergence.
+    93 % event alignment (42/45 close-encounter peaks matched within
+    $3.3 \times 10^{-2}$ t.u.).
     Notebook: [`paper/notebooks/2026-04-30-rebound-parity-pythagorean.md`](paper/notebooks/2026-04-30-rebound-parity-pythagorean.md).
   - **Kepler-retrograde ($L_z < 0$; long-horizon $10^4$ orbits +
     100-orbit checkpoint):** ten gated metrics × two horizons; all
