@@ -15,18 +15,6 @@ use pyo3::prelude::*;
 
 use crate::integrator::IntegratorKind as PyIntegratorKind;
 
-fn integrator_slug(kind: CoreIntegratorKind) -> &'static str {
-    match kind {
-        CoreIntegratorKind::Ias15 => "ias15",
-        CoreIntegratorKind::Yoshida4 => "yoshida4",
-        CoreIntegratorKind::VelocityVerlet => "velocity_verlet",
-        CoreIntegratorKind::WisdomHolman => "wisdom_holman",
-        CoreIntegratorKind::Mercurius => "mercurius",
-        CoreIntegratorKind::WHFast => "whfast",
-        CoreIntegratorKind::ImplicitMidpoint => "implicit_midpoint",
-    }
-}
-
 /// Snapshot of the simulation's cumulative scalar diagnostics.
 ///
 /// Returned by `System.stats`; immutable. A researcher prints
@@ -105,7 +93,7 @@ impl PyStats {
             self.dt,
             de,
             dl,
-            integrator_slug(self.integrator_kind),
+            self.integrator_kind.slug(),
         )
     }
 }

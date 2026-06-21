@@ -115,15 +115,7 @@ impl IntegratorKind {
     /// by config files (`"ias15"`, `"yoshida4"`, ...).
     #[getter]
     fn slug(&self) -> &'static str {
-        match self {
-            Self::Ias15 => "ias15",
-            Self::Yoshida4 => "yoshida4",
-            Self::VelocityVerlet => "velocity_verlet",
-            Self::WisdomHolman => "wisdom_holman",
-            Self::Mercurius => "mercurius",
-            Self::WHFast => "whfast",
-            Self::ImplicitMidpoint => "implicit_midpoint",
-        }
+        self.into_core().slug()
     }
 }
 

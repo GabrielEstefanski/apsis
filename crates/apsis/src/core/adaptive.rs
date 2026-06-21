@@ -54,7 +54,6 @@ pub struct DtAdaptationConfig {
     pub accel_epsilon: f64,
     pub grow_limit: f64,
     pub shrink_limit: f64,
-    pub dt_slew_fraction: f64,
 }
 
 #[derive(Debug, Clone)]
@@ -148,10 +147,6 @@ impl ThetaController {
 
         next
     }
-
-    pub fn error(&self) -> f64 {
-        self.error_ema
-    }
 }
 
 /// Whether the dt controller has a well-conditioned relative-error
@@ -184,7 +179,6 @@ impl DtController {
                 accel_epsilon: config.accel_epsilon.max(1e-18),
                 grow_limit: config.grow_limit.max(1.0),
                 shrink_limit: config.shrink_limit.clamp(1e-6, 1.0),
-                dt_slew_fraction: config.dt_slew_fraction.clamp(0.02, 1.0),
             },
             last_dt: 0.0,
             feedback_mode: FeedbackMode::Active,
@@ -256,10 +250,6 @@ impl DtController {
 
         out
     }
-
-    pub fn last_dt(&self) -> f64 {
-        self.last_dt
-    }
 }
 
 #[cfg(test)]
@@ -275,7 +265,6 @@ mod tests {
             accel_epsilon: 0.1,
             grow_limit: 1.2,
             shrink_limit: 0.5,
-            dt_slew_fraction: 0.1,
         }
     }
 

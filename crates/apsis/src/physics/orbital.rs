@@ -107,19 +107,6 @@ const E_CIRCULAR_EPS: f64 = 1e-6;
 /// where `h_vec.x` and `h_vec.y` are exactly zero.
 const N_DEGENERATE_EPS: f64 = 1e-12;
 
-/// CSV schema version for [`OrbitalElements::csv_header`] and
-/// [`OrbitalElements::to_csv_row`].
-///
-/// **Version 1** (legacy): `t, body_idx, primary_idx, a, e, period, h,
-/// energy, omega_deg, orbit_type` — 10 columns.
-///
-/// **Version 2** (current): adds `inclination_deg, lon_asc_node_deg,
-/// true_anomaly_deg, eccentric_anomaly_deg, mean_anomaly_deg, pericenter,
-/// apocenter` — 17 columns total. External tooling parsing the apsis
-/// CSV format must check this constant before consuming the file; v1
-/// readers will silently misalign on v2 output.
-pub const CSV_SCHEMA_VERSION: u32 = 2;
-
 // ── Orbit classification ──────────────────────────────────────────────────────
 
 /// Keplerian orbit type derived from specific orbital energy.
@@ -282,45 +269,6 @@ impl OrbitalElements {
     /// Mean motion `n = 2π / T`. Returns NaN for unbound orbits.
     pub fn mean_motion(self) -> f64 {
         if self.period.is_finite() && self.period > 0.0 { TAU / self.period } else { f64::NAN }
-    }
-
-    /// CSV header row matching [`Self::to_csv_row`].
-    ///
-    /// Schema is versioned — see [`CSV_SCHEMA_VERSION`]. The current
-    /// header reflects v2 (17 columns); external parsers built against
-    /// the v1 format (10 columns) will silently misalign and must check
-    /// the version constant before consuming the file.
-    pub fn csv_header() -> &'static str {
-        "t,body_idx,primary_idx,a,e,period,h,energy,\
-         inclination_deg,lon_asc_node_deg,omega_deg,\
-         true_anomaly_deg,eccentric_anomaly_deg,mean_anomaly_deg,\
-         pericenter,apocenter,orbit_type"
-    }
-
-    /// Serialise to a CSV data row.  `t` and `body_idx` are injected by the caller.
-    pub fn to_csv_row(self, t: f64, body_idx: usize) -> String {
-        format!(
-            "{t:.6e},{body_idx},{},\
-             {:.6e},{:.6e},{:.6e},{:.6e},{:.6e},\
-             {:.4},{:.4},{:.4},\
-             {:.4},{:.4},{:.4},\
-             {:.6e},{:.6e},{:?}",
-            self.primary_idx,
-            self.a,
-            self.e,
-            self.period,
-            self.h_vec.z,
-            self.energy,
-            self.inclination.to_degrees(),
-            self.lon_ascending_node.to_degrees(),
-            self.omega.to_degrees(),
-            self.true_anomaly.to_degrees(),
-            self.eccentric_anomaly.to_degrees(),
-            self.mean_anomaly.to_degrees(),
-            self.pericenter(),
-            self.apocenter(),
-            self.orbit_type.label(),
-        )
     }
 
     /// Samples the predicted Keplerian orbit in **world coordinates**.

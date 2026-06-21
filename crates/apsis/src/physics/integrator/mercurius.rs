@@ -247,7 +247,6 @@ impl Mercurius {
     /// inertial position from the COM constraint and restores every
     /// other body's COM-relative velocity to inertial velocity.
     fn dh_to_inertial(&self, bodies: &mut [Body]) {
-        let n = bodies.len();
         let mut tmp = Vec3::ZERO;
         let mut tmp_v = Vec3::ZERO;
         let mut tmp_m = 0.0_f64;
@@ -281,7 +280,6 @@ impl Mercurius {
         bodies[0].vel_x = self.com_vel.x - tmp_v.x;
         bodies[0].vel_y = self.com_vel.y - tmp_v.y;
         bodies[0].vel_z = self.com_vel.z - tmp_v.z;
-        let _ = n;
     }
 
     // ── dcrit computation (REBOUND `dcrit_for_particle`) ──────────────

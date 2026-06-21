@@ -4,13 +4,3 @@ pub enum TemplateCategory {
     Systems,
     ThreeBodyProblems,
 }
-
-impl TemplateCategory {
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Bodies => "BODIES",
-            Self::Systems => "SYSTEMS",
-            Self::ThreeBodyProblems => "3-BODY PROBLEMS",
-        }
-    }
-}

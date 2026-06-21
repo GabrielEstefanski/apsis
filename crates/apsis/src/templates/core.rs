@@ -159,12 +159,6 @@ impl UnitSystem {
             time_to_s: None,
         }
     }
-
-    /// Returns `true` if this unit system has a physical SI mapping.
-    #[inline]
-    pub fn is_physical(&self) -> bool {
-        self.mass_to_kg.is_some()
-    }
 }
 
 // ── Template ──────────────────────────────────────────────────────────────────
@@ -172,8 +166,7 @@ impl UnitSystem {
 /// Complete initial-condition specification for one simulation
 /// scenario; the engine converts it into live [`Body`] objects via
 /// [`Template::instantiate`]. After instantiation the engine zeroes the
-/// net linear momentum — see
-/// [`centre_of_momentum_velocity`](Self::centre_of_momentum_velocity).
+/// net linear momentum.
 #[derive(Debug, Clone)]
 pub struct Template {
     /// Short human-readable name shown in the scenario picker UI.
@@ -223,45 +216,5 @@ impl Template {
     /// Total mass of all bodies in the template [simulation mass units].
     pub fn total_mass(&self) -> f64 {
         self.bodies.iter().map(|b| b.mass).sum()
-    }
-
-    /// Number of bodies.
-    pub fn body_count(&self) -> usize {
-        self.bodies.len()
-    }
-
-    /// Mass-weighted centre-of-velocity.
-    ///
-    /// The instantiation step should subtract this from every body's velocity
-    /// to ensure the system has zero net linear momentum in the simulation
-    /// frame.  Bodies with `position = None` are included in the momentum sum
-    /// using `velocity` as-is.
-    pub fn centre_of_momentum_velocity(&self) -> [f64; 3] {
-        let total = self.total_mass();
-        if total <= 0.0 {
-            return [0.0, 0.0, 0.0];
-        }
-        let vx = self.bodies.iter().map(|b| b.mass * b.velocity[0]).sum::<f64>() / total;
-        let vy = self.bodies.iter().map(|b| b.mass * b.velocity[1]).sum::<f64>() / total;
-        let vz = self.bodies.iter().map(|b| b.mass * b.velocity[2]).sum::<f64>() / total;
-        [vx, vy, vz]
-    }
-
-    /// Centre of mass position, computed only over bodies with known positions.
-    ///
-    /// Returns `None` if no body has a known position.
-    pub fn centre_of_mass(&self) -> Option<[f64; 3]> {
-        let known: Vec<_> = self.bodies.iter().filter(|b| b.position.is_some()).collect();
-        if known.is_empty() {
-            return None;
-        }
-        let total: f64 = known.iter().map(|b| b.mass).sum();
-        if total <= 0.0 {
-            return None;
-        }
-        let cx = known.iter().map(|b| b.mass * b.position.unwrap()[0]).sum::<f64>() / total;
-        let cy = known.iter().map(|b| b.mass * b.position.unwrap()[1]).sum::<f64>() / total;
-        let cz = known.iter().map(|b| b.mass * b.position.unwrap()[2]).sum::<f64>() / total;
-        Some([cx, cy, cz])
     }
 }

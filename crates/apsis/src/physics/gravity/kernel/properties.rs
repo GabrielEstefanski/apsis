@@ -22,8 +22,6 @@
 //!   impulsive accelerations that cannot be represented within any
 //!   symplectic splitting scheme.
 
-use crate::domain::body::Body;
-
 // ── KernelProperties ──────────────────────────────────────────────────────── //
 
 /// Physical invariants a kernel satisfies.
@@ -199,13 +197,6 @@ impl std::fmt::Display for RequirementViolation {
         }
     }
 }
-
-// ── Helper: touch Body to avoid unused-import warnings in downstream ─────── //
-
-/// Retained to document the dependency direction: kernel properties may
-/// be computed from body state. Used by [`Kernel::properties`] signatures.
-#[allow(dead_code)]
-fn _body_reference(_bodies: &[Body]) {}
 
 // ── Tests ─────────────────────────────────────────────────────────────────── //
 

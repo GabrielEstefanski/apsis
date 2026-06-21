@@ -227,12 +227,6 @@ pub struct System {
     /// symplectic rhythm across sampling boundaries.
     pub(crate) exact_finish_time: bool,
 
-    /// Accumulated world-space COM translation since the last call to
-    /// [`take_com_shift`](System::take_com_shift). Downstream visualisers
-    /// read and clear this each frame to keep overlays aligned with the
-    /// shifted bodies.
-    pub(crate) pending_com_shift: (f32, f32),
-
     /// Dense-output snapshot from the most recent integration step.
     /// Produced each step; consumed by downstream interpolators (e.g.
     /// trail samplers, sub-step position renderers) that need a smooth
@@ -396,7 +390,6 @@ impl System {
                 accel_epsilon: 0.1,
                 grow_limit: 1.2,
                 shrink_limit: 0.5,
-                dt_slew_fraction: 0.1,
             }),
             theta_ctrl: ThetaController::new(1e-3, 0.05, 1.5).with_initial_theta(theta),
             adaptive_theta: false,
@@ -416,7 +409,6 @@ impl System {
             hooks: HookRegistry::new(),
             stop_requested: false,
             exact_finish_time: true,
-            pending_com_shift: (0.0, 0.0),
             last_dense_snapshot: None,
             template_source: None,
             finished: false,
