@@ -21,9 +21,10 @@ ULP** of f64 (for the validated reference configuration) across four
 canonical regimes (Kepler $e = 0.5$, Chenciner–Montgomery figure-8,
 Pythagorean, $10^4$-orbit retrograde Kepler); under
 [`apsis.gr`](crates/apsis-1pn/) (post-Newtonian 1PN), Mercury's
-perihelion precession matches the analytic 1PN GR prediction to
-within **100 ppm** (osculating-ω end-vs-start over 500 orbits),
-reproduced bit-identically across Windows and Linux on x86_64.
+perihelion precession matches the analytic 1PN GR prediction to its
+derived error budget (residual **+4.6×10⁻⁶** relative, CI-gated below
+**9.2×10⁻⁶**) over 500 orbits, reproduced bit-identically across
+Windows and Linux on x86_64.
 
 > **Status.** Pre-release (`v0.1.0` alpha). 3D-aware physics core
 > (Vec3, inclined orbits, 3D observables). Multiple published operator
@@ -150,7 +151,7 @@ The same Mercury 1PN scenario as a runnable example, with the GR
 comparison printed inline (Rust 1.85+):
 
 ```bash
-git clone https://github.com/gabrielbragaestefanski/apsis
+git clone https://github.com/GabrielEstefanski/apsis
 cd apsis
 cargo run --release --example mercury_perihelion -p apsis-1pn
 ```
@@ -159,14 +160,14 @@ Expected output (abridged):
 
 ```text
 Mercury + Sun + 1PN @ IAS15
-  T_mercury      = 1.513251 sim units
-  integrating    = 500 orbits  →  t = 756.63
-  ...
+T_mercury = 1.513251 sim units
+integrating 500 orbits → t = 756.63
+...
 ── GR comparison over 500 orbits ──
-  predicted Δω      = +2.509332e-04 rad  (+51.7587 arcsec)
-  measured  Δω      = +2.509130e-04 rad  (+51.7545 arcsec)
-  relative error    = -8.053e-05
-  rate              = 42.978 arcsec/century  (GR expects 43)
+predicted Δω = +2.509332e-4 rad (+51.7587 arcsec)
+measured Δω = +2.509344e-4 rad (+51.7589 arcsec)
+relative error = +4.581e-6
+rate = 42.982 arcsec/century (GR expects 43)
 ```
 
 The same number is asserted in CI, gate-style:
@@ -190,8 +191,8 @@ fn main() {
 
     sys.integrate_for(100.0);
 
-    println!("dE/E = {:.3e}", sys.energy_delta());
-    println!("dLz  = {:.3e}", sys.lz_delta());
+    println!("dE/E = {:.3e}", sys.energy_delta().unwrap_or(f64::NAN));
+    println!("dLz = {:.3e}", sys.lz_delta().unwrap_or(f64::NAN));
 }
 ```
 
@@ -236,11 +237,6 @@ maturin builds the cdylib in `crates/apsis-python` via the root
 `pyproject.toml`. Adding an internal force is adding a Cargo crate
 and a feature flag; adding an external force is publishing
 `apsis-plugin-X` against the public extension API.
-
-The interactive visualisation shell lives in a separate repository
-at [`GabrielEstefanski/apsis-app`](https://github.com/GabrielEstefanski/apsis-app);
-it is a downstream consumer of the public `apsis` API and is not
-part of the library's validated surface or release cadence.
 
 ## Fine-physics guardrail
 
@@ -305,9 +301,10 @@ What is verified in CI:
   radiation (Burns 1979 β-table dust decay), central-force
   (Tamayo 2020 round-trip).
 - **Release-mode Mercury gate**: `cargo test --release -p apsis-1pn
-  -- --ignored` asserts Mercury's precession within 100 ppm of the
-  analytic 1PN GR prediction over 500 orbits, reproduced
-  bit-identically across Windows and Linux on x86_64.
+  -- --ignored` asserts Mercury's precession within the derived error
+  budget (residual +4.6×10⁻⁶, gate <9.2×10⁻⁶) of the analytic 1PN GR
+  prediction over 500 orbits, reproduced bit-identically across Windows
+  and Linux on x86_64.
 - **Cross-implementation parity portfolio**: against REBOUND's IAS15
   on four canonical scenarios spanning periodic 2-body, periodic
   3-body, chaotic 3-body, and sign-flipped 2-body regimes. All gated

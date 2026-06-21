@@ -78,8 +78,8 @@ fn main() {
     // ── Integrate and sample ────────────────────────────────────────────────
     let t_end = mercury_period * (N_ORBITS as f64);
     println!("Mercury + Sun + 1PN @ IAS15");
-    println!("  T_mercury      = {mercury_period:.6} sim units");
-    println!("  integrating    = {N_ORBITS} orbits  →  t = {t_end:.2}");
+    println!("T_mercury = {mercury_period:.6} sim units");
+    println!("integrating {N_ORBITS} orbits → t = {t_end:.2}");
     println!();
 
     println!("{:>6}  {:>14}  {:>14}  {:>14}", "orbit", "Δω (rad)", "Δω (arcsec)", "|δE/E|");
@@ -125,10 +125,10 @@ fn main() {
 
     println!();
     println!("── GR comparison over {N_ORBITS} orbits ──");
-    println!("  predicted Δω      = {predicted_total:+.6e} rad  ({predicted_arcsec:+.4} arcsec)");
-    println!("  measured  Δω      = {measured_total:+.6e} rad  ({measured_arcsec:+.4} arcsec)");
-    println!("  relative error    = {rel_err:+.3e}");
-    println!("  rate              = {arcsec_per_century:.3} arcsec/century  (GR expects 43)");
+    println!("predicted Δω = {predicted_total:+.6e} rad ({predicted_arcsec:+.4} arcsec)");
+    println!("measured Δω = {measured_total:+.6e} rad ({measured_arcsec:+.4} arcsec)");
+    println!("relative error = {rel_err:+.3e}");
+    println!("rate = {arcsec_per_century:.3} arcsec/century (GR expects 43)");
 }
 
 fn unwrap_angle(d: f64) -> f64 {
