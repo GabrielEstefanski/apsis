@@ -226,8 +226,8 @@ metrics pass.
 
 The Tier-3 $|\Delta r|$ tabulated above (peak $1.57 \times 10^{-9}$) is the
 original `cc66c1b` controller. The later Pascal-warmstart refactor (`e849d31`)
-tightened apsis's step schedule toward REBOUND's, dropping the drift two orders
-to $6.6 \times 10^{-12}$ in the current figure while the gated invariants stay at
+tightened apsis's step schedule toward REBOUND's, dropping the drift by over
+two orders to $4.05 \times 10^{-12}$ in the current figure while the gated invariants stay at
 the round-off floor — controller-dependent phase drift, not a parity defect
 (§Pilot Interpretation).
 
