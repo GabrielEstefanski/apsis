@@ -46,7 +46,7 @@ For the Pythagorean three-body problem integrated under IAS15 in both `apsis` an
 
 The quantities here are exact constants of motion of the three-body dynamics under Newtonian gravity; any drift in either implementation is a numerical artefact. Both per-side conservation and cross-implementation agreement are gated.
 
-- **Energy** — $\max |\Delta E / E_0|$ per side $\leq 1.0 \times 10^{-13}$. IAS15 is designed for machine-precision energy conservation across many substeps (Rein & Spiegel 2015, §4), and the published Pythagorean conservation results cited in their §4.2 sit at this level. The bound matches the figure-8 notebook's energy gate (i.e., $\sim 450 \times$ f64 machine epsilon, generous over the per-side 1–10 ULP floor that smooth-flow IAS15 achieves) and is exceeded symmetrically by both implementations in the close-encounter regime — the documented limitation registered in Threats #4.
+- **Energy** — $\max |\Delta E / E_0|$ per side $\leq 1.0 \times 10^{-13}$. IAS15 is designed for machine-precision energy conservation across many substeps (Rein & Spiegel 2015). The bound matches the figure-8 notebook's energy gate (i.e., $\sim 450 \times$ f64 machine epsilon, generous over the per-side 1–10 ULP floor that smooth-flow IAS15 achieves) and is exceeded symmetrically by both implementations in the close-encounter regime — the documented limitation registered in Threats #4.
 - **Energy** — cross-implementation $\max |\Delta E_\text{apsis} - \Delta E_\text{rebound}| / |E_0| \leq 1.0 \times 10^{-13}$.
 - **Angular momentum** — $\max |\Delta \mathbf{L}|$ per side $\leq 1.0 \times 10^{-13}$ in absolute units. The Pythagorean ICs have $\mathbf{L}_0 = \mathbf{0}$ by construction (all velocities zero, no rotation built into the IC), so a relative bound is undefined; the absolute bound is set against the characteristic angular-momentum scale $|m_i \, \mathbf{r}_i \times \mathbf{v}_i|$ that develops once the bodies acquire velocity from gravitational attraction. With the Burrau mass distribution (3, 4, 5) and close-encounter velocity peaks, this scale reaches $\sim O(10)$ during the chaotic regime; the $10^{-13}$ bound is comfortably above the f64 round-off envelope at that scale and matches the figure-8 notebook's gate.
 - **Angular momentum** — cross-implementation $\max |\mathbf{L}_\text{apsis} - \mathbf{L}_\text{rebound}| \leq 1.0 \times 10^{-13}$.
@@ -196,7 +196,7 @@ All nine of these structural invariants pass at the f64 round-off floor — angu
 | $\lvert \Delta E / E_0 \rvert$ rebound | $1.089 \times 10^{-10}$ | $1.00 \times 10^{-13}$ | **FAIL** ($1090\times$ over) |
 | Cross-impl $\lvert \Delta E \rvert / \lvert E_0 \rvert$ | $1.405 \times 10^{-10}$ | $1.00 \times 10^{-13}$ | **FAIL** ($1405\times$ over) |
 
-The a-priori bound of $1 \times 10^{-13}$ ($\approx 50 \times$ f64 ULP) was derived from IAS15's published machine-precision conservation property for **smooth flow with bounded acceleration** (Rein & Spiegel 2015 §4). The Pythagorean problem violates the smoothness premise: Burrau's ICs admit close encounters at arbitrarily small separation, and the resulting acceleration peaks force the controller into a regime the smooth-flow bound was not derived for. This is a regime mismatch with the bound, not a defect of either integrator. Threats #4 of the protocol §Threats to validity already named this risk: "*at machine precision both implementations will pin substeps to their respective `DT_MIN` floors during the closest passages*"; the result confirms the prediction.
+The a-priori bound of $1 \times 10^{-13}$ ($\approx 50 \times$ f64 ULP) was derived from IAS15's published machine-precision conservation property for **smooth flow with bounded acceleration** (Rein & Spiegel 2015). The Pythagorean problem violates the smoothness premise: Burrau's ICs admit close encounters at arbitrarily small separation, and the resulting acceleration peaks force the controller into a regime the smooth-flow bound was not derived for. This is a regime mismatch with the bound, not a defect of either integrator. Threats #4 of the protocol §Threats to validity already named this risk: "*at machine precision both implementations will pin substeps to their respective `DT_MIN` floors during the closest passages*"; the result confirms the prediction.
 
 The drift is **symmetric across implementations** — REBOUND drifts approximately $3 \times$ more than apsis, both at the same order of magnitude, both well above the smooth-flow bound. A bug confined to one side would produce asymmetric drift; the symmetry instead supports that both implementations integrate the same Hamiltonian to the precision the f64 close-encounter regime admits. The bound was a faithful prediction *under its derivation's assumptions*; the assumptions do not hold for this scenario, and the failure is documentary evidence of that, not of a parity violation.
 
@@ -230,7 +230,7 @@ Reading the four bands of evidence together — close-encounter alignment, struc
 
 **The two implementations differ in adaptive policy under numerical constraints.** apsis's controller drives `dt` down to its explicit $10^{-12}$ floor at the closest passages, accepting $250{,}208$ degraded (floor-pinned) substeps and totalling $3.3 \times 10^{6}$ substeps. REBOUND's controller stops shrinking at $6.77 \times 10^{-5}$, never invokes a degraded-step path, and totals $7.3 \times 10^{3}$ substeps. The two policies trade computational cost against energy precision in the same close-encounter regime, with apsis paying $450 \times$ more substeps for a $3 \times$ better energy bound — diminishing-return characteristics consistent with both implementations operating against the same effective f64 floor for this regime.
 
-**The protocol's a-priori energy bound does not apply to this regime.** The $1 \times 10^{-13}$ tolerance was set against IAS15's machine-precision conservation property for smooth flow (Rein & Spiegel 2015 §4); the Pythagorean problem's repeated close encounters force the controller into a regime where that property's preconditions (bounded acceleration over smooth phase-space neighbourhoods) do not hold. The bound is exceeded by both implementations, symmetrically, by 2–3 orders of magnitude — exactly the kind of bound failure the protocol's tier hierarchy was designed to absorb without invalidating the overall parity claim. The *Verdict criterion* (§Hypothesis) gates the experiment on Tier 1 and Tier 2 collectively; the energy failures do not in fact invalidate the conservation invariant evidence they sit alongside, because that evidence is independent of the energy estimate and reaches f64 precision on both sides.
+**The protocol's a-priori energy bound does not apply to this regime.** The $1 \times 10^{-13}$ tolerance was set against IAS15's machine-precision conservation property for smooth flow (Rein & Spiegel 2015); the Pythagorean problem's repeated close encounters force the controller into a regime where that property's preconditions (bounded acceleration over smooth phase-space neighbourhoods) do not hold. The bound is exceeded by both implementations, symmetrically, by 2–3 orders of magnitude — exactly the kind of bound failure the protocol's tier hierarchy was designed to absorb without invalidating the overall parity claim. The *Verdict criterion* (§Hypothesis) gates the experiment on Tier 1 and Tier 2 collectively; the energy failures do not in fact invalidate the conservation invariant evidence they sit alongside, because that evidence is independent of the energy estimate and reaches f64 precision on both sides.
 
 **This is the third entry in Pillar A of the v0.1 validation portfolio.** The Kepler scenario (notebook `2026-04-25`) showed apsis IAS15 reproducing the Keplerian two-body limit to ULP precision against REBOUND. The figure-8 scenario (notebook `2026-04-26`) extended that to the periodic three-body limit, also at ULP precision. The Pythagorean scenario reported here characterises a third, distinct regime — chaotic, non-periodic, close-encounter-dominated — in which the two implementations resolve the same dynamical events and preserve the same structural invariants but exceed the smooth-flow energy bound symmetrically. The Pythagorean is canonically described in the literature as a stress test for adaptive integrators (Aarseth 2003); the result here is consistent with that description: not a regime where IAS15-class methods reach their theoretical floor, but one where the integrator's behaviour is well-characterised by the alignment of its close-encounter responses with an independent reference.
 
@@ -255,7 +255,7 @@ energy conservation is necessary but not sufficient for trajectory accuracy
 (Boekholt & Portegies Zwart 2015). The gate is set at the double-precision energy
 floor reported for the Pythagorean problem, $dE/E \approx 10^{-8}$ (Boekholt &
 Portegies Zwart 2015) — above the observed cross-implementation drift
-($\sim 4 \times 10^{-10}$) and below the $\sim 10^{-6}$ energy-error level
+($\sim 2 \times 10^{-10}$) and below the $\sim 10^{-6}$ energy-error level
 conventional in collisional N-body work. Cross-implementation parity rests on the
 structural invariants and the close-encounter alignment, not on this bound. All
 twelve gated metrics pass.
@@ -277,12 +277,12 @@ Re-run under the corrected controller and the derived gates:
 | accepted sub-steps | $3{,}312{,}889$ | $680{,}418$ |
 | floor-pinned (degraded) | $250{,}208$ | $0$ |
 | truncation rejections | $374{,}650$ | $0$ |
-| $\lvert \Delta E / E_0 \rvert$ apsis | $3.85 \times 10^{-11}$ | $2.12 \times 10^{-10}$ |
-| cross-impl $\lvert \Delta E \rvert / \lvert E_0 \rvert$ | $1.41 \times 10^{-10}$ | $4.27 \times 10^{-10}$ |
-| close-encounter alignment | 44/45 | 43/45 |
+| $\lvert \Delta E / E_0 \rvert$ apsis | $3.85 \times 10^{-11}$ | $1.37 \times 10^{-10}$ |
+| cross-impl $\lvert \Delta E \rvert / \lvert E_0 \rvert$ | $1.41 \times 10^{-10}$ | $1.75 \times 10^{-10}$ |
+| close-encounter alignment | 44/45 | 42/45 |
 | gated metrics | 9/12 (a-priori) | 12/12 (derived) |
 
-Energy relaxes to the REBOUND-class chaotic floor ($\approx 2 \times 10^{-10}$,
+Energy relaxes to the REBOUND-class chaotic floor ($10^{-11}$–$10^{-10}$,
 where both implementations sit): the corrected controller no longer
 over-resolves. The residual sub-step gap to REBOUND is chaotic trajectory
 divergence — on a deterministic high-eccentricity Kepler orbit the two
