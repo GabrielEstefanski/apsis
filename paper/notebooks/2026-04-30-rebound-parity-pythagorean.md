@@ -93,7 +93,7 @@ By construction these ICs satisfy $\sum_i m_i \, \mathbf{r}_i = \mathbf{0}$, $\s
 | Force model | direct $O(N^2)$ (forced via pairing rule, ADR-003) | direct (REBOUND default) |
 | Exact finish time | not enforced | `sim.exact_finish_time = 1` |
 
-The initial `dt = 10^{-3}` matches the apsis preset's `suggested_dt` and is the conventional seed used in the literature (Szebehely & Peters 1967; Aarseth 2003). Both controllers are then free to grow `dt` in the smooth quiescent intervals between encounters and shrink at encounters; the gated metrics characterise the cumulative round-off accumulated through this adaptation.
+The initial `dt = 10^{-3}` matches the apsis preset's `suggested_dt` and serves only as a seed. Both controllers are then free to grow `dt` in the smooth quiescent intervals between encounters and shrink at encounters; the gated metrics characterise the cumulative round-off accumulated through this adaptation.
 
 REBOUND's `exact_finish_time = 1` is used so REBOUND samples are evaluated at the *actual* sample times produced by the apsis side after its adaptive controller has overshot the nominal target; this removes "two implementations sampled at slightly different physical times" as a confound in the cross-implementation comparison. The same convention was used in the Kepler and figure-8 notebooks.
 
@@ -267,7 +267,7 @@ twelve gated metrics pass.
 The §Controller-behaviour figures exposed a defect, not a regime cost: the apsis
 controller accepted a sub-step only when the truncation error was already
 $\leq \varepsilon$, so it rejected-and-halved to the `DT_MIN` floor at every
-close encounter. The canonical policy (Rein & Spiegel 2015 §3.4) accepts unless
+close encounter. The canonical policy (Rein & Spiegel 2015 §2.3) accepts unless
 the error-recommended step is a gross overshoot; adopting it removes the cascade.
 
 Re-run under the corrected controller and the derived gates:

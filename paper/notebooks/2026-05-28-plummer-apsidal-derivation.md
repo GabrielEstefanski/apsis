@@ -45,8 +45,8 @@ closed-form prediction cited in §3.2.
   cluster dynamics; gives the radial-force expression and discusses
   the apsidal-angle deviation it induces.
 - Goldstein, Poole & Safko (2002). *Classical Mechanics* (3rd ed.),
-  §3.6 (orbit equation in a central potential), §3.8 (apsidal
-  angle and conditions for closed orbits).
+  §3.5 (orbit equation and integrable power-law potentials), §3.6
+  (apsidal angle and conditions for closed orbits).
 - Landau, L. D., & Lifshitz, E. M. (1976). *Mechanics* (3rd ed.),
   §15. Perihelion-precession formula for a small perturbation to the
   Kepler potential; used for the first-order $\varepsilon^4$ next-order
@@ -189,7 +189,7 @@ $5 \times 10^4$.
 The closed form above is the leading order in $\varepsilon^2$. The
 apsidal precession for the *full* Plummer potential needs no expansion:
 for a central potential the angle swept periapse-to-periapse is the
-quadrature (Goldstein §3.6)
+quadrature (Goldstein §3.5)
 
 $$\Delta\varpi = 2\int_{r_\text{min}}^{r_\text{max}}\frac{L/r^2}{\sqrt{2\,(E-\Phi(r)) - L^2/r^2}}\,\mathrm{d}r - 2\pi,
 \qquad \Phi(r) = -\frac{GM}{\sqrt{r^2+\varepsilon^2}},$$

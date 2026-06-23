@@ -66,10 +66,10 @@ pub(crate) enum IntegratorKind {
     #[pyo3(name = "MERCURIUS")]
     Mercurius,
 
-    /// Wisdom-Holman split with compensated summation on per-step
-    /// position and velocity accumulators (Rein & Tamayo 2015).
-    /// Reduces round-off envelope from $O(N \cdot \varepsilon)$ to
-    /// $O(\sqrt{N} \cdot \varepsilon)$, unlocking long-horizon
+    /// Wisdom-Holman split (Rein & Tamayo 2015) with Neumaier-compensated
+    /// position and velocity accumulators, reducing the round-off
+    /// envelope from $O(N \cdot \varepsilon)$ to $O(\sqrt{N} \cdot
+    /// \varepsilon)$ (Higham 2002 §4.5), unlocking long-horizon
     /// planetary integration. Same hierarchical-mass requirement
     /// as Wisdom-Holman.
     #[pyo3(name = "WHFAST")]

@@ -6,7 +6,7 @@ precession per radial period
     Δϖ = 2 ∫_{r_min}^{r_max} (L/r²) / sqrt(2(E − Φ(r)) − L²/r²) dr − 2π
 
 for the FULL Plummer potential Φ(r) = −GM/sqrt(r²+ε²) (no ε-expansion),
-via the central-potential apsidal-angle integral (Goldstein §3.6), plus
+via the central-potential apsidal-angle integral (Goldstein §3.5), plus
 the radial period T_r = 2 ∫ dr / sqrt(...) for the Kepler-vs-radial
 "orbit" bookkeeping.
 

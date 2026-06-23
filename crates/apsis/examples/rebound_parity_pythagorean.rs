@@ -55,9 +55,10 @@ const V1: (f64, f64) = (0.0, 0.0);
 const V2: (f64, f64) = (0.0, 0.0);
 const V3: (f64, f64) = (0.0, 0.0);
 
-/// Default integration horizon in canonical time units. Exceeds both
-/// "completion" reference points in the literature (Aarseth 2003 §3 cites
-/// t ≈ 46; Szebehely & Peters 1967 Fig. 5 extends through t ≈ 60) without
+/// Default integration horizon in canonical time units. Exceeds the
+/// canonical Burrau completion in the literature (Szebehely & Peters
+/// 1967: the system resolves to an escaper plus a binary by t ≈ 60)
+/// without
 /// entering the regime where the post-ejection binary's rapid orbit
 /// dominates substep selection.
 const HORIZON: f64 = 70.0;

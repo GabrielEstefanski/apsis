@@ -86,7 +86,7 @@ The bound is loosened from the Mercurius lab notebook's 10⁻⁶ to 10⁻⁵ to 
 
 #### Tier 3 — Reference-side conservation sanity *(soft gate)*
 
-REBOUND-side ΔE/E₀ and ΔLz/Lz₀ peak should match the published REBOUND MERCURIUS conservation behaviour on Solar-System scenarios (Rein et al. 2019 §3 reports ~10⁻⁹ to 10⁻¹⁰ on similar runs). If REBOUND-side conservation fails, the parity test is uninformative — either the scenario is mis-specified or one of the integrator settings is wrong.
+REBOUND-side ΔE/E₀ and ΔLz/Lz₀ peak should sit at the symplectic-class floor for this scenario — MERCURIUS (Rein et al. 2019) is a 2nd-order method whose energy error oscillates around the initial value rather than drifting. If REBOUND-side conservation fails, the parity test is uninformative — either the scenario is mis-specified or one of the integrator settings is wrong.
 
 ### Methodology
 
@@ -165,10 +165,9 @@ Three regimes are visible:
 
 ### Tier 3 — Reference-side sanity *(pass)*
 
-REBOUND ΔE/E₀ peak `= 1.112 × 10⁻⁹` matches the published REBOUND
-MERCURIUS conservation behaviour on Solar-System scenarios (Rein et al.
-2019 §3 reports ~10⁻⁹ to 10⁻¹⁰ on similar runs); the scenario is
-correctly specified. The closeness of the per-side ΔE/E₀ floors —
+REBOUND ΔE/E₀ peak `= 1.112 × 10⁻⁹` sits at the symplectic-class floor
+expected for a 2nd-order method on this scenario (MERCURIUS, Rein et al.
+2019); the scenario is correctly specified. The closeness of the per-side ΔE/E₀ floors —
 `apsis 1.113 × 10⁻⁹` vs `REBOUND 1.112 × 10⁻⁹`, agreeing in the
 mantissa to 4 significant figures — is a strong independent signal
 that the two implementations are running the same algorithm.
@@ -279,6 +278,6 @@ Open follow-ups (separate PRs):
 
 ## References
 
-- Rein, H., Hernandez, D. M., Tamayo, D., & Brown, G. (2019). *Hybrid symplectic integrators for planetary dynamics.* MNRAS, 489(4), 4632–4640.
+- Rein, H., Hernandez, D. M., Tamayo, D., Brown, G., Eckels, E., Holmes, E., Lau, M., Leblanc, R., & Silburt, A. (2019). *Hybrid symplectic integrators for planetary dynamics.* MNRAS, 485(4), 5490–5497.
 - Mercurius implementation lab notebook: `docs/experiments/2026-05-13-mercurius-hybrid.md`.
 - Kepler parity protocol template: `docs/experiments/2026-04-25-rebound-parity-kepler.md`.

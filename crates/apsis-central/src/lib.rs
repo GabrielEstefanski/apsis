@@ -102,7 +102,7 @@
 //! Tamayo, D., Rein, H., Shi, P., & Hernandez, D. M. (2020). REBOUNDx:
 //! a library for adding conservative and dissipative forces to
 //! otherwise symplectic N-body integrations. *MNRAS* 491, 2885–2901.
-//! DOI: [10.1093/mnras/stz3018](https://doi.org/10.1093/mnras/stz3018).
+//! DOI: [10.1093/mnras/stz2870](https://doi.org/10.1093/mnras/stz2870).
 
 #![deny(unsafe_code)]
 #![allow(clippy::needless_range_loop)]
@@ -365,7 +365,7 @@ impl Operator for CentralForce {
     fn citation(&self) -> Option<Citation> {
         Some(Citation {
             bibtex: TAMAYO_2020_BIBTEX,
-            doi: Some("10.1093/mnras/stz3018"),
+            doi: Some("10.1093/mnras/stz2870"),
             crate_name: env!("CARGO_PKG_NAME"),
             crate_version: env!("CARGO_PKG_VERSION"),
             commit_hash: option_env!("APSIS_CENTRAL_GIT_COMMIT").filter(|s| !s.is_empty()),
@@ -467,7 +467,7 @@ const TAMAYO_2020_BIBTEX: &str = r#"@article{tamayo2020,
   number  = {2},
   pages   = {2885--2901},
   year    = {2020},
-  doi     = {10.1093/mnras/stz3018}
+  doi     = {10.1093/mnras/stz2870}
 }"#;
 
 #[cfg(test)]
@@ -680,7 +680,7 @@ mod tests {
         let c = f.citation().expect("CentralForce must publish a citation");
         assert_eq!(c.crate_name, "apsis-central");
         assert_eq!(c.crate_version, env!("CARGO_PKG_VERSION"));
-        assert_eq!(c.doi, Some("10.1093/mnras/stz3018"));
+        assert_eq!(c.doi, Some("10.1093/mnras/stz2870"));
         assert!(c.bibtex.contains("tamayo2020"));
         if let Some(h) = c.commit_hash {
             assert!(h.chars().all(|ch| ch.is_ascii_hexdigit()), "bad commit_hash: {h}");

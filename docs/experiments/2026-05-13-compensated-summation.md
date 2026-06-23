@@ -71,4 +71,4 @@ Neumaier, A. (1974). Rundungsfehleranalyse einiger Verfahren zur Summation endli
 
 Higham, N. J. (2002). *Accuracy and Stability of Numerical Algorithms*, 2nd ed., §4.3 ("Compensated summation"). SIAM.
 
-Rein, H., & Tamayo, D. (2015). WHFast: a fast and unbiased implementation of a symplectic Wisdom-Holman integrator for long-term gravitational simulations. *MNRAS* 452, 376–388. § 6 documents REBOUND's compensated summation use.
+Rein, H., & Tamayo, D. (2015). WHFast: a fast and unbiased implementation of a symplectic Wisdom-Holman integrator for long-term gravitational simulations. *MNRAS* 452, 376–388. §2.7 establishes the unbiased `O(√N · ε)` round-off envelope (Brouwer's law).
