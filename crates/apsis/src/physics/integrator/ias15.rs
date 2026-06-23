@@ -351,7 +351,7 @@ const H: [f64; 8] = [
 //     g_j = b_j + Σ_{k>j}  d_mat[k][j] · b_k
 //
 // We store only the lower triangle (row k, cols 0..k). Values from
-// Everhart (1985) table I; the same constants appear in Rein &
+// Everhart (1985); the same constants appear in Rein &
 // Spiegel (2015) §2 and in any specification-correct IAS15
 // implementation, including the independent C implementation in
 // REBOUND used as the parity reference.
@@ -451,21 +451,21 @@ const DEFAULT_EPSILON: f64 = 1e-9;
 
 /// Floor on `dt` to keep contact-singularity scenes from stalling the
 /// scheduler. Below this, accept the attempt with `degraded = true`
-/// and let the caller decide. R&S 2015 §3.4 leaves this as an
-/// implementation choice; `1e-12` is 3 decades above f64 ε.
+/// and let the caller decide. R&S 2015 §2.3 does not specify a
+/// floor here; `1e-12` is 3 decades above f64 ε.
 const DT_MIN: f64 = 1e-12;
 
 /// Multiplier on the theoretically optimal Δt after each attempt.
 /// Keeps the controller away from the accept/reject boundary so
 /// step size doesn't oscillate between borderline-too-large and
-/// too-small. `0.9` is the value specified in Rein & Spiegel (2015)
-/// §3.4.
+/// too-small. `0.9` follows the REBOUND implementation; it is not
+/// specified in Rein & Spiegel (2015).
 const DT_SAFETY: f64 = 0.9;
 
 /// Accept/reject band: a converged sub-step is accepted unless the
 /// error-recommended next step falls below this fraction of the attempt
 /// (a gross overshoot, redone with the recommended step). The error sets
-/// the step size; it is not a hard accept gate (Rein & Spiegel 2015 §3.4).
+/// the step size; it is not a hard accept gate (Rein & Spiegel 2015 §2.3).
 /// `0.25` matches the per-step change factor of the REBOUND parity oracle.
 const SAFETY_FACTOR_BAND: f64 = 0.25;
 
@@ -475,7 +475,8 @@ const SAFETY_FACTOR_BAND: f64 = 0.25;
 /// [`DT_GROWTH_LIMIT`].
 const DT_ZERO_ERR_GROWTH: f64 = 2.0;
 
-/// Maximum step-size growth ratio per accepted sub-step (R&S 2015 §3.4).
+/// Maximum step-size growth ratio per accepted sub-step — a REBOUND
+/// implementation convention, not specified in Rein & Spiegel (2015).
 /// Without this cap, the `(ε/err)^{1/7}` formula proposes unbounded
 /// growth in smooth regions, triggering a shrink cascade on the next
 /// truncation rejection. See
@@ -489,7 +490,7 @@ const MAX_PICARD_ITERATIONS: usize = 12;
 
 /// Convergence threshold on the Picard residual across one
 /// predictor–corrector iteration. `1e-16` is essentially f64 round-off
-/// — Rein & Spiegel (2015) §3.3 specify exactly this floor and pair
+/// — Rein & Spiegel (2015) §2.2 specify exactly this floor and pair
 /// it with an early-exit on two consecutive non-improving iterations,
 /// which we also do (see [`Ias15::picard_loop_inner`]).
 const PICARD_TOL: f64 = 1e-16;
@@ -510,7 +511,7 @@ const EPSILON_MAX: f64 = 1e-3;
 /// Shrink factor applied when the Picard predictor–corrector fails to
 /// converge. Divergence is a Lipschitz-regime problem (the step is
 /// simply too large for the local dynamics); a fixed halving is the
-/// canonical IAS15 response (Rein & Spiegel 2015 §3.4) and converges
+/// canonical IAS15 response (Rein & Spiegel 2015 §2.3) and converges
 /// faster than the truncation formula `(ε/err)^{1/7}` when the error
 /// comes from non-convergence rather than from dt⁷-scaled truncation.
 const PICARD_SHRINK: f64 = 0.5;
@@ -543,7 +544,7 @@ enum DtDecision {
 /// signals — Picard can diverge while `dt_new` is incidentally large, and
 /// that case must reject. A converged step is accepted unless `dt_new` is
 /// a gross overshoot (`< SAFETY_FACTOR_BAND · dt_try`); the error sets the
-/// step, it is not a hard accept gate (Rein & Spiegel 2015 §3.4).
+/// step, it is not a hard accept gate (Rein & Spiegel 2015 §2.3).
 ///
 /// | `converged` | `dt_new ≥ band·dt` | `dt ≤ DT_MIN` | → |
 /// |---|---|---|---|
@@ -989,7 +990,7 @@ impl Integrator for Ias15 {
                     time_phase!(snapshot_restore, {
                         self.restore_snapshot(bodies);
                     });
-                    // Fixed halving per Rein & Spiegel (2015) §3.4:
+                    // Fixed halving per Rein & Spiegel (2015) §2.3:
                     // Picard divergence means the step exceeds the
                     // local Lipschitz bound, and the (ε/err)^{1/7}
                     // formula — which assumes the dt⁷-scaled
@@ -1016,7 +1017,7 @@ impl Integrator for Ias15 {
                     // Redo with the error-recommended step. Reaching here
                     // means `dt_new` is a gross overshoot (< band·dt_try),
                     // so this is one calibrated shrink, not a halving
-                    // cascade (R&S 2015 §3.4).
+                    // cascade (R&S 2015 §2.3).
                     let dt_next_attempt = dt_new.max(DT_MIN);
                     diag_emit_attempt(
                         self,
@@ -1106,7 +1107,7 @@ impl Integrator for Ias15 {
                     self.update_warmstart_record();
                     self.dt_last_accepted = dt_try;
                     // Propose next dt from the truncation signal, capped
-                    // at `dt_try · DT_GROWTH_LIMIT` per R&S 2015 §3.4.
+                    // at `dt_try · DT_GROWTH_LIMIT` (see DT_GROWTH_LIMIT).
                     let new_dt_next = dt_new.min(dt_try * DT_GROWTH_LIMIT).max(DT_MIN);
 
                     if let Some(natural) = clipped_natural_dt {
@@ -1479,7 +1480,7 @@ impl Ias15 {
             }
 
             // Residual: RMS over per-body `‖Δb₆[i]‖/‖a₀[i]‖`. R&S 2015
-            // §3.3 formulates it as max-max which is equivalent at small
+            // §2.2 formulates it as max-max which is equivalent at small
             // N but pins to the worst-outlier ratio at large N — RMS
             // shrinks as 1/√N for a single noisy body and keeps the
             // criterion meaningful at N ≈ 10². Degenerate bodies
@@ -1515,7 +1516,7 @@ impl Ias15 {
             }
 
             // Stagnation = ULP-noise saturation of the residual. R&S
-            // 2015 §3.3 breaks out of the predictor-corrector and lets
+            // 2015 §2.2 breaks out of the predictor-corrector and lets
             // the truncation gate decide accept/reject — we follow,
             // returning `(true, …)` so `decide_dt` routes through the
             // truncation branch.
@@ -1669,8 +1670,8 @@ impl Ias15 {
 
     /// Extrapolate `b` from the previous accepted step to the current
     /// `dt_try`. Implements the polynomial-basis transformation
-    /// derived in Everhart (1985, eq. III.12) and used in IAS15 (Rein
-    /// & Spiegel 2015 §3.2): `b_new` is the Pascal-triangle (binomial)
+    /// introduced by Everhart (1985) and used in IAS15 (Rein
+    /// & Spiegel 2015 §2.2): `b_new` is the Pascal-triangle (binomial)
     /// rescaling of `b` by powers of `(dt_try / dt_prev)`, plus a
     /// correction from the drift `b - e` that carries forward last
     /// step's predictor–corrector residual. This drastically reduces
@@ -1690,7 +1691,7 @@ impl Ias15 {
         // Pascal-triangle (binomial) coefficients for the polynomial-basis
         // transformation `b_new[k] = q^{k+1} · Σ_{j ≥ k} C(j+1, k+1) · b_old[j]`
         // that exactly preserves `a(u) = a₀ + Σ b_k · u^{k+1}` under the
-        // variable rescaling `u_new = u_old / q` (Everhart 1985 §III).
+        // variable rescaling `u_new = u_old / q` (Everhart 1985).
         // Off-diagonal cross-terms are load-bearing — dropping them
         // biases warm-started `b` and cascades on stiff scenarios.
         //
@@ -2082,7 +2083,7 @@ mod tests {
     }
 
     /// Guards the accept/reject policy at violent close encounters (Burrau
-    /// 1913 Pythagorean): the canonical controller (R&S 2015 §3.4) accepts
+    /// 1913 Pythagorean): the canonical controller (R&S 2015 §2.3) accepts
     /// and rides the error up instead of rejecting-and-halving into the
     /// `DT_MIN` floor — no floor-pinning, no rejection cascade. Binary/loose
     /// thresholds stay robust to the chaotic trajectory (a strict `err ≤ ε`

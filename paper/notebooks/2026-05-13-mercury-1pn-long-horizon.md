@@ -54,7 +54,7 @@ The paper positioning makes the federation an explicit point of differentiation 
 
 ### Reference: closed-form GR perihelion advance
 
-Schwarzschild test-particle 1PN expansion (Will 1993 §6, Murray & Dermott §8.1):
+Schwarzschild test-particle 1PN expansion (Will 1993 §7.3):
 
 $$
 \Delta\omega_\text{GR per orbit} = \frac{6\pi G M_\odot}{c^2 \, a \, (1 - e^2)}
@@ -299,10 +299,10 @@ existing `validation/rebound-parity/` scenario layout.
 
 ## References
 
-- Will, C. M. (1993). *Theory and Experiment in Gravitational Physics.* Cambridge University Press, §6 (Schwarzschild perihelion advance).
-- Murray, C. D., & Dermott, S. F. (1999). *Solar System Dynamics.* Cambridge University Press, §8.1 + Table A.2 (Mercury orbital elements).
+- Will, C. M. (1993). *Theory and Experiment in Gravitational Physics.* Cambridge University Press, §7.3 (the perihelion shift of Mercury).
+- Murray, C. D., & Dermott, S. F. (1999). *Solar System Dynamics.* Cambridge University Press, Table A.2 (Mercury orbital elements).
 - Rein, H., & Spiegel, D. S. (2015). *MNRAS* 446, 1424 (IAS15).
-- Rein, H., Hernandez, D. M., Tamayo, D., & Brown, G. (2019). *MNRAS* 489, 4632 (MERCURIUS).
+- Rein, H., Hernandez, D. M., Tamayo, D., et al. (2019). *MNRAS* 485, 5490 (MERCURIUS).
 - Existing 500-orbit gate: `crates/apsis-1pn/tests/mercury_precession_gate.rs`.
 - Mercurius implementation lab notebook: `docs/experiments/2026-05-13-mercurius-hybrid.md`.
 - Mercurius REBOUND parity: `docs/experiments/2026-05-13-rebound-parity-mercurius.md`.

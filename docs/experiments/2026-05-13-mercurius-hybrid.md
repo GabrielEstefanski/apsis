@@ -1,7 +1,7 @@
 # Mercurius — close-encounter hybrid integrator — protocol
 
 **Date:** 2026-05-13
-**Subject:** First-class implementation of the MERCURIUS hybrid integrator (Rein, Hernandez, Tamayo & Brown 2019, MNRAS 489, 4632–4640): WH symplectic outer step + IAS15 close-field sub-integration with a smooth `K(r/r_cross)` changeover. Federates the existing `WisdomHolman` and `Ias15` integrators into a single algorithm whose far-field cost stays O(N) per step while close encounters get IAS15-grade precision *only on the encountering pairs*.
+**Subject:** First-class implementation of the MERCURIUS hybrid integrator (Rein et al. 2019, MNRAS 485, 5490–5497): WH symplectic outer step + IAS15 close-field sub-integration with a smooth `K(r/r_cross)` changeover. Federates the existing `WisdomHolman` and `Ias15` integrators into a single algorithm whose far-field cost stays O(N) per step while close encounters get IAS15-grade precision *only on the encountering pairs*.
 
 **Status:** Protocol declared a priori, before any implementation lands. Builds on the design proposal `docs/proposals/close-encounter-hybrid.md` (PR #32) and locks the six §6 open design questions with explicit rationale below.
 
@@ -299,10 +299,8 @@ measured the answer is "now". The mechanism varies:
    on the encountering subset; the cost is bounded by the close-pair
    sub-integration. IAS15 runs its full adaptive controller on every
    sub-step and additionally triggers more rejections near the close
-   approach. **1.9×** is the headline ratio, and consistent with
-   Rein et al. (2019) §3.2 figure 3 where MERCURIUS is reported
-   ~2× faster than IAS15 on Solar-System-with-encounter scenarios at
-   comparable conservation.
+   approach. **1.9×** is the headline ratio, consistent with the
+   speedup of MERCURIUS over IAS15 reported by Rein et al. (2019).
 
 3. **Crowded ring (no Hill-radius encounters at α = 3)**: at the
    default α the encounter detector stays silent because the velocity
@@ -366,7 +364,7 @@ tool, not production code.
 
 ## References
 
-- Rein, H., Hernandez, D. M., Tamayo, D., & Brown, G. (2019). *Hybrid symplectic integrators for planetary dynamics.* MNRAS, 489(4), 4632–4640.
+- Rein, H., Hernandez, D. M., Tamayo, D., Brown, G., Eckels, E., Holmes, E., Lau, M., Leblanc, R., & Silburt, A. (2019). *Hybrid symplectic integrators for planetary dynamics.* MNRAS, 485(4), 5490–5497.
 - Rein, H., & Spiegel, D. S. (2015). *IAS15: a fast, adaptive, high-order integrator for gravitational dynamics, accurate to machine precision over a billion orbits.* MNRAS, 446, 1424–1437.
 - Wisdom, J., & Holman, M. (1991). *Symplectic maps for the n-body problem.* AJ, 102, 1528–1538.
 - Chambers, J. E. (1999). *A hybrid symplectic integrator that permits close encounters between massive bodies.* MNRAS, 304(4), 793–799.

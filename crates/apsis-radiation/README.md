@@ -18,7 +18,7 @@ no patches to core sources.
 ### `RadiationPressure` — Hamiltonian
 
 Radial 1/r² force opposing gravity from the source body, scaled per
-receiver by `β` (Burns et al. eq. 17, the dimensionless
+receiver by `β` (Burns et al. eq. 19, the dimensionless
 radiation-to-gravity ratio):
 
 ```text

@@ -153,7 +153,7 @@ For leaf node with bodies {b}:
   where d_b = pos_b − COM_node
 ```
 
-The internal-node formula is the parallel-axis theorem for second moments (translation of a child's tensor from its own COM to the parent's COM). Reference: Goldstein, Poole & Safko §11.3.
+The internal-node formula is the parallel-axis theorem for second moments (translation of a child's tensor from its own COM to the parent's COM). Reference: Goldstein, Poole & Safko Ch.5 (the inertia tensor).
 
 **Force evaluation in `bh_eval_body`.** When a node passes the BH opening criterion, the acceleration on the target at vector displacement `r` from the node's COM (magnitude `r`, unit vector `r̂`):
 

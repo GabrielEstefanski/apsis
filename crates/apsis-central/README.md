@@ -102,6 +102,6 @@ sys.add_hamiltonian_perturbation(Box::new(force))?;
 Tamayo, D., Rein, H., Shi, P., & Hernandez, D. M. (2020). REBOUNDx: a
 library for adding conservative and dissipative forces to otherwise
 symplectic N-body integrations. *MNRAS* 491, 2885–2901.
-DOI: [10.1093/mnras/stz3018](https://doi.org/10.1093/mnras/stz3018).
+DOI: [10.1093/mnras/stz2870](https://doi.org/10.1093/mnras/stz2870).
 
 [`CentralForce::from_apsidal_rate`]: src/lib.rs

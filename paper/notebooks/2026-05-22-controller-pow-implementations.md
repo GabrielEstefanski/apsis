@@ -8,7 +8,7 @@
 
 ## Motivation
 
-The IAS15 adaptive step-size controller (Rein & Spiegel 2015 §3.4) chooses the next step size from
+The IAS15 adaptive step-size controller (Rein & Spiegel 2015 §2.3) chooses the next step size from
 $$
 \Delta t_\text{next} = \Delta t_\text{current} \cdot 0.9 \cdot \left(\frac{\varepsilon}{\text{err}}\right)^{1/7}
 $$
@@ -141,7 +141,7 @@ The method (workload capture, comparison against an arbitrary-precision oracle r
 
 ## References
 
-- Rein, H. & Spiegel, D. S. (2015). *IAS15: a fast, adaptive, high-order integrator for gravitational dynamics, accurate to machine precision over a billion orbits.* MNRAS **446**, 1424. §3.4 for the step-size controller formula.
+- Rein, H. & Spiegel, D. S. (2015). *IAS15: a fast, adaptive, high-order integrator for gravitational dynamics, accurate to machine precision over a billion orbits.* MNRAS **446**, 1424. §2.3 for the step-size controller formula.
 - Will, C. M. (1993). *Theory and Experiment in Gravitational Physics.* Cambridge University Press.
 - Bertotti, B., Iess, L., & Tortora, P. (2003). *A test of general relativity using radio links with the Cassini spacecraft.* Nature **425**, 374. PPN $\gamma$ constraint.
 - Verma, A. K., & Fienga, A. (2014). *Use of MESSENGER radioscience data to improve planetary ephemeris and to test general relativity.* A&A **561**, A115. Modern Mercury perihelion observational precision.

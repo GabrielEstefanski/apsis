@@ -262,7 +262,7 @@ impl HamiltonianOperator for RadiationPressure {
 ///
 /// Constructed with the same `(source, betas, units)` triple as
 /// [`RadiationPressure`] — the two operators share the per-body β
-/// definition (Burns et al. eq. 17) and are typically registered
+/// definition (Burns et al. eq. 19) and are typically registered
 /// together. β = 0 entries silently skip the receiver.
 #[derive(Debug, Clone)]
 pub struct PoyntingRobertsonDrag {
