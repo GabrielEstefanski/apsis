@@ -21,3 +21,8 @@ __pycache__/
 # Compiled paper (generated via `make paper`). Figures under
 # `paper/figures/` are versioned; the assembled paper.pdf is not.
 /paper.pdf
+
+/tmp/
+/paper/notebooks/wip/
+/validation/audit/
+/validation/rebound-parity/*/out/

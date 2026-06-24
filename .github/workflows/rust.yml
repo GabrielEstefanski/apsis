@@ -245,3 +245,27 @@ jobs:
         run: |
           python paper/notebooks/scripts/error_budget_endpoint_symbolic.py
           python paper/notebooks/scripts/error_budget_k_symbolic.py
+
+  # ── Figure pipeline (reproducibility) ────────────────────────────────────
+  # The paper's reproducibility claim rests on every data figure rendering from
+  # a frozen CSV under paper/figures/data/. This job re-renders them from those
+  # frozen inputs and fails if any script no longer runs (matplotlib API drift,
+  # a renamed CSV column, a snapshot mismatch). The rendered PDFs are discarded;
+  # only the exit status is checked. fig_a_architecture (static TikZ, byte-pinned
+  # via SOURCE_DATE_EPOCH) needs a LaTeX toolchain and is rendered out of CI.
+  figures-render:
+    name: figures render (reproducibility)
+    runs-on: ${{ vars.RUNNER_LABEL || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: install figure deps
+        run: pip install numpy matplotlib pandas
+      - name: re-render data figures from frozen CSVs
+        run: |
+          make figures-continuity-spike-bound \
+               figures-rebound-parity-trajectories \
+               figures-rebound-parity-brouwer \
+               figures-plummer-apsidal-convergence
