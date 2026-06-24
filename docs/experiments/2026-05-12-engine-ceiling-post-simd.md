@@ -3,7 +3,7 @@
 **Date:** 2026-05-12
 **Subject:** Re-run the engine-ceiling profiling harness on the production code path with the AVX2 leaf-pair SIMD kernel active. Compare to the pre-SIMD baseline in `docs/experiments/2026-05-09-engine-ceiling.md`. The objective is decomposition, not a ship/revert gate: validate the back-out estimate that leaf-pair was ~67-80 % of pre-SIMD walk time, and quantify how much per-interaction headroom remains for further kernel-arithmetic optimisation (RSQRT-class kernel approximation) vs further vectorisation (accepted-node phase).
 
-**Status:** Diagnostic measurement, not an axis experiment. No production code changes; no PR. The result feeds the choice between the next perf optimisation axes — kernel approximation (rsqrt + Newton-Raphson, simultaneously affects leaf and accepted-node phases), rayon scheduling tune, accepted-node SIMD, or AoSoA + Morton.
+**Status:** Diagnostic measurement, not an axis experiment. No production code changes. The result feeds the choice between the next perf optimisation axes — kernel approximation (rsqrt + Newton-Raphson, simultaneously affects leaf and accepted-node phases), rayon scheduling tune, accepted-node SIMD, or AoSoA + Morton.
 
 ---
 
@@ -17,7 +17,7 @@ walk = f_dispatch + f_emit + f_kernel_leaf + f_kernel_node
 
 with pre-SIMD fractions estimated as `f_dispatch ≈ 0.13`, `f_emit ≈ 0.08`, `f_kernel_leaf ≈ 0.35-0.40`, `f_kernel_node ≈ 0.40-0.45`. That estimate was used to derive the AVX2 walk-speedup envelope `[1.3, 2.0]×` from a kernel-isolated speedup of `S_kernel ∈ [1.8, 2.5]×`.
 
-**The estimate was wrong.** Backing-out from the measured AVX2 walk speedups (Cell A 1.5× median Zen 4; Cell B 1.67× median Sapphire Rapids), holding `S_kernel = 2.0×` and assuming SIMD only touches the leaf-pair phase:
+**The estimate was wrong.** Backing-out from the measured AVX2 walk speedups (1.5× median on Zen 4; 1.67× median on Sapphire Rapids), holding `S_kernel = 2.0×` and assuming SIMD only touches the leaf-pair phase:
 
 ```text
 walk_post / walk_pre = 1 / S_walk
@@ -28,7 +28,7 @@ S_walk = 1.67 →  leaf_pre = 0.80   (Sapphire Rapids)
 Leaf-pair was 67-80 % of pre-SIMD walk time, not 35-40 %. That changes the Amdahl analysis materially:
 
 - Non-leaf fraction (accepted-node + dispatch + emit) is 20-33 %, not 60 %.
-- Kernel-only Amdahl ceiling is `1 / 0.20 = 5.0×` (Cell B back-out) or `1 / 0.33 = 3.0×` (Cell A back-out) walk speedup — substantially more headroom than the original §Tier 3 derivation predicted.
+- Kernel-only Amdahl ceiling is `1 / 0.20 = 5.0×` (Sapphire Rapids back-out) or `1 / 0.33 = 3.0×` (Zen 4 back-out) walk speedup — substantially more headroom than the original §Tier 3 derivation predicted.
 - Current AVX2 sits at 1.5-1.67× — between 33 % and 50 % of the kernel-only ceiling.
 
 This experiment validates the back-out empirically by re-measuring engine-ceiling Cell V with SIMD active and reading off:
@@ -54,7 +54,7 @@ The bound is not a hard gate — this is a diagnostic, not a ship/revert axis. T
 
 ## Methodology
 
-Re-run the existing `engine_ceiling_v` harness on the recorded Zen 4 desktop with the production code at HEAD (`51610a1`). Same parameters as May 9:
+Re-run the existing `engine_ceiling_v` harness on the recorded Zen 4 desktop with the production code at HEAD. Same parameters as May 9:
 
 - Seed: `0x6E63696C`
 - Body distribution: sphere log-normal mass
@@ -98,7 +98,7 @@ Walk continues to dominate ≥ 86 % of step time at every N; build fraction stay
 
 | N | t_per_int May 9 | t_per_int May 12 | Δ | t_per_body May 9 | t_per_body May 12 | Δ |
 | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 100 | 2.8 ns | 4.0 ns | **+43 %** ⚠️ | 0.64 µs | 0.88 µs | +37 % |
+| 100 | 2.8 ns | 4.0 ns | **+43 %** | 0.64 µs | 0.88 µs | +37 % |
 | 1 000 | 1.7 ns | 1.1 ns | **−35 %** | 2.06 µs | 1.38 µs | **−33 %** |
 | 5 000 | 1.3 ns | 1.0 ns | −23 % | 4.73 µs | 3.92 µs | −17 % |
 | 10 000 | 1.5 ns | 1.3 ns | −13 % | 4.05 µs | 3.53 µs | −13 % |
@@ -122,7 +122,7 @@ All counter ratios match the May 9 baseline exactly. The BH algorithm is unchang
 
 ### Tier 4 — Cross-check against `perf_simd_walk` measurements
 
-The previous `perf_simd_walk` harness (commit `cbfb905`, since deleted in the bake commit `ee7ba9b`) measured scalar→AVX2 walk speedup directly via A/B on the same seed within a single run. Comparing the two measurement methodologies at matched N:
+The previous `perf_simd_walk` harness (since deleted) measured scalar→AVX2 walk speedup directly via A/B on the same seed within a single run. Comparing the two measurement methodologies at matched N:
 
 | N | engine_ceiling May 9→May 12 step ratio | `perf_simd_walk` direct A/B median |
 | ---: | ---: | ---: |
@@ -142,8 +142,8 @@ The §A-priori predictions table verdict:
 | --- | --- | --- | --- |
 | `t_per_interaction` at N = 10⁴ ∈ [0.8, 1.2] ns | yes | 1.3 ns | **above range** by 0.1 ns |
 | `t_per_body` at N = 10⁴ ∈ [2.4, 3.1] µs | yes | 3.53 µs | **above range** by 0.43 µs |
-| Counters unchanged | yes | identical | ✓ |
-| Walk dominates ≈ 94 % at N = 10⁴ | yes | 95.4 % | ✓ |
+| Counters unchanged | yes | identical | pass |
+| Walk dominates ≈ 94 % at N = 10⁴ | yes | 95.4 % | pass |
 
 The two predictions outside their range are both higher than expected — the SIMD walk-speedup at engine-ceiling's seed/distribution at N = 10⁴ is smaller than `perf_simd_walk` measured on the perf-canonical seeds. This is the most important finding from this re-measurement.
 
@@ -153,10 +153,10 @@ Backing out `f_leaf` (fraction of pre-SIMD walk in the leaf-pair phase) from eac
 
 | Source | N | walk speedup | back-out `f_leaf` |
 | --- | ---: | ---: | ---: |
-| `perf_simd_walk` Cell A median (Zen 4 desktop, perf-canonical seeds) | 1 000 | 1.42× | 0.59 |
-| `perf_simd_walk` Cell A median (Zen 4) | 5 000 | 1.29× | 0.45 |
-| `perf_simd_walk` Cell A median (Zen 4) | 10 000 | 1.54× | 0.70 |
-| `perf_simd_walk` Cell B median (Sapphire Rapids, perf-canonical) | 10 000 | 1.67× | 0.80 |
+| `perf_simd_walk` median (Zen 4 desktop, perf-canonical seeds) | 1 000 | 1.42× | 0.59 |
+| `perf_simd_walk` median (Zen 4) | 5 000 | 1.29× | 0.45 |
+| `perf_simd_walk` median (Zen 4) | 10 000 | 1.54× | 0.70 |
+| `perf_simd_walk` median (Sapphire Rapids, perf-canonical) | 10 000 | 1.67× | 0.80 |
 | engine-ceiling delta (Zen 4, seed `0x6E63696C`) | 1 000 | 1.49× | 0.66 |
 | engine-ceiling delta (Zen 4, seed `0x6E63696C`) | 5 000 | 1.21× | 0.35 |
 | engine-ceiling delta (Zen 4, seed `0x6E63696C`) | 10 000 | 1.15× | 0.26 |
@@ -174,7 +174,7 @@ This changes the relative attractiveness of the deferred next-axis candidates:
 - **B (vectorise accepted-node phase)** — leverage **grows** with N. At N = 10⁴ savings would be modest (~17 % of walk); at N = 10⁵ savings would approach ~50 %. For the v0.1 paper target (N ≤ 10³) it stays small; for v0.2 scaling work (N ≤ 10⁵) it becomes the dominant axis.
 - **C (AoSoA + Morton)** — leverage **shrunk** post-SIMD because it targets the leaf-pair phase whose fraction is now smaller (especially at large N). At engine-ceiling N = 10⁴ where leaf is only ~26 %, even halving leaf-pair gathers saves <13 % of walk.
 - **E (RSQRT + Newton-Raphson)** — leverage **unchanged**. It accelerates per-interaction arithmetic regardless of which phase the interaction is in. This makes E the **only** axis that captures both leaf and accepted-node savings simultaneously.
-- **D (rayon chunking)** — leverage **largest at small N**, where rayon scheduling overhead is a fraction of per-task work. Cell A small-N walk speedup variance (1.27-1.81× across seeds at N = 1 000) is consistent with rayon overhead being a meaningful fraction.
+- **D (rayon chunking)** — leverage **largest at small N**, where rayon scheduling overhead is a fraction of per-task work. The Zen 4 small-N walk speedup variance (1.27-1.81× across seeds at N = 1 000) is consistent with rayon overhead being a meaningful fraction.
 
 ### Finding 3 — The N = 100 cell is below the regime SIMD targets
 
@@ -193,8 +193,8 @@ This notebook does not have a ship/revert gate. The output informs the next perf
 | Axis | Pre-experiment estimated leverage | Post-experiment leverage | Recommended priority |
 | --- | --- | --- | --- |
 | **E** — rsqrt + Newton-Raphson on Plummer kernel arithmetic | "+25-30 % walk speedup, cross-phase" | confirmed cross-phase (only candidate that helps both leaf and accepted-node simultaneously); absolute headroom bounded by per-interaction floor (`~5-7 cycles` at midrange N) | **Next** — small-LOC, low-risk, cross-phase. Bound construction is straightforward (rsqrt+1NR delivers ~24-bit precision; needs Tier 1 against IAS15 conservation). |
-| **D** — rayon chunking / scheduler tune | "+5-15 % at small N where overhead pesa" | consistent with the small-N variance observed in `perf_simd_walk` Cell A (1.27-1.81× spread at N = 1 000); not measured directly here | **After E** — separate axis, low risk, modest gain. Worth a 1-day spike with `par_chunks` + thread-pool size tune. |
-| **B** — accepted-node phase SIMD (gather Node fields → batched quadrupole) | "+20-30 % at N ≥ 10⁴ if accepted-node is large fraction" | **leverage confirmed and growing with N**: at N = 10⁵ accepted-node is ~half the walk and is currently scalar | **Defer to v0.2 scaling work** — for v0.1 paper (N ≤ 10³) leverage is small; for v0.2 (N ≤ 10⁵) it becomes the dominant axis. Do not do this PR before the v0.1 paper lands. |
+| **D** — rayon chunking / scheduler tune | "+5-15 % at small N where overhead pesa" | consistent with the small-N variance observed in `perf_simd_walk` on Zen 4 (1.27-1.81× spread at N = 1 000); not measured directly here | **After E** — separate axis, low risk, modest gain. Worth a 1-day spike with `par_chunks` + thread-pool size tune. |
+| **B** — accepted-node phase SIMD (gather Node fields → batched quadrupole) | "+20-30 % at N ≥ 10⁴ if accepted-node is large fraction" | **leverage confirmed and growing with N**: at N = 10⁵ accepted-node is ~half the walk and is currently scalar | **Defer to v0.2 scaling work** — for v0.1 paper (N ≤ 10³) leverage is small; for v0.2 (N ≤ 10⁵) it becomes the dominant axis. |
 | **C** — AoSoA + Morton ordering | "+5 % marginal" | **leverage shrunk** because leaf-pair fraction is smaller post-SIMD; engine-ceiling N = 10⁴ has leaf-pair = 26 %, even halving its gathers saves < 13 % of walk | **Drop** — was conditional on leaf-pair being a residual bottleneck; data shows it is not. |
 
 ### Recommended next axis: E (rsqrt + Newton-Raphson)

@@ -1,20 +1,19 @@
 # Wisdom-Holman refactor — protocol
 
 **Date:** 2026-05-03
-**Subject:** Refactor the `apsis` Wisdom-Holman integrator from the current pseudo-heliocentric 2D-only implementation to faithful Wisdom & Holman (1991) in democratic heliocentric coordinates with 3D-native data flow. Validate that the four documented algorithmic defects (TD-008) are closed and that conservation invariants reach the published WH 1991 floor in smooth-flow regime.
-**Baseline commit:** `70a14c2` (PR #33 merge into `develop`); refactor commits `5471c20` (kepler Vec3) → `9081c2b` (WH refactor) → `a42c44f` (positive regression tests + Galilean shift) → `32946ec` (negative regime-boundary tests).
+**Subject:** Refactor the `apsis` Wisdom-Holman integrator from the current pseudo-heliocentric 2D-only implementation to faithful Wisdom & Holman (1991) in democratic heliocentric coordinates with 3D-native data flow. Validate that the four documented algorithmic defects are closed and that conservation invariants reach the published WH 1991 floor in smooth-flow regime.
 **Tooling:** `apsis` core (`crates/apsis/src/physics/integrator/wisdom_holman.rs` and `kepler.rs`); REBOUND 4.6.0 via Python 3.10 (`reb.IAS15` informational reference, not exercised in the gates below).
-**Status:** *Run executed via `cargo test --release -p apsis --lib core::system::tests::wh_refactor_regression`. **All four TD-008 defects structurally closed; six regression tests pass.** The runtime hierarchy-signal surface (`HierarchySignal` enum + `StepResult.hierarchy_signal` field + config-time `warn_diag!` in `System::set_integrator`) was added in the close-out commit alongside §Results population. Bug #4 angular-momentum bound was revised post-empirical-observation from $10^{-13}$ to $10^{-3}$ — formulation of the bound, not the algorithm; the load-bearing z-envelope claim passes strictly. See §Interpretation.*
+**Status:** All four documented defects structurally closed; six regression tests pass. The runtime hierarchy-signal surface (`HierarchySignal` enum + `StepResult.hierarchy_signal` field + config-time `warn_diag!` in `System::set_integrator`) was added alongside §Results population. The Bug #4 angular-momentum bound was revised post-empirical-observation from $10^{-13}$ to $10^{-3}$ — formulation of the bound, not the algorithm; the load-bearing z-envelope claim passes strictly. See §Interpretation.
 
 ---
 
 ## Abstract
 
-The current Wisdom-Holman implementation in `apsis` carries four documented algorithmic defects (TD-008, surfaced by the cross-implementation parity portfolio at `paper/notebooks/2026-05-01-rebound-parity-retrograde.md` §"WH bug map"): a non-canonical centre-of-mass frame, a central-body update placed outside the symplectic split, an asymmetric translation in the Kepler step, and a 2D-only computation that silently drops the $z$-component of motion. The integrator is reported informationally in v0.1 validation runs and is not currently treated as a quality signal.
+The current Wisdom-Holman implementation in `apsis` carries four documented algorithmic defects (surfaced by the cross-implementation parity portfolio at `paper/notebooks/2026-05-01-rebound-parity-retrograde.md` §"WH bug map"): a non-canonical centre-of-mass frame, a central-body update placed outside the symplectic split, an asymmetric translation in the Kepler step, and a 2D-only computation that silently drops the $z$-component of motion. The integrator is reported informationally in v0.1 validation runs and is not currently treated as a quality signal.
 
 This experiment specifies the refactor protocol: democratic heliocentric (DH) coordinates per Duncan, Levison & Lee (1998), kick-drift-kick second-order symplectic split, central body integrated via the same Hamiltonian split as the planets, Kepler step extended to `Vec3` (matches the rest of the integrator stack), and a two-level dominance check (config-time `warn_diag!` plus runtime observability signal in `Metrics`) replacing the current per-step silent fallback to Yoshida-4.
 
-The acceptance gates are organised in three tiers: smooth-flow conservation invariants on a hierarchical Sun + Mercury system (Tier 1, gated), per-bug regression tests with binary outcomes (Tier 2, gated, four checks targeting each TD-008 defect), and cross-implementation comparison against REBOUND WHFast on the same primary scenario (Tier 3, informational; the implementations differ in correctors, coordinate variant choices, and round-off control, so strict numerical agreement is not expected and not gated).
+The acceptance gates are organised in three tiers: smooth-flow conservation invariants on a hierarchical Sun + Mercury system (Tier 1, gated), per-bug regression tests with binary outcomes (Tier 2, gated, four checks targeting each documented defect), and cross-implementation comparison against REBOUND WHFast on the same primary scenario (Tier 3, informational; the implementations differ in correctors, coordinate variant choices, and round-off control, so strict numerical agreement is not expected and not gated).
 
 ---
 
@@ -51,7 +50,7 @@ The vector-norm form $\lvert \Delta L \rvert / \lvert L_0 \rvert$ rather than $\
 
 #### Tier 2 — Per-bug regression tests *(gated, binary)*
 
-Each of the four TD-008 defects has a dedicated regression scenario whose initial conditions exercise the failure mode the defect predicts. All four scenarios pass or all four fail; partial pass is acceptable but each failing item is interpreted via §Decision rules.
+Each of the four documented defects has a dedicated regression scenario whose initial conditions exercise the failure mode the defect predicts. All four scenarios pass or all four fail; partial pass is acceptable but each failing item is interpreted via §Decision rules.
 
 | # | Bug | Scenario | Pass criterion |
 | ---: | --- | --- | --- |
@@ -75,7 +74,7 @@ WHFast carries algorithmic features apsis WH does not implement (symplectic corr
 
 | Outcome | Diagnostic | Action |
 | --- | --- | --- |
-| Tier 1 + Tier 2 all pass | Refactor closes TD-008; smooth-flow conservation at WH 1991 floor | Ship; mark TD-008 as resolved; update `recommended_dt` validation Tier 3 to remove WH from informational status (or keep with revised quantitative claims) |
+| Tier 1 + Tier 2 all pass | Refactor closes the four documented defects; smooth-flow conservation at WH 1991 floor | Mark the defects as resolved; update `recommended_dt` validation Tier 3 to remove WH from informational status (or keep with revised quantitative claims) |
 | Tier 1 fail, Tier 2 all pass | Per-bug regressions pass but integral conservation does not | Investigate Hamiltonian decomposition correctness; the bugs are individually fixed but their composition is wrong (e.g., indirect term mis-applied, kick scaling factor incorrect) |
 | Tier 1 pass, Tier 2 partial fail | At least one bug regression failed; conservation in the smooth scenario does not exercise that mode | Localise the failing regression; do not ship until all four pass |
 | Tier 1 fail, Tier 2 partial fail | Combined failure surface | Halt; revisit the design before further code changes |
@@ -222,7 +221,7 @@ Tier 1 measures the integral effect in a smooth-flow scenario (Sun + Mercury at 
 
 ## Results
 
-The WH refactor was implemented across four commits on `feat/wh-refactor` (`5471c20` through `32946ec`), merged via PR #33 into `develop` at commit `70a14c2`. Six regression tests live in `crates/apsis/src/core/system/tests::wh_refactor_regression`; all six pass under `cargo test --release` on the validated configuration.
+Six regression tests live in `crates/apsis/src/core/system/tests::wh_refactor_regression`; all six pass under `cargo test --release` on the validated configuration.
 
 ### Tier 1 — smooth-flow conservation invariants
 
@@ -236,7 +235,7 @@ The other Tier 1 invariants ($\lvert \Delta L \rvert$, $\lvert \Delta P \rvert$,
 
 ### Tier 2 — per-bug regression tests
 
-Each test scenario isolates a defect predicted by TD-008 with initial conditions chosen so that the failure mode dominates the observable signature.
+Each test scenario isolates one of the documented defects with initial conditions chosen so that the failure mode dominates the observable signature.
 
 | Test | Bound | Verdict |
 | --- | --- | --- |
@@ -257,7 +256,7 @@ Two inverted-assertion tests confirm the integrator fails or degrades as predict
 
 ### Two-level dominance signal
 
-The runtime hierarchy signal declared in §Hypothesis was implemented in this commit alongside §Results population:
+The runtime hierarchy signal declared in §Hypothesis was implemented:
 
 - `HierarchySignal::{Hierarchical, Borderline, Violated}` enum in `physics::integrator::traits`.
 - `StepResult::hierarchy_signal: Option<HierarchySignal>` populated by Wisdom-Holman, `None` for VV/Y4/IAS15.
@@ -268,7 +267,7 @@ The signal is observability only; the integrator does not branch on it. It surfa
 
 ### Total test surface
 
-`cargo test --workspace` reports: 6 WH refactor regression tests (4 positive Tier 2 + Tier 1 smoke + 2 negative regime-boundary), 9 `HierarchySignal` classification tests, 5 `kepler::kepler_step` Vec3-API unit tests added for the API change, plus 326 baseline tests = **341 lib tests** passing on the WH refactor and close-out.
+`cargo test --workspace` reports: 6 WH refactor regression tests (4 positive Tier 2 + Tier 1 smoke + 2 negative regime-boundary), 9 `HierarchySignal` classification tests, 5 `kepler::kepler_step` Vec3-API unit tests added for the API change, plus 326 baseline tests = **341 lib tests** passing.
 
 Raw outputs: integration test results live in the test runner; no separate CSV is emitted because the test bounds are the gate.
 
@@ -276,17 +275,17 @@ Raw outputs: integration test results live in the test runner; no separate CSV i
 
 ## Interpretation
 
-The refactor closes the four documented TD-008 defects structurally: the implementation derives the central body's new state from the symplectic split's invariants (barycenter conservation, total-momentum conservation) rather than from an ad-hoc Euler step at step end, and operates uniformly on `Vec3` throughout. The four positive regression tests confirm the predicted failure modes are absent; the two negative tests confirm the failure modes outside the validated regime remain present, as the WH derivation requires.
+The refactor closes the four documented defects structurally: the implementation derives the central body's new state from the symplectic split's invariants (barycenter conservation, total-momentum conservation) rather than from an ad-hoc Euler step at step end, and operates uniformly on `Vec3` throughout. The four positive regression tests confirm the predicted failure modes are absent; the two negative tests confirm the failure modes outside the validated regime remain present, as the WH derivation requires.
 
 **Tier 1 conservation at the WH 1991 floor.** Sun + Mercury at $m_p / m_0 = 1.66 \times 10^{-7}$ stays within the $10^{-5}$ bound across 1000 orbits. This places the implementation alongside the published WH 1991 conservation envelope for hierarchical Kepler at this mass ratio; the result is what the algorithm is supposed to deliver, with the Galilean shift to the rest frame and the barycenter-constraint reconstruction absorbing the leading $O(m_p / m_0)$ correction that a fixed-center treatment would otherwise leave. The $\sim 100\times$ headroom predicted in §Hypothesis is observed empirically.
 
-**Bug #4 angular-momentum bound revision.** The protocol declared a $1 \times 10^{-13}$ bound on $\lvert \Delta L \rvert / \lvert L_0 \rvert$ for the inclined-orbit regression test. Empirical observation lands at $\sim 10^{-5}$ — orders of magnitude above the canonical exact-symplectic floor, but orders of magnitude below the catastrophic O(1) drop the pre-refactor 2D-only code exhibited. The revised test bound at $1 \times 10^{-3}$ captures the WH 1991 fixed-center $\mu = G m_0$ truncation envelope at this mass ratio and horizon. The load-bearing claim Bug #4 is about — that $z$ motion is propagated through the integration rather than silently dropped — is captured by the analytic z-envelope assertion in the same test, which passes strictly. The revision is documented inline in the test rationale comments per the post-run discipline established in PR #22 (recommended_dt validation): the bound is calibrated against the algorithm's actual achievable floor at the chosen mass ratio, not against an idealised exact-symplectic ceiling. Tightening to $1 \times 10^{-13}$ would require WHFast-class corrections (symplectic correctors, optimised Stumpff series, alternative coordinate variants), explicitly out of scope for this refactor.
+**Bug #4 angular-momentum bound revision.** The protocol declared a $1 \times 10^{-13}$ bound on $\lvert \Delta L \rvert / \lvert L_0 \rvert$ for the inclined-orbit regression test. Empirical observation lands at $\sim 10^{-5}$ — orders of magnitude above the canonical exact-symplectic floor, but orders of magnitude below the catastrophic O(1) drop the pre-refactor 2D-only code exhibited. The revised test bound at $1 \times 10^{-3}$ captures the WH 1991 fixed-center $\mu = G m_0$ truncation envelope at this mass ratio and horizon. The load-bearing claim Bug #4 is about — that $z$ motion is propagated through the integration rather than silently dropped — is captured by the analytic z-envelope assertion in the same test, which passes strictly. The revision is documented inline in the test rationale comments per the post-run discipline established in the `recommended_dt` validation: the bound is calibrated against the algorithm's actual achievable floor at the chosen mass ratio, not against an idealised exact-symplectic ceiling. Tightening to $1 \times 10^{-13}$ would require WHFast-class corrections (symplectic correctors, optimised Stumpff series, alternative coordinate variants), explicitly out of scope for this refactor.
 
 **Negative tests confirm the regime boundary is observable.** The equal-mass binary scenario produces $\lvert \Delta E / E_0 \rvert = 2.47 \times 10^{-4}$ — above the WH 1991 floor by a factor of $\sim 25$, but not the catastrophic O(1) loss a naive expectation might predict. The Galilean shift to the rest frame and the barycenter-constraint reconstruction degrade gracefully even where the perturbation expansion is no longer in its small-parameter regime, which the inverted assertion captures: the test passes because the drift is loud enough to signal the regime break, not because the integrator preserves energy as if it were validated. The marginal-hierarchy scenario at $m_p / m_0 = 0.1$ exhibits the same graceful degradation. Together with the configuration-time `HierarchySignal` warning, the regime boundary is now observable from three independent surfaces (the static dominance criterion at integrator selection, the per-step `StepResult` signal, the empirical conservation drift) rather than implicit in literature citations.
 
 **The refactor leaves WHFast features as a future federated extension.** Symplectic correctors (Wisdom 2006), optimised Stumpff series, compensated summation, multiple coordinate variants — none are implemented here. The protocol §Out of scope declared this explicitly. A future `apsis-whfast-py`-style federated extension could compose these on top of the refactored core; the federation thesis applies to integrator features as it does to perturbation forces. The choice of `mu = G m_0` (fixed-center) over `G(m_0 + m_i)` (reduced-mass two-body) is faithful to Wisdom & Holman 1991 §III; the leading $O(m_p / m_0)$ reduced-mass correction is absorbed by the H_indirect drift.
 
-**This completes the Wisdom-Holman item of the v0.1 roadmap.** The integrator is no longer reported as informational-only in the cross-implementation validation portfolio (`docs/experiments/2026-05-01-recommended-dt-heuristic.md` Tier 3 was the previous status); future runs of the `recommended_dt` validation harness with this refactor will produce data at the WH 1991 floor in regime, and the Tier 3 informational status can be revisited. WH MMR phase-drift characterisation remains a separate experiment, tracked at Issue #34.
+**This completes the Wisdom-Holman item of the v0.1 roadmap.** The integrator is no longer reported as informational-only in the cross-implementation validation portfolio (`docs/experiments/2026-05-01-recommended-dt-heuristic.md` Tier 3 was the previous status); future runs of the `recommended_dt` validation harness with this refactor will produce data at the WH 1991 floor in regime, and the Tier 3 informational status can be revisited. WH MMR phase-drift characterisation remains a separate experiment.
 
 ---
 
@@ -339,4 +338,4 @@ This notebook mirrors the section structure and methodological framing of the pa
 | Decision rules | implicit (in §Interpretation prose) | implicit | **explicit** (per the convention established in the retrograde notebook) |
 | Out-of-scope handling | flagged in §Threats / §Out of scope | same | same |
 
-The shared framework remains "physical invariants gate; out-of-derivation regime informs". The WH-refactor specialisation is the per-bug regression tier — TD-008 has four named defects with predicted failure signatures, and the protocol gates each one independently rather than only on the integral conservation outcome.
+The shared framework remains "physical invariants gate; out-of-derivation regime informs". The WH-refactor specialisation is the per-bug regression tier — the four named defects each have a predicted failure signature, and the protocol gates each one independently rather than only on the integral conservation outcome.

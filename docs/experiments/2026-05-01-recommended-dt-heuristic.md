@@ -53,8 +53,8 @@ Four templates fall outside the heuristic's quasi-regular envelope and report in
 
 ## History
 
-Prior phases of the experiment live in the git log:
+Prior phases of the experiment:
 
-- Phase A — original Tier 2 bound `|ΔLz/Lz_0| ≤ 10⁻¹⁰` (sub-round-off in scenarios with small `|Lz_0|`); commit `0d71547`.
-- Phase B — isclose-style two-sided revision; commit `b30d278`. Verdict `26/26 gated cells pass` against the heuristic available at that commit (pre-PR-#121).
-- Phase C — kernel-softening removal (PR #121) silently swapped the active branch; per-template IC audit surfaced the `binary` `v_body` √2 mismatch; heuristic refactored to `min(dt_dynamic, dt_pair, dt_softening)`; four scenarios reclassified as out-of-regime. Commits `3f7b809`, `86e5802`, `f064346`.
+- Phase A — original Tier 2 bound `|ΔLz/Lz_0| ≤ 10⁻¹⁰` (sub-round-off in scenarios with small `|Lz_0|`).
+- Phase B — isclose-style two-sided revision. Verdict `26/26 gated cells pass` against the heuristic available at that time.
+- Phase C — kernel-softening removal; per-template IC audit surfaced the `binary` `v_body` √2 mismatch; heuristic refactored to `min(dt_dynamic, dt_pair, dt_softening)`; four scenarios reclassified as out-of-regime.

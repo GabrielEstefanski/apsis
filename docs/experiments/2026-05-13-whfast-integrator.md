@@ -2,13 +2,9 @@
 
 **Date:** 2026-05-13
 
-**Subject:** Adds `IntegratorKind::WHFast` to the apsis integrator zoo as a faithful port of Rein & Tamayo 2015 (MNRAS 452, 376–388). Compensated-summation symplectic integrator that pushes the round-off floor from `O(ε · N)` (apsis WH 1991) to `O(ε · √N)`, enabling 10⁹-orbit horizons. Does **not** replace `IntegratorKind::WisdomHolman` — adds to zoo. Symplectic corrector for democratic-heliocentric coords (Wisdom 2006, Petit et al. 2019) is deferred — see *Future work*.
+**Subject:** Adds `IntegratorKind::WHFast` as a faithful port of Rein & Tamayo 2015 (MNRAS 452, 376–388). Compensated-summation symplectic integrator that pushes the round-off floor from `O(ε · N)` (apsis WH 1991) to `O(ε · √N)`, enabling 10⁹-orbit horizons. Does **not** replace `IntegratorKind::WisdomHolman`. Symplectic corrector for democratic-heliocentric coords (Wisdom 2006, Petit et al. 2019) is deferred — see *Future work*.
 
 **Status:** Protocol declared *a priori*, before any code lands. Locks the algorithmic decisions and validation-against-REBOUND scenario before implementation.
-
-**Branch:** `feat/whfast-integrator`, branched from `develop` after PR #87 (long-horizon Mercury 1PN) merges.
-
-**Roadmap context:** First locked target in the integrator-zoo roadmap — paper-baseline credential. Subsequent integrators in the zoo (Implicit Midpoint, Gauss-Legendre RK, AR-Chain) follow only after the v0.1 paper.
 
 ---
 
@@ -18,7 +14,7 @@ The apsis integrator zoo ships WH (1991) at the foundational "Wisdom-Holman spli
 
 1. **Compensated summation** (Kahan / Neumaier-style) on every accumulator that grows with `N_steps`. Reduces round-off accumulation from `O(ε · N_steps)` (where the WH 1991 leapfrog saturates around `~10⁶ steps` at the f64 floor for Solar-System orbits) to `O(ε · √N_steps)`. Unlocks `~10⁹` orbit horizons that WH 1991 cannot reach without artefactual energy drift.
 
-2. **Symplectic correctors** (deferred to a follow-up PR). Wisdom 1996 correctors are not directly applicable to democratic-heliocentric coordinates because the DH split has three pieces (Keplerian + interaction + indirect-jump). Wisdom 2006 publishes the explicit "special splitting" correctors that resolve this; Petit et al. 2019 implement an order-6/8 variant for collisional planetary systems. This PR ships compensated summation only; corrector implementation tracks separately with the published-paper references.
+2. **Symplectic correctors** (deferred). Wisdom 1996 correctors are not directly applicable to democratic-heliocentric coordinates because the DH split has three pieces (Keplerian + interaction + indirect-jump). Wisdom 2006 publishes the explicit "special splitting" correctors that resolve this; Petit et al. 2019 implement an order-6/8 variant for collisional planetary systems. This work ships compensated summation only; corrector implementation tracks separately with the published-paper references.
 
 WHFast is paper-baseline. With WHFast in the zoo, apsis covers the four canonical integrator regimes: low-cost real-time (VV / Yoshida4), market-standard long-horizon planetary (WHFast), close-encounter hybrid (Mercurius), and adaptive precision (IAS15). Federation thesis: every regime composes with every perturbation through a single contract.
 
@@ -32,14 +28,14 @@ Three claims chain into this experiment:
 
 2. **The integrator-zoo positioning thesis makes WHFast first** — it is the credential reviewers expect before they engage with novel integrators (Mercurius, federation contract). Without WHFast in the zoo, the integrator-of-integrators claim looks under-equipped.
 
-3. **The federated FPM thesis depends on the integrator slot accepting any first-class symplectic-class integrator.** WHFast composes with apsis-1pn and any future perturbation through the same `Mercurius::interaction_step`-style mechanism (PR #86). Validating WHFast + 1PN at the same ~3-7 ppm precision floor as Mercurius + 1PN closes the federation contract demonstration over the entire active-integrator set.
+3. **The federated FPM thesis depends on the integrator slot accepting any first-class symplectic-class integrator.** WHFast composes with apsis-1pn and any future perturbation through the same `Mercurius::interaction_step`-style mechanism. Validating WHFast + 1PN at the same ~3-7 ppm precision floor as Mercurius + 1PN closes the federation contract demonstration over the entire active-integrator set.
 
 ### What this experiment is NOT testing
 
 - **Not 10⁹-orbit endurance.** A multi-Gyr run would saturate at the f64 floor where WHFast's compensated summation matters most, but the wall-time budget per validation run rules it out. Cap at 10⁵ Jupiter orbits (~1.2 Myr) — strong enough to demonstrate the WHFast advantage over WH 1991 without committing to a multi-day run.
-- **Not WHFast512 / SIMD-vectorised batch WHFast.** REBOUND ships a separate `whfast512` integrator (Rein, Tamayo & Brown 2024) that 8-way-vectorises the Kepler solver. Out of scope for this PR; would land as a separate `IntegratorKind::WHFast512` if/when SIMD-batched planetary integration becomes a priority.
+- **Not WHFast512 / SIMD-vectorised batch WHFast.** REBOUND ships a separate `whfast512` integrator (Rein, Tamayo & Brown 2024) that 8-way-vectorises the Kepler solver. Out of scope here; would land as a separate `IntegratorKind::WHFast512` if/when SIMD-batched planetary integration becomes a priority.
 - **Not Jacobi-coordinate WHFast.** REBOUND WHFast supports both democratic-heliocentric and Jacobi coords; apsis sticks with DH for consistency with WH 1991 and Mercurius. Jacobi support is an opt-in follow-up if a hierarchical-system scenario surfaces a need.
-- **Not a replacement for WH 1991.** Both ship in the zoo. WH 1991 stays as the pedagogical / minimal symplectic baseline; WHFast is the production long-horizon path.
+- **Not a replacement for WH 1991.** Both ship. WH 1991 stays as the pedagogical / minimal symplectic baseline; WHFast is the production long-horizon path.
 
 ---
 
@@ -49,19 +45,19 @@ Three claims chain into this experiment:
 | --- | --- | --- |
 | Public name | `IntegratorKind::WHFast`, slug `"whfast"` | Matches REBOUND. Self-documenting. |
 | Coordinates | Democratic-heliocentric (DH) | Matches existing `WisdomHolman` and `Mercurius`. Consistent integrator zoo convention; reduces "did the coord transform compose right" as a debugging axis. Jacobi support deferred. |
-| Kepler propagator | Existing `apsis::physics::integrator::kepler::kepler_step` (Stumpff universal variable) | Already correct for `μ ≠ 1` post PR #84. Mercurius already uses it; same code path, same numerical behaviour. |
+| Kepler propagator | Existing `apsis::physics::integrator::kepler::kepler_step` (Stumpff universal variable) | Already correct for `μ ≠ 1`. Mercurius already uses it; same code path, same numerical behaviour. |
 | Compensated summation | Neumaier-style on planet positions, planet velocities, COM position, integrator's own internal accumulators | Neumaier-style compensated summation (Higham 2002 §4.5) on every length-`N_steps` accumulator. Implemented as `(value, compensator)` pairs with `add_cs(value, compensator, increment)` updates. |
-| Symplectic corrector | **Deferred** — see *Future work* section. | Wisdom 1996 correctors are incompatible with the three-piece DH split. The Wisdom 2006 + Petit 2019 variants address this and are tracked as a separate PR. |
+| Symplectic corrector | **Deferred** — see *Future work* section. | Wisdom 1996 correctors are incompatible with the three-piece DH split. The Wisdom 2006 + Petit 2019 variants address this and are tracked separately. |
 | Step size | Fixed-step, user-supplied via `with_dt` (matches WH 1991 + Mercurius) | WHFast is fixed-step by construction. Adaptive overlay (a la `DtMode::Adaptive`) breaks symplectic invariants and is silently disabled when `IntegratorKind::WHFast` is selected. |
 | Hierarchical-system requirement | Same as WisdomHolman (`HierarchySignal::classify` ≥ Borderline) | WH-class derivation; opens up to non-hierarchical configurations only at the cost of breaking the small-parameter expansion. Same enforcement path as `set_integrator(WisdomHolman)`. |
 | Force-model determinism | `requires_deterministic_force = false` | WHFast computes its own K-weighted planet-planet kicks internally (same as Mercurius); does not use `ctx.force` directly. |
-| Perturbation handling | `interaction_step` accumulates `ctx.perturbations` after the planet-planet kick, before the velocity update — same Strang-split position as Mercurius post PR #86. | Symmetric `dt` perturbation strength split across the two τ/2 kicks, matching the WH-class convention since 1991. |
-| Snapshot codec | Byte 5 in the on-disk codec (continues from `Mercurius = 4`, PR #83) | Standard append. |
+| Perturbation handling | `interaction_step` accumulates `ctx.perturbations` after the planet-planet kick, before the velocity update — same Strang-split position as Mercurius. | Symmetric `dt` perturbation strength split across the two τ/2 kicks, matching the WH-class convention since 1991. |
+| Snapshot codec | Byte 5 in the on-disk codec (continues from `Mercurius = 4`) | Standard append. |
 
 ### What's NOT a parameter
 
 - **Not WHFast variant choice (Jacobi vs DH).** Locked to DH.
-- **Not corrector configuration surface.** Corrector itself is deferred (see *Future work*). When implemented, the configuration surface (order, sync mode) lands with that PR.
+- **Not corrector configuration surface.** Corrector itself is deferred (see *Future work*). When implemented, the configuration surface (order, sync mode) lands with it.
 
 ---
 
@@ -106,7 +102,7 @@ This bounds round-off accumulation to `O(ε · √N_steps)` for length-`N` summa
 
 The bare WH leapfrog has Hamiltonian error `H_err = c_2 · dt² · {H_K, {H_K, H_I}} + O(dt^4)`. A symplectic corrector applied at synchronisation boundaries can push leading-error to `O(dt^{N+1})` for chosen order `N`. The standard Wisdom 1996 corrector requires Jacobi coordinates; in democratic-heliocentric coordinates the Hamiltonian splits into three pieces (Keplerian + interaction + indirect-jump) and the Wisdom 1996 algorithm is not directly applicable. Wisdom 2006 ("Symplectic Correctors for Canonical Heliocentric N-Body Maps") publishes the explicit "special splitting" correctors that resolve this; Petit et al. 2019 implement an order-6/8 variant for collisional planetary systems.
 
-Implementation tracks separately. Phase 2 of WHFast ships compensated summation only; the corrector slot lands in a follow-up PR with Wisdom 2006 / Petit 2019 as the primary references.
+Implementation tracks separately. This work ships compensated summation only; the corrector slot lands separately with Wisdom 2006 / Petit 2019 as the primary references.
 
 ---
 
@@ -131,11 +127,11 @@ Sun + Jupiter + Saturn + Uranus + Neptune (no test particle, no encounter), inte
 
 | Metric | Bound | Rationale |
 | --- | ---: | --- |
-| Cross-impl `\|ΔE/E₀\|` peak | ≤ 5 × 10⁻¹¹ | Mercurius parity (PR #85) hit `3.7 × 10⁻¹¹` at 10⁴ years; WHFast at 10⁵ Jupiter orbits (~10× longer in cumulative cycles) should sit at similar level if compensated summation works. Same compensated-summation algorithm on both sides; the f64 random-walk floors should agree at the integrator-truncation noise. |
+| Cross-impl `\|ΔE/E₀\|` peak | ≤ 5 × 10⁻¹¹ | Mercurius parity hit `3.7 × 10⁻¹¹` at 10⁴ years; WHFast at 10⁵ Jupiter orbits (~10× longer in cumulative cycles) should sit at similar level if compensated summation works. Same compensated-summation algorithm on both sides; the f64 random-walk floors should agree at the integrator-truncation noise. |
 | Cross-impl `\|ΔLz/Lz₀\|` peak | ≤ 10⁻¹² | Angular momentum conserved exactly by analytical Kepler drift on both sides; cross-impl floor sits at the f64 noise. |
 | Per-side `\|ΔE/E₀\|` peak | ≤ 10⁻¹⁰ each | WHFast's compensated-summation floor on a 10⁵-orbit Solar-System integration. Demonstrates WHFast pushing past WH 1991's `O(ε·N) ≈ 10⁻⁹` saturation for the same horizon. |
 
-Same-scenario REBOUND parity test demonstrates the canonical-reference equivalence (PR #85 pattern). The 50 ppm bound applies to integrators on the same physics; the 5 × 10⁻¹¹ bound here applies to integrators with the same algorithm, which is a tighter claim.
+Same-scenario REBOUND parity test demonstrates the canonical-reference equivalence, following the Mercurius parity pattern. The 50 ppm bound applies to integrators on the same physics; the 5 × 10⁻¹¹ bound here applies to integrators with the same algorithm, which is a tighter claim.
 
 #### Tier 3 — WHFast vs WH 1991 on the same scenario *(reported, no gate)*
 
@@ -192,13 +188,13 @@ Three-side test infrastructure following the existing `validation/rebound-parity
 
 ## Decision
 
-**Tier 1 (Federation contract) — PASS.** `mercury_precession_whfast_matches_gr_within_100ppm` enforces the 100 ppm bound in CI; WHFast + apsis-1pn reproduces Mercury perihelion precession against the GR analytical prediction. The Mercurius cross-integrator parity sub-gate is left open (issue #114).
+**Tier 1 (Federation contract) — PASS.** `mercury_precession_whfast_matches_gr_within_100ppm` enforces the 100 ppm bound in CI; WHFast + apsis-1pn reproduces Mercury perihelion precession against the GR analytical prediction. The Mercurius cross-integrator parity sub-gate is left open.
 
-**Tier 2 (REBOUND cross-impl parity) — DEFERRED.** Requires the corrector-OFF apples-to-apples REBOUND-side harness in `validation/rebound-parity/whfast/`. Tracked in issue #115.
+**Tier 2 (REBOUND cross-impl parity) — DEFERRED.** Requires the corrector-OFF apples-to-apples REBOUND-side harness in `validation/rebound-parity/whfast/`.
 
-**Tier 3 (WHFast vs WH 1991 long-horizon advantage) — DEFERRED.** The compensated-summation `O(√N · ε)` advantage surfaces at `N ≳ 10⁸` per the lab notebook §Tier 3 — a multi-day run that does not fit the in-PR validation budget. Tracked in issue #116.
+**Tier 3 (WHFast vs WH 1991 long-horizon advantage) — DEFERRED.** The compensated-summation `O(√N · ε)` advantage surfaces at `N ≳ 10⁸` per the lab notebook §Tier 3 — a multi-day run that does not fit the validation budget.
 
-The unblocking diagnostic for each deferred tier is preserved below for the follow-up:
+The unblocking diagnostic for each deferred tier:
 
 - **Tier 1 passes, Tier 2 fails** → WHFast composes with perturbations correctly but apsis WHFast and REBOUND WHFast disagree on the canonical scenario; bisect against the compensated-summation order or the per-side accumulator state.
 - **Tier 1 fails** → perturbation wiring through WHFast's interaction_step has a regression vs Mercurius; check `interaction_step` signature compatibility.
@@ -210,14 +206,14 @@ The unblocking diagnostic for each deferred tier is preserved below for the foll
 
 ### Symplectic corrector for democratic-heliocentric coordinates
 
-This PR ships compensated summation alone. The symplectic corrector — which would push boundary truncation from `O(dt²)` to `O(dt^{N+1})` for chosen order `N` — is deferred to a follow-up PR.
+This work ships compensated summation alone. The symplectic corrector — which would push boundary truncation from `O(dt²)` to `O(dt^{N+1})` for chosen order `N` — is deferred.
 
 The standard Wisdom 1996 corrector is not directly applicable to DH coordinates because the DH Hamiltonian splits into three pieces (Keplerian + interaction + indirect-jump) rather than the two-piece split Wisdom 1996 assumes. Two published paths resolve this:
 
 - **Wisdom (2006)** *Symplectic Correctors for Canonical Heliocentric N-Body Maps* — explicit "special splitting" correctors for canonical heliocentric coords with coefficients of multiple orders. Demonstrated in 100 Myr integrations of the outer planets.
 - **Petit, Laskar, Boué (2019)** *High-order regularised symplectic integrator for collisional planetary systems* (A&A) — implements an order-6/8 corrector variant in DH-equivalent coordinates for the collisional regime.
 
-The follow-up PR cites Wisdom 2006 as the primary source for coefficients and uses Petit 2019 as cross-check. Estimated cost: 1–2 days focused work (paper read + implementation + dt^N convergence test). Trigger: before v0.1 paper submission.
+The follow-up cites Wisdom 2006 as the primary source for coefficients and uses Petit 2019 as cross-check, validated by a dt^N convergence test. Trigger: before v0.1 paper submission.
 
 REBOUND does not implement DH correctors (its WHFast supports only Jacobi and Barycentric for correctors); the apsis follow-up is independent.
 

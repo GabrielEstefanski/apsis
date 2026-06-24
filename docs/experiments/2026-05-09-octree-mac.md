@@ -5,8 +5,6 @@
 
 **Status:** Protocol declared a priori, before any MAC implementation lands. §Results populated incrementally; §Decision written after enough cells measure to make the call.
 
-**Branch:** `perf/octree-mac`, from `develop` (PR #73 merged carrying the engine ceiling §Decision that names this experiment).
-
 ---
 
 ## Abstract
@@ -52,7 +50,7 @@ For the four MAC cells under test, the metrics declared below are bounded a prio
 
 #### Tier 1 — Force accuracy preserved at perf 2×2 bounds *(gated; per cell)*
 
-Same body distribution, seeds, and θ as perf 2×2 §Tier 1 (sphere log-normal, N ∈ {1 000, 10 000}, three seeds `0x6F637472`, `0x71756164`, `0x6D6F7274`, θ = 0.5). Per-body acceleration error measured against an independent O(N²) reference (the `exact_pairwise_forces` path established in perf 2×2 commit `d44dfda`).
+Same body distribution, seeds, and θ as perf 2×2 §Tier 1 (sphere log-normal, N ∈ {1 000, 10 000}, three seeds `0x6F637472`, `0x71756164`, `0x6D6F7274`, θ = 0.5). Per-body acceleration error measured against an independent O(N²) reference (the `exact_pairwise_forces` path established in perf 2×2).
 
 | Cell | N | Bound p50 | Bound p95 |
 | --- | ---: | ---: | ---: |
@@ -174,9 +172,9 @@ Implementation cost: intermediate — `a_internal_scale` is per-node (one additi
 
 - **Adaptive θ controller** — the existing `ThetaController` infrastructure is not part of this experiment; θ stays fixed at 0.5 across all cells. Adaptive opening per-body is a different axis from MAC selection.
 - **Higher-order multipoles (p ≥ 3)** — quadrupole-only per perf 2×2 §Decision; octupole and Dehnen-FMM proper are post-MAC investigations.
-- **SIMD / SoA layout** — separately queued as PR-perf-5/6.
+- **SIMD / SoA layout** — separately queued.
 - **Cross-machine comparison** — single-hardware as in prior experiments.
-- **MAC interaction with Morton sortation** — Morton was reverted in perf 2×2; engine ceiling §Decision queues a re-evaluation after SoA + SIMD land. MAC × Morton cross-product is post-PR-perf-7 if both still relevant.
+- **MAC interaction with Morton sortation** — Morton was reverted in perf 2×2; engine ceiling §Decision queues a re-evaluation after SoA + SIMD land. The MAC × Morton cross-product is deferred to after the SoA/SIMD/Morton work if both are still relevant.
 
 ---
 
@@ -285,7 +283,7 @@ The engine ceiling §Decision listed MAC as the first axis on the four-axis road
 
 ## Decision
 
-**Do not ship M1.** Do not implement M2 or M3 at this time. Production stays on M0 (classical `s/d < θ`) at θ = 0.5; the toggle scaffolding (`MacKind` enum, `Octree::built_mac`, `Node::delta_max`, `Octree::aggregate_delta_max`, `BarnesHutEngine::set_mac_kind`, MAC harness) is removed in the experiment's final commit per the perf 2×2 (PR #72) precedent.
+**Do not ship M1.** Do not implement M2 or M3 at this time. Production stays on M0 (classical `s/d < θ`) at θ = 0.5; the toggle scaffolding (`MacKind` enum, `Octree::built_mac`, `Node::delta_max`, `Octree::aggregate_delta_max`, `BarnesHutEngine::set_mac_kind`, MAC harness) is removed once the experiment closes, per the perf 2×2 precedent.
 
 The decision fires the protocol's *"Tier 3 shows interaction reduction but Tier 2 wall-time gain < 50 % of expected ratio range → possibly defer MAC pending SoA / SIMD work"* branch, modified for the actual outcome: Tier 3 shows interaction *increase*, which is a strictly stronger negative signal. Combined with §Interpretation's argument that M2 and M3 inherit the failure mode under the same `δ_max` construction, the parsimonious move is to defer the entire MAC axis rather than pay the M2 / M3 implementation cost for a likely-equivalent or worse outcome.
 
@@ -294,25 +292,25 @@ The decision fires the protocol's *"Tier 3 shows interaction reduction but Tier 
 | Step | Axis | Status |
 | --- | --- | --- |
 | 1 | MAC (this experiment) | **deferred** — see below for re-entry condition |
-| 2 | SoA layout (PR-perf-5) | next; gated on this PR landing on `develop` |
-| 3 | SIMD kernel (PR-perf-6) | follows SoA; brings cache locality + vectorisation in the same engine cycle |
+| 2 | SoA layout | next |
+| 3 | SIMD kernel | follows SoA; brings cache locality + vectorisation in the same engine cycle |
 | 4 | Re-measure interaction-bound vs compute-bound classification | gates whether MAC re-enters scope |
-| 5 | Morton (PR-perf-7) | follows the re-measurement, per the engine ceiling §Decision |
+| 5 | Morton | follows the re-measurement, per the engine ceiling §Decision |
 
 **MAC re-entry condition.** This experiment is filed as a closed negative result for the cheap-MAC variants under the triangle-inequality `δ_max` bound. MAC re-enters the roadmap only if a post-SoA/SIMD measurement on this same body distribution shows: (a) the walk is still interaction-bound (`t_per_interaction` still low, `n_interactions / body` still the dominant cost driver) AND (b) somebody has done the prior literature work to identify a `δ_max` construction or alternative MAC formulation that does not stack slack with tree depth. Without (b), repeating M1/M2/M3 with a different harness will not change the outcome.
 
-### What ships in this PR
+### Code disposition after the experiment closes
 
-| Item | State after PR |
+| Item | State |
 | --- | --- |
 | `MacKind` enum, `Octree::built_mac`, `Node::delta_max`, `Octree::aggregate_delta_max` | removed |
 | `BarnesHutEngine::mac_kind` field, `set_mac_kind`, `mac_kind()` accessors, MAC tests in `engine.rs` | removed |
 | `physics::perf_mac` harness | removed (superseded by this notebook) |
 | `physics::gravity::tree` visibility (bumped to `pub(crate)` for the harness) | reverted to `mod tree` |
 | `BarnesHutEngine::build` signature back to no-op-MAC form | identical to pre-experiment baseline |
-| Notebook (`docs/experiments/2026-05-09-octree-mac.md`) | retained as the closed lab record; this is the artefact a future PR-perf-MAC-v2 must read first |
+| Notebook (`docs/experiments/2026-05-09-octree-mac.md`) | retained as the closed lab record; this is the artefact a future MAC re-evaluation must read first |
 
-The diff at PR-perf-4's final commit is therefore: production source + runtime is byte-identical to pre-experiment; the only added code is the lab notebook. This matches the perf 2×2 / PR #72 closure pattern (toggle code lived only on the experiment branch; merge baked the §Decision and removed the knobs).
+Production source and runtime are therefore byte-identical to pre-experiment; the only retained code is the lab notebook. This matches the perf 2×2 closure pattern: toggle code lived only on the experiment branch, and the §Decision was baked while the knobs were removed.
 
 ---
 

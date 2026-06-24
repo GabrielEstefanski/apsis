@@ -1,8 +1,6 @@
 ---
 date: 2026-05-19
-status: a priori (protocol declared before any code lands)
-issue: '#146'
-closes: '#133'
+status: a priori (protocol declared before implementation)
 ---
 
 # Energy bookkeeping metric — regime-aware refactor
@@ -20,16 +18,15 @@ by `|1e-12 / E_initial|` and stops measuring physics.
 The same pattern exists in `update_angular_momentum_tracking`
 (`step.rs`).
 
-Issue #133 surfaced this on `radiation_dust.py`:
+This was first surfaced on `radiation_dust.py`:
 `|E_initial| ≈ 5 × 10⁻¹⁶`, reported `|dE/E| = 1.16 × 10⁻⁵`,
 true honest relative drift `≈ 2.4 %`. The floor masked the
-regime-precision-limited reality by a factor of 2000. The Issue
-#133 engine fix (PR #147, directional back-reaction suppression)
+regime-precision-limited reality by a factor of 2000. The
+companion engine fix (directional back-reaction suppression)
 removed spurious back-reaction on the primary but did not change
 the reported `|dE/E|` because the metric itself was the bug.
 
 This refactor replaces the floor with a regime-aware metric.
-Closes #133.
 
 ## Hypothesis
 
@@ -153,16 +150,16 @@ This goes into:
 - `core/system/regime.rs` rustdoc on the helper.
 - `core/system/metrics.rs` rustdoc on the Metrics fields.
 - `paper.md` near the conservation-claim paragraph (paper voice
-  audit; not blocking this PR).
+  audit).
 
 ## Protocol
 
 ### Baseline
 
-Run the following on `develop` tip and record current outputs:
+Run the following on the current tip and record current outputs:
 
 1. `examples/radiation_dust.py` — `|dE/E|` reading (expect
-   `1.200e-5`, the post-#147 value).
+   `1.200e-5`, the value after the companion engine fix).
 2. `examples/kepler_2body.rs` — `|dE/E|` reading (non-degenerate;
    expect existing IAS15-Kepler typical value).
 3. Mercury 1PN precession gate
@@ -172,8 +169,6 @@ Run the following on `develop` tip and record current outputs:
 Capture as `2026-05-19-energy-metric-regime-aware/baseline-pre-fix.{csv,txt}` (sibling directory).
 
 ### Implementation gate
-
-Six commits:
 
 1. **`regime` module + helper + threshold constant.**
    `core/system/regime.rs` with `regime_aware_rel` +
@@ -200,10 +195,9 @@ Six commits:
    `pythagorean_close_encounter.rs`, `solar_system_long.rs` —
    `Option<f64>` handling in `println!`. Benchmark
    `runner.rs:79` switches to `abs_energy_error`.
-6. **Python binding + tests + release note.**
+6. **Python binding + tests.**
    PyO3 accessors mirror shape. `apsis/_native/__init__.pyi`
-   stubs updated. Smoke tests cover `None` case. Release note
-   under `docs/releases/`.
+   stubs updated. Smoke tests cover `None` case.
 
 ### Decision gates
 
@@ -233,15 +227,15 @@ Six commits:
 ## Out of scope
 
 - Records v0.2 Diagnostic frames (`d_energy_rel`, `d_lz_rel`).
-  Fold into #143 (v0.3 FORMAT_VER 3 schema work). NaN markers
+  Deferred to v0.3 FORMAT_VER 3 schema work. NaN markers
   rejected as an encoding choice — use explicit tagged
   optional encoding when the format bump happens.
 - Linear momentum tracking. Degeneracy is the default case for
   COM-centered systems (`|P_initial| ≈ 0` by construction);
   adding a third regime-aware metric with always-on weirdness
   is low value.
-- `paper.md` conservation-claim wording update. Defer to paper
-  voice audit. Mention in release note.
+- `paper.md` conservation-claim wording update. Deferred to paper
+  voice audit.
 
 ## Expected outcomes
 
@@ -272,7 +266,7 @@ or near-cancellation regimes documented as
 
 ### Baseline (pre-fix)
 
-Captured against `develop` tip (commit `4ddef70` post-#147 merge):
+Captured against commit `4ddef70`:
 
 | Scenario | Regime | Metric | Value | Expected post-fix |
 |---|---|---|---|---|
@@ -280,16 +274,16 @@ Captured against `develop` tip (commit `4ddef70` post-#147 merge):
 | `kepler_2body` | well-conditioned (`\|E_initial\| ≈ 0.5`) | `\|dE/E\|` | `3.775 × 10⁻¹⁵` | `Some(3.775e-15)` ±1 ULP |
 | `mercury_precession_gate` | well-conditioned | 4.4 ppm vs GR | PASS | PASS |
 
-**Gate 1 — PASS.** Dust value matches post-#147 develop tip;
-Kepler value matches IAS15 noise floor expectation; Mercury gate
-green. Diagnosis is stable; ready for implementation.
+**Gate 1 — PASS.** Dust value matches the post-engine-fix
+baseline; Kepler value matches IAS15 noise floor expectation;
+Mercury gate green. Diagnosis is stable; ready for implementation.
 
 Raw stdout under [`2026-05-19-energy-metric-regime-aware/`](./2026-05-19-energy-metric-regime-aware/) (sibling directory).
 
 ### Post-fix
 
-Captured 2026-05-19 against the `feat(system): regime-aware
-energy/Lz drift metric` commit:
+Captured 2026-05-19 with the regime-aware energy/Lz drift metric
+in place:
 
 | Scenario | Pre-fix | Post-fix | Gate result |
 |---|---|---|---|
@@ -300,7 +294,7 @@ energy/Lz drift metric` commit:
 
 NaN at the Python surface is a fallback the binding applies
 because the PyO3 accessor still returns `f64`; the proper
-`Optional[float]` parity lands in a follow-up commit alongside
+`Optional[float]` parity lands in a follow-up alongside
 stubs and smoke tests.
 
 ### Controller behaviour (Gate 4)
@@ -312,15 +306,11 @@ all well-conditioned). No regression. The
 `DtController` (added alongside the integration above).
 
 Explicit degenerate-regime controller test deferred to the
-Python-binding commit, where the dust scenario can be exercised
+Python-binding work, where the dust scenario can be exercised
 end-to-end with `adaptive_stats()` introspection.
 
 ## References
 
-- Issue #146 — `https://github.com/GabrielEstefanski/apsis/issues/146`
-- Issue #133 — original report; closed by this work.
-- PR #147 — directional back-reaction suppression (companion
-  architectural fix landed separately).
 - Higham, N. J. (2002). *Accuracy and Stability of Numerical
   Algorithms*, 2nd ed. §1.4, conditioning of division.
 
@@ -344,7 +334,7 @@ end-to-end with `adaptive_stats()` introspection.
 - **D6:** Market-standard escape hatch: `System.initial_energy()`
   and `System.initial_lz()` exposed publicly so power users
   can compose their own normalisation.
-- **D7:** Records v0.2 Diagnostic frames out of scope; tracked
-  in #143 for FORMAT_VER 3.
+- **D7:** Records v0.2 Diagnostic frames out of scope; deferred
+  to FORMAT_VER 3.
 - **D8:** Linear momentum tracking out of scope (degeneracy is
   default for COM-centered systems).

@@ -1,7 +1,6 @@
 # 3D port — physics regression baseline
 
 **Date:** 2026-04-29
-**Branch:** `feat/3d-port` at commit `df7a0df`
 **Platform:** Windows 11, MSVC 14.43, libm via std, x86_64-pc-windows-msvc
 **Toolchain:** stable Rust (workspace `Cargo.lock` resolved)
 
@@ -87,8 +86,8 @@ CARGO_TARGET_DIR=target-3d cargo test --release -p apsis-1pn --tests -- \
 
 The `BASELINE` lines printed by the temporary `eprintln!` calls in
 each assertion site are not committed to the repository — this
-document is the evidence of record. After commit 4 lands, the
-instrumentation is re-applied transiently to verify, then stripped.
+document is the evidence of record. The instrumentation is
+re-applied transiently to verify, then stripped.
 
 ## Post-migration verification (commit 4)
 

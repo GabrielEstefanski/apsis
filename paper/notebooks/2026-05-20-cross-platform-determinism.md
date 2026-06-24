@@ -3,10 +3,6 @@
 **Date:** 2026-05-20
 **Subject:** Demonstrate that an apsis record (Cargo.lock + rustc version + source SHA) reproduces f64-bit-identical trajectories across heterogeneous x86_64 hosts (Windows AMD Zen 4 vs Linux Intel Ice Lake) for the four REBOUND-parity scenarios and the Mercury 1PN federation gate, once the only libc transcendental in the IAS15 adaptive controller is routed through the deterministic `libm` crate.
 
-**Baseline commit (pre-fix):** `06bd0a9` (master, post-#152)
-
-**Fix commit:** `ce0f2a9` (`experiment/cross-platform-libm`)
-
 **Tooling:** apsis IAS15 (`crates/apsis/src/physics/integrator/ias15.rs`), `libm = "0.2"` (pure-Rust math), `validation/cross-platform/run_linux_side.sh`, `validation/cross-platform/compare.py`
 
 **Status:** Single bidirectional run executed 2026-05-20. Diagnostic phase identified `f64::powf(1/7)` in the IAS15 step-size controller as the sole bifurcation source. Post-fix run on identical hosts yields byte-identical output files (independent SHA256 verification).
@@ -19,13 +15,13 @@ The v0.1 paper's central claim — that an apsis record's TOML provenance plus t
 
 The signature pointed at the adaptive step-size controller, not the force model. A single line of the IAS15 step-size optimizer (`crates/apsis/src/physics/integrator/ias15.rs:1981`) called `f64::powf(1.0/7.0)` on the dimensionless ratio in the IAS15 7th-root step-size formula (Rein & Spiegel 2015 §2.3 eq. 11). `f64::powf` routes to the platform's libc `pow`; the last-ULP outputs of glibc `pow` and Microsoft UCRT `pow` are not bitwise-equivalent. Replacing this single call with `libm::pow` (the `libm` crate's pure-Rust implementation, deterministic across x86_64 targets) restored full bitwise cross-platform reproducibility for all four parity scenarios (Kepler, figure-8, Pythagorean, retrograde Kepler), validated independently by SHA256 of the output CSVs; the Mercury 1PN rate matched cross-platform to all displayed digits.
 
-The claim that paper artifacts now carry is conditional and scoped: "Bitwise cross-platform reproducibility is achievable when all libc-bound transcendentals in integration-critical paths are routed through deterministic alternatives. This experiment demonstrates the principle for IAS15 + direct summation + Newton kernel + 1PN operator on x86_64; extending it to WHFast (Kepler solver), Mercurius (Hill-radius switching), and the central-force operator requires the analogous audit-and-replace pass, tracked as issues #159–#161."
+The claim that paper artifacts now carry is conditional and scoped: "Bitwise cross-platform reproducibility is achievable when all libc-bound transcendentals in integration-critical paths are routed through deterministic alternatives. This experiment demonstrates the principle for IAS15 + direct summation + Newton kernel + 1PN operator on x86_64; extending it to WHFast (Kepler solver), Mercurius (Hill-radius switching), and the central-force operator requires the analogous audit-and-replace pass."
 
 ---
 
 ## Motivation
 
-The apsis-record format (PR #92) stores, alongside frame data, a TOML header containing the integrator kind, every registered operator and its declared kernel requirements, the workspace `Cargo.lock` BLAKE3 hash, the `rustc` version, and a per-system reproducibility seed. The stated contract is: `{ source SHA, Cargo.lock, rustc version, header }` is sufficient to regenerate the byte-identical frame stream that the record's trailer hashes.
+The apsis-record format stores, alongside frame data, a TOML header containing the integrator kind, every registered operator and its declared kernel requirements, the workspace `Cargo.lock` BLAKE3 hash, the `rustc` version, and a per-system reproducibility seed. The stated contract is: `{ source SHA, Cargo.lock, rustc version, header }` is sufficient to regenerate the byte-identical frame stream that the record's trailer hashes.
 
 That contract is trivially provable intra-platform — the same machine running the same commit twice will hash to the same trailer. The CI release-validation job exercises exactly this. The unmet question, until this experiment, is whether the contract holds *across* platforms.
 
@@ -37,7 +33,7 @@ The experiment reported here found that the weaker outcome was an artifact of a 
 
 - Not a cross-architecture claim. Targets exercised are both x86_64 with AVX2 + AVX-512 available. ARM, RISC-V, POWER are unaddressed.
 - Not a claim about `target-cpu = native` codegen. Both binaries were built with default codegen (`target-cpu = x86-64` baseline). Microarch-specific tuning is unaddressed.
-- Not a Mercurius, WHFast, BH, or apsis-central reproducibility claim. The integration-critical paths of those code paths contain additional libc transcendentals (sin/cos/cosh, cbrt, powf respectively) and are tracked separately as issues #159, #160, #161.
+- Not a Mercurius, WHFast, BH, or apsis-central reproducibility claim. The integration-critical paths of those code paths contain additional libc transcendentals (sin/cos/cosh, cbrt, powf respectively) and are addressed separately.
 - Not a claim that all apsis simulations reproduce bitwise on any pair of x86_64 hosts. The claim is scoped to the parity portfolio above with the libm fix in place.
 
 ---
@@ -67,7 +63,7 @@ The experiment reported here found that the weaker outcome was an artifact of a 
 | rustc | 1.94.1 (pinned via `rustup default 1.94.1` to match Host A) |
 | target | `x86_64-unknown-linux-gnu` (glibc) |
 | `Cargo.lock` SHA256 | `F39E4946109916E8C8CCBE9D482502CCFB4166391BC8BCFFCF8302743A6EAFE1` (matches Host A) |
-| git SHA (post-fix) | `e06ba47` (`experiment/cross-platform-libm`, after `ce0f2a9`) |
+| git SHA (post-fix) | `e06ba47` |
 
 Both hosts compile against the same workspace `Cargo.lock` and the same `rustc 1.94.1`, isolating microarch + libc + LLVM target as the experimental axes.
 
@@ -157,7 +153,7 @@ Before re-running cross-platform, the Windows side regenerated all five outputs 
 
 ## Phase 3 — post-fix cross-platform run
 
-Both hosts executed against branch `experiment/cross-platform-libm` (commit `e06ba47`), with `rustc 1.94.1` and the same `Cargo.lock` (the only delta from Phase 1 is the `libm` workspace entry, which does not change any other crate's resolved versions). Output files were compared via `python validation/cross-platform/compare.py` and independently via SHA256.
+Both hosts executed against commit `e06ba47`, with `rustc 1.94.1` and the same `Cargo.lock` (the only delta from Phase 1 is the `libm` workspace entry, which does not change any other crate's resolved versions). Output files were compared via `python validation/cross-platform/compare.py` and independently via SHA256.
 
 ### Per-column ULP results (`compare.py`)
 
@@ -215,13 +211,13 @@ The gate threshold was updated from `1 × 10⁻⁴` (100 ppm) to `1.5 × 10⁻�
 
 ## Phase 4 — portfolio extension to full v0.1 FPM stack
 
-Phase 3 demonstrated bit-equal cross-platform reproducibility for IAS15 + direct + Newton + 1PN. The Methodology principle below predicted the same property would hold for the remaining integrators and operators once their libc transcendentals were routed through the `libm` crate. That batch shipped as:
+Phase 3 demonstrated bit-equal cross-platform reproducibility for IAS15 + direct + Newton + 1PN. The Methodology principle below predicted the same property would hold for the remaining integrators and operators once their libc transcendentals were routed through the `libm` crate. That batch covered:
 
-- **PR #165** — `kepler.rs` Stumpff series (`sin`, `cos`, `cosh`, `sinh`, `tanh` → `libm::*`), exercised by WHFast and Mercurius's outer drift.
-- **PR #166** — `mercurius.rs` Hill-radius `cbrt` → `libm::cbrt`, exercised by Mercurius's WH↔IAS15 switching decision.
-- **PR #167** — `apsis-central` force law and potential (`powf` × 4, `ln` × 1 → `libm::*`), exercised by every step the `CentralForce` operator is active.
+- `kepler.rs` Stumpff series (`sin`, `cos`, `cosh`, `sinh`, `tanh` → `libm::*`), exercised by WHFast and Mercurius's outer drift.
+- `mercurius.rs` Hill-radius `cbrt` → `libm::cbrt`, exercised by Mercurius's WH↔IAS15 switching decision.
+- `apsis-central` force law and potential (`powf` × 4, `ln` × 1 → `libm::*`), exercised by every step the `CentralForce` operator is active.
 
-PR #168 added three new validation scenarios exercising those code paths end-to-end:
+Three new validation scenarios exercise those code paths end-to-end:
 
 | scenario | exercises | source |
 | --- | --- | --- |
@@ -235,9 +231,9 @@ The `whfast_outer_solar` scenario deserves a note: **physics correctness is not 
 
 ### Setup
 
-Phase 4 used a fresh c6i.large EC2 spot instance (Intel Xeon Platinum 8375C / Ubuntu 24.04.4 LTS / glibc 2.39 / kernel 6.17.0-1012-aws) against the same Windows AMD Ryzen 5 7600X host. Both pinned to `rustc 1.94.1`. The post-libm-fix workspace resolves a different `Cargo.lock` from Phase 1-3 because PRs #165/#166/#167 expanded the `libm` dep into `apsis-central` and changed transitive resolution; both hosts share the same lockfile (SHA256 captured in each host's meta file).
+Phase 4 used a fresh c6i.large EC2 spot instance (Intel Xeon Platinum 8375C / Ubuntu 24.04.4 LTS / glibc 2.39 / kernel 6.17.0-1012-aws) against the same Windows AMD Ryzen 5 7600X host. Both pinned to `rustc 1.94.1`. The post-libm-fix workspace resolves a different `Cargo.lock` from the earlier phases because expanding the `libm` dep into `apsis-central` changed transitive resolution; both hosts share the same lockfile (SHA256 captured in each host's meta file).
 
-git SHA = `b974214` (`feat/cross-platform-portfolio-extension`).
+git SHA = `b974214`.
 
 ### Per-column ULP results
 
@@ -267,7 +263,7 @@ The full v0.1 FPM portfolio reproduces bit-for-bit across heterogeneous x86_64 h
 - **Three federation operators** (`PostNewtonian1PN`, `CentralForce`, plus the kernel-level Newton gravity exercised in every scenario) bit-equal.
 - **Close-encounter stress regime** (WHFast on a Jupiter-crossing particle, where the integrator's hierarchical assumption is invalid) computationally bit-equal — determinism is a property of the implementation, not of physical correctness.
 
-Issues #159 / #160 / #161 are closed by their respective PRs; the audit checklist is satisfied for every integration-critical path in the v0.1 release surface.
+The audit checklist is satisfied for every integration-critical path in the v0.1 release surface.
 
 ---
 
@@ -303,9 +299,9 @@ The audit checklist for any new integrator or operator joining the cross-platfor
 
 Application to the v0.1 release surface (Phase 4):
 
-- **WHFast Kepler drift** (`crates/apsis/src/physics/integrator/kepler.rs`): `sin`, `cos`, `cosh`, `sinh`, `tanh` in the Stumpff series — routed via `libm` in PR #165 (closed #159), verified by `whfast_outer_solar` and `mercurius_outer_solar`.
-- **Mercurius Hill-radius switching** (`crates/apsis/src/physics/integrator/mercurius.rs`): `cbrt` in the close-encounter detection threshold — routed via `libm::cbrt` in PR #166 (closed #160), verified by `mercurius_outer_solar`.
-- **apsis-central force law** (`crates/apsis-central/src/lib.rs`): `powf` × 4 and `ln` × 1 in the central-force prefactor and potential — routed via `libm` in PR #167 (closed #161), verified by `central_observable_inversion_long`.
+- **WHFast Kepler drift** (`crates/apsis/src/physics/integrator/kepler.rs`): `sin`, `cos`, `cosh`, `sinh`, `tanh` in the Stumpff series — routed via `libm`, verified by `whfast_outer_solar` and `mercurius_outer_solar`.
+- **Mercurius Hill-radius switching** (`crates/apsis/src/physics/integrator/mercurius.rs`): `cbrt` in the close-encounter detection threshold — routed via `libm::cbrt`, verified by `mercurius_outer_solar`.
+- **apsis-central force law** (`crates/apsis-central/src/lib.rs`): `powf` × 4 and `ln` × 1 in the central-force prefactor and potential — routed via `libm`, verified by `central_observable_inversion_long`.
 
 The audit checklist is satisfied for every integration-critical path in the v0.1 release surface. Future operators or integrators must run the checklist before joining the cross-platform portfolio.
 

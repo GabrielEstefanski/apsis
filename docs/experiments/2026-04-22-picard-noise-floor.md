@@ -2,9 +2,7 @@
 
 **Date:** 2026-04-22
 **Subject:** IAS15 integrator in `apsis`
-**Baseline commit:** `ffc3489` (drift-metrics baseline merged into `develop`)
-**Experimental branch:** `perf/ias15-picard-noise-floor` (not merged; null result)
-**Outcome:** Hypothesis falsified. Change abandoned; documentation retained as design record.
+**Outcome:** Hypothesis falsified. Documentation retained as design record.
 
 ---
 
@@ -53,9 +51,9 @@ energy-conservation quality that IAS15 is chosen for.
 
 ## 2. Experimental Infrastructure
 
-All measurements were produced by the `apsis` benchmark harness introduced in
-commits `f5e24e1` through `ffc3489`. Its design is a methodological contribution in its
-own right and is documented here as part of the experimental setup.
+All measurements were produced by the `apsis` benchmark harness. Its design is a
+methodological contribution in its own right and is documented here as part of the
+experimental setup.
 
 ### 2.1 Determinism Enforcement
 
@@ -199,7 +197,7 @@ No other modifications. `decide_dt`, the outer retry loop, `optimal_dt`, and
 
 ### 4.2 Evaluation Procedure
 
-1. On clean `develop` at commit `ffc3489`, record a fresh baseline with
+1. On the clean baseline state, record a fresh baseline with
    `IAS15_BENCH_UPDATE_BASELINE=1 cargo bench`. Confirm the harness reports
    bit-exact determinism across all 10 runs of all 4 scenarios.
 2. Apply the change described in §4.1.
@@ -363,7 +361,7 @@ Iteration count is not the optimisation target. The hot path in IAS15 at
 **Hardware/OS:** Windows 11 Pro for Workstations, x86-64.
 **Toolchain:** Rust stable (as of 2026-04-22), edition 2024.
 **Code state:**
-* Baseline `develop` HEAD: `ffc3489` (drift metrics merged).
+* Baseline commit: `ffc3489`.
 * Experimental diff: two insertions in `crates/apsis/src/physics/integrator/ias15.rs`
   (one constant, one `if` block) — reproduced verbatim in §4.1.
 
@@ -451,6 +449,5 @@ but valuable: they document which optimisation hypotheses are *not* productive,
 save future workers from re-running the same dead ends, and surface diagnostic
 insights (like §6 above) that would otherwise live only in tribal knowledge.
 
-The apsis project treats this document as the permanent artefact of the
-experiment. The code change itself was not merged; the methodology and
-numerical findings are what we keep.
+This document is the permanent artefact of the experiment. The code change itself
+was not adopted; the methodology and numerical findings are what we keep.

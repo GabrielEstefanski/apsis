@@ -2,9 +2,8 @@
 
 **Date:** 2026-05-01
 **Subject:** Numerical agreement between IAS15 (apsis) and IAS15 (REBOUND) on a canonical retrograde Kepler orbit, completing the (prograde, retrograde) pair for sign-convention coverage of the Kepler limit.
-**Baseline commit:** `b57ffe9` ("feat(parity): retrograde Kepler apparatus — apsis cargo example + REBOUND side + comparator").
 **Tooling:** apsis IAS15 (`crates/apsis/src/physics/integrator/ias15.rs`), REBOUND 4.6.0 via Python 3.10 (`reb.IAS15`).
-**Status:** *Run executed 2026-05-02 against `b57ffe9`. **All 20 gated outcomes pass — 10 metrics $\times$ 2 horizons (100-orbit checkpoint + $10^4$-orbit long-horizon gate).** Both Tier 1 magnitude invariants and Tier 2 sign-consistency binary checks within tolerance on both sides; Decision rules verdict `PASS` on both horizons. Brouwer-law growth visible from checkpoint to long horizon ($\sim 10\times$ magnitude across the $\sim 100\times$ horizon, consistent with random-walk $\sqrt{N}$ scaling), all observed values $\geq 5\times$ inside the bound. One scientific finding registered in §Interpretation: Tier 3 $|\Delta r|$ at $10^4$ orbits saturated at $4.57 \times 10^{-9}$, well below the $O(1)$ predicted in §Threats #9 — Kepler's lack of Lyapunov amplification preserves phase coherence between two correct IAS15 implementations across $10^4$ orbits in a way the protocol's a-priori prediction underestimated. **Updated 2026-06:** post-controller-fix re-run gives $\lvert \Delta r \rvert = 3.84 \times 10^{-9}$ at $10^4$ orbits (was $4.57 \times 10^{-9}$); finding stands — see §Gate tolerances — revision.*
+**Status:** *Run executed 2026-05-02. **All 20 gated outcomes pass — 10 metrics $\times$ 2 horizons (100-orbit checkpoint + $10^4$-orbit long-horizon gate).** Both Tier 1 magnitude invariants and Tier 2 sign-consistency binary checks within tolerance on both sides; Decision rules verdict `PASS` on both horizons. Brouwer-law growth visible from checkpoint to long horizon ($\sim 10\times$ magnitude across the $\sim 100\times$ horizon, consistent with random-walk $\sqrt{N}$ scaling), all observed values $\geq 5\times$ inside the bound. One scientific finding registered in §Interpretation: Tier 3 $|\Delta r|$ at $10^4$ orbits saturated at $4.57 \times 10^{-9}$, well below the $O(1)$ predicted in §Threats #9 — Kepler's lack of Lyapunov amplification preserves phase coherence between two correct IAS15 implementations across $10^4$ orbits in a way the protocol's a-priori prediction underestimated. **Updated 2026-06:** post-controller-fix re-run gives $\lvert \Delta r \rvert = 3.84 \times 10^{-9}$ at $10^4$ orbits (was $4.57 \times 10^{-9}$); finding stands — see §Gate tolerances — revision.*
 
 ---
 
@@ -103,7 +102,7 @@ The protocol is actionable, not just descriptive. Each outcome combination has a
 | Tier 1 pass, Tier 2 fail | Sign-convention bug — falls into one of the 5 categories enumerated in §Motivation | Halt. Inspect cross-product order, eccentricity-vector composition, `atan2` argument ordering, controller sign assumptions, and underflow/overflow paths. The first failing sample localises the time of bug expression |
 | Tier 1 + Tier 2 both fail | Deep defect (likely IC handling or state representation) | Halt. Verify IC bit-identicality at $t = 0$; verify COM-shift preserves $h$ sign exactly. If both pass at $t=0$ but the run diverges, the bug is in the integrator's inner state, not the IC layer |
 | Tier 1 + Tier 2 pass, Tier 3 unexpected | Phase drift larger or smaller than prograde precedent | Investigate but do not reprove. Re-run at denser sampling. Compare $\lvert\Delta r\rvert$ shape with prograde — if shape differs systematically (e.g., monotone vs oscillatory), the controller is responding differently to the sign-flipped IC, which itself is a finding |
-| Brouwer-law saturation at $10^4$ horizon | $\lvert\Delta E\rvert$ or $\lvert\Delta h\rvert$ approaches $10^{-13}$ from below at the long-horizon gate | Document honestly as Brouwer-law approach to bound; do **not** widen bound retroactively. If it exceeds, treat as Phase A → Phase B revision per the discipline established in PR #22 (recommended_dt validation) |
+| Brouwer-law saturation at $10^4$ horizon | $\lvert\Delta E\rvert$ or $\lvert\Delta h\rvert$ approaches $10^{-13}$ from below at the long-horizon gate | Document honestly as Brouwer-law approach to bound; do **not** widen bound retroactively. If it exceeds, treat as Phase A → Phase B revision per the discipline established for recommended_dt validation |
 
 ### Methodology
 
@@ -199,7 +198,7 @@ Reporting them as separate gates makes the diagnostic unambiguous: a Tier-1-only
 
 ## Results
 
-The run was executed 2026-05-02 against `b57ffe9`. Total samples: 10001 (orbit 0 plus 10000 orbital periods $\times$ 1 sample/orbit). Final integration time: $t_\text{final} = 6.283185 \times 10^{4}$ canonical t.u. on both sides. Initial energy bit-identical between sides: $E_0 = -5.000014999985003469 \times 10^{-7}$ (matched to 18 decimal digits, expected from bit-identical IC construction confirmed at $t = 0$).
+The run was executed 2026-05-02. Total samples: 10001 (orbit 0 plus 10000 orbital periods $\times$ 1 sample/orbit). Final integration time: $t_\text{final} = 6.283185 \times 10^{4}$ canonical t.u. on both sides. Initial energy bit-identical between sides: $E_0 = -5.000014999985003469 \times 10^{-7}$ (matched to 18 decimal digits, expected from bit-identical IC construction confirmed at $t = 0$).
 
 **Verdict: PASS PASS** — both Decision rules outcomes are `PASS: Tier 1 + Tier 2 both pass — integrator + sign convention OK`. All 10 gated metrics pass at the 100-orbit checkpoint and at the $10^4$-orbit long-horizon gate.
 
@@ -278,7 +277,7 @@ $\omega$ carrying the $1/e$ condition factor (a factor of two at $e = 0.5$). All
 gated metrics pass.
 
 The Tier-3 $|\Delta r|$ tabulated above ($2.18 \times 10^{-12}$ checkpoint,
-$4.57 \times 10^{-9}$ long-horizon) is the original `b57ffe9` run. Under the
+$4.57 \times 10^{-9}$ long-horizon) is the original run. Under the
 corrected IAS15 controller it is $3.84 \times 10^{-9}$ at $10^4$ orbits
 ($\approx 6 \times 10^{-12}$ at the checkpoint) — same order; the §Interpretation
 finding stands.
@@ -311,7 +310,7 @@ finding stands.
 
 | Field | Value |
 | --- | --- |
-| apsis canonical commit | `b57ffe9` (apparatus); protocol-only ancestors `0bdcae9` + `9cb091c` |
+| apsis canonical commit | `b57ffe9` |
 | Run date | 2026-05-02 |
 | REBOUND version | 4.6.0 |
 | Python version | 3.10 (CPython, x64) |
@@ -322,7 +321,7 @@ finding stands.
 | Apsis side | `crates/apsis/examples/rebound_parity_retrograde.rs` |
 | Raw outputs | `validation/rebound-parity/retrograde/out/{apsis,rebound}.csv`, `out/comparison.json` |
 
-**Commit pinning protocol:** the canonical hash committed to this notebook on the run date will include the apsis-side cargo example, the Python harness under `validation/rebound-parity/retrograde/`, and this notebook itself. The harness will be reproducible on a clean checkout of that commit with the dependencies pinned in `validation/rebound-parity/retrograde/requirements.txt` (identical to the Kepler / figure-8 / Pythagorean set: `numpy`, `rebound==4.6.0`).
+The canonical commit includes the apsis-side cargo example, the Python harness under `validation/rebound-parity/retrograde/`, and this notebook. The harness is reproducible on a clean checkout of that commit with the dependencies pinned in `validation/rebound-parity/retrograde/requirements.txt` (identical to the Kepler / figure-8 / Pythagorean set: `numpy`, `rebound==4.6.0`).
 
 ---
 
