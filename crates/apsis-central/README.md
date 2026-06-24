@@ -57,9 +57,9 @@ the target's current orbit. Errors:
 `tests/round_trip_gate.rs` closes the loop end-to-end: register at
 `ω̇ = 1.5 × 10⁻³ rad / Gaussian time` on an `e = 0.1` orbit, integrate
 50 orbits with IAS15, fit `ω̇` from period-locked samples, assert
-agreement within 5%. Empirical agreement when written: 2.7%. The
+agreement within 5%. Empirical agreement when written: 2.38%. The
 counter-test confirms IAS15 alone produces no apsidal drift on the
-same baseline (`< 10⁻⁷`), attributing the measured drift to the
+same baseline (`< 10⁻⁹`), attributing the measured drift to the
 operator.
 
 The 5% bound is set by the Tamayo inversion's near-circular

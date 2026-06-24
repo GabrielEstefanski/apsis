@@ -3,4 +3,4 @@
 * text=auto eol=lf
 
 # Simulation save format is a packed binary with magic bytes + raw f64.
-*.grav binary
+*.apsis binary
