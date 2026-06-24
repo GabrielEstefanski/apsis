@@ -418,7 +418,7 @@ test the field uses as a correctness proxy and is physically
 meaningless — the softening, not relativity, sets the precession.
 The number is not an artifact of apsis: it is fixed by the
 full-potential apsidal-angle quadrature (no $\varepsilon$-expansion,
-independent of the integrator; §3.2), which apsis's measured
+independent of the integrator), which apsis's measured
 geometric precession tracks to $\sim10^{-7}$ across the resolvable
 softening range (Fig. \ref{fig:plummer-apsidal-convergence}), with
 an independent scipy DOP853 integration agreeing to $0.58\,\%$ over
@@ -452,7 +452,7 @@ cumulative perihelion advance agrees with the closed form
 $\Delta\omega_\text{orbit} = 6\pi GM / (c^2 a (1 - e^2))$ to a
 residual of $4.6\times10^{-6}$ relative — the *a-priori derived*
 error budget (endpoint-sampling term, two-body floor, second-order
-floor; §3.2), not a fitted tolerance — asserted in continuous
+floor), not a fitted tolerance — asserted in continuous
 integration below $9.2\times10^{-6}$ (`mercury_precession_gate.rs`).
 The per-century rate reproduces the historical 43 arcsec/century
 [@Will1993]. The endpoint is taken exactly at the requested time
@@ -506,7 +506,7 @@ exhibits no events above $2.7 \times 10^{-14}$ per step, separating
 the Continuity signature from the symplectic round-off floor by
 roughly eight orders of magnitude.
 
-![Continuity counter-test (§3.3): a truncated-Plummer kernel (a $C^0$ force discontinuity at $R_c$) under fourth-order Yoshida, with the smoothness-requiring 1PN operator attached. *Top:* the energy-error spike $|\Delta E / E|$ at each of the eleven $R_c$ crossings against the closed-form jump-bound $\Delta F\,v_\text{cross}\,\delta t / |E_0| = 4.0 \times 10^{-4}$ (with $|E_0| = G(m_1+m_2)/(2a) = 0.5$, the specific energy of the relative motion); every spike sits below it, the worst at 50 %. *Bottom:* the separation $r(t)$ crossing $R_c$ — each spike aligns in time with a crossing, so the spike-per-crossing bijection is observable rather than asserted. A smooth-kernel reference run produces no event above $2.7 \times 10^{-14}$ per step, $\sim 8$ orders below the spikes (omitted here for vertical scale). The apsis points are freshly measured; the bound is evaluated from the shadow-Hamiltonian breakdown with no tuned constants.](paper/figures/continuity_spike_bound.pdf){#fig:continuity-spike-bound width=85%}
+![Continuity counter-test: a truncated-Plummer kernel (a $C^0$ force discontinuity at $R_c$) under fourth-order Yoshida, with the smoothness-requiring 1PN operator attached. *Top:* the energy-error spike $|\Delta E / E|$ at each of the eleven $R_c$ crossings against the closed-form jump-bound $\Delta F\,v_\text{cross}\,\delta t / |E_0| = 4.0 \times 10^{-4}$ (with $|E_0| = G(m_1+m_2)/(2a) = 0.5$, the specific energy of the relative motion); every spike sits below it, the worst at 50 %. *Bottom:* the separation $r(t)$ crossing $R_c$ — each spike aligns in time with a crossing, so the spike-per-crossing bijection is observable rather than asserted. A smooth-kernel reference run produces no event above $2.7 \times 10^{-14}$ per step, $\sim 8$ orders below the spikes (omitted here for vertical scale). The apsis points are freshly measured; the bound is evaluated from the shadow-Hamiltonian breakdown with no tuned constants.](paper/figures/continuity_spike_bound.pdf){#fig:continuity-spike-bound width=85%}
 
 The observed signature is a consequence of the continuity
 violation itself, not of the specific `TruncatedPlummerKernel`
@@ -825,9 +825,9 @@ unless a specific historical reproduction motivates otherwise.
 The work below is prioritised: the first tier quantifies a current
 floor of the satisfied 1PN result, the second generalises the
 cross-platform analysis. (The theory-confirmed counter-test
-prerequisite identified in earlier drafts has closed: §3.2 is anchored
+prerequisite identified in earlier drafts has closed: the Exactness counter-test is anchored
 to the exact apsidal-angle quadrature for the full softened potential,
-§3.3 to the closed-form spike-magnitude bound, both with independent
+the Continuity counter-test to the closed-form spike-magnitude bound, both with independent
 numerical cross-checks.)
 
 *Error budget for Mercury 1PN agreement.* The gated agreement
