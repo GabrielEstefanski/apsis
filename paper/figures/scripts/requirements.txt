@@ -1,0 +1,6 @@
+# Pinned toolchain for the paper's data figures. The committed PDFs were
+# rendered with this exact matplotlib; pinning it keeps `make figures`
+# byte-reproducible (the PDF /Producer embeds the matplotlib version).
+matplotlib==3.6.3
+numpy==1.24.4
+pandas==1.5.3

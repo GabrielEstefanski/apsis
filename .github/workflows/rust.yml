@@ -261,8 +261,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: install figure deps
-        run: pip install numpy matplotlib pandas
+      - name: install figure deps (pinned toolchain)
+        run: pip install -r paper/figures/scripts/requirements.txt
       - name: re-render data figures from frozen CSVs
         run: |
           make figures-continuity-spike-bound \
