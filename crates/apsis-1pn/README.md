@@ -16,7 +16,7 @@ Perturbations registered through [`System::add_hamiltonian_perturbation`](../aps
 
 Preconditions are expressed at the type level and surfaced at runtime, ensuring that invalid physical configurations are detectable without coupling perturbations to the kernel. This crate is the reference implementation of that contract.
 
-## ⚠️ Critical precondition
+## Critical precondition
 
 1PN is derived around the bit-exact Newtonian potential. Default `System::new(...)` uses `NewtonKernel::exact()` (ε = 0) and the registration is silent. Attaching 1PN on top of a softened kernel **invalidates the physical model**.
 
@@ -28,19 +28,19 @@ The contract is enforced once, in the core: opting into a softened kernel via `S
 
 ## Validation signal
 
-With the contract enforced, this crate reproduces Mercury's textbook 43 arcsec/century rate to within **100 ppm** of the GR prediction, gated in CI and bit-identical across Windows and Linux on x86_64. Example output (the recommended `for_units` API path):
+With the contract enforced, this crate reproduces Mercury's textbook 43 arcsec/century rate to within its derived error budget (residual **+4.6×10⁻⁶** relative, CI-gated below **9.2×10⁻⁶**) of the GR prediction, bit-identical across Windows and Linux on x86_64. Example output (the recommended `for_units` API path):
 
 ```text
 $ cargo run --release -p apsis-1pn --example mercury_perihelion
 ...
 ── GR comparison over 500 orbits ──
-  predicted Δω      = +2.509332e-04 rad  (+51.7587 arcsec)
-  measured  Δω      = +2.509130e-04 rad  (+51.7545 arcsec)
-  relative error    = -8.053e-05
-  rate              = 42.978 arcsec/century  (GR expects 43)
+predicted Δω = +2.509332e-4 rad (+51.7587 arcsec)
+measured Δω = +2.509344e-4 rad (+51.7589 arcsec)
+relative error = +4.581e-6
+rate = 42.982 arcsec/century (GR expects 43)
 ```
 
-The Mercury agreement is gated in CI at 100 ppm (`mercury-gate` job in [`.github/workflows/rust.yml`](../../.github/workflows/rust.yml)). The cross-platform deterministic floor is documented in [`paper/notebooks/2026-05-22-controller-pow-implementations.md`](../../paper/notebooks/2026-05-22-controller-pow-implementations.md).
+The Mercury agreement is gated in CI below the derived 9.2×10⁻⁶ budget (`mercury-gate` job in [`.github/workflows/rust.yml`](../../.github/workflows/rust.yml)). The cross-platform deterministic floor is documented in [`paper/notebooks/2026-05-22-controller-pow-implementations.md`](../../paper/notebooks/2026-05-22-controller-pow-implementations.md).
 
 ## Why this matters
 

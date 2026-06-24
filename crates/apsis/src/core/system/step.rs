@@ -55,8 +55,7 @@ impl System {
         // Capture pre-step state for the Order-2 dense-output fallback (VV,
         // Y4, WH). Skipped when `scratch_acc` is empty (first step) or when
         // its length differs from `bodies.len()` — WH leaves it sized N−1
-        // and a misaligned snapshot panics at the renderer. See PR #14 and
-        // issue #16.
+        // and a misaligned snapshot panics at the renderer.
         let pre_x0: Vec<Vec3>;
         let pre_v0: Vec<Vec3>;
         let pre_a0: Vec<Vec3>;

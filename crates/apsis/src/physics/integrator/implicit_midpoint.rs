@@ -5,7 +5,7 @@
 //! A-stable. No central-mass dominance assumption — accepts any topology.
 //!
 //! [`Solver::Newton`] is reserved in the v1 API; only `Picard` is
-//! implemented. Newton lands in issue #117.
+//! implemented.
 //!
 //! A-stable, not L-stable: `R(z) → -1` as `Re(z) → -∞`. Stiff modes
 //! oscillate. Dissipation-dominant regimes need Radau IIA / BDF / TR-BDF2.
@@ -35,7 +35,7 @@ pub enum Solver {
     /// mildly-stiff conservative dynamics.
     #[default]
     Picard,
-    /// Reserved in the v1 API; implementation tracked in issue #117.
+    /// Reserved in the v1 API; not yet implemented.
     /// Selecting this variant in v1 panics on first step.
     Newton,
 }
@@ -252,8 +252,8 @@ fn iterate_to_convergence(
         match solver {
             Solver::Picard => picard_step(bodies, ctx, dt, acc, q0, v0, q_prev, v_prev, v_avg),
             Solver::Newton => unimplemented!(
-                "ImplicitMidpoint Solver::Newton is reserved in v1; \
-                 implementation tracked in issue #117"
+                "ImplicitMidpoint Solver::Newton is reserved in the v1 API \
+                 and not yet implemented"
             ),
         }
         residual = relative_state_delta(bodies, q_prev, v_prev);
@@ -621,9 +621,9 @@ mod tests {
         }
     }
 
-    /// Selecting `Solver::Newton` in v1 panics with the issue link.
+    /// Selecting `Solver::Newton` in v1 panics.
     #[test]
-    #[should_panic(expected = "issue #117")]
+    #[should_panic(expected = "reserved in the v1 API")]
     fn newton_solver_is_unimplemented_in_v1() {
         let mut bodies = two_body_circular();
         let mut im = ImplicitMidpoint::new().with_solver(Solver::Newton);

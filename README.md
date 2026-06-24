@@ -128,7 +128,7 @@ mercury = apsis.Body.rocky(
 )
 
 sys = apsis.System(
-    bodies=[sun, mercury], units=apsis.units.SOLAR,
+    bodies=[sun, mercury], units=apsis.units.SOLAR_CANONICAL,
     integrator="ias15", dt=1e-3,
 )
 sys.add_hamiltonian_perturbation(
@@ -148,7 +148,7 @@ never changes; the composition does.
 ### Rust
 
 The same Mercury 1PN scenario as a runnable example, with the GR
-comparison printed inline (Rust 1.85+):
+comparison printed inline (Rust 1.89+):
 
 ```bash
 git clone https://github.com/GabrielEstefanski/apsis

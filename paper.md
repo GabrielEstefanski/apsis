@@ -22,10 +22,10 @@ abstract: |
   Record* that pins the operator stack to a `Cargo.lock` for end-to-end reproducibility. We exercise the architecture with three
   first-party operator crates — `apsis-1pn` (first-post-Newtonian
   Schwarzschild correction), `apsis-radiation` (radiation pressure
-  and Poynting–Robertson drag, validated to 1.2 % of the Burns 1979
+  and Poynting–Robertson drag, validated to 0.95 % of the Burns 1979
   analytic law), and `apsis-central` (parametric central-force
   precession with an observable-inversion constructor, round-trip
-  agreement to 2.7 %) — spanning Hamiltonian and non-conservative
+  agreement to 2.38 %) — spanning Hamiltonian and non-conservative
   categories and both supported constructor patterns. Among these,
   `apsis-1pn` carries the deepest demonstration of the contract
   mechanism: it reproduces Mercury's perihelion precession to a
