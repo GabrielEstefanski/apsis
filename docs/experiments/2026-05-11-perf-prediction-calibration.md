@@ -1,7 +1,7 @@
-# Perf prediction calibration — lessons from PR-perf-4 and PR-perf-5
+# Perf prediction calibration — lessons from the MAC and SoA experiments
 
 **Date:** 2026-05-11
-**Subject:** Two consecutive perf predictions on the gravity hot path (MAC comparison, SoA layout) overestimated their gains. This doc records the pattern, identifies the misframing root cause, and calibrates the next perf prediction (PR-perf-6 SIMD) so the same overestimation does not recur.
+**Subject:** Two consecutive perf predictions on the gravity hot path (MAC comparison, SoA layout) overestimated their gains. This doc records the pattern, identifies the misframing root cause, and calibrates the next perf prediction (SIMD) so the same overestimation does not recur.
 
 **Status:** Standing reference. Future perf experiments on the gravity hot path should consult §Calibration rule before declaring a-priori bounds.
 
@@ -25,7 +25,7 @@ Two of the three axes have now been measured. Both predictions overestimated.
 
 ## The two predictions
 
-### MAC (PR-perf-4, PR #74)
+### MAC
 
 | Quantity | A-priori range | Measured | Status |
 | --- | ---: | ---: | --- |
@@ -34,7 +34,7 @@ Two of the three axes have now been measured. Both predictions overestimated.
 
 §Decision: defer M1, do not implement M2/M3. Triangle-inequality `δ_max` aggregation accumulates slack at every recursion level; for our regime the geometric MAC tightening was net-negative on interaction count.
 
-### SoA layout (PR-perf-5, PR #78)
+### SoA layout
 
 | Quantity | A-priori range | Measured | Status |
 | --- | ---: | ---: | --- |
@@ -86,13 +86,13 @@ For any perf experiment on the gravity hot path (BH walk, force kernel, octree b
 
 The accumulated complexity from the perf series is non-trivial:
 
-- `BodyArrays` SoA snapshot type (PR-perf-5) — ~250 LOC including pack helpers and tests
-- `Body` field rename `pos_x/y/z, vel_x/y/z` (PR-perf-5) — touches ~36 files mechanically
-- (Pending PR-perf-6) AoSoA chunked layout, two-phase walk, scalar/AVX2/AVX-512 kernel paths, runtime dispatch — projected ~1000-1500 LOC
+- `BodyArrays` SoA snapshot type — ~250 LOC including pack helpers and tests
+- `Body` field rename `pos_x/y/z, vel_x/y/z` — touches ~36 files mechanically
+- (Pending SIMD) AoSoA chunked layout, two-phase walk, scalar/AVX2/AVX-512 kernel paths, runtime dispatch — projected ~1000-1500 LOC
 
-If PR-perf-6's measurement also misses its (recalibrated) bound — Tier 3 walk speedup at N = 10⁴ ≤ 1.0× — the cumulative complexity is unjustified by measurement. The joint revert criterion in PR-perf-6's notebook §Decision rules must fire: revert PR-perf-5 (SoA) and PR-perf-6 (SIMD) together, document as deferred. The MAC §Decision template applies — negative result with documented mechanism, not engineering failure.
+If the SIMD measurement also misses its (recalibrated) bound — Tier 3 walk speedup at N = 10⁴ ≤ 1.0× — the cumulative complexity is unjustified by measurement. The joint revert criterion must fire: revert SoA and SIMD together, document as deferred. The MAC §Decision template applies — negative result with documented mechanism, not engineering failure.
 
-This rule is not symmetric. If PR-perf-6 lands gain inside its (recalibrated) range, both ship as planned. The asymmetry is intentional: shipping requires positive evidence, reverting requires accumulated negative evidence + cost-of-complexity argument.
+This rule is not symmetric. If SIMD lands gain inside its (recalibrated) range, both ship as planned. The asymmetry is intentional: shipping requires positive evidence, reverting requires accumulated negative evidence + cost-of-complexity argument.
 
 ---
 

@@ -1,19 +1,19 @@
 # SIMD kernel for the Barnes-Hut walk — protocol
 
 **Date:** 2026-05-11
-**Subject:** Vectorise the Plummer-kernel arithmetic on the BH walk's leaf-pair and accepted-node interaction phases via `std::arch` SIMD intrinsics, with runtime dispatch across scalar / AVX2 / AVX-512 paths. Restructure the walk into a two-phase pattern (control-flow walk emits interaction lists; dense SIMD kernel processes lists) so the hot loop is branchless and lane-uniform. **Layout stays SoA puro** (inherited from PR-perf-5 `BodyArrays`); SIMD reads via `gather` instructions where leaf-mate indices are scattered. AoSoA + Morton ordering — the layout that would enable aligned loads in place of gather — is deferred to a conditional PR-perf-7 if Tier 2b decomposition shows leaf-pair phase as the residual bottleneck after SIMD lands here.
+**Subject:** Vectorise the Plummer-kernel arithmetic on the BH walk's leaf-pair and accepted-node interaction phases via `std::arch` SIMD intrinsics, with runtime dispatch across scalar / AVX2 / AVX-512 paths. Restructure the walk into a two-phase pattern (control-flow walk emits interaction lists; dense SIMD kernel processes lists) so the hot loop is branchless and lane-uniform. **Layout stays SoA puro** (inherited from the SoA `BodyArrays` refactor); SIMD reads via `gather` instructions where leaf-mate indices are scattered. AoSoA + Morton ordering — the layout that would enable aligned loads in place of gather — is deferred to a conditional follow-up if Tier 2b decomposition shows leaf-pair phase as the residual bottleneck after SIMD lands here.
 
-**Status:** Protocol declared a priori, before any SIMD code lands. Calibrated against the lessons from `2026-05-10-soa-layout.md` (PR-perf-5) — the cache-line waste arithmetic over-predicted the SoA gain because it ignored compute-boundness, prefetcher coverage, and internal-node walk fraction. This notebook builds its predictions from per-interaction kernel arithmetic vectorisation directly, with explicit phase decomposition gates so a Tier 3 miss can be diagnosed.
+**Status:** Protocol declared a priori, before any SIMD code lands. Calibrated against the lessons from the SoA layout experiment (`2026-05-10-soa-layout.md`) — the cache-line waste arithmetic over-predicted the SoA gain because it ignored compute-boundness, prefetcher coverage, and internal-node walk fraction. This notebook builds its predictions from per-interaction kernel arithmetic vectorisation directly, with explicit phase decomposition gates so a Tier 3 miss can be diagnosed.
 
-**Branch:** `perf/simd-kernel`, stacked on top of `perf/soa-layout` (PR #78). PR-perf-6 will not merge unless PR-perf-5's SoA refactor is structurally validated by this experiment's success — if SIMD also fails to materialise, both PRs are reverted together (the SoA refactor's structural justification was "SIMD pre-requisite", and that justification rests on this experiment).
+The SIMD work is gated on the SoA refactor being structurally validated by this experiment's success — if SIMD also fails to materialise, both are reverted together (the SoA refactor's structural justification was "SIMD pre-requisite", and that justification rests on this experiment).
 
 ---
 
 ## Abstract
 
-The engine ceiling experiment (`2026-05-09-engine-ceiling.md` §Decision) classified the production engine on the recorded hardware as **interaction-bound, not compute-bound** at the v1 target N (10³-10⁵). Two perf experiments since then — MAC comparison (PR-perf-4) and SoA layout (PR-perf-5) — both missed their predicted gains. The pattern is recorded in `2026-05-11-perf-prediction-calibration.md`: predictions over-estimated when they assumed compute-bound or memory-bound regimes that engine ceiling had already classified away.
+The engine ceiling experiment (`2026-05-09-engine-ceiling.md` §Decision) classified the production engine on the recorded hardware as **interaction-bound, not compute-bound** at the v1 target N (10³-10⁵). Two perf experiments since then — MAC comparison and SoA layout — both missed their predicted gains. The pattern is recorded in `2026-05-11-perf-prediction-calibration.md`: predictions over-estimated when they assumed compute-bound or memory-bound regimes that engine ceiling had already classified away.
 
-This experiment is calibrated against that pattern. Tier 3 prediction bounds are derived from the engine ceiling §Decision ceiling (`SIMD ≈ 0.5-0.7× per-interaction → 1.4-2× walk speedup`), not from the lane-count ratio (`AVX2 = 4× per-lane`) that the cache-line waste model would imply. The §Interpretation of PR-perf-5 identified three reasons the cache-locality story over-predicted: (1) Plummer-kernel arithmetic is already compiler-vectorised and dominates per-interaction cost, (2) the Zen 4 hardware prefetcher covers sequential-access waste, (3) the walk is dominated by internal-node visits that load-locality optimisations don't touch. Reasons (1) and (3) directly bound this experiment's expected SIMD gain.
+This experiment is calibrated against that pattern. Tier 3 prediction bounds are derived from the engine ceiling §Decision ceiling (`SIMD ≈ 0.5-0.7× per-interaction → 1.4-2× walk speedup`), not from the lane-count ratio (`AVX2 = 4× per-lane`) that the cache-line waste model would imply. The §Interpretation of the SoA layout experiment identified three reasons the cache-locality story over-predicted: (1) Plummer-kernel arithmetic is already compiler-vectorised and dominates per-interaction cost, (2) the Zen 4 hardware prefetcher covers sequential-access waste, (3) the walk is dominated by internal-node visits that load-locality optimisations don't touch. Reasons (1) and (3) directly bound this experiment's expected SIMD gain.
 
 This experiment tests whether explicit SIMD intrinsics deliver the *engineering-baseline* gains engine ceiling predicted, on top of what the compiler is already doing. Plummer kernel per-pair cost is ~30-50 cycles scalar (`sqrt`, `recip`, multiplies, adds); engine ceiling measured `t_per_interaction = 1.3-2.1 ns ≈ 5-9 cycles` on Zen 4 — meaning the compiler is already getting 5-10× speedup over the naive scalar count via auto-vectorisation, FMA, and pipelining. Explicit SIMD's headroom is what the compiler is **not** getting, which is bounded by the kernel-isolated speedup (Tier 2a) attenuated by the walk's non-vectorisable dispatch fraction.
 
@@ -31,9 +31,9 @@ If Tier 3 misses with Tiers 0-2a passing, Tier 2b decomposition isolates whether
 
 ## Motivation
 
-PR-perf-5 §Decision deferred the prediction-construction work into this notebook:
+The SoA layout experiment's §Decision deferred the prediction-construction work into this notebook:
 
-> *"PR-perf-6's notebook should bound its predictions accordingly — not assume SoA's 'lost' gain is recoverable by SIMD on top, but predict SIMD's gain from its own first principles."*
+> *"the SIMD notebook should bound its predictions accordingly — not assume SoA's 'lost' gain is recoverable by SIMD on top, but predict SIMD's gain from its own first principles."*
 
 The standalone calibration record (`2026-05-11-perf-prediction-calibration.md`) generalises this rule: prediction bounds for any future perf experiment on the gravity hot path must respect the engine ceiling §Decision ceiling and not re-imply the original `MAC × SIMD × SoA = 0.32×` multiplicative when prior axes have measured neutral. With `MAC = 1.0×` (deferred) and `SoA = 1.0×` (no Tier 2 gain), the realistic ceiling now is just `SIMD ≈ 0.5-0.7×` (1.4-2× walk speedup), not 3×.
 
@@ -60,7 +60,7 @@ This notebook honours that rule. Bounds below are derived from the engine ceilin
 
 It is **not** testing whether SIMD recovers the gains MAC and SoA missed. The cache-line waste arithmetic that motivated SoA, and the interaction-count reduction that motivated M1, were both invalidated by measurement. Their gain envelope does not transfer to SIMD. SIMD operates on a separate axis (per-interaction kernel cycle count) and stands on its own first principles.
 
-It is **not** testing whether apsis can match REBOUND's headline numbers. Engine ceiling §Decision found apsis ~5-10× behind REBOUND across comparable cells. Closing that gap entirely would require sustained micro-optimisation work (interaction-list reordering for SIMD-friendly access, custom allocators, kernel inlining tuning) that this PR does not pursue. SIMD here is the engineering baseline that closes the most visible structural gap (REBOUND has SIMD intrinsics; apsis has none).
+It is **not** testing whether apsis can match REBOUND's headline numbers. Engine ceiling §Decision found apsis ~5-10× behind REBOUND across comparable cells. Closing that gap entirely would require sustained micro-optimisation work (interaction-list reordering for SIMD-friendly access, custom allocators, kernel inlining tuning) that this work does not pursue. SIMD here is the engineering baseline that closes the most visible structural gap (REBOUND has SIMD intrinsics; apsis has none).
 
 ---
 
@@ -107,7 +107,7 @@ A microbenchmark runs the Plummer interaction kernel **in isolation** — no BH 
 
 **Failure here halts the experiment** with a kernel-implementation diagnosis: either the SIMD intrinsic sequence is wrong, FMA contraction differs, or lane handling has a bug. Fix and re-run before Tier 2b/3. *Passing Tier 2a is a precondition for any Tier 3 measurement to be meaningful.*
 
-If Tier 2a passes its (recalibrated) range but Tier 3 still misses (≤ 1.0× walk speedup), the diagnosis is that walk-dispatch + interaction-list materialisation absorb the kernel gain — which means the two-phase walk's overhead is the rate-limiting factor, and SIMD on the kernel alone cannot address it. Joint revert per §Decision rules.
+If Tier 2a passes its (recalibrated) range but Tier 3 still misses (≤ 1.0× walk speedup), the diagnosis is that walk-dispatch + interaction-list materialisation absorb the kernel gain — which means the two-phase walk's overhead is the rate-limiting factor, and SIMD on the kernel alone cannot address it. Joint revert of the SoA and SIMD work per §Decision rules.
 
 #### Tier 2b — Phase-decomposed walk timing *(informational; diagnostic-only)*
 
@@ -193,15 +193,15 @@ A measurement inside the predicted range ships SIMD. Measurements outside trigge
 | Below range but ≥ 1.0× | Compiler is tighter than estimated, less explicit-SIMD headroom; SIMD still net positive but marginal; consider whether complexity is worth it before shipping |
 | ≤ 1.0× (SIMD slower than scalar) | **Joint revert criterion fires** (see §Decision rules below) — SoA and SIMD revert together |
 
-The lower bound of 1.3 (AVX2) is not arbitrary: PR-perf-5 §Decision shipped on structural argument with SoA = 1.0× walk gain. If SIMD also lands ≤ 1.0×, the cumulative complexity (BodyArrays + two-phase walk + 3-path dispatch) is unjustified — at that point the engine ceiling §Decision's "engineering baseline against REBOUND" was over-promised, and revert is the disciplined response.
+The lower bound of 1.3 (AVX2) is not arbitrary: the SoA layout experiment shipped on structural argument with SoA = 1.0× walk gain. If SIMD also lands ≤ 1.0×, the cumulative complexity (BodyArrays + two-phase walk + 3-path dispatch) is unjustified — at that point the engine ceiling §Decision's "engineering baseline against REBOUND" was over-promised, and revert is the disciplined response.
 
-#### Tier 4 — Pack overhead per `compute()` *(gated, inherited from PR-perf-5)*
+#### Tier 4 — Pack overhead per `compute()` *(gated, inherited from the SoA layout experiment)*
 
-Pack is unchanged from PR-perf-5 — same SoA snapshot, same `pack_from(&[Body])`, same five contiguous `Vec<f64>`. Re-measured here purely as a regression sentinel.
+Pack is unchanged from the SoA layout experiment — same SoA snapshot, same `pack_from(&[Body])`, same five contiguous `Vec<f64>`. Re-measured here purely as a regression sentinel.
 
 | Bound | Threshold | Rationale |
 | --- | --- | --- |
-| `t_pack / t_compute` at N = 10⁴ | ≤ 0.01 (1 %) | Same 1 % budget as PR-perf-5 §Tier 3. Two-phase walk does not change pack semantics. |
+| `t_pack / t_compute` at N = 10⁴ | ≤ 0.01 (1 %) | Same 1 % budget as the SoA layout experiment's §Tier 3. Two-phase walk does not change pack semantics. |
 
 #### Decision rules
 
@@ -210,20 +210,20 @@ Pack is unchanged from PR-perf-5 — same SoA snapshot, same `pack_from(&[Body])
 | Tier 0 fails | Toolchain / CPU setup issue | **Halt experiment**, document environment, re-run on confirmed setup |
 | Tier 1 fails | SIMD kernel produces wrong accelerations | **Halt**, debug kernel implementation (lane permutation, masked load, FMA contraction) |
 | Tier 2a fails | SIMD intrinsic implementation suboptimal | **Halt**, profile and fix the kernel before measuring walk |
-| Tier 2a passes AND Tier 3 in range `[1.3, 2.0]× AVX2` / `[1.7, 2.7]× AVX-512` | SIMD delivers as predicted (calibrated against engine ceiling envelope) | **Ship SIMD as production** with current SoA layout; bake removes the harness. If Tier 2b decomposition shows `t_kernel_leafpair` as the dominant residual phase, queue PR-perf-7 (AoSoA + Morton + aligned loads) as a follow-up axis with its own a-priori bounds. |
+| Tier 2a passes AND Tier 3 in range `[1.3, 2.0]× AVX2` / `[1.7, 2.7]× AVX-512` | SIMD delivers as predicted (calibrated against engine ceiling envelope) | **Ship SIMD as production** with current SoA layout; the measurement harness is removed once the experiment closes. If Tier 2b decomposition shows `t_kernel_leafpair` as the dominant residual phase, queue the AoSoA + Morton + aligned-loads axis as a follow-up with its own a-priori bounds. |
 | Tier 2a passes AND Tier 3 below range but ≥ 1.0× | Compiler tighter than estimated; explicit SIMD net positive but marginal | Tier 2b decomposes; **decide on margin**: if walk speedup ≥ 1.15× with low complexity ceiling, ship and document; if walk speedup < 1.15×, joint revert criterion applies (see below) |
 | Tier 2a passes AND Tier 3 above range | Compiler underperformed scalar baseline more than estimated | Ship and document the surprise; flag for understanding |
 | All tiers pass but walk_speedup ≤ 1.0× | SIMD path is slower than or equal to scalar despite kernel speedup | **Joint revert criterion fires** (see below) |
 
-##### Joint revert criterion (PR-perf-5 + PR-perf-6 together)
+##### Joint revert criterion (SoA + SIMD together)
 
 The cumulative complexity from the perf series, as documented in `2026-05-11-perf-prediction-calibration.md` §Revert discipline:
 
-- `BodyArrays` SoA snapshot (~250 LOC, PR-perf-5)
-- `Body` field rename across ~36 files (PR-perf-5)
-- Two-phase walk, scalar/AVX2/AVX-512 kernel paths with gather, runtime dispatch (~700-900 LOC, this PR — AoSoA refactor deferred to PR-perf-7)
+- `BodyArrays` SoA snapshot (~250 LOC, SoA layout work)
+- `Body` field rename across ~36 files (SoA layout work)
+- Two-phase walk, scalar/AVX2/AVX-512 kernel paths with gather, runtime dispatch (~700-900 LOC, this work — AoSoA refactor deferred)
 
-PR-perf-5's §Decision shipped on **structural grounds** (Tier 1 + Tier 3 + "SIMD pre-requisite"). The "SIMD pre-requisite" justification rests on this experiment delivering a measurable gain. If walk_speedup ≤ 1.0× here, that justification falls — the cumulative complexity has no ROI. The disciplined response is **joint revert**: PR-perf-5 (SoA) and PR-perf-6 (SIMD) revert together. Production returns to the pre-PR-perf-5 AoS state. The lab notebooks remain as the closed negative-result record (same template as PR-perf-4 MAC §Decision).
+The SoA layout experiment's §Decision shipped on **structural grounds** (Tier 1 + Tier 3 + "SIMD pre-requisite"). The "SIMD pre-requisite" justification rests on this experiment delivering a measurable gain. If walk_speedup ≤ 1.0× here, that justification falls — the cumulative complexity has no ROI. The disciplined response is **joint revert**: the SoA and SIMD work revert together. Production returns to the pre-SoA AoS state. The lab notebooks remain as the closed negative-result record (same template as the MAC experiment's §Decision).
 
 The asymmetry is intentional. Shipping requires positive evidence (Tier 3 in range). Reverting requires accumulated negative evidence + cost-of-complexity argument:
 
@@ -234,18 +234,18 @@ The asymmetry is intentional. Shipping requires positive evidence (Tier 3 in ran
 
 After three misses on the gravity hot path despite informed predictions, the honest interpretation is: the regime (small-N high-precision interaction-bound walk on a kernel the compiler already vectorises well) does not respond to the optimisation axes the perf series targeted. Further investment requires a different category of work (FMM, GPU, structural algorithm change) that is out of scope for v1.
 
-The user's framing from conversation: *"se a gente não ganha nada de performance: a gente está aplicando errado, esquecendo de algo, ou pro nosso regime isso realmente não funciona"*. Three misses in a row narrows that to "pro nosso regime isso realmente não funciona" — a finding worth documenting cleanly.
+The framing that motivated this series: *"se a gente não ganha nada de performance: a gente está aplicando errado, esquecendo de algo, ou pro nosso regime isso realmente não funciona"*. Three misses in a row narrows that to "pro nosso regime isso realmente não funciona" — a finding worth documenting cleanly.
 
 ### Methodology
 
 #### Implementation order
 
-1. **Notebook a priori** (this commit).
-2. **Two-phase walk + scalar dense kernel together** — `Octree::walk` restructured to emit per-body interaction lists (`Vec<u32>` of leaf body indices, `Vec<u32>` of accepted node indices). Phase 2 is a branchless scalar kernel that processes both lists with indexed reads from `BodyArrays`. **Tier 1 here uses tolerance `≤ 1e-13` relative, NOT bit-exact**: the two-phase pattern changes summation order from DFS-interleaved (leaf-pair, leaf-pair, accepted-node, leaf-pair, ...) to segregated (all leaf-pairs first, then all accepted-nodes). Floating-point addition is not associative; per-body acceleration drift at ~`O(n_interactions × ULP)` ≈ `~3000 × 2^-52 ≈ 7e-13` is the physical floor for this reordering. The single-phase walk is preserved as `#[cfg(test)] fn bh_eval_body_single_phase` so the tolerance test can compare the two paths on identical inputs. Combined into one commit because the two-phase walk and scalar kernel are conceptually inseparable — the walk emits lists that only make sense if a kernel processes them.
+1. **Notebook a priori.**
+2. **Two-phase walk + scalar dense kernel together** — `Octree::walk` restructured to emit per-body interaction lists (`Vec<u32>` of leaf body indices, `Vec<u32>` of accepted node indices). Phase 2 is a branchless scalar kernel that processes both lists with indexed reads from `BodyArrays`. **Tier 1 here uses tolerance `≤ 1e-13` relative, NOT bit-exact**: the two-phase pattern changes summation order from DFS-interleaved (leaf-pair, leaf-pair, accepted-node, leaf-pair, ...) to segregated (all leaf-pairs first, then all accepted-nodes). Floating-point addition is not associative; per-body acceleration drift at ~`O(n_interactions × ULP)` ≈ `~3000 × 2^-52 ≈ 7e-13` is the physical floor for this reordering. The single-phase walk is preserved as `#[cfg(test)] fn bh_eval_body_single_phase` so the tolerance test can compare the two paths on identical inputs. The two-phase walk and scalar kernel land together because they are conceptually inseparable — the walk emits lists that only make sense if a kernel processes them.
 3. **AVX2 intrinsic kernel** — `std::arch::x86_64` AVX2 path with `_mm256_i32gather_pd` for scattered-index loads. Tier 0 + Tier 1 + Tier 2a gates run here.
 4. **AVX-512 intrinsic kernel + runtime dispatch** — AVX-512 path added with `_mm512_i32gather_pd`, `is_x86_feature_detected!` chooses scalar / AVX2 / AVX-512 at engine construction time.
 5. **`perf_simd` harness** — runs Tier 0 + Tier 2a + Tier 2b + Tier 3 + Tier 4 measurements on the canonical seed × N grid.
-6. **§Results, §Interpretation, §Decision** populated; bake removes the harness per the perf-2 / perf-4 / perf-5 closure pattern.
+6. **§Results, §Interpretation, §Decision** populated; the measurement harness is removed per the perf-series closure pattern.
 
 #### Run parameters
 
@@ -260,21 +260,21 @@ The user's framing from conversation: *"se a gente não ganha nada de performanc
 | SIMD batch size | 4 (AVX2) / 8 (AVX-512) per gather instruction | Lane width per intrinsic; not a layout chunk size |
 | MAC | Classical `s/d < θ` | Per MAC §Decision |
 | Multipole order | Quadrupole always-on | Per perf 2×2 §Decision |
-| Layout | SoA puro (inherited from PR-perf-5 `BodyArrays`); SIMD reads via gather | AoSoA + Morton deferred to PR-perf-7 conditional |
-| Hardware | Cell A: Ryzen 5 7600X (Zen 4 desktop, Windows 11) — same as prior perf series. Cell B: AWS EC2 c7i.large (Intel Xeon Platinum 8488C / Sapphire Rapids, 2 vCPU on-demand, Ubuntu 24.04) — added to test the AVX-512-µop-decomposition hypothesis on a native-512-bit implementation | Cross-experiment comparability + cross-vendor robustness on the AVX-512 axis |
+| Layout | SoA puro (inherited from the SoA `BodyArrays` refactor); SIMD reads via gather | AoSoA + Morton deferred to a conditional follow-up |
+| Hardware | Ryzen 5 7600X (Zen 4 desktop, Windows 11) — same as prior perf series; and AWS EC2 c7i.large (Intel Xeon Platinum 8488C / Sapphire Rapids, 2 vCPU on-demand, Ubuntu 24.04) — added to test the AVX-512-µop-decomposition hypothesis on a native-512-bit implementation | Cross-experiment comparability + cross-vendor robustness on the AVX-512 axis |
 | AVX-512 detection | `is_x86_feature_detected!("avx512f")` at engine construction | Runtime dispatch; falls back to AVX2 then scalar |
 
 #### Out of scope (declared a priori)
 
-- **Vectorising the build pass.** `Octree::build` is a sequential top-down insertion with frequent branches; vectorising it is a separate axis with its own predicted gain. Build is ~5 % of total step time at N = 10⁴ (per PR-perf-5 §Results); not the leverage axis.
+- **Vectorising the build pass.** `Octree::build` is a sequential top-down insertion with frequent branches; vectorising it is a separate axis with its own predicted gain. Build is ~5 % of total step time at N = 10⁴ (per the SoA layout experiment's §Results); not the leverage axis.
 - **Vectorising the walk dispatch.** The per-body stack-based traversal is irregular per body; vectorising across bodies would require ISPC-style mask-and-execute, which has its own cost class. Out of scope.
-- **GPU offload / CUDA / OpenCL / wgpu.** Different cost class entirely; out of scope for any near-term PR.
+- **GPU offload / CUDA / OpenCL / wgpu.** Different cost class entirely; out of scope in the near term.
 - **Adaptive-θ controller interaction.** The adaptive controller calls `theta_error_proxy` once per step (independent of force eval); not affected by SIMD on the walk.
-- **Rayon scheduler tuning** (chunk size, stealing thresholds). Separate axis; out of scope. PR-perf-N+1 candidate.
-- **Reducing internal-node interaction count via tighter MAC.** PR-perf-4 §Decision defered; remains deferred until the post-SIMD re-measure (perf roadmap step 4) reclassifies the engine.
+- **Rayon scheduler tuning** (chunk size, stealing thresholds). Separate axis; out of scope; a candidate for a later experiment.
+- **Reducing internal-node interaction count via tighter MAC.** The MAC experiment's §Decision deferred this; it remains deferred until the post-SIMD re-measure (perf roadmap step 4) reclassifies the engine.
 - **Cross-machine comparison.** Single-hardware per the perf series convention.
-- **AoSoA layout + Morton ordering (deferred to PR-perf-7, conditional).** AoSoA chunked layout enables aligned SIMD loads only when leaf-mate body indices are sequential within a chunk, which requires Morton ordering of bodies. Without Morton, AoSoA degrades to gather-equivalent performance for the BH walk's scattered-index access pattern (no advantage over SoA puro). Combining AoSoA + Morton in this PR would entangle layout + ordering + SIMD axes, making attribution impossible. Strategy: ship SIMD on SoA puro here, measure Tier 2b decomposition, and **if leaf-pair phase emerges as the residual bottleneck**, queue PR-perf-7 with AoSoA + Morton on a clean baseline (engine ceiling roadmap step 5 already gates Morton on PR-6.5 re-measurement; this experiment is PR-6.5).
-- **`std::simd` portable_simd** (nightly Rust). Discussed in conversation; rejected for this experiment in favour of `std::arch` + scalar fallback baseline. Hybrid portable+intrinsic architecture deferred until apsis has 3+ distinct SIMD kernels and `std::simd` stabilises on stable Rust.
+- **AoSoA layout + Morton ordering (deferred, conditional).** AoSoA chunked layout enables aligned SIMD loads only when leaf-mate body indices are sequential within a chunk, which requires Morton ordering of bodies. Without Morton, AoSoA degrades to gather-equivalent performance for the BH walk's scattered-index access pattern (no advantage over SoA puro). Combining AoSoA + Morton here would entangle layout + ordering + SIMD axes, making attribution impossible. Strategy: ship SIMD on SoA puro here, measure Tier 2b decomposition, and **if leaf-pair phase emerges as the residual bottleneck**, queue AoSoA + Morton on a clean baseline (engine ceiling roadmap step 5 already gates Morton on this re-measurement step).
+- **`std::simd` portable_simd** (nightly Rust). Rejected for this experiment in favour of `std::arch` + scalar fallback baseline. Hybrid portable+intrinsic architecture deferred until apsis has 3+ distinct SIMD kernels and `std::simd` stabilises on stable Rust.
 
 ---
 
@@ -282,12 +282,12 @@ The user's framing from conversation: *"se a gente não ganha nada de performanc
 
 Hardware reference cells (two architectures from different vendors, sweeping the same N × seed × dispatch grid):
 
-| Cell | CPU | Cores / threads visible | Notes |
+| Hardware | CPU | Cores / threads visible | Notes |
 | --- | --- | --- | --- |
-| **A** — desktop | AMD Ryzen 5 7600X (Zen 4) | 6 cores / 12 threads | Windows 11, idle desktop with background processes; per-cell variance high |
-| **B** — cloud | Intel Xeon Platinum 8488C (Sapphire Rapids) | 2 vCPU on AWS EC2 `c7i.large` (on-demand) | Ubuntu 24.04, isolated instance; per-cell variance very low |
+| Desktop (Zen 4) | AMD Ryzen 5 7600X (Zen 4) | 6 cores / 12 threads | Windows 11, idle desktop with background processes; per-cell variance high |
+| Cloud (Sapphire Rapids) | Intel Xeon Platinum 8488C (Sapphire Rapids) | 2 vCPU on AWS EC2 `c7i.large` (on-demand) | Ubuntu 24.04, isolated instance; per-cell variance very low |
 
-Cell A has AVX-512 implemented as 2× 256-bit µops (consumer Zen 4); cell B has native 512-bit datapath FMA/sqrt/div. Both have Rust 1.94.1 release builds.
+The Zen 4 cell has AVX-512 implemented as 2× 256-bit µops (consumer Zen 4); the Sapphire Rapids cell has native 512-bit datapath FMA/sqrt/div. Both have Rust 1.94.1 release builds.
 
 Reproduce with the unit-test gates next to the kernels and the `perf_simd_walk` harness:
 
@@ -315,14 +315,14 @@ cargo test --release -p apsis perf_simd_walk -- --ignored --nocapture
 
 | Cell | Path | Wall time (median) | Speedup vs scalar | Bound | Verdict |
 | --- | --- | ---: | ---: | --- | --- |
-| A (Zen 4) | Scalar | 281–474 µs (high variance) | — | — | — |
-| A (Zen 4) | AVX2 | 182–289 µs | 1.40× – 2.61× | ≥ 2.5× | run-dependent |
-| A (Zen 4) | AVX-512 | 208 µs | 1.35× | ≥ 4.0× | **MISS** |
-| B (Sapphire Rapids) | Scalar | 646 µs | — | — | — |
-| B (Sapphire Rapids) | AVX2 | 611 µs | 1.06× | ≥ 2.5× | **MISS** |
-| B (Sapphire Rapids) | AVX-512 | 598 µs | 1.06× | ≥ 4.0× | **MISS** |
+| Zen 4 | Scalar | 281–474 µs (high variance) | — | — | — |
+| Zen 4 | AVX2 | 182–289 µs | 1.40× – 2.61× | ≥ 2.5× | run-dependent |
+| Zen 4 | AVX-512 | 208 µs | 1.35× | ≥ 4.0× | **MISS** |
+| Sapphire Rapids | Scalar | 646 µs | — | — | — |
+| Sapphire Rapids | AVX2 | 611 µs | 1.06× | ≥ 2.5× | **MISS** |
+| Sapphire Rapids | AVX-512 | 598 µs | 1.06× | ≥ 4.0× | **MISS** |
 
-The N = 10⁶ saxpy dataset is 16 MB across `x` and `y`, well past either CPU's last-level-cache-per-core capacity — the loop is bandwidth-bound on both architectures, not compute-bound. Cell A's variance reflects desktop background load; cell B's tight 1.06×/1.06× pair reflects an isolated 2-vCPU cloud instance with limited memory bandwidth. The Tier 0 bound was calibrated as a compute-bound prediction; the workload as written measures memory-system throughput on either platform. **The right diagnostic for SIMD-throughput-as-such is Tier 2a**, where the bound holds.
+The N = 10⁶ saxpy dataset is 16 MB across `x` and `y`, well past either CPU's last-level-cache-per-core capacity — the loop is bandwidth-bound on both architectures, not compute-bound. The Zen 4 cell's variance reflects desktop background load; the Sapphire Rapids cell's tight 1.06×/1.06× pair reflects an isolated 2-vCPU cloud instance with limited memory bandwidth. The Tier 0 bound was calibrated as a compute-bound prediction; the workload as written measures memory-system throughput on either platform. **The right diagnostic for SIMD-throughput-as-such is Tier 2a**, where the bound holds.
 
 ### Tier 1 — Acceleration tolerance bound
 
@@ -342,19 +342,19 @@ Plummer monopole over N = 10⁶ pre-laid-out interaction tuples (no gather, no w
 
 | Cell | Path | Wall time (median) | Speedup vs scalar | Bound | Verdict |
 | --- | --- | ---: | ---: | --- | --- |
-| A (Zen 4) | Scalar | 3.28–3.35 ms | — | — | — |
-| A (Zen 4) | AVX2 | 1.44–1.56 ms | 2.15× – 2.28× | ∈ [1.8, 2.5] | **PASS** |
-| A (Zen 4) | AVX-512 | 1.38 ms | 2.40× | ∈ [2.5, 3.5] | **MISS** (below lower bound by 0.10×) |
-| B (Sapphire Rapids) | Scalar | 4.48–4.68 ms | — | — | — |
-| B (Sapphire Rapids) | AVX2 | 2.28 ms | 1.96× | ∈ [1.8, 2.5] | **PASS** |
-| B (Sapphire Rapids) | AVX-512 | 2.22–2.29 ms | 2.05× – 2.08× | ∈ [2.5, 3.5] | **MISS** (below lower bound by ~0.45×) |
+| Zen 4 | Scalar | 3.28–3.35 ms | — | — | — |
+| Zen 4 | AVX2 | 1.44–1.56 ms | 2.15× – 2.28× | ∈ [1.8, 2.5] | **PASS** |
+| Zen 4 | AVX-512 | 1.38 ms | 2.40× | ∈ [2.5, 3.5] | **MISS** (below lower bound by 0.10×) |
+| Sapphire Rapids | Scalar | 4.48–4.68 ms | — | — | — |
+| Sapphire Rapids | AVX2 | 2.28 ms | 1.96× | ∈ [1.8, 2.5] | **PASS** |
+| Sapphire Rapids | AVX-512 | 2.22–2.29 ms | 2.05× – 2.08× | ∈ [2.5, 3.5] | **MISS** (below lower bound by ~0.45×) |
 
 AVX2 passes its predicted range on **both** hardware classes — the explicit-SIMD-over-auto-vectorised-baseline gain is robust across vendors.
 
 AVX-512 misses on both. The mechanism is **architecture-specific** but the outcome is identical:
 
-- **Zen 4 (cell A)** µop-decomposes 512-bit ops into 2× 256-bit issues on FMA / sqrt / div ports, so the wider register does not double throughput over AVX2. AVX-512's measured advantage over AVX2: **+5 %** (2.40× vs 2.28×).
-- **Sapphire Rapids (cell B)** has a native 512-bit datapath, but `vsqrtpd zmm` and `vdivpd zmm` have throughput per-element similar to their AVX2 counterparts (Agner Fog tables: ~12 cycles RT for sqrt at both widths) — the kernel's `sqrt → div` critical path does not benefit from the wider register. Combined with reduced last-level cache on a 2-vCPU instance, AVX-512's measured advantage over AVX2: **+5 %** (2.05× vs 1.96×).
+- **Zen 4** µop-decomposes 512-bit ops into 2× 256-bit issues on FMA / sqrt / div ports, so the wider register does not double throughput over AVX2. AVX-512's measured advantage over AVX2: **+5 %** (2.40× vs 2.28×).
+- **Sapphire Rapids** has a native 512-bit datapath, but `vsqrtpd zmm` and `vdivpd zmm` have throughput per-element similar to their AVX2 counterparts (Agner Fog tables: ~12 cycles RT for sqrt at both widths) — the kernel's `sqrt → div` critical path does not benefit from the wider register. Combined with reduced last-level cache on a 2-vCPU instance, AVX-512's measured advantage over AVX2: **+5 %** (2.05× vs 1.96×).
 
 **Cross-vendor finding:** the AVX-512-over-AVX2 advantage on the Plummer kernel is ~5 % on **two architecturally distinct AVX-512 implementations** (µop-decomposed AMD vs native Intel). The lane-count-ratio prediction (~50 %) was wrong on both for the same underlying reason: the kernel is sqrt/div-throughput-bound, and those ports do not scale with vector width on either microarchitecture.
 
@@ -366,7 +366,7 @@ AVX-512 misses on both. The mechanism is **architecture-specific** but the outco
 
 `evaluate_profile` only (`build` and `pack` excluded), θ = 0.5, sphere log-normal distribution, 3 warmup + 5 measured runs per cell, median per `(N, seed)`.
 
-#### Cell A — Ryzen 5 7600X (Zen 4 desktop, 12 threads)
+#### Ryzen 5 7600X (Zen 4 desktop, 12 threads)
 
 Per-cell median speedups vs scalar:
 
@@ -382,7 +382,7 @@ Median across seeds at each N:
 | AVX2 | **1.42×** | 1.29× | **1.54×** | ∈ [1.3, 2.0] | 2 of 3 (N=5k miss by 0.01×) |
 | AVX-512 | **1.73×** | 1.35× | 1.57× | ∈ [1.7, 2.7] | 1 of 3 |
 
-#### Cell B — AWS EC2 c7i.large (Intel Sapphire Rapids, 2 vCPU)
+#### AWS EC2 c7i.large (Intel Sapphire Rapids, 2 vCPU)
 
 Per-cell median speedups vs scalar:
 
@@ -400,29 +400,29 @@ Median across seeds at each N:
 
 #### Cross-cell synthesis
 
-Per-seed variance dropped sharply between cells (cell A AVX2 N=10k seeds spread 1.40–1.87×, ratio 1.34; cell B AVX2 N=10k seeds spread 1.65–1.67×, ratio 1.01). The cloud cell's isolated 2-vCPU instance produces measurement-quality numbers that confirm cell A's headline trend was real, not noise:
+Per-seed variance dropped sharply between cells (Zen 4 AVX2 N=10k seeds spread 1.40–1.87×, ratio 1.34; Sapphire Rapids AVX2 N=10k seeds spread 1.65–1.67×, ratio 1.01). The cloud cell's isolated 2-vCPU instance produces measurement-quality numbers that confirm the Zen 4 headline trend was real, not noise:
 
-| Path | N | Cell A median | Cell B median | Sign |
+| Path | N | Zen 4 median | Sapphire Rapids median | Sign |
 | --- | ---: | ---: | ---: | --- |
-| AVX2 | 1 000 | 1.42× | 2.06× | both > 1.0× ✓ |
-| AVX2 | 5 000 | 1.29× | 1.52× | both > 1.0× ✓ |
-| AVX2 | 10 000 | 1.54× | 1.67× | both > 1.0× ✓ |
-| AVX-512 | 1 000 | 1.73× | 2.05× | both > 1.0× ✓ |
-| AVX-512 | 5 000 | 1.35× | 1.54× | both > 1.0× ✓ |
-| AVX-512 | 10 000 | 1.57× | 1.70× | both > 1.0× ✓ |
+| AVX2 | 1 000 | 1.42× | 2.06× | both > 1.0× |
+| AVX2 | 5 000 | 1.29× | 1.52× | both > 1.0× |
+| AVX2 | 10 000 | 1.54× | 1.67× | both > 1.0× |
+| AVX-512 | 1 000 | 1.73× | 2.05× | both > 1.0× |
+| AVX-512 | 5 000 | 1.35× | 1.54× | both > 1.0× |
+| AVX-512 | 10 000 | 1.57× | 1.70× | both > 1.0× |
 
 AVX2 vs AVX-512 head-to-head, same hardware:
 
-| Cell | N=1 000 | N=5 000 | N=10 000 |
+| Hardware | N=1 000 | N=5 000 | N=10 000 |
 | --- | ---: | ---: | ---: |
-| A | 1.73× / 1.42× = 1.22 | 1.35× / 1.29× = 1.05 | 1.57× / 1.54× = 1.02 |
-| B | 2.05× / 2.06× = 1.00 | 1.54× / 1.52× = 1.01 | 1.70× / 1.67× = 1.02 |
+| Zen 4 | 1.73× / 1.42× = 1.22 | 1.35× / 1.29× = 1.05 | 1.57× / 1.54× = 1.02 |
+| Sapphire Rapids | 2.05× / 2.06× = 1.00 | 1.54× / 1.52× = 1.01 | 1.70× / 1.67× = 1.02 |
 
-**The AVX-512-over-AVX2 walk-level advantage is essentially zero on both hardware classes** (largest delta 1.22× at cell A N=1k, well within per-seed variance; all other cells under 1.05×). The Tier 2a kernel-level +5 % does not propagate to the walk because the walk's non-vectorisable phases (dispatch, list emit, accepted-node scalar processing) absorb most of the kernel premium.
+**The AVX-512-over-AVX2 walk-level advantage is essentially zero on both hardware classes** (largest delta 1.22× at Zen 4 N=1k, well within per-seed variance; all other cells under 1.05×). The Tier 2a kernel-level +5 % does not propagate to the walk because the walk's non-vectorisable phases (dispatch, list emit, accepted-node scalar processing) absorb most of the kernel premium.
 
-The joint revert criterion (`walk_speedup ≤ 1.0×`) does **not** fire on either cell. The worst-case AVX2 cell is N = 5 000 on Zen 4 at 1.29×, and on Sapphire Rapids at 1.52×; both more than 25 % above the revert threshold. The SoA pre-requisite from PR-perf-5 is justified by measurement across two hardware vendors.
+The joint revert criterion (`walk_speedup ≤ 1.0×`) does **not** fire on either cell. The worst-case AVX2 cell is N = 5 000 on Zen 4 at 1.29×, and on Sapphire Rapids at 1.52×; both more than 25 % above the revert threshold. The SoA pre-requisite from the SoA layout experiment is justified by measurement across two hardware vendors.
 
-Cell B's AVX2 N = 1 000 median (2.06×) sits 0.06× above the upper bound of the engine-ceiling envelope `[1.3, 2.0]×`. At N = 1 000 the absolute walk wall-time is ~2.5 ms and the per-seed range (2.02× / 2.06× / 2.10×) brackets the bound; the over-performance is reported per the §Decision rules (*"Above range — Compiler underperformed scalar baseline more than estimated; ship and document the surprise"*) but is not interpreted as a regime where SIMD systematically over-delivers — small-N noise covers the 3 % margin.
+The Sapphire Rapids AVX2 N = 1 000 median (2.06×) sits 0.06× above the upper bound of the engine-ceiling envelope `[1.3, 2.0]×`. At N = 1 000 the absolute walk wall-time is ~2.5 ms and the per-seed range (2.02× / 2.06× / 2.10×) brackets the bound; the over-performance is reported per the §Decision rules (*"Above range — Compiler underperformed scalar baseline more than estimated; ship and document the surprise"*) but is not interpreted as a regime where SIMD systematically over-delivers — small-N noise covers the 3 % margin.
 
 ### Tier 4 — Pack overhead per `compute()`
 
@@ -430,14 +430,14 @@ Cell B's AVX2 N = 1 000 median (2.06×) sits 0.06× above the upper bound of the
 
 | Cell | N | t_pack (median) | t_compute (median) | Ratio | Bound |
 | --- | ---: | ---: | ---: | ---: | --- |
-| A (Zen 4) | 1 000 | 7.5 µs | 785 µs | 0.0096 | ≤ 0.01 ✓ |
-| A (Zen 4) | 5 000 | 35.7 µs | 4 366 µs | 0.0082 | ≤ 0.01 ✓ |
-| A (Zen 4) | 10 000 | 75.7 µs | 11 888 µs | 0.0064 | ≤ 0.01 ✓ |
-| B (Sapphire Rapids) | 1 000 | 7.0 µs | 2 496 µs | 0.0028 | ≤ 0.01 ✓ |
-| B (Sapphire Rapids) | 5 000 | 36.0 µs | 28 946 µs | 0.0012 | ≤ 0.01 ✓ |
-| B (Sapphire Rapids) | 10 000 | 116.1 µs | 75 225 µs | 0.0015 | ≤ 0.01 ✓ |
+| Zen 4 | 1 000 | 7.5 µs | 785 µs | 0.0096 | ≤ 0.01 |
+| Zen 4 | 5 000 | 35.7 µs | 4 366 µs | 0.0082 | ≤ 0.01 |
+| Zen 4 | 10 000 | 75.7 µs | 11 888 µs | 0.0064 | ≤ 0.01 |
+| Sapphire Rapids | 1 000 | 7.0 µs | 2 496 µs | 0.0028 | ≤ 0.01 |
+| Sapphire Rapids | 5 000 | 36.0 µs | 28 946 µs | 0.0012 | ≤ 0.01 |
+| Sapphire Rapids | 10 000 | 116.1 µs | 75 225 µs | 0.0015 | ≤ 0.01 |
 
-All six cells pass the 1 % budget inherited from PR-perf-5. The two-phase walk and SIMD dispatch did not regress pack semantics on either hardware. Cell B's lower ratio is explained by its higher per-step compute (smaller LLC, fewer cores) inflating the denominator — pack itself takes the same wall time per body as cell A, since `pack_from` is single-threaded sequential reads + stores.
+All six cells pass the 1 % budget inherited from the SoA layout experiment. The two-phase walk and SIMD dispatch did not regress pack semantics on either hardware. The Sapphire Rapids cell's lower ratio is explained by its higher per-step compute (smaller LLC, fewer cores) inflating the denominator — pack itself takes the same wall time per body as the Zen 4 cell, since `pack_from` is single-threaded sequential reads + stores.
 
 ---
 
@@ -445,8 +445,8 @@ All six cells pass the 1 % budget inherited from PR-perf-5. The two-phase walk a
 
 The cross-hardware sweep (Zen 4 desktop + Intel Sapphire Rapids cloud) produced two clean findings:
 
-1. **AVX2 delivers a robust walk speedup of 1.3–2.1× across N ∈ {10³, 10⁴} on both hardware classes**, inside the engine-ceiling-anchored envelope `[1.3, 2.0]×`. The cell A median of 1.42–1.54× sat at the lower edge of the envelope amidst desktop-process noise; cell B's isolated 2-vCPU instance produced 1.52–2.06× medians at the upper edge with per-seed variance under 2 %. The signal is real, not measurement artefact.
-2. **AVX-512 over AVX2 delivers essentially zero walk-level advantage on both hardware classes** (largest delta 1.22× at cell A N = 1k, all other cells ≤ 1.05×). The Tier 2a kernel-level +5 % is the upper bound for the entire AVX-512 path; it does not propagate to the walk because the walk's non-vectorisable phases absorb most of the kernel premium.
+1. **AVX2 delivers a robust walk speedup of 1.3–2.1× across N ∈ {10³, 10⁴} on both hardware classes**, inside the engine-ceiling-anchored envelope `[1.3, 2.0]×`. The Zen 4 median of 1.42–1.54× sat at the lower edge of the envelope amidst desktop-process noise; the Sapphire Rapids isolated 2-vCPU instance produced 1.52–2.06× medians at the upper edge with per-seed variance under 2 %. The signal is real, not measurement artefact.
+2. **AVX-512 over AVX2 delivers essentially zero walk-level advantage on both hardware classes** (largest delta 1.22× at Zen 4 N = 1k, all other cells ≤ 1.05×). The Tier 2a kernel-level +5 % is the upper bound for the entire AVX-512 path; it does not propagate to the walk because the walk's non-vectorisable phases absorb most of the kernel premium.
 
 The first finding ships SIMD; the second drops the AVX-512 path. The full answer to *"why didn't AVX-512 deliver?"* decomposes into three layered mechanisms — each one alone would erode the lane-count-ratio prediction, and they compose multiplicatively against the explicit-SIMD headroom.
 
@@ -454,10 +454,10 @@ The first finding ships SIMD; the second drops the AVX-512 path. The full answer
 
 The Plummer leaf-pair kernel's critical path is `sqrt(r² + ε²) → div(1/r) → 3× FMA(dx * fac, …)`. Of the four SIMD ops, FMA scales cleanly with vector width on both architectures (Zen 4 native AVX2 FMA at 1-cycle throughput; Sapphire Rapids ZMM-FMA at 1-cycle throughput). The two non-pipelined ops do not:
 
-- **Zen 4 (cell A):** consumer Zen 4 µop-decomposes 512-bit `vsqrtpd / vdivpd` into 2× 256-bit µops on the same FPU ports. Per-element sqrt throughput is identical between AVX2 and AVX-512 — the wider register issues twice the µops, taking twice the cycles. This is the dominant reason cell A's AVX-512 kernel hits 2.40× scalar (vs AVX2's 2.28×) instead of the predicted 2.5–3.5×.
-- **Sapphire Rapids (cell B):** has a true native 512-bit datapath, but Intel's `vsqrtpd zmm` reciprocal throughput is ~16 cycles vs `vsqrtpd ymm`'s ~12 cycles (Agner Fog SPR tables) — the wider register processes 8 doubles in 16 cycles vs 4 doubles in 12 cycles, a per-element improvement of only ~1.5×, not 2×. `vdivpd` follows the same pattern. The kernel ends up sqrt+div-bound regardless of register width.
+- **Zen 4:** consumer Zen 4 µop-decomposes 512-bit `vsqrtpd / vdivpd` into 2× 256-bit µops on the same FPU ports. Per-element sqrt throughput is identical between AVX2 and AVX-512 — the wider register issues twice the µops, taking twice the cycles. This is the dominant reason the Zen 4 AVX-512 kernel hits 2.40× scalar (vs AVX2's 2.28×) instead of the predicted 2.5–3.5×.
+- **Sapphire Rapids:** has a true native 512-bit datapath, but Intel's `vsqrtpd zmm` reciprocal throughput is ~16 cycles vs `vsqrtpd ymm`'s ~12 cycles (Agner Fog SPR tables) — the wider register processes 8 doubles in 16 cycles vs 4 doubles in 12 cycles, a per-element improvement of only ~1.5×, not 2×. `vdivpd` follows the same pattern. The kernel ends up sqrt+div-bound regardless of register width.
 
-Same outcome (2.05× cell B vs 2.28× cell A AVX-512 over scalar; ~5 % advantage over AVX2 on both), different mechanism (decomposition vs throughput-port limit). The lane-count-ratio prediction (~50 % AVX-512 advantage) was wrong on both for the same underlying reason: this kernel is not FMA-bound.
+Same outcome (2.05× Sapphire Rapids vs 2.28× Zen 4 AVX-512 over scalar; ~5 % advantage over AVX2 on both), different mechanism (decomposition vs throughput-port limit). The lane-count-ratio prediction (~50 % AVX-512 advantage) was wrong on both for the same underlying reason: this kernel is not FMA-bound.
 
 ### Mechanism 2 — Walk dispatch + list emit absorbs the kernel premium
 
@@ -469,7 +469,7 @@ walk_speedup = 1 / (f_dispatch + f_emit + (f_kernel_leaf + f_kernel_node) / S_ke
 
 With estimated phase fractions `f_dispatch ≈ 0.13`, `f_emit ≈ 0.08`, `f_kernel ≈ 0.79` (per the notebook §Tier 3 derivation), an `S_kernel = 2.0×` only delivers `walk_speedup = 1 / (0.21 + 0.395) = 1.65×`. An `S_kernel = 2.4×` gives `walk_speedup = 1.74×`. The Amdahl ceiling at `S_kernel → ∞` is `1 / 0.21 = 4.76×`, but the marginal return from making the kernel faster vanishes quickly because the dispatch + emit fraction does not vectorise.
 
-This is **architecture-independent**: it would attenuate AVX-512's kernel-level premium on Granite Rapids or Zen 5 just as much as on the cells measured here. Closing this gap requires vectorising the walk dispatch itself (ISPC-style mask-and-execute across bodies), which is out of scope for this PR and probably a different cost class entirely.
+This is **architecture-independent**: it would attenuate AVX-512's kernel-level premium on Granite Rapids or Zen 5 just as much as on the cells measured here. Closing this gap requires vectorising the walk dispatch itself (ISPC-style mask-and-execute across bodies), which is out of scope here and probably a different cost class entirely.
 
 ### Mechanism 3 — The compiler is already vectorising the scalar baseline
 
@@ -481,7 +481,7 @@ AVX-512's `[2.5, 3.5]×` prediction was already conservative against the lane ra
 
 Mechanism 1 has different microarchitectural causes on the two cells (decomposition vs throughput-port limit), but the same effective outcome (5 % AVX-512 advantage over AVX2 at the kernel level on both). Mechanism 2 is hardware-independent. Mechanism 3 is compiler-dependent (LLVM, same on both) — also hardware-independent.
 
-A single hardware data point would have left an open question: *"would Zen 5's native 512-bit datapath and improved sqrt throughput change the answer?"* Cell B answers it: even on a native 512-bit AVX-512 implementation (Sapphire Rapids), the kernel-level advantage over AVX2 is the same ~5 %, and walk-level it is zero. The bottleneck is the kernel's mathematical critical path, not the AVX-512 implementation strategy. Newer hardware (Zen 5, Granite Rapids, Diamond Rapids) might shift sqrt+div port throughput marginally but is unlikely to change the qualitative result without an order-of-magnitude improvement in those specific units.
+A single hardware data point would have left an open question: *"would Zen 5's native 512-bit datapath and improved sqrt throughput change the answer?"* The Sapphire Rapids cell answers it: even on a native 512-bit AVX-512 implementation, the kernel-level advantage over AVX2 is the same ~5 %, and walk-level it is zero. The bottleneck is the kernel's mathematical critical path, not the AVX-512 implementation strategy. Newer hardware (Zen 5, Granite Rapids, Diamond Rapids) might shift sqrt+div port throughput marginally but is unlikely to change the qualitative result without an order-of-magnitude improvement in those specific units.
 
 ### Calibration record
 
@@ -493,54 +493,53 @@ The calibration doc's standing rule applies forward: future perf experiments on 
 
 ## Decision
 
-**Ship the AVX2 leaf-pair SIMD kernel; remove the AVX-512 path; keep PR-perf-5 SoA layout.**
+**Ship the AVX2 leaf-pair SIMD kernel; remove the AVX-512 path; keep the SoA layout.**
 
-The joint revert criterion (`walk_speedup ≤ 1.0×` on the SIMD axis would force PR-perf-5 + PR-perf-6 to revert together) does **not** fire. The worst-case AVX2 cells across the grid are 1.29× (Zen 4 N = 5 000) and 1.52× (Sapphire Rapids N = 5 000); both more than 25 % above the revert threshold across both hardware classes:
+The joint revert criterion (`walk_speedup ≤ 1.0×` on the SIMD axis would force the SoA and SIMD work to revert together) does **not** fire. The worst-case AVX2 cells across the grid are 1.29× (Zen 4 N = 5 000) and 1.52× (Sapphire Rapids N = 5 000); both more than 25 % above the revert threshold across both hardware classes:
 
-| Cell | AVX2 walk speedup range across N | All cells > 1.0× |
+| Hardware | AVX2 walk speedup range across N | All cells > 1.0× |
 | --- | --- | --- |
-| A — Ryzen 5 7600X (Zen 4 desktop) | 1.27× – 1.87× | yes |
-| B — AWS c7i.large (Sapphire Rapids cloud) | 1.50× – 2.10× | yes |
+| Ryzen 5 7600X (Zen 4 desktop) | 1.27× – 1.87× | yes |
+| AWS c7i.large (Sapphire Rapids cloud) | 1.50× – 2.10× | yes |
 
-The SoA pre-requisite from PR-perf-5's §Decision (shipped on structural grounds) is **validated by measurement**: SIMD does deliver, the layout was load-bearing for that delivery.
+The SoA pre-requisite from the SoA layout experiment's §Decision (shipped on structural grounds) is **validated by measurement**: SIMD does deliver, the layout was load-bearing for that delivery.
 
 ### What ships
 
-- `BodyArrays` SoA snapshot (PR-perf-5, kept).
+- `BodyArrays` SoA snapshot (from the SoA layout work, kept).
 - Two-phase BH walk: phase 1 walk emits per-body interaction lists; phase 2 dense kernel processes them. Tier 1 verified the segregated summation order matches the single-phase reference within `p99 ≤ 1 × 10⁻¹³` on three perf-canonical seeds at N ∈ {10³, 5 × 10³}.
 - `LeafPairKernel::{Scalar, Avx2}` runtime dispatch resolved at engine construction via `Kernel::is_plummer()` + `is_x86_feature_detected!("avx2", "fma")`. Non-Plummer kernels (`TruncatedPlummerKernel`, future custom kernels) stay on the scalar dyn-dispatched path.
 - AVX2 leaf-pair kernel (`process_leafpair_avx2`) using `_mm256_i32gather_pd` for scattered leaf-mate reads + `_mm256_fmadd_pd` accumulators.
 - Tier 1 correctness gates (`tier1_avx2_leaf_pair_matches_scalar_within_tolerance`, the existing `tier1_two_phase_walk_matches_single_phase_within_tolerance`) live alongside the engine code as production gates.
 
-### What is removed in the bake commit
+### What is removed once the experiment closes
 
 - `LeafPairKernel::Avx512` enum variant + dispatch arm + `select` branch.
 - `simd::process_leafpair_avx512`, `simd::saxpy_avx512`, `simd::plummer_kernel_avx512_micro`.
 - AVX-512 unit tests: `tier0_saxpy_avx512_speedup_geq_4x`, `tier1_avx512_leaf_pair_matches_scalar_within_tolerance`, `tier2a_kernel_avx512_speedup_in_range`.
-- `perf_simd_walk` harness (`crates/apsis/src/physics/perf_simd.rs`) — closed per the perf-2 / perf-4 / perf-5 closure pattern; the §Results numbers above are the canonical record, with raw CSVs in `target/perf-simd/` retained for one cycle.
+- `perf_simd_walk` harness (`crates/apsis/src/physics/perf_simd.rs`) — closed per the perf-series closure pattern; the §Results numbers above are the canonical record, with raw CSVs in `target/perf-simd/` retained for one cycle.
 
 The dispatch sanity tests (`dispatch_picks_avx512_over_avx2_when_both_available`, `dispatch_falls_back_to_scalar_for_non_plummer_kernel`) collapse to a single non-Plummer fallback test since AVX-512 is no longer in the dispatch table.
 
 ### What stays for forward reference
 
 - This notebook (Results + Interpretation) preserves the cross-vendor measurement so future perf experiments can consult it before re-introducing AVX-512.
-- The MSRV bump (1.85 → 1.89) introduced for AVX-512 intrinsics stays — let-chains and `is_multiple_of` from the chore commit depend on Rust 1.88+, and 1.89 is otherwise harmless on a research codebase.
+- The MSRV bump (1.85 → 1.89) introduced for AVX-512 intrinsics stays — let-chains and `is_multiple_of` depend on Rust 1.88+, and 1.89 is otherwise harmless on a research codebase.
 - The AVX2 path covers every shipping x86 CPU since Haswell (2013) and every shipping AMD CPU since Excavator/Zen 1 — the production fast-path is universally available on the hardware apsis runs on.
 
 ### Why drop AVX-512 instead of keeping it for forward compat
 
-Keeping the AVX-512 path would cost: ~190 LOC of intrinsics, 4 unit tests (3 of which would fail on currently-shipping hardware), and the standing maintenance burden of a code path that is never hit on either tested hardware class. The "future Zen 5 / Granite Rapids might deliver" argument was the basis for measuring on cloud Sapphire Rapids in the first place; the measurement explicitly contradicted the hypothesis on a true-native-512-bit implementation. Per the `feedback_no_strategic_justification_in_code` rule, code paths must justify themselves by what they do, not by hypothetical future hardware that might benefit. If a future PR measures a different result on a future architecture, the AVX-512 kernel is recoverable from this notebook's git history (the bake commit deletes a clean, tested, working implementation — re-adding it on demand is straightforward).
+Keeping the AVX-512 path would cost: ~190 LOC of intrinsics, 4 unit tests (3 of which would fail on currently-shipping hardware), and the standing maintenance burden of a code path that is never hit on either tested hardware class. The "future Zen 5 / Granite Rapids might deliver" argument was the basis for measuring on cloud Sapphire Rapids in the first place; the measurement explicitly contradicted the hypothesis on a true-native-512-bit implementation. Code paths must justify themselves by what they do, not by hypothetical future hardware that might benefit. If a future measurement reports a different result on a future architecture, the AVX-512 kernel is recoverable from version history (removing it deletes a clean, tested, working implementation — re-adding it on demand is straightforward).
 
 ### Standing for the perf series
 
-| PR | Axis | Outcome |
+| Experiment | Axis | Outcome |
 | --- | --- | --- |
-| PR-perf-1 (perf 2×2) | Multipole order × insertion order | Quadrupole ships always-on; Morton deferred |
-| PR-perf-2 (engine ceiling) | Profile + ceiling derivation | Interaction-bound classification, 4-axis roadmap |
-| PR-perf-3 | (no separate PR; ceiling absorbed prior framing) | — |
-| PR-perf-4 (MAC) | Tighter `s/d < θ` via `δ_max` aggregation | Negative result; deferred. Mechanism documented. |
-| PR-perf-5 (SoA) | Layout reorganisation as SIMD pre-requisite | Shipped on structural grounds; Tier 2 walk gain 1.015× (no direct SIMD-independent benefit). Validated retroactively by PR-perf-6 ✓. |
-| **PR-perf-6 (SIMD)** | **AVX2 leaf-pair kernel** | **Ships. Walk speedup 1.3-2.1× cross-vendor, AVX-512 dropped per measurement.** |
+| perf 2×2 | Multipole order × insertion order | Quadrupole ships always-on; Morton deferred |
+| engine ceiling | Profile + ceiling derivation | Interaction-bound classification, 4-axis roadmap |
+| MAC | Tighter `s/d < θ` via `δ_max` aggregation | Negative result; deferred. Mechanism documented. |
+| SoA | Layout reorganisation as SIMD pre-requisite | Shipped on structural grounds; Tier 2 walk gain 1.015× (no direct SIMD-independent benefit). Validated retroactively by the SIMD experiment. |
+| **SIMD** | **AVX2 leaf-pair kernel** | **Ships. Walk speedup 1.3-2.1× cross-vendor, AVX-512 dropped per measurement.** |
 
 The MAC + SoA + SIMD trio was framed as an engineering-baseline optimisation arc; the final standing is one negative (MAC), one structural (SoA — validated downstream), one measured positive (SIMD AVX2). Engine ceiling §Decision predicted realistic combined ceiling 2.5-3.5× speedup; measured combined `MAC × SoA × SIMD ≈ 1.0 × 1.0 × 1.5 ≈ 1.5×`. The total roadmap delivery is at the lower edge of the predicted envelope; the perf-prediction-calibration doc's standing rules absorb the discrepancy.
 
@@ -552,14 +551,14 @@ The MAC + SoA + SIMD trio was framed as an engineering-baseline optimisation arc
 
 2. **`sqrt` and `divide` not fully pipelined.** Plummer kernel arithmetic is dominated by `sqrt` (one per interaction, for the `r` magnitude) and `divide` (one per interaction, for the `1/r³`). On Zen 4 these are not single-cycle; AVX-512 throughput on `sqrt` and `div` may be lower than `mul`/`add` on the same width. Mitigation: Tier 2a kernel-isolated benchmark directly measures the achievable per-lane-width speedup; if it's below the predicted range, that's diagnostic for sqrt/div pipeline limit.
 
-3. **Interaction-list materialisation cost.** The two-phase pattern writes `Vec<u32>` for leaf indices and `Vec<NodeRef>` for accepted nodes. Per body at N = 10⁴, the lists have ~1000-3000 entries combined (per engine ceiling §Results). Writing these lists is store-bound at L2/L3 bandwidth. If `t_walk_emit` per Tier 2b is large, materialisation is a bottleneck. Mitigation: pre-allocate per-body list buffers with high-water-mark capacity; reuse across walks. Document in commit message.
+3. **Interaction-list materialisation cost.** The two-phase pattern writes `Vec<u32>` for leaf indices and `Vec<NodeRef>` for accepted nodes. Per body at N = 10⁴, the lists have ~1000-3000 entries combined (per engine ceiling §Results). Writing these lists is store-bound at L2/L3 bandwidth. If `t_walk_emit` per Tier 2b is large, materialisation is a bottleneck. Mitigation: pre-allocate per-body list buffers with high-water-mark capacity; reuse across walks.
 
 4. **Rayon overhead at small N.** Per-body parallelism via `rayon::par_iter` has fixed overhead (~µs per body for work-stealing). At N = 1k with SIMD-fast kernels, the per-body work shrinks to a few µs, and rayon overhead becomes a measurable fraction. Mitigation: report Tier 3 across the full N grid (1k / 5k / 10k) and look for the trend — if AVX-512 walk speedup at N = 1k is materially lower than at N = 10k, rayon overhead is the cause.
 
 5. **Tier 1 tolerance bound is conservative.** 1e-13 relative is ~50 ULP, which covers typical SIMD reordering. But certain pathological body configurations (cancellation, near-zero accelerations) could spike the *relative* error even with correct SIMD. The bound uses `‖a_scalar[i]‖_∞` as denominator, which has a small-magnitude floor; any body with `‖a_scalar[i]‖ < 1e-30` is excluded from the relative metric and checked via the absolute net-force metric instead.
 
-6. **Auto-vectorisation interfering with the scalar baseline.** rustc + LLVM may auto-vectorise the "scalar" baseline kernel even without explicit intrinsics. If the baseline is silently vectorised, the SIMD-vs-scalar ratio compresses and Tier 2a / Tier 3 underestimate the explicit SIMD gain. Mitigation: inspect the scalar baseline's compiled output (`cargo rustc -- --emit=asm`) to confirm scalar instructions; if auto-vectorisation appears, add `#[inline(never)]` and inspect again. Document confirmation in commit message.
+6. **Auto-vectorisation interfering with the scalar baseline.** rustc + LLVM may auto-vectorise the "scalar" baseline kernel even without explicit intrinsics. If the baseline is silently vectorised, the SIMD-vs-scalar ratio compresses and Tier 2a / Tier 3 underestimate the explicit SIMD gain. Mitigation: inspect the scalar baseline's compiled output (`cargo rustc -- --emit=asm`) to confirm scalar instructions; if auto-vectorisation appears, add `#[inline(never)]` and inspect again.
 
-7. **The revert-criterion is high-stakes.** If Tier 3 fails badly, both PR-perf-5 and PR-perf-6 revert together. This is a substantial code retraction — ~700-900 LOC across multiple files (smaller than originally projected because AoSoA refactor moved to PR-perf-7). The §Decision must document the revert clearly with the negative-result framing the perf series has used (PR-perf-4 MAC §Decision is the template). The revert is honest and scientifically valuable; it's not a failure of the engineering process, it's a finding of the regime.
+7. **The revert-criterion is high-stakes.** If Tier 3 fails badly, both the SoA and SIMD work revert together. This is a substantial code retraction — ~700-900 LOC across multiple files (smaller than originally projected because the AoSoA refactor was deferred). The §Decision must document the revert clearly with the negative-result framing the perf series has used (the MAC experiment's §Decision is the template). The revert is honest and scientifically valuable; it's not a failure of the engineering process, it's a finding of the regime.
 
-8. **Gather throughput on Zen 4.** SIMD path uses `_mm256_i32gather_pd` / `_mm512_i32gather_pd` for scattered leaf-mate body field reads. Gather instructions on Zen 4 have ~4-5 cycle reciprocal throughput per 4-lane chunk (better than Zen 3 but still slower than aligned loads). Tier 2a captures this directly via the kernel-isolated speedup measurement; if gather throughput dominates and pushes Tier 2a below [1.8, 2.5]×, AoSoA + Morton (PR-perf-7) becomes the natural follow-up axis to attack the gather penalty specifically.
+8. **Gather throughput on Zen 4.** SIMD path uses `_mm256_i32gather_pd` / `_mm512_i32gather_pd` for scattered leaf-mate body field reads. Gather instructions on Zen 4 have ~4-5 cycle reciprocal throughput per 4-lane chunk (better than Zen 3 but still slower than aligned loads). Tier 2a captures this directly via the kernel-isolated speedup measurement; if gather throughput dominates and pushes Tier 2a below [1.8, 2.5]×, AoSoA + Morton becomes the natural follow-up axis to attack the gather penalty specifically.

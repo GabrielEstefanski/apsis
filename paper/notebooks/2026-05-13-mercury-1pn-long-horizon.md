@@ -1,11 +1,9 @@
 # Long-horizon Mercury 1PN — millennium-scale precession reproducibility
 
 **Date:** 2026-05-13
-**Subject:** Sun + Mercury under apsis IAS15 with the apsis-1pn perturbation registered, integrated for 1000 years (~4150 orbits) and compared against the closed-form Schwarzschild test-particle perihelion advance `Δω = 6πGM/(c²a(1−e²))` per orbit. Cross-validated against `Mercurius + apsis-1pn` once the Mercurius perturbation contract fix (PR #86) merges — this is the headline FPM federation demonstration: integrator-of-integrators composing with a first-class perturbation produces the same physics as a homogeneous integrator + same perturbation, both matching the analytical GR prediction at the f64 precision floor.
+**Subject:** Sun + Mercury under apsis IAS15 with the apsis-1pn perturbation registered, integrated for 1000 years (~4150 orbits) and compared against the closed-form Schwarzschild test-particle perihelion advance `Δω = 6πGM/(c²a(1−e²))` per orbit. Cross-validated against `Mercurius + apsis-1pn` — this is the headline FPM federation demonstration: integrator-of-integrators composing with a first-class perturbation produces the same physics as a homogeneous integrator + same perturbation, both matching the analytical GR prediction at the f64 precision floor.
 
-**Status:** Protocol declared *a priori*, before the long-horizon run. Builds on the existing 500-orbit gate (`crates/apsis-1pn/tests/mercury_precession_gate.rs`, ~1 ppm developer-hardware) and Issue #29 (long-horizon Mercury 1PN).
-
-**Branch:** `feat/mercury-1pn-long-horizon`, branched from `develop`. The Mercurius half of Tier 2 stacks on PR #86 (Mercurius perturbation hole fix) and is added once that merges.
+**Status:** Protocol declared *a priori*, before the long-horizon run. Builds on the existing 500-orbit gate (`crates/apsis-1pn/tests/mercury_precession_gate.rs`, ~1 ppm developer-hardware) and the long-horizon Mercury 1PN open question.
 
 ---
 
@@ -22,15 +20,15 @@ For the v0.1 paper this is the headline FPM demonstration: the federation thesis
 Three claims chain into this experiment:
 
 1. **apsis-1pn reproduces GR.** Established at 500 orbits / ~1 ppm by the existing gate.
-2. **The precision is stable.** Issue #29's open question — does the agreement hold at 4× the horizon, or does cumulative round-off swamp the signal? Answer here.
-3. **The federation contract works at the precision floor.** Not just "WH + 1PN works" or "IAS15 + 1PN works" — *any* integrator + *any* perturbation. Mercurius is the most architecturally complex integrator in the apsis zoo (rewind hybrid with embedded IAS15 sub-integrator); if 1PN composes cleanly through Mercurius's K-weighted half-kicks (post PR #86), the contract is demonstrated at the level the paper needs.
+2. **The precision is stable.** The open question — does the agreement hold at 4× the horizon, or does cumulative round-off swamp the signal? Answer here.
+3. **The federation contract works at the precision floor.** Not just "WH + 1PN works" or "IAS15 + 1PN works" — *any* integrator + *any* perturbation. Mercurius is the most architecturally complex integrator available (rewind hybrid with embedded IAS15 sub-integrator); if 1PN composes cleanly through Mercurius's K-weighted half-kicks, the contract is demonstrated at the level the paper needs.
 
 The paper positioning makes the federation an explicit point of differentiation against monolithic codebases. A clean Mercurius + 1PN parity result is the demonstration that the "federated FPM" framing is operationally true, not just rhetorical.
 
 ### What this experiment is NOT testing
 
-- Not a new physics derivation. apsis-1pn shipped under PR #?? and is validated by the existing gate; this extends the horizon, not the formula.
-- Not a Mercurius implementation test. Mercurius shipped under PR #83 with structural / cost validation and PR #85 with REBOUND parity at the conservation level.
+- Not a new physics derivation. apsis-1pn is validated by the existing gate; this extends the horizon, not the formula.
+- Not a Mercurius implementation test. Mercurius is validated separately by structural / cost validation and by REBOUND parity at the conservation level.
 - Not a WHFast integrator scope. Adding WHFast to the integrator zoo is queued as a separate axis (Rein & Tamayo 2015 — needed for 10⁹-orbit horizons; the 4150-orbit horizon here is comfortably inside both IAS15 and apsis WH-class envelopes).
 
 ---
@@ -42,7 +40,7 @@ The paper positioning makes the federation an explicit point of differentiation 
 | Units | Canonical Hénon (`UnitSystem::canonical`, G=1) | Matches the existing 500-orbit gate convention; `PostNewtonian1PN::solar_units()` carries `c = 10065.13` in time-units of year/(2π), which is exactly the canonical Hénon time unit. Re-using these conventions removes "did the units rescale correctly" as a source of error. |
 | Bodies | Sun (m=1, unsoftened) + Mercury (m=1.66 × 10⁻⁷, unsoftened) | Sun + 1 planet is the cleanest Schwarzschild test-particle case; matches the analytical formula's assumptions. Mercury mass set to physical value so the orbital frequency is exactly Mercury's. Both unsoftened so the Newtonian baseline is bit-Keplerian (Plummer softening would swamp the 1PN signal by ~2000×, per `apsis-1pn` `kernel_requirements`). |
 | Mercury orbital elements | a = 0.387098, e = 0.20563, i = 0 (2D), starting at periapsis | a, e are physical Mercury values (Murray & Dermott Table A.2). i = 0 keeps the precession measurement in 2D where the periapsis-orientation extraction is least ambiguous. Starting at periapsis sets `ω_initial` cleanly to 0 by symmetry. |
-| Horizon | 1000 years = 4153 Mercury orbits = 6283.19 canonical time units | 8.3× the existing 500-orbit gate. Long enough to demonstrate stability; short enough that one IAS15 run takes ~1 minute on Cell A. Issue #29 framed as "century-scale", the choice here is "millennium-scale" to make the cumulative drift signal big enough to dominate any per-orbit noise. |
+| Horizon | 1000 years = 4153 Mercury orbits = 6283.19 canonical time units | 8.3× the existing 500-orbit gate. Long enough to demonstrate stability; short enough that one IAS15 run takes ~1 minute on developer hardware. The century-scale open question is extended here to "millennium-scale" to make the cumulative drift signal big enough to dominate any per-orbit noise. |
 | Outer dt (IAS15 first-call seed) | 1 × 10⁻⁴ canonical | Matches the existing 500-orbit gate. ~15 134 IAS15 sub-steps per Mercury orbit, ~6.3 × 10⁷ over the full integration. |
 | Outer dt (Mercurius) | 1 × 10⁻² canonical (~151 sub-steps per Mercury orbit) | Mercurius is fixed-step. Smaller dt is wasted work; larger dt loses K-weighted-kick resolution. ~151 sub-steps per Mercury orbit gives ~628 000 outer steps over 1000 yr — fast even at the per-step cost of the analytical Kepler solver. |
 | Sample cadence | 1 sample per Mercury orbit (4154 samples per side) | Captures the cumulative ω trajectory at orbit-resolution, plenty for the linear-in-time precession signal. |
@@ -93,11 +91,11 @@ Subtract `ω_initial = 0` (Mercury starts at periapsis along +x by construction)
 | `\|Δω_measured(end) − Δω_GR(end)\| / \|Δω_GR(end)\|` | ≤ 10⁻⁵ (10 ppm) | The existing 500-orbit gate hits ~1 ppm developer-side. Cumulative round-off scales as `√N_substeps · ε ~ 10⁻¹²` absolute, i.e. ~10⁻⁹ relative on the 2 × 10⁻³ rad signal. The 10 ppm bound has ~4 orders of margin against the round-off floor and ~1 order against the 1-ppm developer-hardware result. |
 | Per-orbit precession trajectory linearity | R² ≥ 0.99999 against `Δω_GR_per_orbit · k` | Independent secondary check: GR predicts a strictly linear Δω(t); any non-linear residual signals a non-1PN perturbation (numerical drift, controller chatter, etc.). |
 
-#### Tier 2 — Mercurius + apsis-1pn precision *(hard gate, post PR #86)*
+#### Tier 2 — Mercurius + apsis-1pn precision *(hard gate)*
 
 Same bounds as Tier 1, applied to a separate Mercurius+1PN run on the same scenario. For Sun + Mercury (N = 2) the encounter step never fires; Mercurius reduces to its WH-like outer step (K-weighted half-kicks with 1PN folded in via the perturbation contract + analytical Kepler drift around the Sun). The fact that *no encounter ever fires* is itself part of the test — Mercurius's structural overhead must not introduce drift that IAS15 doesn't have.
 
-#### Tier 3 — Cross-integrator parity *(hard gate, post PR #86)*
+#### Tier 3 — Cross-integrator parity *(hard gate)*
 
 | Metric | Bound | Rationale |
 | --- | --- | --- |
@@ -107,7 +105,7 @@ Same bounds as Tier 1, applied to a separate Mercurius+1PN run on the same scena
 
 1. **apsis-side IAS15 run** (`crates/apsis/examples/mercury_1pn_long_horizon_ias15.rs`): builds the scenario, registers `PostNewtonian1PN::solar_units()`, integrates 1000 yr at the locked dt, writes per-orbit (t, x, y, vx, vy, a_osc, e_osc, ω_osc) to `validation/mercury-1pn-long-horizon/out/ias15.csv`.
 
-2. **apsis-side Mercurius run** (`crates/apsis/examples/mercury_1pn_long_horizon_mercurius.rs`, added post PR #86): same scenario, same perturbation, Mercurius integrator, writes to `out/mercurius.csv`.
+2. **apsis-side Mercurius run** (`crates/apsis/examples/mercury_1pn_long_horizon_mercurius.rs`): same scenario, same perturbation, Mercurius integrator, writes to `out/mercurius.csv`.
 
 3. **Comparator** (`validation/mercury-1pn-long-horizon/compare.py`): loads both CSVs, unwraps ω, computes the three Tier metrics against the analytical GR prediction, exits 0 iff all gates pass.
 
@@ -117,9 +115,8 @@ Same bounds as Tier 1, applied to a separate Mercurius+1PN run on the same scena
 
 ## Results
 
-Run on Cell A (Ryzen 5 7600X / Zen 4 desktop) with the apsis workspace
-at `b2d3d70` (post PR #86, including the Mercurius perturbation hole
-fix). 4154 samples per side (initial + 4153 Mercury orbits = 1000.5 yr).
+Run on a Ryzen 5 7600X / Zen 4 desktop with the apsis workspace
+at `b2d3d70`. 4154 samples per side (initial + 4153 Mercury orbits = 1000.5 yr).
 
 ### Tier 1 — IAS15 + apsis-1pn *(all gates PASS)*
 
@@ -161,7 +158,7 @@ findings, in order of significance:
 1. **Mercurius + apsis-1pn matches the GR analytical prediction at
    6.7 ppm over 1000 years.** Mercury's perihelion advance is
    reproduced to within ~10⁻⁵ relative on a 2nd-order symplectic-class
-   integrator with a registered first-class perturbation. The PR #86
+   integrator with a registered first-class perturbation. The
    wiring (perturbations folded into the K-weighted half-kicks) is
    confirmed correct at the level of long-horizon physics, not just
    the 100-step probe regression test.
@@ -186,7 +183,7 @@ findings, in order of significance:
 
 The 100-year sub-cumulative (`Δω ≈ 43 arcsec`) reproduces Einstein's
 historic prediction to the same ~3-7 ppm. This is the ~century-scale
-"stability of the precision" claim Issue #29 framed: the precision the
+"stability of the precision" claim: the precision the
 500-orbit gate established at ~1 ppm developer-side scales as expected
 to ~3-7 ppm at 4150 orbits — `√(4150/500) ≈ 2.9×` the 500-orbit gate's
 1 ppm developer-side floor. The cumulative drift is statistical; no
@@ -194,7 +191,7 @@ systematic accumulation above the f64 noise floor of the 1PN evaluator.
 
 For the FPM federation thesis: this is the scientifically simplest
 non-trivial composition (the most established perturbation × the most
-architecturally complex integrator in the apsis zoo). It passes
+architecturally complex integrator available). It passes
 comfortably. The federation contract is operationally true at the
 level the v0.1 paper wants to claim — not "two integrators happened to
 give similar answers", but "the federation **contract** delivers the
@@ -266,8 +263,8 @@ The headline numbers for `paper.md` §Validation:
 > that the federation contract delivers the same physics regardless
 > of which integrator occupies the slot.
 
-Closes Issue #29 (long-horizon Mercury 1PN, century-scale
-reproducibility) with the federated demonstration as a bonus.
+Resolves the long-horizon Mercury 1PN century-scale
+reproducibility question, with the federated demonstration as a bonus.
 
 Open follow-ups recorded for separate tracking, none blocking the
 v0.1 paper:
@@ -285,7 +282,7 @@ v0.1 paper:
   REBOUND + REBOUNDx (Tamayo et al. 2020) carries the GR effect as
   a registered perturbation; running the same scenario through that
   stack would close the validation triangle (apsis-internal gate +
-  GR analytical prediction + REBOUND-side parity). Larger PR;
+  GR analytical prediction + REBOUND-side parity). Larger effort;
   follows the existing `validation/rebound-parity/` infrastructure.
 
 The cargo example pair (`mercury_1pn_long_horizon_ias15` and
@@ -306,4 +303,3 @@ existing `validation/rebound-parity/` scenario layout.
 - Existing 500-orbit gate: `crates/apsis-1pn/tests/mercury_precession_gate.rs`.
 - Mercurius implementation lab notebook: `docs/experiments/2026-05-13-mercurius-hybrid.md`.
 - Mercurius REBOUND parity: `docs/experiments/2026-05-13-rebound-parity-mercurius.md`.
-- Issue #29 (long-horizon Mercury 1PN, century-scale).

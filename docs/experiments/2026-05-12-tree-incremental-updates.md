@@ -5,7 +5,7 @@
 
 **Status:** Protocol declared a priori, before any implementation lands. Calibrated against the engine-ceiling re-measurement (`docs/experiments/2026-05-12-engine-ceiling-post-simd.md`) which classified `build` as 4-13 % of step wall-time and identified it as the highest-ROI-per-LOC residual axis. The change has **zero precision impact**: the tree is a spatial accelerator, multipoles are recomputed identically — the per-cell mass / COM / quadrupole values must be bit-exact with the from-scratch rebuild they replace.
 
-**Branch:** `perf/tree-incremental`, stacked on top of `perf/simd-kernel` (PR #79). Independent of PR #78 / #79 in the algorithmic sense — touches `tree.rs` and `Octree::build`, not the walk SIMD or SoA snapshot. Stacks for ergonomic reasons (avoids rebase against the SoA-renamed Body fields).
+This change is independent of the walk SIMD and SoA snapshot work in the algorithmic sense — it touches `tree.rs` and `Octree::build`, not the walk SIMD or SoA snapshot.
 
 ---
 
@@ -22,7 +22,7 @@ REBOUND's `tree.c` exploits this: each particle holds a back-pointer to its curr
 
 For a stable system where, say, < 5 % of particles change cell per step, the per-step cost drops from O(N log N) tree-build to O(N + N_migrants × log N) maintenance. For chaotic systems with frequent cell crossings, the maintenance cost approaches rebuild cost (and may exceed it due to deletion/insertion overhead). The hypothesis below makes that conditional explicit and gates on it.
 
-This experiment is the first axis after the SIMD perf series that follows the lesson the series itself produced: **apsis is interaction-bound on the gravity hot path, and further perf gains come from algorithmic / architectural changes that reduce kernel call frequency or build cost, not from making each kernel call faster**. Engine-ceiling §Decision listed four post-SIMD axes; this experiment attacks the one with highest ROI per LOC and zero precision risk.
+This experiment is the first axis after the SIMD work that follows the lesson that work itself produced: **apsis is interaction-bound on the gravity hot path, and further perf gains come from algorithmic / architectural changes that reduce kernel call frequency or build cost, not from making each kernel call faster**. Engine-ceiling §Decision listed four post-SIMD axes; this experiment attacks the one with highest ROI per LOC and zero precision risk.
 
 ---
 
@@ -31,7 +31,7 @@ This experiment is the first axis after the SIMD perf series that follows the le
 The engine-ceiling re-measurement (`2026-05-12-engine-ceiling-post-simd.md` §Tier 1) shows the post-SIMD walk:
 
 ```text
-Wall-time fractions at N = 10⁴ (post-SIMD, Cell A — Zen 4 desktop):
+Wall-time fractions at N = 10⁴ (post-SIMD, Zen 4 desktop):
   build      ≈ 4.2 %
   walk       ≈ 95.4 %
   integrator ≈ 0.4 %
@@ -55,9 +55,9 @@ The benefit is structural rather than numerical: **stable systems pay almost not
 
 ### What this experiment is NOT testing
 
-It is **not** testing whether tree maintenance scales to GADGET-class N (10⁹ + cosmological). REBOUND's implementation is for planetary regime; we follow the same scope.
+It is **not** testing whether tree maintenance scales to GADGET-class N (10⁹ + cosmological). REBOUND's implementation is for the planetary regime; we follow the same scope.
 
-It is **not** testing whether the multipole order needs to change. Quadrupole stays (PR-perf-1 §Decision; REBOUND `tree.c` confirms quadrupole is the production endpoint for this regime).
+It is **not** testing whether the multipole order needs to change. Quadrupole stays (REBOUND `tree.c` confirms quadrupole is the production endpoint for this regime).
 
 It is **not** introducing approximation. Tree maintenance preserves the tree as an exact spatial structure; multipoles are recomputed identically from the same particle set. Tier 1 below gates on bit-exact multipole agreement with the from-scratch rebuild.
 
@@ -142,27 +142,27 @@ Test scenario: Plummer cluster with σ_v / σ_x sized to produce ~5-10 % migrati
 
 #### Implementation order
 
-1. **Notebook a priori** (this commit).
+1. **Notebook a priori.**
 2. **Per-particle cell back-reference** — add `cell_idx: u32` (or equivalent) to `BodyArrays` SoA snapshot. Initial value `NO_CELL = u32::MAX`. Populated by `Octree::build` (the first call) and updated by maintenance.
 3. **Cell free-list for `Vec<Node>` arena** — current arena is append-only; need slot reuse for derefinement. Add `Octree::free_list: Vec<u32>` of available slot indices; `allocate_node` pops from free-list before extending; `free_node` pushes index.
 4. **Maintenance pass** — `Octree::maintain(arrays: &BodyArrays)` replacing `Octree::build` for steady-state calls (`build` remains for cold-start / first call). Walks particles, checks residency, removes/inserts migrants, walks tree to derefine, recomputes multipoles leaf-up.
 5. **Tier 1 gate** — `tier1_maintenance_matches_rebuild_bit_exact` test in `tree.rs` running both paths over 10 VV steps on canonical sphere distribution; asserts bit-exact per-cell multipoles + per-body acc.
 6. **Tier 2 / 3 / 4 harness** — `perf_tree_maintenance.rs` analogous to `perf_simd.rs`, running stable-system + chaotic cells across N ∈ {1k, 5k, 10k, 50k}, reporting `t_build_maintained / t_build_rebuild` and `t_walk` regression.
-7. **§Results / §Interpretation / §Decision** populated; bake removes harness per closure pattern.
+7. **§Results / §Interpretation / §Decision** populated; the harness is removed once the experiment closes.
 
 #### Run parameters
 
 | Parameter | Value | Justification |
 | --- | --- | --- |
-| Random seeds | 3: `0x6F637472`, `0x71756164`, `0x6D6F7274` | Match perf series convention |
+| Random seeds | 3: `0x6F637472`, `0x71756164`, `0x6D6F7274` | Match prior perf-experiment convention |
 | Stable-system distribution | sphere log-normal mass, σ_v ≈ 0.3 (orbital velocities) | Models hierarchical multi-body; matches engine-ceiling |
 | Chaotic-system distribution | Plummer cluster, σ_v / σ_x ≈ 1.5 (close to virial, frequent encounters) | Stresses migration rate; representative of GC-like dense systems |
 | `θ` | 0.5 | Production canonical |
 | N | `1 000`, `5 000`, `10 000`, `50 000` | Match SoA / SIMD notebooks (50k extra to stress build phase) |
 | dt | `1e-3` | Match engine-ceiling baseline |
 | Warmup / measured runs | 5 / 20 (per cell) | Build wall-time has finer noise floor than walk; need more samples |
-| Multipole order | quadrupole always-on | Per perf 2×2 §Decision |
-| Hardware | Cell A: Ryzen 5 7600X (Zen 4 desktop) | Match prior series |
+| Multipole order | quadrupole always-on | Production canonical |
+| Hardware | Ryzen 5 7600X (Zen 4 desktop) | Match prior experiments |
 
 #### Out of scope (declared a priori)
 
@@ -170,7 +170,7 @@ Test scenario: Plummer cluster with σ_v / σ_x sized to produce ~5-10 % migrati
 - **MPI / multi-process.** REBOUND's `tree.c` has MPI hooks (`#ifdef MPI`). Apsis is single-process; maintenance pattern adopted without distributed extensions.
 - **Particle creation / destruction during simulation.** Apsis production runs have stable N. The maintenance pass handles existing-particle migration only; particle add/remove API stays as-is (full rebuild on next step).
 - **Adaptive cell width / refinement criteria.** Cell subdivision rule (DEFAULT_LEAF, EXACT_THRESHOLD) unchanged.
-- **Cache-aware cell ordering** (Morton, Hilbert). Per perf 2×2 §Decision Morton was reverted at v1 N; per SIMD §Decision AoSoA + Morton is deferred to conditional PR-perf-7. Maintenance is layout-agnostic.
+- **Cache-aware cell ordering** (Morton, Hilbert). Morton was reverted at v1 N in prior work; AoSoA + Morton is deferred. Maintenance is layout-agnostic.
 - **Concurrent maintenance.** The maintenance pass is single-threaded sequential. Walk parallelism via rayon is unchanged. Future axis if needed.
 
 ---
@@ -198,7 +198,7 @@ The precision invariant from the SIMD §Decision is honoured. The no-movement ca
 
 ### Tier 2 — Build phase wall-time reduction
 
-Cell V (single-thread tree build). Median over 20 measured runs after 5 warmup runs, per `(system, N, seed)`. Per-step displacement is `dt × vel` (no force integration), velocity scale 0.3 (stable) or virial Maxwell (chaotic). Recursive subtree walk + derefinement (free-list slot reuse) active.
+Single-thread tree build. Median over 20 measured runs after 5 warmup runs, per `(system, N, seed)`. Per-step displacement is `dt × vel` (no force integration), velocity scale 0.3 (stable) or virial Maxwell (chaotic). Recursive subtree walk + derefinement (free-list slot reuse) active.
 
 | System | N | seed=0x6F637472 | seed=0x71756164 | seed=0x6D6F7274 |
 | --- | ---: | ---: | ---: | ---: |
@@ -221,14 +221,14 @@ Walk timed via `evaluate_profile` on the same tree state used for build/maintain
 
 | System | N | seed=0x6F637472 | seed=0x71756164 | seed=0x6D6F7274 |
 | --- | ---: | ---: | ---: | ---: |
-| Stable | 1 000 | 0.981× ✓ | 0.955× ✓ | 0.961× ✓ |
-| Stable | 5 000 | 1.072× ⚠ | 0.964× ✓ | 1.067× ⚠ |
-| Stable | 10 000 | 1.049× ✓ | 1.064× ⚠ | 1.012× ✓ |
-| Stable | 50 000 | 0.967× ✓ | 0.977× ✓ | 0.974× ✓ |
-| Chaotic | 1 000 | 0.998× ✓ | 0.882× ⚠ | 0.891× ⚠ |
-| Chaotic | 5 000 | 1.045× ✓ | 1.119× ⚠ | 1.056× ⚠ |
-| Chaotic | 10 000 | 0.972× ✓ | 0.999× ✓ | 1.006× ✓ |
-| Chaotic | 50 000 | 0.987× ✓ | 0.999× ✓ | 0.981× ✓ |
+| Stable | 1 000 | 0.981× pass | 0.955× pass | 0.961× pass |
+| Stable | 5 000 | 1.072× warn | 0.964× pass | 1.067× warn |
+| Stable | 10 000 | 1.049× pass | 1.064× warn | 1.012× pass |
+| Stable | 50 000 | 0.967× pass | 0.977× pass | 0.974× pass |
+| Chaotic | 1 000 | 0.998× pass | 0.882× warn | 0.891× warn |
+| Chaotic | 5 000 | 1.045× pass | 1.119× warn | 1.056× warn |
+| Chaotic | 10 000 | 0.972× pass | 0.999× pass | 1.006× pass |
+| Chaotic | 50 000 | 0.987× pass | 0.999× pass | 0.981× pass |
 
 A-priori bound: `[0.95, 1.05]`. **7 of 24 cells exceed the bound**: 5 above by 0.012-0.119× (peak +12 % at Chaotic N = 5 × 10³ seed `0x71756164`) and 2 *below* by 0.059-0.118× (the maintained tree is faster than rebuild on chaotic small N, an unexpected positive). All N = 5 × 10⁴ cells stay inside the bound; above-bound regression is concentrated at small-to-mid N where absolute walk wall-time variance is largest relative to the regression magnitude.
 
@@ -270,9 +270,9 @@ Net positive at five of eight cells. The three slower cells (Stable N = 5k, Stab
 
 The implementation went through three iterations:
 
-1. **First cut without derefinement** (commit `7c8c539`): linear `O(N)` particle scan + per-migrant root re-insert. ~1.5-2× faster build, +10-23 % walk regression at small-mid N because empty leaves accumulated in the arena.
-2. **Re-implementation with REBOUND-style derefinement** (commit `5504569`): recursive subtree walk freeing empty leaves and conservatively collapsing under-LEAF cells. Numbers reported in that commit looked better but were partially based on a silent `is_leaf()` correctness bug — see Mechanism 4.
-3. **Final version with `is_leaf()` fix** (this PR): correct walk traversal exposes the true Tier 3 cost. Conservative collapse retained; build-time canonicalisation of empty leaves was attempted and reverted (measured net-negative on Tier 3 — cache fragmentation from free-list slot reuse outweighed the ~7-cell-per-overflow savings).
+1. **First cut without derefinement**: linear `O(N)` particle scan + per-migrant root re-insert. ~1.5-2× faster build, +10-23 % walk regression at small-mid N because empty leaves accumulated in the arena.
+2. **Re-implementation with REBOUND-style derefinement**: recursive subtree walk freeing empty leaves and conservatively collapsing under-LEAF cells. Numbers from that iteration looked better but were partially based on a silent `is_leaf()` correctness bug — see Mechanism 4.
+3. **Final version with `is_leaf()` fix**: correct walk traversal exposes the true Tier 3 cost. Conservative collapse retained; build-time canonicalisation of empty leaves was attempted and reverted (measured net-negative on Tier 3 — cache fragmentation from free-list slot reuse outweighed the ~7-cell-per-overflow savings).
 
 Four mechanisms dominate the data:
 
@@ -290,7 +290,7 @@ maintain() per-step cost = O(num_nodes) recursive walk     [fixed, dominates]
 
 For stable systems where `N_migrants ≪ N`, the third term is negligible. The first two are fixed, independent of migrant rate. So the floor on maintenance time is roughly the cost of one tree walk + one full multipole recompute — **about a third of the cost of a from-scratch build**, because build's two-thirds (the per-particle insertion loop) is what we skip.
 
-This is consistent with REBOUND's `tree.c` performance characteristics (incremental update saves the per-particle `add_to_tree` recursion but still pays for the gravity-data update). The lab notebook a-priori incorrectly modelled maintenance as proportional to migrant rate — that's the upper bound (zero migrants), but in practice fixed-cost passes dominate.
+This is consistent with REBOUND's `tree.c` performance characteristics (incremental update saves the per-particle `add_to_tree` recursion but still pays for the gravity-data update). The a-priori prediction incorrectly modelled maintenance as proportional to migrant rate — that's the upper bound (zero migrants), but in practice fixed-cost passes dominate.
 
 The honest read: **maintenance is 1.8-3.4× faster than rebuild, not 5-10× faster as predicted**. Still real wall-time savings (~350 µs/step at N = 10⁴, ~2.6 ms/step at N = 5 × 10⁴ stable), but smaller in relative terms than the optimistic prediction.
 
@@ -317,15 +317,15 @@ The free-list is what makes derefinement *useful*: without it, freeing cells wou
 
 ### Mechanism 4 — `is_leaf()` correctness fix surfaces the true walk cost
 
-The first two implementations (commits `7c8c539` + `5504569`) used `is_leaf() = children[0] == NO_CHILD`. This was correct as long as the tree only got cells via [`subdivide`], which always populated all eight `children` slots. **Once derefinement could free a child at any octant, including octant 0, the check became unsound.** A parent whose octant-0 leaf had been freed would have `children[0] == NO_CHILD` while still having populated children at other octants — yet `is_leaf()` reported `true`, and the BH walk would treat the entire subtree below as having no descendants.
+The first two implementations used `is_leaf() = children[0] == NO_CHILD`. This was correct as long as the tree only got cells via [`subdivide`], which always populated all eight `children` slots. **Once derefinement could free a child at any octant, including octant 0, the check became unsound.** A parent whose octant-0 leaf had been freed would have `children[0] == NO_CHILD` while still having populated children at other octants — yet `is_leaf()` reported `true`, and the BH walk would treat the entire subtree below as having no descendants.
 
-The bug silently shortened walks: a fraction of nodes that should have been recursed into (or accepted as multipoles) were instead read as empty leaves contributing zero force. The pre-PR Tier 1 tests passed because they checked aggregated multipoles at the root (`mass`, `com_*`, `q_*`), not per-body acceleration on the maintained-tree walk; the silent shortcut left the per-cell aggregates correct but corrupted the walk's reachability.
+The bug silently shortened walks: a fraction of nodes that should have been recursed into (or accepted as multipoles) were instead read as empty leaves contributing zero force. The earlier Tier 1 tests passed because they checked aggregated multipoles at the root (`mass`, `com_*`, `q_*`), not per-body acceleration on the maintained-tree walk; the silent shortcut left the per-cell aggregates correct but corrupted the walk's reachability.
 
 `is_leaf()` now iterates all eight `children` slots, short-circuiting on the first non-`NO_CHILD` (so internal cells, the common walk-hot-path case, still cost only one comparison; leaves cost eight). The fix is unconditionally needed for correctness regardless of any perf consideration.
 
 Post-fix Tier 3 numbers reflect the true walk cost. They are worse than the pre-fix numbers because the walk now correctly visits every populated subtree. The `proptest_total_mass_is_preserved` proptest, previously passing (because mass aggregates were correct), failed deterministically once the build path also exercised derefinement — that's how the bug was caught.
 
-A second consequence: a build-time canonicalisation pass (free empty leaves left over from overflow-driven subdivisions) was attempted on top of the fix and **measured net-negative on Tier 3**. Without canonicalisation, build's empty leaves stay at predictable contiguous arena positions (right after their populated siblings) and the walk's `mass <= 0.0` skip is essentially free. With canonicalisation, the freed slots are returned to the free-list and reused for migrant cells in subsequent steps — placing those migrant cells at scattered arena positions and degrading the walk's cache pattern. The bisect (commit history preserved) is the evidence; the production version does not canonicalise build-time empty leaves.
+A second consequence: a build-time canonicalisation pass (free empty leaves left over from overflow-driven subdivisions) was attempted on top of the fix and **measured net-negative on Tier 3**. Without canonicalisation, build's empty leaves stay at predictable contiguous arena positions (right after their populated siblings) and the walk's `mass <= 0.0` skip is essentially free. With canonicalisation, the freed slots are returned to the free-list and reused for migrant cells in subsequent steps — placing those migrant cells at scattered arena positions and degrading the walk's cache pattern. The production version does not canonicalise build-time empty leaves.
 
 ---
 
@@ -333,7 +333,7 @@ A second consequence: a build-time canonicalisation pass (free empty leaves left
 
 **Ship tree incremental maintenance with conservative collapse + `is_leaf` correctness fix.** Tier 1 honours the precision invariant (bit-exact under no-movement, FP-summation envelope under movement); Tier 2 delivers 2.0-3.2× faster build than rebuild; Tier 3 lands inside `[0.95, 1.05]` at 17 of 24 cells with the 7 outliers concentrated at small-mid N (peak above-bound +12 %, two cells *faster* than rebuild); Tier 4 passes by a wide margin on chaotic systems.
 
-The `is_leaf` fix is the load-bearing change of this PR — it corrects a silent walk-shortcut bug present in earlier iterations and is unconditionally required regardless of the perf trade-off.
+The `is_leaf` fix is the load-bearing change — it corrects a silent walk-shortcut bug present in earlier iterations and is unconditionally required regardless of the perf trade-off.
 
 ### Net step-time outcome
 
@@ -364,21 +364,21 @@ Five of eight cells gain. The three slower cells lose under 0.5 % to 5 % of step
 - `force_model.rs` per-step path now calls `engine.maintain` instead of `engine.build`. The first call after engine construction still does a full build via the maintain → build fallback chain.
 - 7 tests in `tree.rs` pinning the precision invariants (bit-exact no-movement, FP-tolerance with movement, derefinement relocation correctness, arena bounded under repeated migration).
 
-### What is removed in the bake commit
+### What is removed once the experiment closes
 
-- `crates/apsis/src/physics/perf_tree_maintenance.rs` (Tier 2/3/4 harness) per the perf-2/4/5/6 closure pattern.
+- `crates/apsis/src/physics/perf_tree_maintenance.rs` (Tier 2/3/4 harness).
 - Its registration in `physics/mod.rs`.
 - `BarnesHutEngine::tree_cell_idx_snapshot` (`#[cfg(test)]` accessor used only by the harness).
 
 The §Results numbers above are the canonical record. CSV at `target/perf-tree/maintenance.csv` retained for one cycle for reproducibility.
 
-### Standing for the perf series
+### Standing for the perf work
 
-Tree incremental was the highest-ROI-per-LOC candidate among the post-SIMD deferred axes (engine ceiling §Decision). The measurement shows ROI is real (2.0-3.2× build speedup, 2 % step-time savings at large N) and the precision invariant holds. The lab notebook a-priori was wrong about the magnitude of the gain (predicted 5-10×, observed 2-3×) but right about the direction; the corrected fixed-cost decomposition (Mechanism 1) is the rule for any future tree-maintenance experiment.
+Tree incremental was the highest-ROI-per-LOC candidate among the post-SIMD deferred axes (engine ceiling §Decision). The measurement shows ROI is real (2.0-3.2× build speedup, 2 % step-time savings at large N) and the precision invariant holds. The a-priori prediction was wrong about the magnitude of the gain (predicted 5-10×, observed 2-3×) but right about the direction; the corrected fixed-cost decomposition (Mechanism 1) is the rule for any future tree-maintenance experiment.
 
-Per the calibration doc rule: future tree-maintenance experiments must construct bounds from the per-step fixed cost (recursive walk + multipole recompute ≈ 30 % of build), not from migrant rate alone. The migrant-rate-only model overestimates savings by 2-5×.
+Future tree-maintenance experiments must construct bounds from the per-step fixed cost (recursive walk + multipole recompute ≈ 30 % of build), not from migrant rate alone. The migrant-rate-only model overestimates savings by 2-5×.
 
-### What this PR teaches that the next axis should respect
+### What this experiment teaches that the next axis should respect
 
 Three lessons from the three-iteration record:
 
@@ -386,7 +386,7 @@ Three lessons from the three-iteration record:
 2. **Aggressive collapse is wrong for `LEAF > 1` architectures**: an internal cell with `body_count ≤ LEAF` could be collapsed to a leaf, but that cell would lose its multipole-acceptance opportunity in the BH walk. Conservative collapse, gated on `child_freed`, preserves multipole acceptance for build-created over-divided cells. REBOUND's `tree.c` collapses unconditionally because it uses LEAF=1; apsis with LEAF=8 has different optima.
 3. **Cache layout matters more than node count** (Mechanism 4): freeing build-time empty leaves and letting the free-list reuse those slots for migrant cells (a literal "compact the arena" interpretation of REBOUND's free pattern) measured *net-negative* on Tier 3 because migrants land at scattered arena positions. Predictable contiguous build-time empty leaves cost ~1 cache miss + 1 mass-zero check per visit; reuse-by-migrants costs more.
 
-This generalises: any future incremental data-structure maintenance experiment in apsis (e.g., AoSoA + Morton in PR-perf-7, neighbour lists for time-stepping) must:
+This generalises: any future incremental data-structure maintenance experiment in apsis (e.g., AoSoA + Morton, neighbour lists for time-stepping) must:
 
 - pair "remove" with a corresponding "compact" pass;
 - be conservative about removing structure when downstream consumers (BH walk, kernel dispatch) benefit from over-allocation;
@@ -404,10 +404,10 @@ This generalises: any future incremental data-structure maintenance experiment i
 
 4. **Multipole recompute scheduling.** REBOUND walks the tree top-down to update mass / COM / quadrupole leaf-up after maintenance. Apsis must do the same. The walk order matters for cache behaviour but not for correctness (Tier 1 bit-exact gate covers correctness). Suboptimal walk order might cost a few % of build savings; acceptable.
 
-5. **Interaction with future PR-perf-7 (Morton).** If a future PR adopts Morton ordering for the build pass (currently deferred), maintenance must be reconciled with the ordering invariant. Out of scope for this experiment; flagged as "if Morton lands, maintenance pass needs to preserve the Morton ordering of cells" and gated as a follow-up condition.
+5. **Interaction with future Morton ordering.** If a future change adopts Morton ordering for the build pass (currently deferred), maintenance must be reconciled with the ordering invariant. Out of scope for this experiment; flagged as "if Morton lands, maintenance pass needs to preserve the Morton ordering of cells" and gated as a follow-up condition.
 
 6. **Tier 1 bit-exact gate is genuinely strict.** Floating-point summation order matters: rebuild aggregates `node->mxx += d->mxx + d_m * (3*qx*qx - qr2)` in a child-iteration order (octant 0 through 7). Maintenance, after a derefinement event, may aggregate in a different order. If the order differs, the float results differ at ULP. Mitigation: maintenance must process children in the same canonical order as rebuild (octant 0 through 7), even if some children are NULL after derefinement. The test harness will catch any deviation directly.
 
-7. **Compatibility with existing `BodyArrays` SoA snapshot.** Apsis currently rebuilds the SoA snapshot per `compute()` call (PR-perf-5). The maintenance pattern needs the same SoA inputs; the per-particle cell back-reference can live in `BodyArrays` as a parallel `Vec<u32>` that is read by maintenance and written by build/maintenance. The pack-from-Body operation is unchanged; only the tree management changes.
+7. **Compatibility with existing `BodyArrays` SoA snapshot.** Apsis currently rebuilds the SoA snapshot per `compute()` call. The maintenance pattern needs the same SoA inputs; the per-particle cell back-reference can live in `BodyArrays` as a parallel `Vec<u32>` that is read by maintenance and written by build/maintenance. The pack-from-Body operation is unchanged; only the tree management changes.
 
 8. **Apsis Body owns canonical position fields; BodyArrays is a snapshot.** The cell back-reference logically belongs to the snapshot, not the Body. If a future refactor moves position data into BodyArrays canonically, the back-reference moves with it; the maintenance pattern is layout-agnostic.

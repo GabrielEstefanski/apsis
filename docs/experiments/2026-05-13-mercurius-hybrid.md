@@ -3,9 +3,7 @@
 **Date:** 2026-05-13
 **Subject:** First-class implementation of the MERCURIUS hybrid integrator (Rein et al. 2019, MNRAS 485, 5490–5497): WH symplectic outer step + IAS15 close-field sub-integration with a smooth `K(r/r_cross)` changeover. Federates the existing `WisdomHolman` and `Ias15` integrators into a single algorithm whose far-field cost stays O(N) per step while close encounters get IAS15-grade precision *only on the encountering pairs*.
 
-**Status:** Protocol declared a priori, before any implementation lands. Builds on the design proposal `docs/proposals/close-encounter-hybrid.md` (PR #32) and locks the six §6 open design questions with explicit rationale below.
-
-**Branch:** `feat/mercurius`, branched from `develop`. Independent of the perf series (PRs #78 / #81 / #82 already merged); touches the integrator stack, not the gravity hot path.
+**Status:** Protocol declared a priori, before any implementation lands. Builds on the design proposal `docs/proposals/close-encounter-hybrid.md` and locks the six §6 open design questions with explicit rationale below.
 
 ---
 
@@ -29,7 +27,7 @@ Three regimes drive the case for a hybrid:
 
 ### What this experiment is NOT testing
 
-- **Not a WHFast refactor.** TD-008 is closed (commit `ed12fe1`'s notebook references it); the existing `WisdomHolman` is fit for purpose as the symplectic outer half. A future WHFast upgrade will substitute transparently.
+- **Not a WHFast refactor.** The existing `WisdomHolman` is fit for purpose as the symplectic outer half. A future WHFast upgrade will substitute transparently.
 - **Not introducing a new force-evaluation regime.** Direct O(N²) evaluation of the residual close-field forces is appropriate for the planetary N (≤ 10² typically). The Barnes-Hut tree is irrelevant inside Mercurius and is bypassed.
 - **Not changing the precision invariant.** Mercurius is a Hamiltonian-split symplectic-class scheme: at K = 1 (no encounters anywhere) it reduces algebraically to the existing WH + Kepler drift; at K = 0 (deep encounter) the close-field IAS15 carries the full force. Both limits are testable algebraic identities.
 
@@ -110,7 +108,7 @@ circular velocity. Pair-wise scale: $\mathrm{dcrit}_{ij} = \max(\mathrm{dcrit}_i
 | Question | Decision | Rationale |
 | --- | --- | --- |
 | §6.1 Hill radius $M_\star$ for non-hierarchical systems | Refuse with a `warn_diag!` event + `used_fallback = true`; step does not advance | Mercurius assumes a dominant central body for the analytical Kepler drift. Non-hierarchical fallback would be a different algorithm. Honest failure → user routes to IAS15 directly. Matches REBOUND. |
-| §6.2 Changeover function shape | REBOUND `L_mercury`: $C^2$ quintic Hermite $L(y) = 10 y^3 - 15 y^4 + 6 y^5$ with $y = (d - 0.1\,\mathrm{dcrit})/(0.9\,\mathrm{dcrit})$ | The 0.1·dcrit deadband ensures $L \equiv 0$ deep in the encounter — IAS15 carries the full force without leakage from the K-weighted kick. Earlier draft used a $C^1$ cubic; updated after revisiting Rein et al. 2019 §6.2 (mid-experiment revision recorded as a separate commit). |
+| §6.2 Changeover function shape | REBOUND `L_mercury`: $C^2$ quintic Hermite $L(y) = 10 y^3 - 15 y^4 + 6 y^5$ with $y = (d - 0.1\,\mathrm{dcrit})/(0.9\,\mathrm{dcrit})$ | The 0.1·dcrit deadband ensures $L \equiv 0$ deep in the encounter — IAS15 carries the full force without leakage from the K-weighted kick. Earlier draft used a $C^1$ cubic; updated after revisiting Rein et al. 2019 §6.2. |
 | §6.3 Default $\alpha$ (Hill multiplier for `dcrit`) | $\alpha = 3$ | REBOUND default; validated by Rein et al. 2019 §3 against several planetary scattering scenarios. |
 | §6.4 `fast` integrator selection | Wisdom-Holman analytical Kepler drift, K-weighted planet-planet half-kicks | The K-weighted kick is the only second-order operator; Kepler is analytical, jump and COM are exact, encounter step is high-precision. Yoshida-4 would lose the analytical Kepler advantage. |
 | §6.5 Per-pair vs global changeover | Per-pair, via $\mathrm{dcrit}_{ij} = \max(\mathrm{dcrit}_i, \mathrm{dcrit}_j)$ | REBOUND structure — per-particle critical radius derived from 4 criteria (avg velocity, current velocity, Hill radius, physical radius), pair-wise reduced by max. Not the "mutual Hill radius per pair" formulation the design proposal sketched; the 4-criterion form is what REBOUND ships and what Rein et al. 2019 measure against. |
@@ -123,7 +121,7 @@ Additional decisions (not in §6, locked here):
 | Public name | `IntegratorKind::Mercurius`, slug `"mercurius"` | Matches Rein et al. 2019 algorithm name and REBOUND. Self-documenting. |
 | Algorithmic structure | Rewind hybrid (REBOUND-faithful), not clean Hamiltonian split | A pure $(1-K)\,V$ Hamiltonian generates a kick (no position evolution); feeding it to IAS15 (which integrates $\ddot x = a$) introduces a $v\cdot\tau$ free drift that double-counts Kepler. REBOUND structure is correct: WH advances all → encounter detect → encountering pairs rewind → IAS15 re-integrates them with full Sun-pull + $(1-K)$ planet-planet. |
 | Force model interaction | Mercurius bypasses `IntegratorContext::force` for its own pair forces (direct O(N²) K-weighted kicks + close-field IAS15 with its own internal force model) | The Barnes-Hut tree adds no value at planetary $N$, and the per-pair K weighting requires explicit pair iteration. |
-| `compute_closeness` 2D defect | Fix in this PR (extends to 3D) | Phase 1 EncounterFlag reads `r_min`; latent 2D bug affects Phase 1 correctness on out-of-plane configurations. Single-line fix; in scope. |
+| `compute_closeness` 2D defect | Fix here (extends to 3D) | Phase 1 EncounterFlag reads `r_min`; latent 2D bug affects Phase 1 correctness on out-of-plane configurations. Single-line fix; in scope. |
 | `requires_deterministic_force` | `false` | Mercurius does not rely on the outer `ctx.force` being deterministic (it computes its own K-weighted forces internally). The inner IAS15's deterministic-force requirement is satisfied by the embedded close-field force model. |
 | `controls_own_step_size` | `false` | Outer $\tau$ is consumed exactly per call. The internal IAS15 *does* control its own step within encounter sub-integrations, but that is not visible at the Mercurius trait boundary. |
 | `execution_profile` | `Realtime` | Outer per-step wall time bounded by IAS15-on-encountering-subset cost. Adversarial worst case (deep simultaneous encounters at high N) would push into Precision; flagged for empirical re-classification after Tier 4. |
@@ -132,13 +130,13 @@ Additional decisions (not in §6, locked here):
 
 ## Phasing
 
-Implementation lands in one PR with the following commit history:
+Implementation proceeds in the following phases:
 
-1. **Lab notebook a-priori** *(this commit)*. Locks decisions before code.
+1. **Protocol a-priori.** Locks decisions before code.
 2. **Phase 1 — Encounter diagnostic surfacing.** `PhysicsConfig::close_encounter_threshold: Option<f64>`, `EncounterFlag` enum (`Far` / `Approaching` / `Close`), `compute_closeness` extended to 3D, `warn_diag!` on `Close` transitions. No behavioural change to existing integrators; observability only.
 3. **Phase 3 — Mercurius integrator.** `Mercurius` struct + `Integrator` impl. Internal `ChangeoverForceModel` (close + far variants). Mutual Hill radius computation. Per-pair $r_\text{cross}$ table. 7-stage symplectic step. Tier 1 algebraic-identity tests (K=1 → matches WH; K=0 → matches IAS15-only).
 4. **Phase 4 — Public surface.** `IntegratorKind::Mercurius` variant + `make_integrator` factory entry + slug + label + description. `apsis-py` exposure (constructor arg). `apsis-app` integrator-pick UI entry.
-5. **Cross-implementation parity + bake.** REBOUND MERCURIUS parity entry on a planetary-scattering scenario. §Results / §Interpretation / §Decision populated post-measurement.
+5. **Cross-implementation parity.** REBOUND MERCURIUS parity entry on a planetary-scattering scenario. §Results / §Interpretation / §Decision populated post-measurement.
 
 Phase 2 of the design proposal (hard-switch hybrid as a pedagogical stepping stone) is documented in §Results below as a measurement entry — the swap-boundary energy drift signature — but not shipped as a public integrator option, because Phase 3 supersedes it entirely. Recording the hard-switch numerical signature validates the §Decision rationale for smooth changeover.
 
@@ -199,8 +197,8 @@ The third scenario characterises the regime where Mercurius stops paying off. Im
 ### Methodology
 
 - Tier 1 limits exercised via the no-encounter limit (α = 0 collapses dcrit to the velocity / physical-radius criteria, well below all real separations on the test scenarios) compared against a freshly-constructed `WisdomHolman`. Both run through the same `IntegratorContext` with default `GravityForceModel`. Tests live in the `mercurius` unit module.
-- Tier 4 wall-time on Cell A (Ryzen 5 7600X / Zen 4) single-thread `--release`, harness in `crates/apsis/src/physics/integrator/perf_mercurius.rs`. Each scenario reports p10 / p50 / p90 step time over 500 measured steps with 50 warmup steps discarded, plus the `EncounterFlag` rate as an encounter-engagement proxy.
-- Tier 2 (REBOUND parity) and Tier 3 (smooth-vs-hard signature) deferred to separate validation PRs — see §Decision.
+- Tier 4 wall-time on a Ryzen 5 7600X (Zen 4) single-thread `--release`, harness in `crates/apsis/src/physics/integrator/perf_mercurius.rs`. Each scenario reports p10 / p50 / p90 step time over 500 measured steps with 50 warmup steps discarded, plus the `EncounterFlag` rate as an encounter-engagement proxy.
+- Tier 2 (REBOUND parity) and Tier 3 (smooth-vs-hard signature) deferred to separate follow-up validation — see §Decision.
 
 ---
 
@@ -231,7 +229,7 @@ Both gates pass via the `mercurius` unit-test module
 
 ### Tier 2 — REBOUND MERCURIUS cross-implementation parity
 
-Deferred to a follow-up validation PR (the `validation/rebound-parity/`
+Deferred to follow-up validation (the `validation/rebound-parity/`
 infrastructure for Mercurius-class scenarios is not yet stood up).
 Tracking artefact: a `validation/rebound-parity/mercurius/` directory
 following the `kepler/` template. Closes when the §Tier 2 §Results
@@ -246,7 +244,7 @@ implementation must pass.
 
 ### Tier 4 — Cost characterisation
 
-Cell A (Ryzen 5 7600X / Zen 4, single-thread `--release`),
+Ryzen 5 7600X (Zen 4, single-thread `--release`),
 warmup 50 steps, measured 500 steps, $\tau = 10^{-3}$, three seeds
 collapsed into median per-step wall time. Encounter rate is the
 fraction of measured steps where `r_min` crossed the
@@ -334,7 +332,7 @@ from the four-criterion max. The Tier 4 measurements confirm the
 predicted cost-vs-encounter trade-off; no design knob requires
 revision.
 
-Validation deferred (separate follow-up PRs):
+Validation deferred (separate follow-up work):
 
 - **Tier 2 — REBOUND MERCURIUS cross-implementation parity.** Build
   `validation/rebound-parity/mercurius/` infrastructure (Rust
@@ -354,10 +352,10 @@ Validation deferred (separate follow-up PRs):
   table covers both ends of the trade-off.
 
 The harness `crates/apsis/src/physics/integrator/perf_mercurius.rs`
-that produced the §Tier 4 numbers is removed in the bake commit
-following the convention from `perf_simd` (PR #81) and
-`perf_tree_maintenance` (PR #82): the cost-vs-encounter behaviour is
-documented here in the lab notebook; the harness was a measurement
+that produced the §Tier 4 numbers is removed once the measurement is
+recorded, following the convention from `perf_simd` and
+`perf_tree_maintenance`: the cost-vs-encounter behaviour is
+documented here; the harness was a measurement
 tool, not production code.
 
 ---
@@ -368,4 +366,4 @@ tool, not production code.
 - Rein, H., & Spiegel, D. S. (2015). *IAS15: a fast, adaptive, high-order integrator for gravitational dynamics, accurate to machine precision over a billion orbits.* MNRAS, 446, 1424–1437.
 - Wisdom, J., & Holman, M. (1991). *Symplectic maps for the n-body problem.* AJ, 102, 1528–1538.
 - Chambers, J. E. (1999). *A hybrid symplectic integrator that permits close encounters between massive bodies.* MNRAS, 304(4), 793–799.
-- Design proposal: `docs/proposals/close-encounter-hybrid.md` (PR #32).
+- Design proposal: `docs/proposals/close-encounter-hybrid.md`.

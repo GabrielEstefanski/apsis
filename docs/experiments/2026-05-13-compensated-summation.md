@@ -5,8 +5,6 @@
 
 **Status:** Protocol declared a priori; numbers measured on the gate machine.
 
-**Branch:** `feat/compensated-f64`
-
 ---
 
 ## Setup
@@ -57,8 +55,8 @@ Snapshots every `N / 10` steps confirm the compensated trajectory does not excee
 
 ## Scope
 
-- Scalar accumulator. Vector accumulation (positions in WHFast) is the integrator's concern; PR B handles it.
-- No performance numbers in this notebook. Per-step cost lives in PR B's bench, where `CompensatedF64` runs alongside Kepler / kick / drift work.
+- Scalar accumulator. Vector accumulation (positions in WHFast) is the integrator's concern and handled separately.
+- No performance numbers in this notebook. Per-step cost is measured separately, where `CompensatedF64` runs alongside Kepler / kick / drift work.
 
 ## What this experiment does NOT claim
 

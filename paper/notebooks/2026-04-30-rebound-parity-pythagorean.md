@@ -4,11 +4,9 @@
 
 **Subject:** Numerical agreement between IAS15 (apsis) and IAS15 (REBOUND) on the canonical Pythagorean three-body problem (Burrau 1913; Szebehely & Peters 1967) — three masses 3, 4, 5 at the vertices of a 3-4-5 right triangle, released from rest, integrated through the chaotic close-encounter regime to ejection.
 
-**Baseline commit:** `850d4a7` ("feat(parity): Pythagorean three-body harness mirroring figure-8").
-
 **Tooling:** apsis IAS15 (`crates/apsis/src/physics/integrator/ias15.rs`), REBOUND 4.6.0 via Python 3.10 (`reb.IAS15`).
 
-**Status:** *Run executed 2026-04-30 against `850d4a7`. Decisive parity evidence — close-encounter alignment at 98% (44 of 45 prominent local minima of $r_\text{min}(t)$ match within $\sim 3 \times 10^{-2}$ t.u. and within a factor of 2.5 in minimum approach distance) — confirms both implementations integrate the same dynamics. Tier-1 $\lvert \Delta \mathbf{L} \rvert$ and Tier-2 $\lvert \Delta \mathbf{P} \rvert$, $\lvert \Delta \mathbf{r}_\text{COM} \rvert$ pass at the f64 round-off floor on both sides. Tier-1 $\lvert \Delta E / E_0 \rvert$ exceeds the a-priori bound on both sides ($3.85 \times 10^{-11}$ apsis, $1.09 \times 10^{-10}$ REBOUND vs $1.0 \times 10^{-13}$ declared) — the bound's smooth-flow derivation does not apply to the effective stiffness induced by repeated close encounters; the failure reflects the regime, not a parity defect, and is symmetric across the two implementations. **Updated 2026-06:** an IAS15 controller defect (the sub-step cascade) has since been corrected and the gates re-derived — see §Controller fix and re-run; 12/12 gated metrics now pass.*
+**Status:** *Run executed 2026-04-30. Decisive parity evidence — close-encounter alignment at 98% (44 of 45 prominent local minima of $r_\text{min}(t)$ match within $\sim 3 \times 10^{-2}$ t.u. and within a factor of 2.5 in minimum approach distance) — confirms both implementations integrate the same dynamics. Tier-1 $\lvert \Delta \mathbf{L} \rvert$ and Tier-2 $\lvert \Delta \mathbf{P} \rvert$, $\lvert \Delta \mathbf{r}_\text{COM} \rvert$ pass at the f64 round-off floor on both sides. Tier-1 $\lvert \Delta E / E_0 \rvert$ exceeds the a-priori bound on both sides ($3.85 \times 10^{-11}$ apsis, $1.09 \times 10^{-10}$ REBOUND vs $1.0 \times 10^{-13}$ declared) — the bound's smooth-flow derivation does not apply to the effective stiffness induced by repeated close encounters; the failure reflects the regime, not a parity defect, and is symmetric across the two implementations. **Updated 2026-06:** an IAS15 controller defect (the sub-step cascade) has since been corrected and the gates re-derived — see §Controller fix and re-run; 12/12 gated metrics now pass.*
 
 ---
 
@@ -76,7 +74,7 @@ Three bodies in canonical units ($G = 1$), masses 3, 4, 5 placed at the vertices
 | 2 | 4 | $-2$ | $-1$ | $0$ | $0$ |
 | 3 | 5 | $+1$ | $-1$ | $0$ | $0$ |
 
-Pairwise distances: $|r_{12}| = 5$ (opposite mass 5 ✓), $|r_{13}| = 4$ (opposite mass 4 ✓), $|r_{23}| = 3$ (opposite mass 3 ✓).
+Pairwise distances: $|r_{12}| = 5$ (opposite mass 5), $|r_{13}| = 4$ (opposite mass 4), $|r_{23}| = 3$ (opposite mass 3).
 
 Centre-of-mass: $\mathbf{r}_\text{COM}(0) = (0, 0)$ exactly. Total momentum: $\mathbf{P}_0 = \mathbf{0}$ exactly. Total angular momentum: $\mathbf{L}_0 = \mathbf{0}$ exactly (all velocities zero).
 
@@ -132,7 +130,7 @@ The justification for the invariant-based metric set is the same as the Kepler a
 ### Out of scope (declared a priori)
 
 - **Trajectory-level prediction.** The Pythagorean problem has no closed-form solution and is exponentially sensitive to numerical noise. This experiment makes no claim about either implementation's trajectory matching any external reference; the only claim is that both implementations preserve the same Hamiltonian to f64 precision through the chaotic regime.
-- **Substep-count comparison.** This experiment does not collect or compare substep-economy data between the two implementations. Making such a comparison scientifically meaningful would require a standardised parity-telemetry mechanism — a consistent definition of "substep" applicable across `apsis` and REBOUND, symmetric collection from both sides, deterministic surfacing through a stable interface — that does not exist today. The right place for that work is a parity-portfolio-wide enhancement issue, not a Pythagorean-specific extension.
+- **Substep-count comparison.** This experiment does not collect or compare substep-economy data between the two implementations. Making such a comparison scientifically meaningful would require a standardised parity-telemetry mechanism — a consistent definition of "substep" applicable across `apsis` and REBOUND, symmetric collection from both sides, deterministic surfacing through a stable interface — that does not exist today. The right place for that work is a parity-portfolio-wide enhancement, not a Pythagorean-specific extension.
 - **Sensitivity to IAS15 `epsilon`.** The default tolerance on both sides is used. A sweep over `epsilon` would characterise the cost-precision frontier and is reserved for a separate cost-precision characterisation experiment.
 - **Behaviour past ejection** beyond $t = 70$. Once the binary has formed and a body has departed, the dynamics admit a closed-form description (a Keplerian binary plus a free particle) and the integration reduces to two-body integration on the binary; further parity evidence in that regime is duplicative of the Kepler notebook.
 
@@ -140,9 +138,9 @@ The justification for the invariant-based metric set is the same as the Kepler a
 
 ## Results
 
-The run was executed 2026-04-30 against `850d4a7` (apparatus commit; protocol-only commit `fa1a477` is its parent). Total samples: 2101 ($30 \times 70 + 1$). Final integration time: $7.000378 \times 10^{1}$ — a 5-ULP overshoot beyond the nominal $t = 70$ inherited from IAS15's substep landing on the apsis side.
+The run was executed 2026-04-30. Total samples: 2101 ($30 \times 70 + 1$). Final integration time: $7.000378 \times 10^{1}$ — a 5-ULP overshoot beyond the nominal $t = 70$ inherited from IAS15's substep landing on the apsis side.
 
-> The results below are the original `850d4a7` run; its sub-step cascade exposed a controller defect, since corrected. See §Controller fix and re-run for the post-fix re-run (12/12 pass).
+> The results below are the original run; its sub-step cascade exposed a controller defect, since corrected. See §Controller fix and re-run for the post-fix re-run (12/12 pass).
 
 ### Overview
 
@@ -305,7 +303,7 @@ controllers agree to within 4 %.
 
 | Field | Value |
 | --- | --- |
-| apsis canonical commit | `850d4a7` (apparatus); protocol-only ancestor `fa1a477` |
+| apsis canonical commit | `850d4a7` |
 | REBOUND version | 4.6.0 |
 | Python version | 3.10.0 (CPython, MSC v.1929 64-bit) |
 | Rust toolchain | apsis Cargo profile `release`; default FP semantics (no `--ffast-math`-equivalent) |

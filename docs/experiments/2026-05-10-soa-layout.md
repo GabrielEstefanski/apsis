@@ -5,8 +5,6 @@
 
 **Status:** Protocol declared a priori, before the type lands. §Results populated incrementally; §Decision written after Tier 1 + Tier 2 are populated.
 
-**Branch:** `perf/soa-layout`, from `origin/develop` (parallel to `perf/octree-mac` / PR #74; no shared hot files).
-
 ---
 
 ## Abstract
@@ -30,7 +28,7 @@ The MAC §Decision baked an updated four-axis roadmap with SoA at axis 2. The re
 3. SoA captures a measurable gain *before* SIMD lands and is the structural pre-requisite for SIMD to pay its full speedup.
 4. REBOUND (the closest-regime production codebase to apsis — small-N, error-control rigorous, IAS15-class; cf. `project_codebase_neighborhood`) keeps `reb_particle` AoS in its public API but has SIMD-friendly internal buffers; the layered approach taken here mirrors that design.
 
-The arithmetic above gives a theoretical upper bound of `128 / 40 ≈ 3.2×` for the leaf-pair phase of the walk. Internal-node loads (`Node.com_x/y/z, mass, q_xx..q_yz` = 72 bytes of a ~144-byte node) are not refactored by this PR and improve only when SIMD lands. Engine ceiling §Results reports `n_leaf_interactions ≈ 0.6 × n_bh_accepted` at N = 10⁴ with quadrupole, which puts the leaf phase at roughly 35–50 % of total walk time depending on per-interaction cost ratio. The blended walk speedup is bounded a priori in §Hypothesis below.
+The arithmetic above gives a theoretical upper bound of `128 / 40 ≈ 3.2×` for the leaf-pair phase of the walk. Internal-node loads (`Node.com_x/y/z, mass, q_xx..q_yz` = 72 bytes of a ~144-byte node) are not refactored here and improve only when SIMD lands. Engine ceiling §Results reports `n_leaf_interactions ≈ 0.6 × n_bh_accepted` at N = 10⁴ with quadrupole, which puts the leaf phase at roughly 35–50 % of total walk time depending on per-interaction cost ratio. The blended walk speedup is bounded a priori in §Hypothesis below.
 
 ### Design constraint: SoA as a write-once snapshot, not a domain type
 
@@ -40,7 +38,7 @@ The SoA buffer is the *execution* state of one phase (force eval); it is not a d
 - **Sole consumer is the gravity hot path.** Integrator reads/writes `Vec<Body>`. API consumers read `Vec<Body>`. SoA is never observed outside the force eval window.
 - **No invalidation flags, no dirty bits.** Because SoA is rebuilt every step from authoritative `Vec<Body>`, there is no concurrent writer to track. The pack itself is the synchronisation point.
 - **Integration stays AoS.** Not because AoS is intrinsically better for integrators, but because IAS15 is compute-bound in its `b/g/e/csb` coefficient arrays — the Body load is not the dominant cost. If a future integrator profile shows Body-bound integrator hot paths, the analysis re-opens; the rule today is empirical, not aspirational.
-- **Indexed kernel, no iterator abstraction.** The walk and tree build read `arrays.pos_x[i]` directly in `for i in 0..n` loops. No `Iterator<Item = Body>` wrapper, no trait-object. This keeps the inner loop in a shape that PR-perf-6 (SIMD) can unroll and vectorise without structural refactor.
+- **Indexed kernel, no iterator abstraction.** The walk and tree build read `arrays.pos_x[i]` directly in `for i in 0..n` loops. No `Iterator<Item = Body>` wrapper, no trait-object. This keeps the inner loop in a shape that the later SIMD work can unroll and vectorise without structural refactor.
 
 Operational rule per step:
 
@@ -104,7 +102,7 @@ Updated budget framing:
 | `t_pack / t_compute` at N = 10⁴ | `≤ 0.01` (1 %) | Pack overhead per `ForceModel::compute()` call must not erase the per-call walk gain. With expected `t_compute ≈ 4 ms` post-SoA at N = 10⁴, 1 % budget is ~40 µs — exactly the bandwidth-limited estimate. |
 | `Σ t_pack / t_step_ias15` at N = 10⁴ | `≤ 0.05` (5 %) | Aggregate pack overhead across all `compute()` calls in one IAS15 step. ~15 calls × 40 µs = 600 µs vs ~12 ms IAS15 step → ~5 %. Still net win because walk savings compound over the same call count. |
 
-The harness logs `t_pack` per (N, seed, integrator) so future regressions are caught — if `t_pack` ever crosses either threshold in a later experiment, that PR has to root-cause before merge.
+The harness logs `t_pack` per (N, seed, integrator) so future regressions are caught — if `t_pack` ever crosses either threshold in a later experiment, the cause has to be found before the change lands.
 
 #### Decision rules
 
@@ -120,7 +118,7 @@ The harness logs `t_pack` per (N, seed, integrator) so future regressions are ca
 
 #### Implementation order — Tier 1 gate first, then measurement
 
-1. **Notebook a priori** (this commit).
+1. **Notebook a priori.**
 2. **Rename `Body` fields** to `pos_x/y/z, vel_x/y/z` for nomenclatural alignment with `BodyArrays`. Mechanical refactor across ~36 files; behaviour-identical.
 3. **Introduce `BodyArrays`** in `crate::domain::body_arrays`. Type + `pack_from(&[Body])` + roundtrip / pack-correctness tests. No consumers. **No `unpack_into`** — the snapshot is write-once.
 4. **`Octree::build` and `BarnesHutEngine::evaluate` consume `&BodyArrays`** with indexed `for i in 0..n` inner loops. **Tier 1 gate runs here** — bit-exact accelerations vs the AoS path on a fixed seed before the step orchestration changes.
@@ -144,11 +142,11 @@ The harness logs `t_pack` per (N, seed, integrator) so future regressions are ca
 #### Out of scope (declared a priori)
 
 - **Velocity in the SoA snapshot.** BH walk does not read velocity; including `vel_x/y/z` would add 24 bytes per body to the SoA payload (40 → 64) and reduce the per-cache-line density that motivates the refactor. Integrator stays on AoS for velocity reads.
-- **AoSoA / chunked layout (4 or 8 bodies per chunk)**. Pure SoA first; AoSoA is a SIMD-era optimisation deferred to PR-perf-6 if the SIMD profile asks for it.
+- **AoSoA / chunked layout (4 or 8 bodies per chunk)**. Pure SoA first; AoSoA is a SIMD-era optimisation deferred to the SIMD work if the SIMD profile asks for it.
 - **Single-allocation `Vec<f64>` with offset slices**. Separate `Vec<f64>` per field is simpler and sufficient for cache locality. Migration to single-allocation aligned buffers is a small follow-up if SIMD aligned-loads need it.
-- **AVX-strict alignment (32 / 64 byte).** `Vec<f64>` provides natural 8-byte alignment. AVX2 / AVX-512 aligned loads are a PR-perf-6 concern.
+- **AVX-strict alignment (32 / 64 byte).** `Vec<f64>` provides natural 8-byte alignment. AVX2 / AVX-512 aligned loads are a SIMD-era concern.
 - **Universal SoA (deleting `Body`)**. Layered approach keeps `Body` as the API surface; perturbations, templates, save format, render, and inspector continue to read `Body`. SoA is execution state, not a domain type.
-- **Refactoring `Octree::Node` layout**. Internal nodes stay AoS in this PR. SIMD-era refactor candidate.
+- **Refactoring `Octree::Node` layout**. Internal nodes stay AoS here. SIMD-era refactor candidate.
 - **Integrator SoA refactor**. IAS15 is compute-bound in its internal coefficient arrays; Body load is not the dominant cost. Re-evaluate if a future integrator profile shows otherwise.
 - **MAC re-evaluation**. Per the MAC §Decision, MAC re-enters scope only after SoA + SIMD land and the re-measure step (axis 4) reclassifies the engine.
 - **Cross-machine comparison**. Single-hardware as in prior experiments.
@@ -157,11 +155,11 @@ The harness logs `t_pack` per (N, seed, integrator) so future regressions are ca
 
 ## Results
 
-Hardware: AMD Ryzen 5 7600X, Windows 11 (matches perf 2×2 / engine ceiling / MAC). Run via `cargo test --release -p apsis perf_soa_aos_vs_soa -- --ignored --nocapture`. Per-cell wall-time is the within-seed median over 5 measured runs after 3 warmup runs. Both AoS-shadow and SoA-production walks use the same rayon parallel iter (matching the pre-PR-perf-5 production walk semantics). Raw rows in `target/perf-soa/profile.csv`.
+Hardware: AMD Ryzen 5 7600X, Windows 11 (matches perf 2×2 / engine ceiling / MAC). Run via `cargo test --release -p apsis perf_soa_aos_vs_soa -- --ignored --nocapture`. Per-cell wall-time is the within-seed median over 5 measured runs after 3 warmup runs. Both AoS-shadow and SoA-production walks use the same rayon parallel iter (matching the prior production walk semantics). Raw rows in `target/perf-soa/profile.csv`.
 
 ### Tier 1 — Accelerations bit-exact
 
-Recorded at commit `6e6f724` (PR-perf-5 commit 4) when both AoS and SoA paths coexisted. The comparison test `tier1_soa_walk_matches_aos_walk_bit_exact` ran across 6 cells (N ∈ {10³, 5×10³} × 3 seeds) plus 3 cells in exact mode (N = 50, 3 seeds) and asserted per-body acceleration components bit-equal via `f64::to_bits()`. **All 9 cells passed bit-exact, no tolerance needed.** The legacy AoS path was removed in commit `253abe9`; the gate's pass is the historical record this row preserves.
+Recorded when both AoS and SoA paths coexisted. The comparison test `tier1_soa_walk_matches_aos_walk_bit_exact` ran across 6 cells (N ∈ {10³, 5×10³} × 3 seeds) plus 3 cells in exact mode (N = 50, 3 seeds) and asserted per-body acceleration components bit-equal via `f64::to_bits()`. **All 9 cells passed bit-exact, no tolerance needed.** The legacy AoS path was subsequently removed; the gate's pass is the historical record this row preserves.
 
 ### Tier 2 — BH walk wall-time speedup
 
@@ -228,32 +226,32 @@ The combined effect: SoA's theoretical L1-load speedup is real on paper, but com
 
 The Tier 2 miss is a wash, not a regression. Tier 1 proves correctness; Tier 3 proves the snapshot overhead is operationally invisible. The refactor is therefore neutral on the metrics we measured, and structurally meaningful for the next axis on the roadmap:
 
-- **PR-perf-6 (SIMD) is the actual cache-locality test.** SIMD requires dense, aligned loads of the same field across 4 (AVX2) or 8 (AVX-512) bodies in one instruction. AoS cannot vectorise leaf-pair loads natively (each lane would need a gather). SoA and AoSoA both can — SoA via aligned `Vec<f64>` slices, AoSoA via per-chunk vectors. SoA is the necessary structural pre-requisite to AoSoA, and AoSoA is what unlocks SIMD's full speedup. Reverting SoA would force a from-scratch refactor when SIMD lands.
+- **SIMD is the actual cache-locality test.** SIMD requires dense, aligned loads of the same field across 4 (AVX2) or 8 (AVX-512) bodies in one instruction. AoS cannot vectorise leaf-pair loads natively (each lane would need a gather). SoA and AoSoA both can — SoA via aligned `Vec<f64>` slices, AoSoA via per-chunk vectors. SoA is the necessary structural pre-requisite to AoSoA, and AoSoA is what unlocks SIMD's full speedup. Reverting SoA would force a from-scratch refactor when SIMD lands.
 
 - **Domain layer is unchanged.** `Body` API is intact; templates, save format, render, perturbations, inspector all read `Body` as before. The SoA snapshot lives entirely as execution state inside `GravityForceModel`. Reverting saves ~250 LOC of `BodyArrays` + helpers; keeping it costs nothing operationally.
 
 - **Pack overhead is below noise.** 40 µs per `compute()` at N = 10⁴ is 0.45 % of step. If a future workload showed pack as the bottleneck, that would be a dramatic regime shift (and SIMD would presumably be done by then).
 
-### What the result means for PR-perf-6
+### What the result means for the SIMD work
 
 The predicted SIMD gain has to be re-modelled with the same honesty. The cache-line waste argument that motivated SoA also motivated AoSoA-for-SIMD; both proved less load-bearing than expected for the BH walk. The actual SIMD gain will likely come from:
 
 1. Vectorising the per-interaction kernel arithmetic (sqrt, multiply, division) — the dominant cost per §Interpretation.1 above.
 2. Reducing per-body walk overhead via batched stack management.
 
-PR-perf-6's notebook should bound its predictions accordingly — not assume SoA's "lost" gain is recoverable by SIMD on top, but predict SIMD's gain from its own first principles.
+The SIMD work should bound its predictions accordingly — not assume SoA's "lost" gain is recoverable by SIMD on top, but predict SIMD's gain from its own first principles.
 
 ---
 
 ## Decision
 
-**Ship SoA.** Production stays on the SoA snapshot path landed in this PR. Tier 1 holds (bit-exact accelerations, 9 cells); Tier 2 is a wash (median walk ratio 1.015 at N = 10⁴, vs the predicted ≥ 1.20); Tier 3 holds (pack overhead 0.45 % at N = 10⁴, vs the 1 % budget).
+**Ship SoA.** Production stays on the SoA snapshot path. Tier 1 holds (bit-exact accelerations, 9 cells); Tier 2 is a wash (median walk ratio 1.015 at N = 10⁴, vs the predicted ≥ 1.20); Tier 3 holds (pack overhead 0.45 % at N = 10⁴, vs the 1 % budget).
 
 The decision rests on three structural points, not on the Tier 2 measurement:
 
 1. **Correctness is preserved** — the bit-exact gate is the strongest possible evidence the refactor did not regress the physics.
 2. **Operational overhead is absent** — pack cost is below noise; integrator and API stay AoS-ergonomic.
-3. **PR-perf-6 (SIMD) needs SoA as a structural pre-requisite** — AoSoA chunked layouts for SIMD vectorisation are a refinement on top of SoA, not on top of AoS. Reverting SoA would force this refactor to be redone when SIMD lands.
+3. **SIMD needs SoA as a structural pre-requisite** — AoSoA chunked layouts for SIMD vectorisation are a refinement on top of SoA, not on top of AoS. Reverting SoA would force this refactor to be redone when SIMD lands.
 
 The Tier 2 miss is documented honestly: the cache-line waste arithmetic over-predicted the cache-locality gain because it ignored the per-interaction arithmetic cost (compute-bound), the HW prefetcher's coverage of sequential leaf-pair loads, and the internal-node-dominated walk fraction. None of these were callable a priori without the measurement; the prediction was built on the most defensible model available at the time.
 
@@ -261,28 +259,27 @@ The Tier 2 miss is documented honestly: the cache-line waste arithmetic over-pre
 
 | Step | Axis | Status |
 | --- | --- | --- |
-| 1 | MAC (PR-perf-4 / #74) | deferred |
-| 2 | SoA layout (this PR) | **shipped, neutral on Tier 2, structurally landed** |
-| 3 | SIMD kernel (PR-perf-6) | next; predictions to be rebuilt on per-interaction kernel arithmetic, not on residual cache-locality |
+| 1 | MAC | deferred |
+| 2 | SoA layout | **shipped, neutral on Tier 2, structurally landed** |
+| 3 | SIMD kernel | next; predictions to be rebuilt on per-interaction kernel arithmetic, not on residual cache-locality |
 | 4 | Re-measure interaction-bound vs compute-bound classification | gates whether MAC re-enters scope |
-| 5 | Morton (PR-perf-7) | follows the re-measurement, per the engine ceiling §Decision |
+| 5 | Morton | follows the re-measurement, per the engine ceiling §Decision |
 
-PR-perf-6's notebook is the next artefact; its Tier 2 prediction has to bound the SIMD gain from kernel-arithmetic vectorisation directly, given that SoA's load-locality lever turned out empirically inert.
+The SIMD work is the next axis; its Tier 2 prediction has to bound the SIMD gain from kernel-arithmetic vectorisation directly, given that SoA's load-locality lever turned out empirically inert.
 
-### What ships in this PR
+### What changes
 
-| Item | State after PR |
+| Item | State |
 | --- | --- |
-| `BodyArrays` SoA snapshot type | shipped in `crate::domain::body_arrays` |
-| `Body` field rename (`x → pos_x`, `vx → vel_x`, etc.) | shipped, ~36 files touched mechanically |
-| `GravityForceModel` packs SoA snapshot per `compute()` | shipped, replaces direct AoS read |
-| `BarnesHutEngine::build` / `evaluate` / `evaluate_profile` accept `&BodyArrays` | shipped, AoS overloads removed |
-| `perf_soa` harness (`crate::physics::perf_soa`) | removed in the bake commit that follows this §Decision (the `aos_baseline` shadow was the sole reason it existed) |
+| `BodyArrays` SoA snapshot type | landed in `crate::domain::body_arrays` |
+| `Body` field rename (`x → pos_x`, `vx → vel_x`, etc.) | ~36 files touched mechanically |
+| `GravityForceModel` packs SoA snapshot per `compute()` | replaces direct AoS read |
+| `BarnesHutEngine::build` / `evaluate` / `evaluate_profile` accept `&BodyArrays` | AoS overloads removed |
+| `perf_soa` harness (`crate::physics::perf_soa`) | removed once the gates closed (the `aos_baseline` shadow was the sole reason it existed) |
 | `pub(crate)` re-exports of `WalkCounters`, `DEFAULT_LEAF`, `NO_CHILD`, `Node` | reverted with the harness |
 | `Node::new` visibility bumped to `pub(crate)` | reverted with the harness |
-| Notebook (`docs/experiments/2026-05-10-soa-layout.md`) | retained as the closed lab record |
 
-The diff at PR-perf-5's final commit is therefore: production source carries the SoA snapshot type, the renamed `Body` fields, and the SoA-fed engine; the perf harness is gone. This matches the perf-2 / PR-perf-4 closure pattern.
+The net diff is therefore: production source carries the SoA snapshot type, the renamed `Body` fields, and the SoA-fed engine; the perf harness is gone.
 
 ---
 

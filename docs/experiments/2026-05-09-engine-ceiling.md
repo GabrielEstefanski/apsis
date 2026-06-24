@@ -5,8 +5,6 @@
 
 **Status:** Protocol declared a priori, before any instrumentation code is written. §Results populated after the run.
 
-**Branch:** `perf/engine-ceiling`, from `develop` (PR #72 merged carrying the perf 2×2 §Decision).
-
 ---
 
 ## Abstract
@@ -23,7 +21,7 @@ The deliverable is a per-stage cost breakdown and SPS curve sufficient to identi
 
 ## Motivation
 
-The perf 2×2 §Decision queued PR-perf-3 as an MAC comparison. Before committing to that work, two questions are worth empirical answers:
+The perf 2×2 §Decision queued an MAC comparison. Before committing to that work, two questions are worth empirical answers:
 
 1. **Is the BH walk actually the dominant cost at our N target?** If trail recorder, integrator overhead, or another stage dominates, MAC investment optimises something that does not move the user-perceived ceiling.
 2. **Where is the practical interactive ceiling?** REBOUND publishes headline numbers for IAS15 (~10² interactive, ~10³–10⁴ offline) and tree code (~10⁵ interactive, ~10⁶ offline with SIMD). Apsis's actual ceiling has not been measured end-to-end; without that number, "respectable" or "needs work" is intuition, not evidence.
@@ -98,7 +96,7 @@ The Apsis/REBOUND ratio per cell answers "are we within 2× of the reference imp
 
 | Outcome | Diagnostic | Action |
 | --- | --- | --- |
-| BH walk dominates VV at N = 10⁴ AND `t_per_interaction` is roughly N-flat | Walk is compute-bound, cache fits L2/L3 | MAC (PR-perf-4) is the right next investment; SIMD adds value but second-order |
+| BH walk dominates VV at N = 10⁴ AND `t_per_interaction` is roughly N-flat | Walk is compute-bound, cache fits L2/L3 | MAC is the right next investment; SIMD adds value but second-order |
 | BH walk dominates VV at N = 10⁴ AND `t_per_interaction` grows with N | Walk is memory-bound earlier than predicted | SoA refactor + SIMD is a more pressing investment than MAC |
 | Trail recorder ≥ 30 % of total at N = 10⁴ | Trail recording is rate-limiting | Optimise trail buffer (down-sample, lazy snapshot) before further BH work |
 | `t_integrator_overhead` ≥ 30 % of VV total | Kick/drift bookkeeping is rate-limiting | Investigate integrator step impl; possibly inline force-call boundary |
@@ -213,7 +211,7 @@ The escalation is one-shot: if (γ) doesn't resolve ambiguity, the next investig
 
 ## Results
 
-**Hardware / build identifier** (matches PR-perf-2 §Results for cross-experiment comparability):
+**Hardware / build identifier** (matches the perf 2×2 §Results for cross-experiment comparability):
 
 - CPU: AMD Ryzen 5 7600X, 6 cores
 - OS: Windows 11
@@ -225,7 +223,7 @@ CSV exports: `target/engine-ceiling/profile_v.csv` (12 rows), `target/engine-cei
 
 ### Tier 1 — Per-stage breakdown (Cell V, gated)
 
-Sanity gate (`|sum_phases − t_total| / t_total ≤ 5 %`): **PASS at every (N, trail) combination**, observed range 99.7–100 % phase coverage. Instrumentation has no measurable gap.
+Sanity gate (`|sum_phases − t_total| / t_total ≤ 5 %`): **passes at every (N, trail) combination**, observed range 99.7–100 % phase coverage. Instrumentation has no measurable gap.
 
 Phase breakdown at θ = 0.5, trail off (median across measured steps, percentages of `t_total`):
 
@@ -238,7 +236,7 @@ Phase breakdown at θ = 0.5, trail off (median across measured steps, percentage
 | 50 000 | 249 ms | 3.3 % | **96.5 %** | 0.2 % | 0.0 % |
 | 100 000 | 707 ms | 4.5 % | **95.3 %** | 0.3 % | 0.0 % |
 
-Tree-build share decays from 15 % at N = 100 (where the BH walk is so cheap that build dominates the small step budget) down to 3–5 % at N ≥ 5 000 — the regime where the walk dominates outright. Sub-bound `t_tree_build + t_bh_walk ≥ 85 %` at N ≥ 10⁵: observed 99.8 % at N = 10⁵; **PASS with 15 percentage-point headroom**.
+Tree-build share decays from 15 % at N = 100 (where the BH walk is so cheap that build dominates the small step budget) down to 3–5 % at N ≥ 5 000 — the regime where the walk dominates outright. Sub-bound `t_tree_build + t_bh_walk ≥ 85 %` at N ≥ 10⁵: observed 99.8 % at N = 10⁵; **passes with 15 percentage-point headroom**.
 
 Trail-recorder cost (cells V at trail = on, delta vs trail = off):
 
@@ -359,21 +357,21 @@ The data fires three of the protocol's decision rules cleanly:
 
 | Rule | Trigger | Action |
 | --- | --- | --- |
-| BH walk dominates VV at N = 10⁴ AND `t_per_interaction` ≈ N-flat | Walk = 96.6 %; `t_per_interaction` varies 1.24× | **MAC (PR-perf-4) attacks the right axis**: reduces work volume the dominant stage processes |
-| Apsis SPS / REBOUND SPS < 0.2 across comparable cells | All three measured comparisons fall below the threshold | **SIMD + SoA layout (PR-perf-5/6) needed for paper-credibility baseline**; not a silver bullet — closes a structural engineering gap, does not fix the interaction-bound problem |
+| BH walk dominates VV at N = 10⁴ AND `t_per_interaction` ≈ N-flat | Walk = 96.6 %; `t_per_interaction` varies 1.24× | **MAC attacks the right axis**: reduces work volume the dominant stage processes |
+| Apsis SPS / REBOUND SPS < 0.2 across comparable cells | All three measured comparisons fall below the threshold | **SIMD + SoA layout needed for paper-credibility baseline**; not a silver bullet — closes a structural engineering gap, does not fix the interaction-bound problem |
 | Trail recorder ≥ 30 % of total at N = 10⁴ | 0.2 % observed | **No trail-recorder optimisation needed**; the suspicion is empirically resolved |
 
 ### Sequencing (4-axis roadmap, measure-first between SIMD and Morton)
 
 The engine's roadmap is multi-factorial; no single PR closes the REBOUND gap or fully exploits the interaction-bound classification. Each axis ships as a discrete experiment with its own lab notebook and a-priori bounds:
 
-| # | PR | Axis attacked | Expected ROI (a priori) | Notes |
+| # | Work item | Axis attacked | Expected ROI (a priori) | Notes |
 | ---: | --- | --- | --- | --- |
 | 4 | **MAC comparison** | work-volume reduction | 0.6–0.8× walk time (Barnes 1990 ≈ 15–25 %; Dehnen 2002 ≈ 30–50 %) | Discrete, literature-backed, no layout dependency. Ships first. |
 | 5 | **SoA layout refactor** | foundation enabler | 0.85–0.95× standalone (mild cache locality gain) | Foundational — SoA is **not** primarily a cache optimisation; it is the prerequisite for efficient SIMD vectorisation across nodes. AoS Node forces gather/scatter loads in any SIMD attempt. |
 | 6 | **SIMD inner kernel** | per-interaction cost | 0.4–0.7× per-interaction (1.5–2.5× speedup, 3× ceiling with full alignment) | Engineering baseline against REBOUND. Multiplicative with MAC's interaction reduction. Realistic ceiling, not silver bullet — `t_per_interaction` is already low. |
-| 6.5 | **Re-measure ceiling profile** | calibration | n/a | Critical step. SoA + SIMD will materially shift the cache-pressure profile (denser access patterns, faster kernel makes traversal relatively heavier). The Morton calculus from PR-perf-2 (deferred at D-vs-C = 1.03×) is invalidated by these changes. Re-running this experiment at this point answers "does Morton now help or still not?" with current data. |
-| 7 | **Re-evaluate Morton sortation** | conditional cache locality | 0.85–0.95× **conditional on PR-6.5 results**; may stay deferred | Either ship (if re-measurement shows D-vs-C now under 0.90) or document as still-deferred (if Morton remains marginal). The decision is gated on re-measurement, not re-litigated by intuition. |
+| 6.5 | **Re-measure ceiling profile** | calibration | n/a | Critical step. SoA + SIMD will materially shift the cache-pressure profile (denser access patterns, faster kernel makes traversal relatively heavier). The Morton calculus from the perf 2×2 experiment (deferred at D-vs-C = 1.03×) is invalidated by these changes. Re-running this experiment at this point answers "does Morton now help or still not?" with current data. |
+| 7 | **Re-evaluate Morton sortation** | conditional cache locality | 0.85–0.95× **conditional on the re-measurement results**; may stay deferred | Either ship (if re-measurement shows D-vs-C now under 0.90) or document as still-deferred (if Morton remains marginal). The decision is gated on re-measurement, not re-litigated by intuition. |
 | 8 | Tree shape micro-tuning | fine-tuning | < 10 % | Defers; LEAF = 8 stays as production default per perf 2×2 §Results. |
 
 **Multiplicative speedup ceiling (a priori, with explicit non-independence caveat)**:
@@ -389,7 +387,7 @@ This is the realistic v1 paper claim envelope. It does not chase REBOUND parity 
 
 **Production engine remains unchanged.** The instrumentation infrastructure (`WalkCounters`, `evaluate_profile`, `engine_ceiling.rs` test module) ships as-is — `evaluate_profile` is `pub(crate)` and the harness is `#[cfg(test)]`, so the public API and the `evaluate` hot path are untouched.
 
-**§Decision provenance.** This section was written after the cell V harness completed (220 s) and the cell I harness completed (19 s, partial), with all derived metrics computed from the per-row eprintln output and the CSVs archived under `target/engine-ceiling/`. Decision rules and escalation triggers were declared a priori in the Hypothesis and §Escalation rules sections of this same notebook before any instrumentation code was written. The 4-axis sequencing was added after the data landed, in response to the recognition that the original "MAC vs SIMD" framing collapsed two distinct axes (work-volume reduction vs per-interaction cost) and a foundation enabler (SoA layout) into a binary that did not survive the data; the roadmap now respects the multi-factorial nature of the gap to REBOUND.
+**§Decision provenance.** Decision rules and escalation triggers were declared a priori in the Hypothesis and §Escalation rules sections before any instrumentation code was written. The 4-axis sequencing reflects the recognition that the original "MAC vs SIMD" framing collapsed two distinct axes (work-volume reduction vs per-interaction cost) and a foundation enabler (SoA layout) into a binary that did not survive the data; the roadmap now respects the multi-factorial nature of the gap to REBOUND.
 
 ---
 

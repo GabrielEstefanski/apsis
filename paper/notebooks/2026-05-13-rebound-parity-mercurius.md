@@ -1,17 +1,15 @@
 # REBOUND parity — Mercurius
 
 **Date:** 2026-05-13
-**Subject:** Numerical agreement between apsis Mercurius (`crates/apsis/src/physics/integrator/mercurius.rs`) and REBOUND's MERCURIUS (Rein et al. 2019) on a Solar-System scenario with a Jupiter-crossing test particle. The paired Mercurius lab notebook (`docs/experiments/2026-05-13-mercurius-hybrid.md` §Tier 2) deferred this gate to a separate validation PR; this is that PR's notebook.
+**Subject:** Numerical agreement between apsis Mercurius (`crates/apsis/src/physics/integrator/mercurius.rs`) and REBOUND's MERCURIUS (Rein et al. 2019) on a Solar-System scenario with a Jupiter-crossing test particle. The paired Mercurius lab notebook (`docs/experiments/2026-05-13-mercurius-hybrid.md` §Tier 2) deferred this cross-implementation parity gate; this notebook records it.
 
 **Status:** Protocol declared *a priori*, before any code lands. Bounds and scenario locked from the Mercurius lab notebook §Tier 2 specification, refined to the practical horizon and dt that fit the existing `validation/rebound-parity/` infrastructure.
-
-**Branch:** `validation/mercurius-parity`, branched from `develop` post-merge of PR #83. Independent of any other in-flight work.
 
 ---
 
 ## Abstract
 
-Mercurius shipped in PR #83 with structural (Tier 1) and cost (Tier 4) validation but no cross-implementation parity. The federated FPM thesis treats integrators as first-class scientific artifacts that age well — the strongest substantiation for that claim is bit-level numerical agreement with the canonical REBOUND implementation on a scenario that actively engages the close-encounter sub-integration. This experiment is that gate.
+Mercurius shipped with structural (Tier 1) and cost (Tier 4) validation but no cross-implementation parity. The federated FPM thesis treats integrators as first-class scientific artifacts that age well — the strongest substantiation for that claim is bit-level numerical agreement with the canonical REBOUND implementation on a scenario that actively engages the close-encounter sub-integration. This experiment is that gate.
 
 The scenario is a Sun + 4 outer planets + 1 Jupiter-crossing test particle, integrated for 10⁴ years (~840 Jupiter orbits, ~1170 test-particle orbits) under Mercurius with REBOUND's default `r_crit_hill = 3` on both sides. Output is sampled at 1-year cadence; conservation diagnostics (ΔE / E₀, Δ Lz / Lz₀) and the test particle's osculating elements (a, e, i) are compared between implementations.
 
@@ -40,7 +38,7 @@ Units: solar AU-year (`UnitSystem::solar()`), G ≈ 4π². All bodies start at t
 | Neptune | 5.15 × 10⁻⁵ | 30.07 | 0.0 | 0.0 | 3π/2 |
 | Test particle | 1.0 × 10⁻⁹ | 4.20 | 0.40 | 0.05 | 0.0 |
 
-The test particle's `a = 4.20 AU`, `e = 0.40`, `i = 0.05 rad` give an apoapsis at `5.88 AU` (above Jupiter's circular orbit) and periapsis at `2.52 AU` (below). Inclination of 0.05 rad keeps the encounter geometry 3D-non-trivial (out-of-plane). This guarantees the test particle's orbit crosses Jupiter's during the 1000-year integration; the exact encounter times are dictated by the resonance structure and are not specified — the parity gates on conservation and final orbital elements, both of which are insensitive to encounter phase.
+The test particle's `a = 4.20 AU`, `e = 0.40`, `i = 0.05 rad` give an apoapsis at `5.88 AU` (above Jupiter's circular orbit) and periapsis at `2.52 AU` (below). Inclination of 0.05 rad keeps the encounter geometry 3D-non-trivial (out-of-plane). This guarantees the test particle's orbit crosses Jupiter's during the 10⁴-year integration; the exact encounter times are dictated by the resonance structure and are not specified — the parity gates on conservation and final orbital elements, both of which are insensitive to encounter phase.
 
 The four outer planets are placed on circular coplanar orbits at named heliocentric distances (Murray & Dermott §3 canonical values). Eccentricity and inclination set to zero so the IC are bit-reproducible across both implementations from the (a, M, ν) → (q, v) Keplerian conversion.
 
@@ -58,8 +56,8 @@ The four outer planets are placed on circular coplanar orbits at named heliocent
 
 ### Run parameters
 
-- Total integration: 1000 years (≈ 84 Jupiter orbits, ≈ 117 test-particle orbits at a=4.20).
-- Output cadence: 1 sample per year, plus initial state — 1001 samples per body per run.
+- Total integration: 10⁴ years (≈ 840 Jupiter orbits, ≈ 1170 test-particle orbits at a=4.20).
+- Output cadence: 1 sample per year, plus initial state — 10001 samples per body per run.
 - Output format: per-body (pos_x, pos_y, pos_z, vel_x, vel_y, vel_z, mass) + total energy + total angular momentum z-component, at every sample time.
 
 ### Hypothesis
@@ -74,7 +72,7 @@ The four outer planets are placed on circular coplanar orbits at named heliocent
 
 #### Tier 2 — Test-particle orbital element parity *(hard gate)*
 
-After 1000 years, the test particle has experienced at least one Jupiter encounter (the orbital geometry guarantees it). Compare its osculating elements at t = 1000 yr:
+After 10⁴ years, the test particle has experienced at least one Jupiter encounter (the orbital geometry guarantees it). Compare its osculating elements at t = 10⁴ yr:
 
 | Element | Bound (relative) |
 | --- | --- |
@@ -92,7 +90,7 @@ REBOUND-side ΔE/E₀ and ΔLz/Lz₀ peak should sit at the symplectic-class flo
 
 Three-side test infrastructure following the existing `validation/rebound-parity/{kepler,figure8,pythagorean,retrograde}/` pattern:
 
-1. **apsis side** (`crates/apsis/examples/rebound_parity_mercurius.rs`): instantiates the scenario, runs Mercurius for 1000 years, writes `out/apsis.csv` with one row per sample.
+1. **apsis side** (`crates/apsis/examples/rebound_parity_mercurius.rs`): instantiates the scenario, runs Mercurius for 10⁴ years, writes `out/apsis.csv` with one row per sample.
 2. **REBOUND side** (`validation/rebound-parity/mercurius/rebound_side.py`): reads apsis's actual sample times from `out/apsis.csv`, sets up the same scenario in REBOUND, runs MERCURIUS landing at apsis's sample times via `exact_finish_time = 1`, writes `out/rebound.csv`.
 3. **Comparator** (`validation/rebound-parity/mercurius/compare.py`): loads both CSVs, computes the Tier 1/2/3 metrics, exits 0 iff every gated metric is within tolerance, writes `out/comparison.json` with the structured report.
 
@@ -106,9 +104,9 @@ Same argument as the Kepler parity notebook (`docs/experiments/2026-04-25-reboun
 
 ## Results
 
-Run on Ubuntu 24.04 (WSL2) with REBOUND 4.6.0, apsis from
-`feat: REBOUND-side + comparator for Mercurius parity` on top of develop
-(post-merge of the kepler μ≠1 fix, PR #84). Cell A hardware (Zen 4 desktop).
+Run on Ubuntu 24.04 (WSL2) with REBOUND 4.6.0, apsis with the
+REBOUND-side and comparator for Mercurius parity, on top of the
+kepler μ≠1 fix. Zen 4 desktop.
 
 ### Tier 1 — Conservation parity *(all gates PASS)*
 
@@ -263,7 +261,7 @@ strength of Tier 1 alone:
 > over 10⁴ years on a Sun + 4 outer planets + Jupiter-crossing
 > test-particle scenario.
 
-Open follow-ups (separate PRs):
+Open follow-ups:
 
 - **Tier 3 — Smooth-vs-hard changeover signature**: still deferred,
   documents §Decision rationale for the L_mercury smooth changeover

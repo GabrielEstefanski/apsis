@@ -6,8 +6,6 @@
 
 **Status:** Protocol declared *a priori*, before any code lands. Locks the algorithmic decisions and validation scenario before implementation.
 
-**Branch:** `feat/implicit-midpoint`, branched from `develop` after PR #101 (WHFast Phase 2) lands or as a parallel track — IntegratorKind enum conflict is trivial.
-
 **Roadmap context:** Co-priority with WHFast in the integrator-zoo roadmap. Where WHFast is the long-horizon planetary baseline and Mercurius is the close-encounter hybrid, Implicit Midpoint is the *implicit* baseline — paper credibility for any regime where explicit methods are unstable: stiff perturbations, extreme mass ratios, dissipative dynamics. Forward-compatible for the v0.2 regime exploration (PN ≥ 2, particle tests, BH binaries, pulsar orbits with radiation reaction).
 
 ---
@@ -35,11 +33,11 @@ Three claims chain into this experiment:
 
 2. **Future regime exploration (v0.2+) requires A-stability.** The user's stated v0.2 regime portfolio includes: PN ≥ 2 corrections (chaotic at small `r/M`), test-particle integration around dynamical perturbers (massive-particle stiffness), BH binary dynamics (extreme mass ratio), pulsar orbits with gravitational-radiation back-reaction (intrinsically dissipative). Every one of these scenarios is a stress test for explicit symplectic methods. Implicit Midpoint is the paper-grade tool of choice for these regimes — having it in the zoo *before* the v0.2 work begins means each new regime experiment can use it as the stable baseline against which other methods are measured.
 
-3. **The federation contract must hold across implicit/explicit boundaries.** WHFast + 1PN (PR #101) and Mercurius + 1PN (PR #83) demonstrated that explicit symplectic integrators dispatch the operator framework correctly. Demonstrating Implicit Midpoint + 1PN at the same federation gate (Mercury precession within the noise floor) closes the contract for the implicit class and makes the federation claim integrator-class-independent. This is the v0.1 paper-portfolio item.
+3. **The federation contract must hold across implicit/explicit boundaries.** WHFast + 1PN and Mercurius + 1PN demonstrated that explicit symplectic integrators dispatch the operator framework correctly. Demonstrating Implicit Midpoint + 1PN at the same federation gate (Mercury precession within the noise floor) closes the contract for the implicit class and makes the federation claim integrator-class-independent. This is the v0.1 paper-portfolio item.
 
 ### What this experiment is NOT testing
 
-- **Not 4th/6th-order Gauss–Legendre.** Higher-order implicit symplectic methods exist (Hairer-Lubich-Wanner II.1.4) and would slot into the same iteration loop. Out of scope for this PR; tracked as follow-up.
+- **Not 4th/6th-order Gauss–Legendre.** Higher-order implicit symplectic methods exist (Hairer-Lubich-Wanner II.1.4) and would slot into the same iteration loop. Out of scope here; tracked as follow-up.
 - **Not Newton-Krylov iteration.** Fixed-point iteration on the midpoint state converges for non-stiff and mildly-stiff problems; Newton iteration with an analytical or finite-difference Jacobian is the standard fallback for very stiff systems. The fixed-point baseline lets us measure where the breakdown is and motivates the Newton follow-up empirically.
 - **Not adaptive dt.** Adaptive-step symplectic methods are research-grade complexity (Hairer-Wanner-Lubich §VIII.7) because step-size variation breaks the symplectic structure unless carefully constructed. Out of v1 scope; fixed-dt baseline is the standard reference.
 - **Not a replacement for IAS15.** IAS15 is the precision-controlled adaptive method; Implicit Midpoint is fixed-step A-stable. They cover different reviewer expectations and both ship.
@@ -54,11 +52,11 @@ Three claims chain into this experiment:
 | Public name | `IntegratorKind::ImplicitMidpoint`, slug `"implicit_midpoint"` | Matches Hairer-Lubich-Wanner naming. Self-documenting. |
 | Order | 2nd (single Gauss point) | Matches WH 1991 / WHFast / Mercurius for clean cross-integrator comparison. Higher orders deferred. |
 | Coordinate frame | Barycentric inertial | No DH split, no Jacobi split, no central-mass assumption. **Differentiator vs WH/WHFast/Mercurius**: works on any topology — BH binaries, equal-mass triples, particle clouds, dissipative systems. This is the load-bearing differentiator for v0.2 regime work. |
-| Iteration solver enum | `Solver { Picard, Newton }` reserved in v1; only `Picard` implemented | API surface stable from v1. Newton lands in a follow-up PR (#117) with the *same* iteration loop, *same* convergence criterion, *same* diagnostic emission — only the per-iteration update rule differs. Avoids API churn between v1 and v2. v1 calling `with_solver(Solver::Newton)` panics with an explicit "see issue #117" message. |
-| Default iteration solver | `Solver::Picard` (fixed-point on the midpoint state) | No Jacobian required. Sufficient for non-stiff and mildly-stiff conservative dynamics — the v0.1 paper-portfolio scenarios all sit in this regime. Newton becomes the user-selectable choice for stiff systems once #117 lands. |
+| Iteration solver enum | `Solver { Picard, Newton }` reserved in v1; only `Picard` implemented | API surface stable from v1. Newton lands as a follow-up with the *same* iteration loop, *same* convergence criterion, *same* diagnostic emission — only the per-iteration update rule differs. Avoids API churn between v1 and v2. v1 calling `with_solver(Solver::Newton)` panics with an explicit not-yet-implemented message. |
+| Default iteration solver | `Solver::Picard` (fixed-point on the midpoint state) | No Jacobian required. Sufficient for non-stiff and mildly-stiff conservative dynamics — the v0.1 paper-portfolio scenarios all sit in this regime. Newton becomes the user-selectable choice for stiff systems once the follow-up lands. |
 | Convergence criterion | `‖y_k - y_{k-1}‖ / ‖y_k‖ < ε_iter` (relative state delta on positions + velocities, two-norm) | Matches the iteration-residual standard in numerical-ODE literature (Iserles §7, Hairer-Wanner §IV.8). Per-iteration cost of evaluating norms is `O(N)`, dwarfed by the force evaluation. |
 | Default tolerance | `ε_iter = 8 · f64::EPSILON ≈ 1.78e-15` | Conservative: tighter than the integrator's truncation floor (`O(dt²)`), so the iteration converges below the discretisation noise. Builder accessor `with_iteration_tolerance(ε)`. |
-| Max iterations | `max_iter = 10` default | Standard heuristic from numerical-ODE practice. On divergence: emit `Warn` diagnostic on the log bus, set `StepResult::degraded = true`, **do not silently fall back to another integrator** — paper-grade determinism trumps engineering pragmatism (per the discussion that motivated this experiment). Builder accessor `with_max_iterations(n)`. |
+| Max iterations | `max_iter = 10` default | Standard heuristic from numerical-ODE practice. On divergence: emit `Warn` diagnostic on the log bus, set `StepResult::degraded = true`, **do not silently fall back to another integrator** — paper-grade determinism trumps engineering pragmatism. Builder accessor `with_max_iterations(n)`. |
 | Adaptive dt | Disabled (fixed-dt only) | Adaptive symplectic is research-grade. Out of v1 scope. |
 | Hierarchy gate | None — `is_suitable_for(_) -> true` | IM works on any system topology. **No central-mass dominance assumption** (vs WH/WHFast/Mercurius). Differentiator for non-planetary regimes. |
 | Conservation handling | `HamiltonianOperator` + `NonConservativeOperator` both honored through standard dispatch | No special-case logic. The midpoint scheme is naturally compatible with both: conservative parts contribute symplectically, non-conservative parts dissipate as physically required. Forward-compat for pulsar / radiation regimes. |
@@ -244,7 +242,7 @@ Failure-mode interpretation if any tier regresses in the future:
 - **Tier 1 fails** → perturbation wiring through the iteration loop regressed; check that `force_model.compute` and operator dispatch are called inside the iteration on the *midpoint* state, not the start-of-step state.
 - **Tier 2 fails (secular drift visible)** → endpoint `|ΔE/E₀|` grows with `t` instead of staying inside peak oscillation. Iteration is converging to the wrong fixed point (sign bug in midpoint formula), or `ε_iter` is too loose for the chosen `dt`.
 - **Tier 3 fails** → midpoint position formula asymmetric (e.g. forward uses `q_n + dt · v_avg`, backward uses `q_n + dt · v_n`).
-- **Tier 4 reports `max_iter` saturation** → fixed-point divergence in the stiff regime; trigger the Newton-iteration follow-up (#117). Not a v1 regression on the smooth scenarios validated here.
+- **Tier 4 reports `max_iter` saturation** → fixed-point divergence in the stiff regime; trigger the Newton-iteration follow-up. Not a v1 regression on the smooth scenarios validated here.
 
 ---
 
@@ -252,18 +250,18 @@ Failure-mode interpretation if any tier regresses in the future:
 
 Honest scope of what this integrator does *not* solve:
 
-- **Not L-stable.** Implicit midpoint's amplification factor `R(z) = (1 + z/2)/(1 - z/2)` tends to `−1` as `Re(z) → −∞`, not to `0`. Infinitely stiff modes are not damped — they are sign-flipped, oscillating instead of relaxing. For dissipation-dominant extreme regimes (BH–BH inspiral close to merger; pulsar binaries with intense gravitational-radiation back-reaction; any system where the dissipative timescale is far shorter than `dt`), this integrator will oscillate where an L-stable method would relax. The right tools for that regime are **Radau IIA, BDF, or TR-BDF2** — tracked as v0.2+ extensions, *not* claimed by this PR.
-- **Not stiff out of the box.** Picard fixed-point converges only when `dt · ∂f/∂y` has spectral radius `< 1` in the relevant operator norm. For very stiff systems Picard diverges and Newton is required. Newton-Krylov is committed (#117) but ships in a separate PR; v1 ships Picard alone with the explicit API reservation.
+- **Not L-stable.** Implicit midpoint's amplification factor `R(z) = (1 + z/2)/(1 - z/2)` tends to `−1` as `Re(z) → −∞`, not to `0`. Infinitely stiff modes are not damped — they are sign-flipped, oscillating instead of relaxing. For dissipation-dominant extreme regimes (BH–BH inspiral close to merger; pulsar binaries with intense gravitational-radiation back-reaction; any system where the dissipative timescale is far shorter than `dt`), this integrator will oscillate where an L-stable method would relax. The right tools for that regime are **Radau IIA, BDF, or TR-BDF2** — tracked as v0.2+ extensions, *not* claimed here.
+- **Not stiff out of the box.** Picard fixed-point converges only when `dt · ∂f/∂y` has spectral radius `< 1` in the relevant operator norm. For very stiff systems Picard diverges and Newton is required. Newton-Krylov is committed as a follow-up; v1 ships Picard alone with the explicit API reservation.
 - **Not adaptive.** Fixed-step. Variable-step symplectic methods (Hairer-Wanner-Lubich §VIII.7) require careful construction to preserve the symplectic property and are deferred.
 - **Not faster than explicit methods on non-stiff problems.** Cost is ~10× a Velocity-Verlet step for the same accuracy on non-stiff gravity. The justification for shipping IM is regime coverage and the implicit-class slot in the integrator zoo, not speed.
 
 ## Committed roadmap (named follow-ups, not optional)
 
-These are tracked as issues from this PR's merge — not "if-needed" future work, but next-PR roadmap commitments that complete the implicit-symplectic line in the integrator zoo:
+These are roadmap commitments that complete the implicit-symplectic line in the integrator zoo:
 
-- **#117 — Newton-Krylov solver.** Same iteration loop, same convergence criterion, same diagnostic emission as Picard; only the per-iteration update rule differs. Reuses `Solver` enum + `IterationOutcome` types reserved in v1. Trigger: before v0.2 stiff-regime work begins. Estimated cost: 2-3 days.
-- **#118 — Gauss-Legendre 4th and 6th order.** "Production-grade" implicit symplectic — same theoretical foundation as IM2 (Gauss-Legendre is the family; IM2 is the 1-stage member), substantially better accuracy per step. Reuses the v1 `Solver` / `IterationOutcome` / `ConvergenceCriterion` types via composition; the new struct(s) handle multi-stage iteration over `s × N` midpoint states without rewriting the v1 scaffolding. Trigger: immediately after this PR merges. Estimated cost: 2-3 days for 4th order, additional 1 day for 6th.
-- **#119 — `IntegrationReport` `#[must_use]` enforcement.** Workspace-wide API change to make integrator-side diagnostics impossible to ignore at the language level. Out of scope for this PR (touches every integrator + every example + Python binding); the IM v1 integrator emits `degraded: true` correctly into the existing `StepResult` / `Metrics` / log-bus paths. Trigger: when one of the existing integrators or this one produces a misuse case in the wild.
+- **Newton-Krylov solver.** Same iteration loop, same convergence criterion, same diagnostic emission as Picard; only the per-iteration update rule differs. Reuses `Solver` enum + `IterationOutcome` types reserved in v1. Trigger: before v0.2 stiff-regime work begins. Estimated cost: 2-3 days.
+- **Gauss-Legendre 4th and 6th order.** "Production-grade" implicit symplectic — same theoretical foundation as IM2 (Gauss-Legendre is the family; IM2 is the 1-stage member), substantially better accuracy per step. Reuses the v1 `Solver` / `IterationOutcome` / `ConvergenceCriterion` types via composition; the new struct(s) handle multi-stage iteration over `s × N` midpoint states without rewriting the v1 scaffolding. Estimated cost: 2-3 days for 4th order, additional 1 day for 6th.
+- **`IntegrationReport` `#[must_use]` enforcement.** Workspace-wide API change to make integrator-side diagnostics impossible to ignore at the language level (touches every integrator + every example + Python binding); the IM v1 integrator emits `degraded: true` correctly into the existing `StepResult` / `Metrics` / log-bus paths. Trigger: when one of the existing integrators or this one produces a misuse case in the wild.
 
 ## Future work (genuinely deferred — no commitment)
 
