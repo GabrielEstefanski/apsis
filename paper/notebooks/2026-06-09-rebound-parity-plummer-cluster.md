@@ -154,17 +154,17 @@ bound of the per-component form declared in §Hypothesis.
 ## Phase 1 results (2026-06-10) — gated run, N = 10³
 
 All twelve gated metrics pass at the floors frozen in §Phase 0. Per-side
-wall time: apsis 214 s (2412 accepted steps), REBOUND 75 s (1165 steps);
+wall time: apsis 214 s (2453 accepted steps), REBOUND 75 s (1166 steps);
 REBOUND's minimum accepted dt was 2.7 × 10⁻³ — no close-encounter stiffness,
 matching the pilot. The step-count ratio (≈ 2.1×) is consistent across both
 phases.
 
 | Metric (max over samples) | apsis | REBOUND | cross | gate |
 | --- | ---: | ---: | ---: | ---: |
-| \|ΔE/E₀\| | 5.9 × 10⁻¹⁵ | 6.4 × 10⁻¹⁵ | 2.2 × 10⁻¹⁵ | 2.6–4.2 × 10⁻¹² |
-| \|Δ**L**\| | 5.4 × 10⁻¹⁷ | 5.2 × 10⁻¹⁷ | 3.0 × 10⁻¹⁷ | 1.9–2.8 × 10⁻¹⁵ |
-| \|Δ**P**\| | 3.8 × 10⁻¹⁷ | 4.2 × 10⁻¹⁷ | 4.1 × 10⁻¹⁷ | 1.3–1.8 × 10⁻¹⁵ |
-| \|Δ**r**_COM\| | 6.5 × 10⁻¹⁶ | 6.5 × 10⁻¹⁶ | 9.7 × 10⁻¹⁷ | 1.9–3.8 × 10⁻¹⁵ |
+| \|ΔE/E₀\| | 6.4 × 10⁻¹⁵ | 6.3 × 10⁻¹⁵ | 1.2 × 10⁻¹⁵ | 2.6–4.2 × 10⁻¹² |
+| \|Δ**L**\| | 5.7 × 10⁻¹⁷ | 5.7 × 10⁻¹⁷ | 3.5 × 10⁻¹⁷ | 1.9–2.8 × 10⁻¹⁵ |
+| \|Δ**P**\| | 4.7 × 10⁻¹⁷ | 4.5 × 10⁻¹⁷ | 3.6 × 10⁻¹⁷ | 1.3–1.8 × 10⁻¹⁵ |
+| \|Δ**r**_COM\| | 6.5 × 10⁻¹⁶ | 6.4 × 10⁻¹⁶ | 1.0 × 10⁻¹⁶ | 1.9–3.8 × 10⁻¹⁵ |
 
 Energy sits ~450× under its gate on both sides; the conserved integrals of
 the softened Hamiltonian agree between implementations at the f64 round-off
