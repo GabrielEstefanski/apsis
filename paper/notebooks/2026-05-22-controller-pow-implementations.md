@@ -133,6 +133,8 @@ The `libm` result reproduces with the adaptive step-size ratio routed through `l
 
 The Mercury 1PN agreement cited in v0.1 user-facing documentation updates from 4.4 ppm to 28 ppm against the closed-form GR prediction. Cross-platform reproducibility (`paper/notebooks/2026-05-20-cross-platform-determinism.md`) is preserved. The previously-cited value is attributable to the Windows UCRT operating point.
 
+> **Superseded (2026-06).** ADR-014 moved the `for_units` $c$, and the exact-finish-time fix (ADR-015) removed the endpoint-sampling term that dominated both values above. The documented residual is now $4.6\times10^{-6}$, CI-gated below $9.2\times10^{-6}$; derivation in `2026-06-10-mercury-1pn-error-budget.md`. The ULP methodology and the UCRT-vs-libm comparison in this notebook are unaffected.
+
 The method (workload capture, comparison against an arbitrary-precision oracle rounded to f64, ULP distribution aggregation) applies to any adaptive integrator or operator using transcendentals on an integration-critical path.
 
 ---

@@ -30,7 +30,11 @@ and `paper.md` §3.2):
 
 Apsis measurement (post-unwrap): drift $\approx -2.289 \times 10^6$
 arcsec/century, $\sim 5\times 10^4$ times the GR signal and of the
-wrong sign. The harness at
+wrong sign. (The paper quotes $-2.288\times 10^6$, the
+full-potential quadrature value; the $\sim 0.04\,\%$ offset between
+the osculating post-unwrap measurement here and the quadrature value
+is the osculating-vs-geometric definition difference, not a
+discrepancy.) The harness at
 `crates/apsis-1pn/tests/softened_plummer_precession_validation.rs` re-measures the
 drift under the same conditions and exposes the value through
 `cargo test --release ... --nocapture` for cross-check against the
