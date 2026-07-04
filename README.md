@@ -29,8 +29,8 @@ Windows and Linux on x86_64.
 > **Status.** Pre-release (`v0.1.0` alpha). 3D-aware physics core
 > (Vec3, inclined orbits, 3D observables). Multiple published operator
 > crates exercise the federation contract end-to-end. Public API
-> stabilised but not yet tagged; citation DOI pending first Zenodo
-> release.
+> stabilised; tagged `v0.1.0-alpha.1`, archived at Zenodo
+> (DOI [10.5281/zenodo.21197539](https://doi.org/10.5281/zenodo.21197539)).
 
 ---
 
@@ -376,8 +376,15 @@ Licensed under the [Apache License, Version 2.0](LICENSE).
 
 ## Citing this work
 
-*(A Zenodo DOI and JOSS reference will appear here after the first tagged
-release.)*
+[![DOI](https://zenodo.org/badge/1199747853.svg)](https://doi.org/10.5281/zenodo.21197539)
+
+> Estefanski, G. B. (2026). *apsis: A Federated Model for Composable
+> N-Body Force Artifacts* (v0.1.0-alpha.1) [Computer software]. Zenodo.
+> <https://doi.org/10.5281/zenodo.21197539>
+
+The DOI above cites all versions and resolves to the latest release;
+`CITATION.cff` carries the version-specific DOI
+(10.5281/zenodo.21197540).
 
 ## References
 

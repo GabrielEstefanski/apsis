@@ -876,7 +876,7 @@ configuration additionally compiles every example crate, rejects
 warnings under `cargo clippy --all-targets`, and verifies that the
 library crate resolves no user-interface dependency. A pinned
 snapshot of the source archive corresponding to this paper is
-deposited at Zenodo (DOI forthcoming).
+deposited at Zenodo (DOI 10.5281/zenodo.21197540).
 
 # Acknowledgements
 
