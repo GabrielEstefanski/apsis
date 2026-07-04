@@ -730,9 +730,9 @@ across IEEE 754-conformant x86_64 implementations by mandate and
 does not require replacement. The IAS15 step-size controller's
 `pow` is the one such call on the integration-critical path. Its
 host implementations are not correctly-rounded: measured against an
-IEEE-754 correctly-rounded mpmath oracle on the 42,662 unique
+IEEE-754 correctly-rounded mpmath oracle on the 43,284 unique
 inputs generated during the Mercury 1PN run, Windows UCRT and the
-`libm` crate agree with the oracle on 96.97 % and 95.29 % of inputs
+`libm` crate agree with the oracle on 96.69 % and 95.08 % of inputs
 respectively, within the IEEE-754 tolerance for transcendentals. The
 host `pow` therefore differs by up to one ULP between platforms,
 which without intervention would propagate through the controller's
@@ -852,8 +852,8 @@ IAS15 truncation, `libm` tolerance, and the unmodelled $v^4/c^4$
 correction would resolve that round-off floor further.
 
 *Cross-platform ULP-distribution analysis.* The summary statistics
-in §Cross-platform reproducibility (UCRT 96.97 % oracle-exact, libm
-95.29 %) admit an underlying ULP-distribution histogram that
+in §Cross-platform reproducibility (UCRT 96.69 % oracle-exact, libm
+95.08 %) admit an underlying ULP-distribution histogram that
 visualises the rounding behaviour of each implementation against
 the IEEE-754 correctly-rounded reference. A propagation-sensitivity
 derivation linking per-call rounding to the IAS15 controller's

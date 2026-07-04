@@ -1,8 +1,9 @@
 # Paper literal sweep — 2026-05-28
 
-**Status:** done (Phase 1+2). Phase 3 (cross-platform §3.5 percentages)
-deferred — requires re-running the controller-`pow` ULP analysis on
-both Windows and Linux against a fresh Mercury 1PN trajectory.
+**Status:** done (Phases 1–3). Phase 3 (cross-platform §3.5
+percentages) closed 2026-07-04: re-measured on the current workload,
+paper updated. Full table in the controller-`pow` notebook's
+re-measurement section.
 
 ## Motivation
 
@@ -38,7 +39,7 @@ paper text. Volatile fields (`git_sha`, `created_utc`, `crate_hash`,
 | 3.4 | Pythagorean $\|\Delta E\|/\|E_0\|$ at $T=70$ | $1.4\times10^{-10}$ | $1.405\times10^{-10}$ | pass |
 | 3.4 | retrograde $10^4$ orbits $\|\Delta E\|/\|E_0\|$ | $2.6\times10^{-14}$ | $2.583\times10^{-14}$ | pass |
 | App A | `[unit_system]` `density = "Msun/AU3"` line | present | absent in dump | **stale (schema drift — field removed)** |
-| 3.5 | UCRT 96.97 % / libm 95.29 % / $4.4\times10^{-6}$ / $2.8\times10^{-5}$ | — | deferred | unverified (Phase 3) |
+| 3.5 | UCRT / libm oracle-agreement percentages | 96.97 % / 95.29 % (42,662 inputs) | 96.69 % / 95.08 % (43,284 inputs) | resolved — paper updated 2026-07-04; the $4.4\times10^{-6}$ / $2.8\times10^{-5}$ trajectory literals left §3.5 in the 2026-06-16 rewrite |
 
 ## Findings
 
@@ -77,12 +78,13 @@ paper text. Volatile fields (`git_sha`, `created_utc`, `crate_hash`,
 long-horizon residual, §3.3 (3 values), §3.4 (2 values), §3.1 central
 round-trip — all reproduce within rounding.
 
-**Deferred (Phase 3):** §3.5 cross-platform UCRT 96.97 / libm 95.29
-percentages depend on re-running the controller-pow oracle analysis
-on both Windows and Linux against a fresh Mercury 1PN trajectory.
-Inputs (Mercury satisfied case) reproduce exactly per the §3.2 row,
-so the underlying trajectory hasn't drifted; the percentages should
-hold but are not confirmed.
+**Phase 3 (closed 2026-07-04):** re-measured on the current workload
+(43,284 unique controller inputs; the count moved from 42,662 with
+ADR-014/ADR-015 and the controller-policy alignment): UCRT 96.69 %,
+libm 95.08 %, glibc 2.39 96.68 %; no implementation off by more than
+1 ULP on any input; libm bit-identical Windows↔Linux on the full set.
+Qualitative structure of the original measurement unchanged. Paper
+literals updated (count + both percentages, two call-out sites).
 
 ## Action items
 
@@ -108,8 +110,9 @@ hold but are not confirmed.
       ULP floor — gate retains ~8 orders of headroom against noise.
       Sweep's "gated at < 10⁻⁹" claim was incorrect at the time
       (gate was 1e-7); it is now true.
-- [ ] Phase 3 follow-up: re-run cross-platform ULP analysis once both
-      OS images are available; refresh §3.5 percentages.
+- [x] Phase 3 follow-up: re-run cross-platform ULP analysis once both
+      OS images are available; refresh §3.5 percentages. Done
+      2026-07-04 (Windows UCRT + WSL2 glibc 2.39); paper updated.
 
 ## Process gap
 
