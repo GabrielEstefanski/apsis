@@ -288,8 +288,8 @@ contribution.
 
 Out of current scope: stellar evolution, hydrodynamics, collisionless
 large-N. Published validation runs at $N \le 10^3$ bodies (horizons
-up to $10^4$ orbits for the long-horizon parity gate); larger-$N$
-behaviour is the subject of the v0.2 scaling notebook.
+up to $10^4$ orbits for the long-horizon parity gate); behaviour at
+larger $N$ is the subject of the v0.2 scaling notebook.
 
 ## Validation
 
