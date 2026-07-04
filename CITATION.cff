@@ -9,6 +9,11 @@ authors:
 license: Apache-2.0
 version: 0.1.0-alpha.1
 date-released: "2026-07-04"
+doi: 10.5281/zenodo.21197540
+identifiers:
+  - type: doi
+    value: 10.5281/zenodo.21197539
+    description: "All versions; resolves to the latest."
 url: "https://github.com/GabrielEstefanski/apsis"
 repository-code: "https://github.com/GabrielEstefanski/apsis"
 keywords:

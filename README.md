@@ -3,6 +3,8 @@
 *A Federated Model for Composable N-Body Force Artifacts*
 
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/GabrielEstefanski/apsis?include_prereleases&sort=semver)](https://github.com/GabrielEstefanski/apsis/releases)
+[![DOI](https://zenodo.org/badge/1199747853.svg)](https://doi.org/10.5281/zenodo.21197539)
 
 APSIS treats N-body force perturbations as first-class scientific
 artifacts. The model is *federated* in Rust: each force is an
@@ -29,8 +31,8 @@ Windows and Linux on x86_64.
 > **Status.** Pre-release (`v0.1.0` alpha). 3D-aware physics core
 > (Vec3, inclined orbits, 3D observables). Multiple published operator
 > crates exercise the federation contract end-to-end. Public API
-> stabilised but not yet tagged; citation DOI pending first Zenodo
-> release.
+> stabilised; tagged `v0.1.0-alpha.1`, archived at Zenodo
+> (DOI [10.5281/zenodo.21197539](https://doi.org/10.5281/zenodo.21197539)).
 
 ---
 
@@ -288,8 +290,8 @@ contribution.
 
 Out of current scope: stellar evolution, hydrodynamics, collisionless
 large-N. Published validation runs at $N \le 10^3$ bodies (horizons
-up to $10^4$ orbits for the long-horizon parity gate); larger-$N$
-behaviour is the subject of the v0.2 scaling notebook.
+up to $10^4$ orbits for the long-horizon parity gate); behaviour at
+larger $N$ is the subject of the v0.2 scaling notebook.
 
 ## Validation
 
@@ -376,8 +378,15 @@ Licensed under the [Apache License, Version 2.0](LICENSE).
 
 ## Citing this work
 
-*(A Zenodo DOI and JOSS reference will appear here after the first tagged
-release.)*
+[![DOI](https://zenodo.org/badge/1199747853.svg)](https://doi.org/10.5281/zenodo.21197539)
+
+> Estefanski, G. B. (2026). *apsis: A Federated Model for Composable
+> N-Body Force Artifacts* (v0.1.0-alpha.1) [Computer software]. Zenodo.
+> <https://doi.org/10.5281/zenodo.21197539>
+
+The DOI above cites all versions and resolves to the latest release;
+`CITATION.cff` carries the version-specific DOI
+(10.5281/zenodo.21197540).
 
 ## References
 
