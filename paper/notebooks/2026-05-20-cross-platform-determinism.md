@@ -5,7 +5,7 @@
 
 **Tooling:** apsis IAS15 (`crates/apsis/src/physics/integrator/ias15.rs`), `libm = "0.2"` (pure-Rust math), `validation/cross-platform/run_linux_side.sh`, `validation/cross-platform/compare.py`
 
-**Status:** Single bidirectional run executed 2026-05-20. Diagnostic phase identified `f64::powf(1/7)` in the IAS15 step-size controller as the sole bifurcation source. Post-fix run on identical hosts yields byte-identical output files (independent SHA256 verification).
+**Status:** Single bidirectional run executed 2026-05-20. Diagnostic phase identified `f64::powf(1/7)` in the IAS15 step-size controller as the sole bifurcation source. Post-fix run on identical hosts yields byte-identical output files (independent SHA256 verification). Phase 4 (2026-06-15) extends the portfolio to the full v0.1 release surface; Phase 5 (2026-06-16) adds a single-run cross-ISA probe: Graviton3 (aarch64), byte-identical to the x86_64 reference.
 
 ---
 
@@ -233,7 +233,7 @@ The `whfast_outer_solar` scenario deserves a note: **physics correctness is not 
 
 Phase 4 used a fresh c6i.large EC2 spot instance (Intel Xeon Platinum 8375C / Ubuntu 24.04.4 LTS / glibc 2.39 / kernel 6.17.0-1012-aws) against the same Windows AMD Ryzen 5 7600X host. Both pinned to `rustc 1.94.1`. The post-libm-fix workspace resolves a different `Cargo.lock` from the earlier phases because expanding the `libm` dep into `apsis-central` changed transitive resolution; both hosts share the same lockfile (SHA256 captured in each host's meta file).
 
-git SHA = `b974214`.
+git SHA = `b974214`. The committed reference set was later re-captured on the release commit `22be999` (both hosts' `meta.txt` record it); bit-equality unchanged.
 
 ### Per-column ULP results
 
@@ -264,6 +264,57 @@ The full v0.1 FPM portfolio reproduces bit-for-bit across heterogeneous x86_64 h
 - **Close-encounter stress regime** (WHFast on a Jupiter-crossing particle, where the integrator's hierarchical assumption is invalid) computationally bit-equal — determinism is a property of the implementation, not of physical correctness.
 
 The audit checklist is satisfied for every integration-critical path in the v0.1 release surface.
+
+---
+
+## Phase 5 — cross-ISA probe on Graviton3 (aarch64)
+
+Phase 4's guarantee is scoped to x86_64. This phase asks whether the
+pinned recipe survives an instruction-set change. The design is a
+scope probe: either the single ARM capture extends the claim by one
+ISA, or it locates the divergence mechanism (the FMA-contraction
+candidate).
+
+### Probe setup
+
+| item | value |
+| --- | --- |
+| Host | EC2 `c7g.large` (AWS Graviton3, Neoverse-V1, aarch64, 2 vCPU) |
+| OS / toolchain | Ubuntu Server 24.04 LTS (Arm64); build inside the `rust:1.94.1` Docker image (aarch64 variant) |
+| Source | commit `22be999` (the re-captured reference); `Cargo.lock` SHA256 `392CD0C5…` verified equal to the reference before the run |
+| Build | `cargo build --release`, default codegen (no `target-cpu`, no FP contraction) |
+| Comparison target | the committed `validation/cross-platform/windows/` reference (x86_64), same commit |
+
+### Results
+
+| check | result |
+| --- | --- |
+| SHA256 pairwise, 7 CSVs + `mercury_perihelion.txt` | 8/8 match |
+| `compare.py` worst max-ULP, all columns, all scenarios | 0 |
+| Mercury 1PN rate | 42.982000 = 42.982000; Δ 0.000 arcsec/century (0.000 ppm) |
+
+The anticipated FMA divergence did not occur, and the match itself
+pins the mechanism: rustc does not contract `a*b + c` into FMA under
+default codegen on either ISA, `pow` is the pure-Rust `libm` routine
+(same source on every target), and the remaining arithmetic is
+IEEE 754 correctly-rounded. x86_64 and aarch64 therefore execute the
+same rounding sequence. The planned `fp-contract=off` control variant
+became unnecessary; there was no divergence to attribute.
+
+The conclusion is scoped to the pinned recipe, not to ARM in general:
+enabling FP contraction or `target-cpu=native` voids it on any ISA.
+
+### Provenance and artifact retention
+
+Single run, 2026-06-16 23:06–23:15 UTC. The ARM capture stays out of
+the committed reference set; `windows/` and the Intel `linux/`
+capture are untouched, and the raw tarball was not retained. Since
+the outputs matched bit-for-bit, their content is the committed
+`windows/` files, and the hashes are recomputable from the repo. The
+command log (instance `lscpu`, lockfile check, per-file SHA256,
+`compare.py` output) is retained off-repo. The probe is reproducible
+end to end: `run_linux_side.sh` inside `rust:1.94.1` on any Graviton
+instance, then `compare.py` against `windows/`.
 
 ---
 
@@ -309,7 +360,7 @@ The audit checklist is satisfied for every integration-critical path in the v0.1
 
 ## Limitations
 
-- **x86_64 only.** ARM and RISC-V hosts have different FP unit microarchitectures and (more importantly) different libc/libm implementations. `libm` crate is target-independent, so the same fix likely extends, but this is untested.
+- **x86_64 plus one aarch64 probe.** Phase 5 verifies a single Graviton3 (Neoverse-V1) capture byte-identical under the pinned recipe. Apple Silicon, other ARM microarchitectures, and RISC-V remain untested; FP-contraction-enabled builds void the guarantee on any ISA.
 - **Default codegen only.** `cargo build --release` with no `target-cpu` override. Anyone passing `-C target-cpu=native` to one host but not the other voids the guarantee — LLVM will pick microarch-specific instructions that differ across CPUs.
 - **Parity portfolio scope.** Phase 1–3 covered IAS15 + direct + Newton + 1PN. Phase 4 extended the portfolio to WHFast, Mercurius, and `CentralForce` (apsis-central). Implicit Midpoint, the Plummer kernel under BH SIMD, and the `PoyntingRobertsonDrag` operator from apsis-radiation are not exercised here. The IM federation gate exists as an integration test (`mercury_precession_implicit_midpoint_isolates_1pn_signal`) and is bit-equal across hosts on the developer machines that have run it, but is not yet captured in the cross-platform portfolio.
 - **Unaudited transcendentals.** The grep was comprehensive for the call sites that affect the parity scenarios, but the workspace contains many `sin`/`cos`/`sqrt`/`powf` calls in display code, IC setup, magnitude conversion, etc. Those do not affect trajectory bits but were not enumerated for this experiment.

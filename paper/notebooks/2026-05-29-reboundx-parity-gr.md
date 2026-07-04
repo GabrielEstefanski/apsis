@@ -56,7 +56,8 @@ gauge-invariant 1PN observable); $|\Delta\mathbf{r}|$ is informational.
 | precession apsis-vs-reboundx (gr) | $2\times10^{-5}$ | empirical formulation floor $\sim7\times10^{-7}$, $\sim$30× headroom |
 
 Reported (not gated here): precession vs analytic Schwarzschild (accuracy is
-owned by `crates/apsis-1pn/tests/mercury_precession_gate.rs`, 28 ppm), per-side
+owned by `crates/apsis-1pn/tests/mercury_precession_gate.rs`; 28 ppm at the
+time of writing, tightened to $9.2\times10^{-6}$ by ADR-015), per-side
 Newtonian-energy drift (1PN does not conserve it; both drift identically), and
 $\lvert\Delta\mathbf{r}\rvert$.
 

@@ -155,11 +155,12 @@ across three operator crates spanning both operator categories
 patterns, external-implementation parity against REBOUND IAS15 on
 four canonical scenarios, and closes with the cross-platform
 reproducibility test. §Discussion covers the scope
-of the cross-platform claim (including ARM64 hardware not yet
-verified), solver-family guidance, and a prioritised future-work
-agenda. The per-run *Apsis Record* binary format specification is
-in Appendix A. Source, validation harnesses, and a pinned snapshot
-are available as detailed in §Data and code availability.
+of the cross-platform claim (its aarch64 extension and the
+build-flag boundary), solver-family guidance, and a prioritised
+future-work agenda. The per-run *Apsis Record* binary format
+specification is in Appendix A. Source, validation harnesses, and a
+pinned snapshot are available as detailed in §Data and code
+availability.
 
 # Methods {#sec:methods}
 
@@ -780,14 +781,15 @@ architecture supports.
 ## Scope of the cross-platform claim
 
 The bit-identical cross-platform reproduction reported in
-§Cross-platform reproducibility is verified on x86_64 only — specifically
-Windows on AMD Zen 4 against Linux on Intel Ice Lake. ARM64 hosts
-(including Apple Silicon, increasingly common in the astrophysics
-research community) are not in the v0.1 portfolio. The mechanism —
-routing libc-bound transcendentals through the pure-Rust `libm`
-crate while relying on IEEE 754 hardware arithmetic guarantees —
-should extend to ARM64 in principle, but the empirical verification
-has not been performed and is therefore not claimed.
+§Cross-platform reproducibility is anchored on the committed x86_64
+reference set (Windows on AMD Zen 4 against Linux on Intel Ice
+Lake) and extended by a single-run aarch64 probe (AWS Graviton3,
+Neoverse-V1) that reproduced all eight outputs byte-identically.
+The probe scopes the claim rather than broadening it to ARM in
+general: one microarchitecture, under the pinned toolchain and
+default codegen. Apple Silicon (increasingly common in the
+astrophysics research community) has not been run, and enabling
+floating-point contraction voids the guarantee on any ISA.
 
 The v0.1 hardware-rounded arithmetic guarantee covers FMA-free,
 single-precision-free, default-rounding-mode operation. Code paths
