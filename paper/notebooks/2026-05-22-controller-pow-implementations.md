@@ -139,6 +139,36 @@ The method (workload capture, comparison against an arbitrary-precision oracle r
 
 ---
 
+## Re-measurement on the current workload (2026-07-04)
+
+The percentages above were measured on the pre-ADR-014 trajectory.
+Three changes since then alter the controller-input distribution while
+leaving the method untouched: the $GM_\odot$ calibration (ADR-014)
+moved $c$; `integrate_until` lands exactly on $t_\text{end}$ (ADR-015);
+and the accept/reject policy follows Rein & Spiegel 2015 §3.4. Same
+instrumentation, same oracle (mpmath at 60 significant digits), same
+Windows host (AMD Zen 4, rustc 1.94.1, `libm` 0.2.16); the glibc row
+adds Linux (WSL2, Ubuntu glibc 2.39). The current run yields 43,284
+unique controller inputs.
+
+| implementation | exact match | $-1$ ULP | $+1$ ULP | total off-by-one |
+| --- | --- | --- | --- | --- |
+| Windows UCRT (`f64::powf`) | 41,850 (96.69 %) | 1,434 (3.31 %) | 0 (0.00 %) | 3.31 % |
+| `libm` 0.2.16 (`libm::pow`) | 41,154 (95.08 %) | 1,763 (4.07 %) | 367 (0.85 %) | 4.92 % |
+| glibc 2.39 (`f64::powf`, Linux) | 41,849 (96.68 %) | 1,435 (3.32 %) | 0 (0.00 %) | 3.32 % |
+
+UCRT and `libm` agree bitwise on 41,316 of 43,284 inputs (95.45 %); on
+the 1,968 disagreements, UCRT matches the oracle on 1,332, `libm` on
+636, and both miss on 798. No implementation exceeds 1 ULP on any
+input. `libm` output is bit-identical between Windows and Linux on all
+43,284 inputs, re-confirming the mechanism behind the cross-platform
+bit-equality claim. The qualitative structure of the 2026-05-22
+measurement is unchanged: UCRT and glibc err only toward zero, `libm`
+errs in both directions with a $-1$ ULP bias. The paper's summary
+literals update to 43,284 inputs, UCRT 96.69 %, `libm` 95.08 %.
+
+---
+
 ## References
 
 - Rein, H. & Spiegel, D. S. (2015). *IAS15: a fast, adaptive, high-order integrator for gravitational dynamics, accurate to machine precision over a billion orbits.* MNRAS **446**, 1424. §2.3 for the step-size controller formula.
