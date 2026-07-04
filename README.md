@@ -111,10 +111,13 @@ a *configuration* of a monolith.
 build from source via [`maturin`](https://github.com/PyO3/maturin):
 
 ```bash
-git clone https://github.com/GabrielEstefanski/apsis && cd apsis
+git clone --filter=blob:none https://github.com/GabrielEstefanski/apsis && cd apsis
 pip install maturin
 maturin develop --release
 ```
+
+The optional `--filter=blob:none` skips large historical blobs
+(legacy build artifacts, ~500 MiB) that no current checkout uses.
 
 Then:
 
@@ -151,7 +154,7 @@ The same Mercury 1PN scenario as a runnable example, with the GR
 comparison printed inline (Rust 1.89+):
 
 ```bash
-git clone https://github.com/GabrielEstefanski/apsis
+git clone --filter=blob:none https://github.com/GabrielEstefanski/apsis
 cd apsis
 cargo run --release --example mercury_perihelion -p apsis-1pn
 ```
