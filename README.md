@@ -3,6 +3,8 @@
 *A Federated Model for Composable N-Body Force Artifacts*
 
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/GabrielEstefanski/apsis?include_prereleases&sort=semver)](https://github.com/GabrielEstefanski/apsis/releases)
+[![DOI](https://zenodo.org/badge/1199747853.svg)](https://doi.org/10.5281/zenodo.21197539)
 
 APSIS treats N-body force perturbations as first-class scientific
 artifacts. The model is *federated* in Rust: each force is an
